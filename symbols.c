@@ -24,33 +24,28 @@
 *
 *  ========================================================================
 *
-* Description:  Assembler symbol table management.
+* Description:  symbol table access
 *
 ****************************************************************************/
 
 
-#include "asmglob.h"
-
+#include "globals.h"
 #include "symbols.h"
 #include "memalloc.h"
-#include "asmdefs.h"
-
-#ifdef __USE_BSD
-#define stricmp strcasecmp
-#endif
-
-#if defined( _STANDALONE_ )
-
+#include "banner.h"
 #include "directiv.h"
-#include "types.h"
 #include "queues.h"
-//#include "hash.h"
-#include "asmops1.h"
+#include "fixup.h"
+#include "token.h"
 #include "myassert.h"
 
 // reorganize the symbol table permanently, so the last found item
-// is always first in a line.
+// is always first in a line. Gives no significant speed boost.
 #define DYNREO 0
+
+/* set size of hash table for symbol table searches. This affects
+  assembly speed.
+  */
 
 //#define HASH_TABLE_SIZE 211
 #define HASH_TABLE_SIZE 2003
@@ -63,33 +58,14 @@ static struct asm_sym   *sym_table[ HASH_TABLE_SIZE ];
 
 static unsigned         AsmSymCount;    /* Number of symbols in table */
 
+static char             szDate[12];
+static char             szTime[12];
+
 #define DOTSMAX 32
 
 static char             dots[] = " . . . . . . . . . . . . . . . .";
 
-typedef int (* StrCmpFunc)(char const *, char const *);
 StrCmpFunc SymCmpFunc = stricmp;
-
-#else
-
-static struct asm_sym   *AsmSymHead;
-
-static unsigned short CvtTable[] = {
-    MT_BYTE,   // INT1
-    MT_WORD,   // INT2
-    MT_DWORD,  // INT4
-    MT_FWORD,  // INT6
-    MT_QWORD,  // INT8
-    MT_DWORD,  // FLOAT4
-    MT_QWORD,  // FLOAT8
-    MT_TBYTE,  // FLOAT10
-    MT_NEAR,   // NEAR2
-    MT_NEAR,   // NEAR4
-    MT_FAR,    // FAR2
-    MT_FAR     // FAR4
-};
-
-#endif
 
 /* use the same hash fcn */
 static unsigned int hashpjw( const char *s )
@@ -133,8 +109,8 @@ static struct asm_sym *SymAlloc( const char *name )
 
     sym = AsmAlloc( sizeof( dir_node ) );
     sym->next = NULL;
-
-    sym->name = AsmAlloc( strlen( name ) + 1 );
+    sym->name_size = strlen( name );
+    sym->name = AsmAlloc( sym->name_size + 1 );
     strcpy( sym->name, name );
 
     sym->segment = NULL;
@@ -154,17 +130,19 @@ static struct asm_sym *SymAlloc( const char *name )
     sym->predefined = FALSE;
     sym->variable = FALSE;
     sym->public = FALSE;
+    sym->list = ModuleInfo.cref;
+    sym->included = FALSE; /* for COFF: is symbol in COFF symbol table? */
 
     sym->langtype = LANG_NONE;
+    sym->state = SYM_UNDEFINED;
     sym->mem_type = MT_EMPTY;
     sym->type = NULL;
-    sym->state = SYM_UNDEFINED;
     sym->fixup = NULL;
 
+    ((dir_node *)sym)->e.seginfo = NULL;
+    ((dir_node *)sym)->line_num = 0;
     ((dir_node *)sym)->next = NULL;
     ((dir_node *)sym)->prev = NULL;
-    ((dir_node *)sym)->line_num = 0;
-    ((dir_node *)sym)->e.seginfo = NULL;
     return sym;
 }
 
@@ -173,23 +151,26 @@ static struct asm_sym **SymFind( const char *name )
 /* find a symbol in the symbol table, return NULL if not found */
 {
     int i;
+    int len;
     struct asm_sym      **sym;
     static struct asm_sym  *sym2;
+
+    len = strlen(name);
 
     if (CurrProc) {
         label_list *paracurr;
         for (paracurr = CurrProc->e.procinfo->paralist;paracurr;paracurr = paracurr->next)
-            if (SymCmpFunc( name, paracurr->sym->name ) == 0 ) {
+            if (len == paracurr->sym->name_size && SymCmpFunc( name, paracurr->sym->name) == 0 ) {
                 DebugMsg(("SymFind: '%s' found in proc's param namespace\n", name));
                 return( &paracurr->sym );
             }
         for (paracurr = CurrProc->e.procinfo->locallist;paracurr;paracurr = paracurr->next)
-            if (SymCmpFunc( name, paracurr->sym->name ) == 0 ) {
+            if (len == paracurr->sym->name_size && SymCmpFunc( name, paracurr->sym->name ) == 0 ) {
                 DebugMsg(("SymFind: '%s' found in proc's local namespace\n", name));
                 return( &paracurr->sym );
             }
         for (sym2 = CurrProc->e.procinfo->labellist;sym2;sym2 = sym2->next)
-            if (SymCmpFunc( name, sym2->name ) == 0 ) {
+            if (len == sym2->name_size && SymCmpFunc( name, sym2->name ) == 0 ) {
                 DebugMsg(("SymFind: '%s' found in proc's label namespace\n", name));
                 sym = &sym2;
                 return( sym );
@@ -203,7 +184,7 @@ static struct asm_sym **SymFind( const char *name )
     sym = &AsmSymHead;
 #endif
     for( ; *sym; sym = &((*sym)->next) ) {
-        if (SymCmpFunc( name, (*sym)->name ) == 0 ) {
+        if (len == (*sym)->name_size && SymCmpFunc( name, (*sym)->name ) == 0 ) {
 #if DYNREO
             if (sym != &sym_table [i]) {
                 sym2 = *sym;
@@ -269,7 +250,7 @@ struct asm_sym *SymLookupLabel( const char *name, int bLocal)
             return NULL;
         }
         sym = SymAlloc( name );
-        if (CurrProc && bLocal) {
+        if (CurrProc && bLocal && ModuleInfo.scoped) {
             sym->local = TRUE;
             for (sym_ptr = &CurrProc->e.procinfo->labellist;*sym_ptr;sym_ptr = &((*sym_ptr)->next))
                 ;
@@ -281,7 +262,7 @@ struct asm_sym *SymLookupLabel( const char *name, int bLocal)
         sym->next = *sym_ptr;
         *sym_ptr = sym;
     } else if( sym->state == SYM_UNDEFINED &&
-               sym->local == FALSE && CurrProc && bLocal) {
+               sym->local == FALSE && CurrProc && bLocal && ModuleInfo.scoped) {
         /* move the label to the current proc's local label list
          if it isn't defined yet */
         *sym_ptr = sym->next;
@@ -304,15 +285,14 @@ static void FreeASym( struct asm_sym *sym )
 /*****************************************/
 {
 #if defined( _STANDALONE_ )
-    struct asmfixup     *fixup;
+    struct asmfixup     *curr;
+    struct asmfixup     *next;
 
 //    DebugMsg(("FreeASym: delete %s, state=%X\n", sym->name, sym->state));
-    for( ;; ) {
-        fixup = sym->fixup;
-        if( fixup == NULL )
-            break;
-        sym->fixup = fixup->next;
-        AsmFree( fixup );
+    for(curr = sym->fixup ;curr; ) {
+        next = curr->next;
+        AsmFree( curr );
+        curr = next;
     }
 #endif
     AsmFree( sym->name );
@@ -332,7 +312,8 @@ int SymChangeName( const char *old, const char *new )
         sym = *sym_ptr;
         *sym_ptr = sym->next;
         AsmFree( sym->name );
-        sym->name = AsmAlloc( strlen( new ) + 1 );
+        sym->name_size = strlen( new );
+        sym->name = AsmAlloc( sym->name_size + 1 );
         strcpy( sym->name, new );
 
         sym_ptr = SymFind( new );
@@ -383,7 +364,8 @@ void SymSetName( struct asm_sym *sym, const char * name)
 /*********************************/
 {
     AsmFree( sym->name );
-    sym->name = AsmAlloc( strlen( name ) + 1 );
+    sym->name_size = strlen( name );
+    sym->name = AsmAlloc( sym->name_size + 1 );
     strcpy( sym->name, name );
     return;
 }
@@ -435,11 +417,12 @@ struct asm_sym *SymSearch( const char *name )
 
 #endif
 
+void DumpASym( void );
+
 void SymFini( void )
 /*********************/
 {
     struct asm_sym      *sym;
-#if defined( _STANDALONE_ )
     dir_node            *dir;
     unsigned            i;
 
@@ -447,9 +430,8 @@ void SymFini( void )
     DumpASym();
 #endif
 
-    FreeAllQueues();
-
-    /* now free the symbol table */
+    /* free the symbol table */
+#if 0
     for( i = 0; i < HASH_TABLE_SIZE; i++ ) {
         struct asm_sym  *next;
         next = sym_table[i];
@@ -457,10 +439,6 @@ void SymFini( void )
             sym = next;
             if( sym == NULL )
                 break;
-#ifdef DEBUG_OUT
-//            DebugMsg(("AsmSymFini: i=%u, sym=%X\n", i, sym));
-//            flushall();
-#endif
             dir = (dir_node *)sym;
             next = sym->next;
             dir_free( dir, FALSE );
@@ -469,54 +447,109 @@ void SymFini( void )
         }
     }
     myassert( AsmSymCount == 0 );
-
 #else
-    struct asmfixup     *fixup;
-
-    for( ;; ) {
-        sym = AsmSymHead;
-        if( sym == NULL )
-            break;
-        AsmSymHead = sym->next;
-        FreeASym( sym );
-    }
-    for( ;; ) {
-        fixup = FixupHead;
-        if( fixup == NULL )
-            break;
-        FixupHead = fixup->next;
-        AsmFree( fixup );
-    }
+    AsmSymCount = 0;
 #endif
+
 }
-void SymInit( int pass )
+void SymInit( )
+/*********************/
+{
+    asm_sym * sym;
+
+    memset(sym_table, 0, sizeof(sym_table));
+
+    sym = SymCreate( "__JWASM__", TRUE );
+    sym->state = SYM_INTERNAL;
+    sym->mem_type = MT_ABS;
+    sym->defined = TRUE;
+    sym->predefined = TRUE;
+    sym->offset = _JWASM_VERSION_INT_;
+
+    /* @Version contains the Masm compatible version */
+    sym = SymCreate( "@Version", TRUE );
+    sym->state = SYM_TMACRO;
+    sym->defined = TRUE;
+    sym->predefined = TRUE;
+    sym->string_ptr = "615";
+
+    /* @Date and @Time */
+    sym = SymCreate( "@Date", TRUE );
+    sym->state = SYM_TMACRO;
+    sym->defined = TRUE;
+    sym->predefined = TRUE;
+    sym->string_ptr = _strdate(szDate);
+    sym = SymCreate( "@Time", TRUE );
+    sym->state = SYM_TMACRO;
+    sym->defined = TRUE;
+    sym->predefined = TRUE;
+    sym->string_ptr = _strtime(szTime);
+
+    /* @FileName and @FileCur */
+    sym = SymCreate( "@FileName", TRUE );
+    sym->state = SYM_TMACRO;
+    sym->defined = TRUE;
+    sym->predefined = TRUE;
+    sym->string_ptr = ModuleInfo.name;
+    sym = SymCreate( "@FileCur", TRUE );
+    sym->state = SYM_TMACRO;
+    sym->defined = TRUE;
+    sym->predefined = TRUE;
+    sym->string_ptr = ModuleInfo.name;
+
+    /* $ */
+    sym = SymCreate( "$", TRUE );  // create "$" symbol for current segment counter
+    sym->state = SYM_INTERNAL;
+    sym->defined = TRUE;
+    sym->predefined = TRUE;
+    sym->mem_type = MT_NEAR;
+    sym->list = FALSE; /* don't display the '$' symbol in symbol list */
+
+    /* add @Line numeric equate */
+    LineItem.mem_type = MT_ABS;
+    LineItem.state = SYM_INTERNAL;
+    LineItem.defined = TRUE;
+    LineItem.predefined = TRUE;
+    LineItem.variable = TRUE;
+    LineItem.name_size = strlen(LineItem.name);
+    SymAddToTable(&LineItem);
+
+    /* add @WordSize numeric equate */
+    WordSize.mem_type = MT_ABS;
+    WordSize.state = SYM_INTERNAL;
+    WordSize.defined = TRUE;
+    WordSize.predefined = TRUE;
+    WordSize.variable = TRUE;
+    WordSize.name_size = strlen(WordSize.name);
+    SymAddToTable(&WordSize);
+
+    return;
+
+}
+
+void SymPassInit( int pass )
 /*********************/
 {
     dir_node            *dir;
     unsigned            i;
 
-    /* mark all (text) macros as "undefined" */
-    /* reset "defined" flag for SYM_INTERNALs */
-
-    if (pass == PASS_1) {
-        /* add @Line numeric equate */
-        LineItem.mem_type = MT_ABS;
-        LineItem.state = SYM_INTERNAL;
-        LineItem.defined = TRUE;
-        LineItem.predefined = TRUE;
-        LineItem.variable = TRUE;
-        SymAddToTable(&LineItem);
+    if (pass == PASS_1)
         return;
-    }
+
+    /* mark as "undefined":
+     - text macros (SYM_TMACRO)
+     - macros (SYM_MACRO)
+     - internal labels (SYM_INTERNAL)
+      */
 
     for( i = 0; i < HASH_TABLE_SIZE; i++ ) {
         for(dir = (dir_node *)sym_table[i];dir;dir = (dir_node *)dir->sym.next ) {
-            if (dir->sym.state == SYM_TMACRO && dir->sym.predefined == FALSE) {
-                dir->sym.defined = FALSE;
-            } else if (dir->sym.state == SYM_MACRO && dir->e.macroinfo->hidden == 0) {
-                dir->sym.defined = FALSE;
-            } else if (dir->sym.state == SYM_INTERNAL && dir->sym.predefined == FALSE) {
-                dir->sym.defined = FALSE;
+            if (dir->sym.predefined == FALSE) {
+                if (dir->sym.state == SYM_TMACRO ||
+                    dir->sym.state == SYM_MACRO  ||
+                    dir->sym.state == SYM_INTERNAL) {
+                    dir->sym.defined = FALSE;
+                }
             }
         }
     }
@@ -527,8 +560,13 @@ void SymInit( int pass )
 static int compare_fn( const void *p1, const void *p2 )
 /*****************************************************/
 {
-    struct asm_sym * const  *sym1 = p1;
-    struct asm_sym * const  *sym2 = p2;
+#ifdef __WATCOMC__
+    struct asm_sym * const *sym1 = p1;
+    struct asm_sym * const *sym2 = p2;
+#else
+    const asm_sym * *sym1 = p1;
+    const asm_sym * *sym2 = p2;
+#endif
 
     return( strcmp( (*sym1)->name, (*sym2)->name ) );
 }
@@ -540,18 +578,11 @@ static struct asm_sym **SortAsmSyms( void )
     struct asm_sym      *sym;
     unsigned            i, j;
 
-    syms = AsmAlloc( AsmSymCount * sizeof( struct asm_sym * ) );
+    syms = MemAlloc( AsmSymCount * sizeof( struct asm_sym * ) );
     if( syms ) {
         /* copy symbols to table */
         for( i = j = 0; i < HASH_TABLE_SIZE; i++ ) {
-            struct asm_sym  *next;
-
-            next = sym_table[i];
-            for( ;; ) {
-                sym = next;
-                if( sym == NULL )
-                    break;
-                next = sym->next;
+            for(sym = sym_table[i]; sym; sym = sym->next) {
                 syms[j++] = sym;
             }
         }
@@ -561,7 +592,7 @@ static struct asm_sym **SortAsmSyms( void )
     return( syms );
 }
 
-const char *get_seg_align( seg_info *seg )
+static const char *get_seg_align( seg_info *seg )
 /****************************************/
 {
     switch( seg->segrec->d.segdef.align ) {
@@ -611,7 +642,7 @@ static void log_segment( struct asm_sym *sym, struct asm_sym *group )
             if (i >= DOTSMAX)
                 pdots = "";
             LstMsg( "%s %s        ", sym->name, pdots );
-            if( seg->segrec->d.segdef.use_32 ) {
+            if( seg->Use32 ) {
                 LstMsg( "32 Bit   %08lX ", seg->current_loc );
             } else {
                 LstMsg( "16 Bit   %04lX     ", seg->current_loc );
@@ -679,44 +710,48 @@ static char * GetMemTypeString(asm_sym * sym, char * buffer)
 
 // a struct either has fields or a size of 0
 
-static void log_struct( struct asm_sym **syms, struct asm_sym *sym, int ofs )
+static void log_struct( char * name, struct asm_sym *sym, int ofs )
 /*****************************************************************/
 {
     unsigned        i;
     dir_node    *dir = (dir_node *)sym;
+    char *pdots;
     struct_info  *si = dir->e.structinfo;
     field_list *f;
     static int prefix = 0;
 
     if(( sym->state == SYM_TYPE ) && (si->isRecord == FALSE) && (si->isTypedef == FALSE)) {
-        int i = strlen ( sym->name);
-        char *pdots = dots + i + prefix + 1;
+        if (!name)
+            name = sym->name;
+        i = strlen ( name);
+        pdots = dots + i + prefix + 1;
         if (i >= DOTSMAX)
             pdots = "";
         for (i=0;i<prefix;i++)
             LstMsg(" ");
         if (prefix == 0)
-            LstMsg( "%s %s        %8X\n", sym->name, pdots, sym->total_size );
+            LstMsg( "%s %s        %8X\n", name, pdots, sym->total_size );
         else
-            LstMsg( "%s %s        %8X\n", sym->name, pdots, sym->offset + ofs);
+            LstMsg( "%s %s        %8X\n", name, pdots, sym->offset + ofs);
         prefix += 2;
         for( f = si->head; f; f = f->next ) {
-            if (f->fsym->state == SYM_TYPE) {
-                log_struct(&sym, f->fsym, sym->offset + ofs);
+            /* recursion if an embedded struct occurs */
+            if (f->sym->mem_type == MT_TYPE && f->initializer == NULL) {
+                log_struct( f->sym->name, f->sym->type, f->sym->offset + ofs);
             } else {
                 /* don't list unstructured fields without name */
                 /* but do list them if they are structured */
-                if (*(f->fsym->name) || (f->fsym->mem_type == MT_TYPE)) {
-                    i = strlen ( f->fsym->name ) + prefix;
+                if (*(f->sym->name) || (f->sym->mem_type == MT_TYPE)) {
+                    i = strlen ( f->sym->name ) + prefix;
                     pdots = dots + i + 1 ;
                     if (i >= DOTSMAX)
                         pdots = "";
                     for (i=0;i<prefix;i++)
                         LstMsg(" ");
-                    LstMsg( "%s %s        %8X   ", f->fsym->name, pdots, f->fsym->offset + sym->offset + ofs);
-                    LstMsg("%s", GetMemTypeString(f->fsym, NULL));
-                    if (f->fsym->total_length > 1)
-                        LstMsg("[%u]",f->fsym->total_length);
+                    LstMsg( "%s %s        %8X   ", f->sym->name, pdots, f->sym->offset + sym->offset + ofs);
+                    LstMsg("%s", GetMemTypeString(f->sym, NULL));
+                    if (f->sym->total_length > 1)
+                        LstMsg("[%u]",f->sym->total_length);
                     LstMsg( "\n");
                 }
             }
@@ -742,13 +777,13 @@ static void log_record( struct asm_sym **syms, struct asm_sym *sym )
         for( i = 0,f = si->head; f; f = f->next,i++ );
         LstMsg( "%s %s      %6X  %7X\n", sym->name, pdots, sym->total_size*8, i );
         for( f = si->head; f; f = f->next ) {
-            i = strlen ( f->fsym->name ) + 2;
+            i = strlen ( f->sym->name ) + 2;
             pdots = dots + i + 1 ;
             if (i >= DOTSMAX)
                 pdots = "";
-            for (i=f->fsym->offset, mask=0;i < f->fsym->offset+f->fsym->total_size;i++)
+            for (i=f->sym->offset, mask=0;i < f->sym->offset+f->sym->total_size;i++)
                 mask |= 1 << i;
-            LstMsg( "  %s %s      %6X  %7X  %08X\n", f->fsym->name, pdots, f->fsym->offset, f->fsym->total_size, mask);
+            LstMsg( "  %s %s      %6X  %7X  %08X\n", f->sym->name, pdots, f->sym->offset, f->sym->total_size, mask);
         }
     }
 }
@@ -774,11 +809,11 @@ static void log_typedef( struct asm_sym **syms, struct asm_sym *sym )
         LstMsg( "%s %s    %8u %s\n", sym->name, pdots, sym->total_size, GetMemTypeString(sym, buffer));
 #if 0
         for( f = si->head; f; f = f->next ) {
-            i = strlen ( f->fsym->name ) + prefix;
+            i = strlen ( f->sym->name ) + prefix;
             pdots = dots + i + 1 ;
             if (i >= DOTSMAX)
                 pdots = "";
-            LstMsg( "%s %s        %8u\n", f->fsym->name, pdots, f->fsym->offset);
+            LstMsg( "%s %s        %8u\n", f->sym->name, pdots, f->sym->offset);
         }
 #endif
     }
@@ -884,6 +919,8 @@ static const char *get_sym_seg_name( struct asm_sym *sym )
     }
 }
 
+/* list symbols */
+
 static void log_symbol( struct asm_sym *sym )
 /*******************************************/
 {
@@ -892,17 +929,9 @@ static void log_symbol( struct asm_sym *sym )
     if (i >= DOTSMAX)
         pdots = "";
 
-    if (sym->state == SYM_TMACRO) {
-
-        dir_node * dir = (dir_node *)sym;
-        LstMsg( "%s %s        ", sym->name, pdots );
-        LstMsg( "Text   %s\n", dir->sym.string_ptr);
-
-    } else if( sym->state == SYM_INTERNAL || sym->state == SYM_EXTERNAL) {
-
-        dir_node    *dir = (dir_node *)sym;
-        if (IS_SYM_COUNTER( sym->name ))
-            return;
+    switch (sym->state) {
+    case SYM_INTERNAL:
+    case SYM_EXTERNAL:
         LstMsg( "%s %s        ", sym->name, pdots );
 
         if (sym->total_length > 1)
@@ -918,18 +947,27 @@ static void log_symbol( struct asm_sym *sym )
         if( sym->public )
             LstMsg( "Public " );
 
-        if (sym->state == SYM_INTERNAL) {
-            LstMsg( "%s", get_sym_lang( sym ) );
-        } else if (sym->state == SYM_EXTERNAL) {
+        if (sym->state == SYM_EXTERNAL) {
+            dir_node    *dir = (dir_node *)sym;
+
             if (dir->e.extinfo->weak == 1)
                 LstMsg( "*External " );
             else
                 LstMsg( "External  " );
-            LstMsg( "%s", get_sym_lang( sym ) );
         }
-        LstMsg( "\n" );
+
+        LstMsg( "%s\n", get_sym_lang( sym ) );
+        break;
+    case SYM_TMACRO:
+        LstMsg( "%s %s        Text   %s\n", sym->name, pdots, sym->string_ptr );
+        break;
+    case SYM_ALIAS:
+        LstMsg( "%s %s        Alias  %s\n", sym->name, pdots, sym->string_ptr );
+        break;
     }
 }
+
+/* list Procedures and Prototypes */
 
 static void log_proc( struct asm_sym *sym )
 /*****************************************/
@@ -967,8 +1005,9 @@ static void log_proc( struct asm_sym *sym )
         LstMsg( "%s", get_sym_lang( sym ) );
         LstMsg( "\n" );
         if (dir->e.procinfo->defined) {
-            if ((dir->sym.langtype == LANG_C) ||
-                (dir->sym.langtype == LANG_STDCALL)) {
+            if (dir->sym.langtype == LANG_C ||
+                dir->sym.langtype == LANG_SYSCALL ||
+                dir->sym.langtype == LANG_STDCALL) {
                 int cnt;
                 /* position f2 to last param */
                 for (cnt = 0,f = dir->e.procinfo->paralist;f;f = f->next)
@@ -1003,7 +1042,11 @@ static void log_proc( struct asm_sym *sym )
                 pdots = dots + i + 1 + 2;
                 if (i >= DOTSMAX)
                     pdots = "";
-                LstMsg( "  %s %s        L %s  %08X %s\n",
+                if (dir->e.procinfo->use32)
+                    p = "  %s %s        L %s  %08X %s\n";
+                else
+                    p = "  %s %s        L %s  %04X     %s\n";
+                LstMsg( p,
                         l->name,
                         pdots,
                         get_proc_type( l ),
@@ -1013,6 +1056,8 @@ static void log_proc( struct asm_sym *sym )
         }
     }
 }
+
+/* output the symbol table listing */
 
 void SymWriteCRef( void )
 /***********************/
@@ -1026,15 +1071,17 @@ void SymWriteCRef( void )
     unsigned cntProcs = 0;
     unsigned cntMacros = 0;
 
-    if( AsmFiles.file[LST] == NULL ) {
+    if( AsmFiles.file[LST] == NULL || Options.no_symbol_listing == TRUE) {
         return; // no point going through the motions if lst file isn't open
     }
 
-    DebugMsg(("WriteCRef: calling SortAsmSyms\n"));
+    DebugMsg(("SymWriteCRef: calling SortAsmSyms\n"));
 
     syms = SortAsmSyms();
     if( syms ) {
         for( i = 0; i < AsmSymCount; ++i ) {
+            if (syms[i]->list == FALSE)
+                continue;
             switch (syms[i]->state) {
             case SYM_TYPE:
                 si = ((dir_node *)syms[i])->e.structinfo;
@@ -1058,7 +1105,7 @@ void SymWriteCRef( void )
             LstMsg( "                N a m e                 Type\n\n" );
             /* write out structures */
             for( i = 0; i < AsmSymCount; ++i ) {
-                if (syms[i]->state == SYM_MACRO)
+                if (syms[i]->list == TRUE && syms[i]->state == SYM_MACRO)
                     log_macro( syms[i] );
             }
         }
@@ -1067,7 +1114,8 @@ void SymWriteCRef( void )
             LstMsg( "                N a m e                 Size/Ofs   Type\n\n" );
             /* write out structures */
             for( i = 0; i < AsmSymCount; ++i ) {
-                log_struct( syms, syms[i], 0 );
+                if (syms[i]->list == TRUE)
+                    log_struct( NULL, syms[i], 0 );
             }
         }
         if (cntRecords) {
@@ -1075,14 +1123,16 @@ void SymWriteCRef( void )
             LstMsg( "                N a m e                 Width   # fields\n" );
             LstMsg( "                                        Shift   Width    Mask   Initial\n\n" );
             for( i = 0; i < AsmSymCount; ++i ) {
-                log_record( syms, syms[i] );
+                if (syms[i]->list == TRUE)
+                    log_record( syms, syms[i] );
             }
         }
         if (cntTypedefs) {
             LstMsg( "\n\nTypes:\n\n" );
             LstMsg( "                N a m e              Size    Attr\n\n" );
             for( i = 0; i < AsmSymCount; ++i ) {
-                log_typedef( syms, syms[i] );
+                if (syms[i]->list == TRUE)
+                    log_typedef( syms, syms[i] );
             }
         }
         /* write out the segments */
@@ -1105,7 +1155,8 @@ void SymWriteCRef( void )
             LstMsg( "                N a m e                 Type" );
             LstMsg( "     Value    Attr\n\n" );
             for( i = 0; i < AsmSymCount; ++i ) {
-                log_proc( syms[i] );
+                if (syms[i]->list == TRUE)
+                    log_proc( syms[i] );
             }
             LstMsg( "\n" );
         }
@@ -1115,14 +1166,15 @@ void SymWriteCRef( void )
         LstMsg( "                N a m e                 Type" );
         LstMsg( "      Value    Attr\n\n" );
         for( i = 0; i < AsmSymCount; ++i ) {
-            log_symbol( syms[i] );
+            if (syms[i]->list == TRUE)
+                log_symbol( syms[i] );
         }
         LstMsg( "\n" );
 
-        DebugMsg(("WriteCRef: free sorted symbols\n"));
+        DebugMsg(("SymWriteCRef: free sorted symbols\n"));
 
         /* free the sorted symbols */
-        AsmFree( syms );
+        MemFree( syms );
     }
 }
 

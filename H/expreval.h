@@ -46,7 +46,10 @@ typedef struct expr_list {
     enum exprtype   type;           // Type of expression
     union {
         struct {
-            int_32          value;  // For constant, may also be a label offset
+            union {
+                int_32      value;  // For constant, may also be a label offset
+                uint_32     uvalue;  // For constant, may also be a label offset
+            };
             int_32          hvalue; // high 32bit of 64bit number
             int_16          xvalue; // high 16bit of 80bit number
         };
@@ -81,5 +84,6 @@ typedef struct expr_list {
 } expr_list;
 
 extern int          EvalOperand( int *, int, expr_list *, bool );
+extern void         ExprEvalInit( void );
 
 #endif

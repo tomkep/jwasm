@@ -29,21 +29,18 @@
 *
 ****************************************************************************/
 
-#include "asmglob.h"
-
 #include <ctype.h>
+
+#include "globals.h"
 #include "parser.h"
 #include "expreval.h"
 #include "equate.h"
-#include "asmdefs.h"
-
-#if defined( _STANDALONE_ )
 
 #include "memalloc.h"
 #include "symbols.h"
 #include "directiv.h"
 #include "labels.h"
-#include "asminput.h"
+#include "input.h"
 #include "macro.h"
 
 #include "myassert.h"
@@ -58,13 +55,16 @@ extern void GetInsString( enum asm_token , char *, int );
 int DefineConstant( int i, bool redefine )
 /***********************************************************/
 {
+    asm_sym *sym;
 
     if( i != 0 || AsmBuffer[0]->token != T_ID) {
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
-    if (CreateConstant( AsmBuffer[0]->string_ptr, 0, 2, redefine ) )
+    if (sym = CreateConstant( AsmBuffer[0]->string_ptr, 0, 2, redefine ) ) {
+        WriteLstFile(LSTTYPE_EQUATE, 0, sym);
         return(NOT_ERROR);
+    }
     return(ERROR);
 }
 
@@ -102,7 +102,7 @@ void * CreateConstant( char *name, int value, int start, bool redefine )
 /**********************************************************************************************/
 {
     struct asm_sym      *sym;
-    dir_node            *dir;
+//    dir_node            *dir;
     int                 i;
     int                 j;
     char                *ptr;
@@ -159,7 +159,8 @@ void * CreateConstant( char *name, int value, int start, bool redefine )
     i = start;
 #if 1 // a tiny optimization to avoid calling the evaluator for simple numbers
     if (AsmBuffer[i]->token == T_NUM && AsmBuffer[i+1]->token == T_FINAL) {
-        opndx.value = AsmBuffer[i]->value;
+        opndx.llvalue = AsmBuffer[i]->llvalue;
+        opndx.hlvalue = AsmBuffer[i]->hlvalue;
         opndx.type = EXPR_CONST;
         opndx.string = NULL;
         opndx.instr = EMPTY;
@@ -179,7 +180,7 @@ void * CreateConstant( char *name, int value, int start, bool redefine )
             opndx.string == NULL &&
             (opndx.type == EXPR_CONST || opndx.type == EXPR_ADDR)) {
             DebugMsg(( "CreateConstant(%s): expression evaluated, value=%X, string=%X\n", name, opndx.value, opndx.string));
-            if ((opndx.type == EXPR_CONST) && (sym->offset == opndx.value)) {
+            if ((opndx.type == EXPR_CONST) && (sym->value == opndx.value)) {
                 return( sym );
             }
             // if ((opndx.type == EXPR_ADDR) && (dir->e.constinfo->sym->offset == opndx.sym->offset))
@@ -216,7 +217,15 @@ noerr:
         AsmBuffer[i]->token == T_FINAL &&
         opndx.string == NULL &&
         opndx.indirect == FALSE &&
+#if 1
+        /* the CONST's magnitude must be <= 32 */
+        ((opndx.type == EXPR_CONST &&
+          ((opndx.hvalue == 0 && opndx.hlvalue == 0) ||
+           (opndx.value < 0 && opndx.hvalue == -1))) ||
+         opndx.type == EXPR_ADDR) &&
+#else
         (opndx.type == EXPR_CONST || opndx.type == EXPR_ADDR) &&
+#endif
         opndx.instr == EMPTY) {
         if (!sym)
             sym = SymCreate( name, TRUE );
@@ -226,19 +235,19 @@ noerr:
         sym->state = SYM_INTERNAL;
         if (opndx.type == EXPR_CONST) {
             sym->mem_type = MT_ABS;
-            sym->offset = opndx.value;
-            DebugMsg(("CreateConstant(%s), value set: %X\n", name, opndx.value));
+            sym->value = opndx.value;
+            DebugMsg(("CreateConstant(%s), CONST, value set: %I64X\n", name, opndx.llvalue));
         } else {
             // dir->sym.mem_type = opndx.sym->mem_type;
             sym->mem_type = opndx.mem_type;
             if (opndx.sym) {
-                DebugMsg(("CreateConstant(%s), value set: ofs=%X/value=%X (sym=%X)\n", name, opndx.sym->offset, opndx.value, opndx.sym));
+                DebugMsg(("CreateConstant(%s), ADDR, value set: ofs=%X/value=%X (sym=%X)\n", name, opndx.sym->offset, opndx.value, opndx.sym));
                 sym->offset = opndx.sym->offset + opndx.value;
                 sym->segment = opndx.sym->segment;
             } else {
                 /* the evaluator handles structure fields strange and should be fixed */
                 sym->mem_type = MT_ABS;
-                DebugMsg(("CreateConstant(%s), value set: ofs=%X/value=%X (mbr=%X)\n", name, opndx.mbr->offset, opndx.value, opndx.mbr));
+                DebugMsg(("CreateConstant(%s), ADDR, value set: ofs=%X/value=%X (mbr=%X)\n", name, opndx.mbr->offset, opndx.value, opndx.mbr));
                 sym->offset = opndx.mbr->offset; // + opndx.value;
                 sym->segment = opndx.mbr->segment;
             }
@@ -263,18 +272,14 @@ noerr:
     }
 
     DebugMsg(("CreateConstant(%s): value is NOT numeric, will be stored as a string\n", name));
-    if (sym) {
-        dir_change((dir_node *)sym, TAB_TMACRO);
-    }
 
 define_tmacro:
 
     if (sym == NULL)
-        dir = dir_insert( name, TAB_TMACRO );
-    else
-        dir = (dir_node *)sym;
+        sym = SymCreate( name, TRUE );
 
-    dir->sym.defined = TRUE;
+    sym->state = SYM_TMACRO;
+    sym->defined = TRUE;
 
     /* it is EQU and items cannot be evaluated.
      So a string is to be defined.
@@ -300,14 +305,13 @@ define_tmacro:
                 count = count - 2;
             }
     }
-    if (dir->sym.string_ptr)
-        AsmFree(dir->sym.string_ptr);
-    dir->sym.string_ptr = (char *)AsmAlloc( count + 1);
-    memcpy(dir->sym.string_ptr, ptr, count);
-    *(dir->sym.string_ptr+count) = '\0';
+    if (sym->string_ptr)
+        AsmFree(sym->string_ptr);
+    sym->string_ptr = (char *)AsmAlloc( count + 1);
+    memcpy(sym->string_ptr, ptr, count);
+    *(sym->string_ptr+count) = '\0';
 
-    DebugMsg(("CreateConstant >%s<: value is >%s<, exit\n", name, dir->sym.string_ptr));
-    return( dir );
+    DebugMsg(("CreateConstant >%s<: value is >%s<, exit\n", name, sym->string_ptr));
+    return( sym );
 }
 
-#endif

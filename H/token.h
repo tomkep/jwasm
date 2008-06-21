@@ -1,0 +1,97 @@
+/****************************************************************************
+*
+*                            Open Watcom Project
+*
+*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
+*
+*  ========================================================================
+*
+*    This file contains Original Code and/or Modifications of Original
+*    Code as defined in and that are subject to the Sybase Open Watcom
+*    Public License version 1.0 (the 'License'). You may not use this file
+*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
+*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
+*    provided with the Original Code and Modifications, and is also
+*    available at www.sybase.com/developer/opensource.
+*
+*    The Original Code and all software distributed under the License are
+*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
+*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
+*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
+*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
+*    NON-INFRINGEMENT. Please see the License for the specific language
+*    governing rights and limitations under the License.
+*
+*  ========================================================================
+*
+* Description:  token definitions
+*
+****************************************************************************/
+
+
+#ifndef _TOKEN_H_
+#define _TOKEN_H_
+
+enum state {
+        T_FINAL,
+        T_INSTRUCTION,
+        T_RES_ID,
+        T_ID,
+        T_REG,
+        T_STRING,
+        T_DIRECTIVE,
+        T_DIRECT_EXPR,
+        T_DEC_NUM,
+        T_OCT_NUM,
+        T_HEX_NUM_0,
+        T_HEX_NUM,
+        T_NUM,
+        T_FLOAT,
+        T_NOOP,                 /* No operation */
+
+        T_POSITIVE,
+        T_NEGATIVE,
+        T_ID_IN_BACKQUOTES,
+        T_BIN_NUM,
+        T_PATH,
+        T_UNARY_OPERATOR,
+        T_BAD_NUM,
+
+        T_OP_BRACKET    = '(',
+        T_OP_SQ_BRACKET = '[',
+        T_CL_BRACKET    = ')',
+        T_CL_SQ_BRACKET = ']',
+        T_COMMA         = ',',
+        T_COLON         = ':',
+        T_SEMI_COLON    = ';',
+        T_TIMES         = '*',
+        T_PLUS          = '+',
+        T_MINUS         = '-',
+        T_DOT           = '.',
+        T_QUESTION_MARK = '?',
+        T_PERCENT       = '%'
+};
+
+struct asm_tok {
+        enum state      token;
+        char            *string_ptr;
+        union {
+            struct {
+                long      value;
+                union {
+                    char  *pos;   /* ptr in src line */
+                    long  hvalue; /* for NUM only */
+                };
+                short     xvalue; /* for NUM only */
+                char      rm_byte;/* for RES_ID only */
+                char      opcode; /* for RES_ID + UNARY_OPERATOR */
+            };
+            unsigned char bytes[16]; /* used by FLOATs +NUMs */
+            struct {
+                unsigned long long llvalue;
+                unsigned long long hlvalue;
+            };
+        };
+};
+
+#endif

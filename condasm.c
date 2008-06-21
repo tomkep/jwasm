@@ -29,14 +29,11 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
 #include <ctype.h>
 
+#include "globals.h"
 #include "parser.h"
-#include "directiv.h"
 #include "expreval.h"
-#include "asmdefs.h"
-
 #include "myassert.h"
 
 extern int              get_instruction_position( char *string );
@@ -61,14 +58,17 @@ typedef enum  {
                         everything until we see an endif */
 } if_state;
 
-if_state CurrIfState = BLOCK_ACTIVE;
-static int  blocknestlevel = 0;
-static int  falseblocknestlevel = 0;
+if_state CurrIfState;
+static int blocknestlevel;
+static int falseblocknestlevel;
+bool inside_comment;
+static char delim_char;
 
 // fixme char *IfSymbol;        /* save symbols in IFDEF's so they don't get expanded */
 
 /*
  this code runs always. it handles the following:
+ COMMENT directive
  inactive -> condition check
  active -> done
 */
@@ -76,19 +76,44 @@ static int  falseblocknestlevel = 0;
 #define is_valid_id_char( ch ) \
     ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
+static int StartComment( char * p )
+/***********************************/
+{
+    while (isspace(*p)) p++;
+    if (*p == NULLC) {
+        AsmError( COMMENT_DELIMITER_EXPECTED );
+        return( ERROR );
+    }
+    delim_char = *p;
+    p++;
+#if 0
+    if (*p != NULLC && isspace(*p) == FALSE) {
+        AsmError( COMMENT_DELIMITER_EXPECTED );
+        return( ERROR );
+    }
+#endif
+    for (;*p;p++)
+        if (*p == delim_char)
+            return( NOT_ERROR );
+
+    inside_comment = TRUE;
+    return( NOT_ERROR );
+}
+
+
 void conditional_assembly_prepare( char *line )
 /***************************************************/
 {
     char        *ptr;
     char        *end;
-    int         count;
-    char        delim;
     char        fix;
+    int         count;
 
-    if( Comment( QUERY_COMMENT, 0 ) ) {
-        delim = (char)Comment( QUERY_COMMENT_DELIM, 0 );
-        if( strchr( line, delim ) != NULL ) {
-            Comment( END_COMMENT, 0 );
+    if( inside_comment == TRUE ) {
+        DebugMsg(("COMMENT active, delim is >%c<, line is >%s<\n", delim_char, line));
+        if( strchr( line, delim_char ) != NULL ) {
+            DebugMsg(("COMMENT mode exited\n"));
+            inside_comment = FALSE;
         }
         *line = '\0';
         return;
@@ -96,6 +121,8 @@ void conditional_assembly_prepare( char *line )
 
     ptr = line;
     while (isspace(*ptr)) ptr++;
+    /* the expansion operator is still present here, since
+     it could have been used as a comment delimiter */
     if (*ptr == '%') {
         ptr++;
         while (isspace(*ptr)) ptr++;
@@ -118,17 +145,24 @@ void conditional_assembly_prepare( char *line )
 
     count = get_instruction_position( ptr );
     *end = fix;
-    if( count == EMPTY ) {
-        /* if it is not in the table */
+    if( count == EMPTY ||
+        AsmOpTable[count].opnd_type[0] != OP_SPECIAL ||
+        AsmOpTable[count].rm_byte != OP_DIRECTIVE ||
+        (AsmOpTable[count].opcode & 2) == 0) {
+        /* it's not a conditional directive or COMMENT */
         if(( CurrIfState == BLOCK_INACTIVE ) || ( CurrIfState == BLOCK_DONE ) ) {
+            DebugMsg(("suppressed: >%s<\n", line));
             *line = '\0';
         }
         return;
     }
 
-    /* otherwise, see if it is a conditional assembly directive */
-
     switch( AsmOpTable[count].token) {
+    case T_COMMENT:
+        StartComment( end );
+        DebugMsg(("COMMENT starting, delim is >%c<\n", delim_char));
+        *line = '\0';
+        return;
     case T_IF:
     case T_IF1:
     case T_IF2:
@@ -224,10 +258,9 @@ void conditional_assembly_prepare( char *line )
         DebugMsg(("conditional_assembly_prepare ENDIF: state=%u, level=%u, falselevel=%u\n", CurrIfState, blocknestlevel, falseblocknestlevel));
         break;
     default:
-        if(( CurrIfState == BLOCK_INACTIVE ) || ( CurrIfState == BLOCK_DONE )) {
-            DebugMsg(("suppressed: >%s<\n", line));
-            *line = '\0';
-        }
+        *end = '\0';
+        DebugMsg(("conditional_assembly_prepare: unknown directive %s\n", ptr));
+        AsmErr( UNKNOWN_DIRECTIVE, ptr);
     }
     return;
 }
@@ -320,12 +353,13 @@ int conditional_assembly_directive( int i, int directive )
             return(NOT_ERROR);
         }
         DebugMsg(("conditional_assembly_directive, unexpected directive=%u\n", directive));
-        AsmError( BLOCK_NESTING_ERROR );
+        AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
         return(ERROR);
         break;
     }
 
-    /* numeric operand needed? */
+    /* check params and call appropriate test routine */
+
     switch( directive ) {
     case T_IF:
     case T_IFE:
@@ -342,22 +376,93 @@ int conditional_assembly_directive( int i, int directive )
             AsmError(CONSTANT_EXPECTED);
             return(ERROR);
         }
-    }
-
-    switch( directive ) {
+        if (directive == T_IF ||
+            directive == T_ELSEIF)
+            CurrIfState = ( opndx.value ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
+        else
+            CurrIfState = ( !opndx.value ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
+        break;
+    case T_IFDIF:
+    case T_IFDIFI:
+    case T_ELSEIFDIF:
+    case T_ELSEIFDIFI:
+    case T_IFIDN:
+    case T_IFIDNI:
+    case T_ELSEIFIDN:
+    case T_ELSEIFIDNI:
+        if (Token_Count != i+4 || AsmBuffer[i+2]->token != T_COMMA) {
+            AsmError(SYNTAX_ERROR);
+            return(ERROR);
+        }
+        i++;
+        if (AsmBuffer[i]->token != T_STRING || AsmBuffer[i+2]->token != T_STRING) {
+            /* to return a more comprehensive error message, check if
+             undefined symbols were used as params */
+            if (AsmBuffer[i]->token == T_ID) {
+                if (SymSearch(AsmBuffer[i]->string_ptr) == NULL) {
+                    AsmErr(SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr);
+                    return(ERROR);
+                }
+            }
+            if (AsmBuffer[i+2]->token == T_ID) {
+                if (SymSearch(AsmBuffer[i+2]->string_ptr) == NULL) {
+                    AsmErr(SYMBOL_NOT_DEFINED, AsmBuffer[i+2]->string_ptr);
+                    return(ERROR);
+                }
+            }
+            AsmError(TEXT_ITEM_REQUIRED);
+            return(ERROR);
+        }
+        if (directive == T_IFDIF ||
+            directive == T_ELSEIFDIF) {
+            DebugMsg(("conditional_assembly_directive, IFDIF, cmp >%s< and >%s<\n", AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
+            CurrIfState = check_dif( TRUE, AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
+        } else if (directive == T_IFDIFI ||
+                   directive == T_ELSEIFDIFI) {
+            DebugMsg(("conditional_assembly_directive, IFDIFI, cmp >%s< and >%s<\n", AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
+            CurrIfState = check_dif( FALSE, AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
+        } else if (directive == T_IFIDN ||
+                   directive == T_ELSEIFIDN) {
+            DebugMsg(("conditional_assembly_directive, IFIDN, cmp >%s< and >%s<\n", AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
+            CurrIfState = !check_dif( TRUE, AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
+        } else {
+            DebugMsg(("conditional_assembly_directive, IFIDNI, cmp >%s< and >%s<\n", AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
+            CurrIfState = !check_dif( FALSE, AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
+        }
+        break;
+    case T_IFB:
+    case T_IFNB:
+    case T_ELSEIFB:
+    case T_ELSEIFNB:
+        if (Token_Count != i+2) {
+            AsmError(SYNTAX_ERROR);
+            return(ERROR);
+        }
+        i++;
+        if (AsmBuffer[i]->token != T_STRING) {
+            /* to return a more comprehensive error message, check if
+             undefined symbols were used as params */
+            if (AsmBuffer[i]->token == T_ID) {
+                if (SymSearch(AsmBuffer[i]->string_ptr) == NULL) {
+                    AsmErr(SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr);
+                    return(ERROR);
+                }
+            }
+            AsmError(TEXT_ITEM_REQUIRED);
+            return(ERROR);
+        }
+        if (directive == T_IFB ||
+            directive == T_ELSEIFB) {
+            CurrIfState = check_blank( AsmBuffer[i]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
+        } else {
+            CurrIfState = !check_blank( AsmBuffer[i]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
+        }
+        break;
     case T_IF1:
         CurrIfState = Parse_Pass == PASS_1 ? BLOCK_ACTIVE : BLOCK_INACTIVE;
         break;
     case T_IF2:
         CurrIfState = Parse_Pass == PASS_1 ? BLOCK_INACTIVE : BLOCK_ACTIVE;
-        break;
-    case T_IF:
-    case T_ELSEIF:
-        CurrIfState = ( opndx.value ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
-        break;
-    case T_IFE:
-    case T_ELSEIFE:
-        CurrIfState = ( !opndx.value ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
         break;
     case T_IFDEF:
     case T_ELSEIFDEF:
@@ -367,35 +472,11 @@ int conditional_assembly_directive( int i, int directive )
     case T_ELSEIFNDEF:
         CurrIfState = !check_defd( AsmBuffer[i+1]->string_ptr )  ? BLOCK_ACTIVE : BLOCK_INACTIVE;
         break;
-    case T_IFB:
-    case T_ELSEIFB:
-        CurrIfState = check_blank( AsmBuffer[i+1]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
-        break;
-    case T_IFNB:
-    case T_ELSEIFNB:
-        CurrIfState = !check_blank( AsmBuffer[i+1]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
-        break;
-    case T_IFDIF:
-    case T_ELSEIFDIF:
-        CurrIfState = check_dif( TRUE, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
-        break;
-    case T_IFDIFI:
-    case T_ELSEIFDIFI:
-        CurrIfState = check_dif( FALSE, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
-        break;
-    case T_IFIDN:
-    case T_ELSEIFIDN:
-        DebugMsg(("conditional_assembly_directive, IFIDN, cmp >%s< and >%s<\n", AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr));
-        CurrIfState = !check_dif( TRUE, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
-        break;
-    case T_IFIDNI:
-    case T_ELSEIFIDNI:
-        CurrIfState = !check_dif( FALSE, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
-        break;
     case T_ELSE:
         CurrIfState = BLOCK_ACTIVE;
         break;
     }
+
 #ifdef DEBUG_OUT
     {
     char * ptr;
@@ -424,18 +505,28 @@ int conditional_error_directive( int i )
 {
     expr_list opndx;
     uint direct;
+    bool forced_error = FALSE;
+    char * p = "";
 
     direct = AsmBuffer[i]->value;
+    i++;
 
     /* get an expression if necessary */
     switch( direct ) {
+    case T_DOT_ERR:
+        if (AsmBuffer[i]->token == T_STRING) {
+            p = AsmBuffer[i]->string_ptr;
+            i++;
+        }
+        if (AsmBuffer[i]->token != T_FINAL)
+            break;
+        if (*p)
+            AsmErr( FORCED_ARBITRARY, p);
+        else
+            AsmErr( FORCED, p);
+        break;
     case T_DOT_ERRE:
     case T_DOT_ERRNZ:
-//    case T_DOT_ERRDIF:
-//    case T_DOT_ERRDIFI:
-//    case T_DOT_ERRIDN:
-//    case T_DOT_ERRIDNI:
-        i++;
         if ((ERROR == EvalOperand( &i, Token_Count, &opndx, TRUE )))
             return(ERROR);
         if (opndx.type == EXPR_CONST && opndx.string == NULL)
@@ -446,86 +537,135 @@ int conditional_error_directive( int i )
             AsmError(CONSTANT_EXPECTED);
             return(ERROR);
         }
-    }
-    switch( direct ) {
-    case T_DOT_ERR:
-        if (AsmBuffer[i+1]->token == T_STRING)
-            AsmErr( FORCED, AsmBuffer[i+1]->string_ptr);
-        else
-            AsmErr( FORCED, "");
-        return( ERROR );
-    case T_DOT_ERRNZ:
-        if( opndx.value ) {
-            if (AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token == T_STRING)
-                AsmErr( FORCED, AsmBuffer[i+1]->string_ptr );
+        if (AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token == T_STRING) {
+            i++;
+            p = AsmBuffer[i]->string_ptr;
+            i++;
+        }
+        if (AsmBuffer[i]->token != T_FINAL)
+            break;
+        if (direct == T_DOT_ERRNZ && opndx.value )
+            forced_error = TRUE;
+        else if (direct == T_DOT_ERRE && !opndx.value)
+            forced_error = TRUE;
+
+        if (forced_error == TRUE)
+            if (*p)
+                AsmErr( FORCED_ARBITRARY, p );
+            else if (direct == T_DOT_ERRNZ)
+                AsmErr( FORCED_EQUAL, opndx.value );
             else
                 AsmErr( FORCED_NOT_ZERO, opndx.value );
-            return( ERROR );
-        }
-        break;
-    case T_DOT_ERRE:
-        if( !opndx.value ) {
-            if (AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token == T_STRING)
-                AsmErr( FORCED, AsmBuffer[i+1]->string_ptr );
-            else
-                AsmErr( FORCED_EQUAL, opndx.value );
-            return( ERROR );
-        }
         break;
     case T_DOT_ERRDEF:
-        if( check_defd( AsmBuffer[i+1]->string_ptr ) ) {
-            AsmErr( FORCED_DEF, AsmBuffer[i+1]->string_ptr );
-            return( ERROR );
-        }
-        break;
     case T_DOT_ERRNDEF:
-        if( !check_defd( AsmBuffer[i+1]->string_ptr ) ) {
-            AsmErr( FORCED_NOT_DEF, AsmBuffer[i+1]->string_ptr );
-            return( ERROR );
+
+        if (Token_Count < i+1) {
+            AsmError(SYNTAX_ERROR);
+            return(ERROR);
+        }
+        if (AsmBuffer[i]->token == T_ID) {
+            asm_sym * sym;
+            char * p1 = AsmBuffer[i]->string_ptr;
+            i++;
+            if (AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token == T_STRING) {
+                i++;
+                p = AsmBuffer[i]->string_ptr; /* p is ignored */
+                i++;
+            }
+            if (AsmBuffer[i]->token != T_FINAL)
+                break;
+
+            /* should run on pass 2 only! */
+            if (Parse_Pass == PASS_1)
+                break;
+
+            /* don't use check_defd()! */
+            sym = SymSearch( p1 );
+            if (sym && sym->state == SYM_UNDEFINED)
+                sym = NULL;
+
+            if( direct == T_DOT_ERRDEF && sym != NULL )
+                AsmErr( FORCED_DEF, p1 );
+            else if( direct == T_DOT_ERRNDEF && sym == NULL )
+                AsmErr( FORCED_NOT_DEF, p1 );
         }
         break;
     case T_DOT_ERRB:
-        if( AsmBuffer[i+1]->token == T_STRING && check_blank( AsmBuffer[i+1]->string_ptr ) ) {
-            if (AsmBuffer[i+2]->token == T_COMMA && AsmBuffer[i+3]->token == T_STRING)
-                AsmErr( FORCED, AsmBuffer[i+3]->string_ptr );
-            else
-                AsmErr( FORCED_BLANK, AsmBuffer[i+1]->string_ptr );
-            return( ERROR );
-        }
-        break;
     case T_DOT_ERRNB:
-        if( AsmBuffer[i+1]->token != T_STRING || !check_blank( AsmBuffer[i+1]->string_ptr ) ) {
-            if (AsmBuffer[i+2]->token == T_COMMA && AsmBuffer[i+3]->token == T_STRING)
-                AsmErr( FORCED, AsmBuffer[i+3]->string_ptr );
-            else
-                AsmErr( FORCED_NOT_BLANK, AsmBuffer[i+1]->string_ptr );
-            return( ERROR );
+        if (Token_Count < i+1) {
+            AsmError(SYNTAX_ERROR);
+            return(ERROR);
+        }
+        if( AsmBuffer[i]->token != T_FINAL) {
+            char * p1 = AsmBuffer[i]->string_ptr;
+            i++;
+            if (AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token == T_STRING) {
+                i++;
+                p = AsmBuffer[i]->string_ptr;
+                i++;
+            }
+            if (AsmBuffer[i]->token != T_FINAL)
+                break;
+            if (direct == T_DOT_ERRB && check_blank( p1 ))
+                AsmErr( FORCED_BLANK, p );
+            else if (direct == T_DOT_ERRNB && !check_blank( p1 ))
+                AsmErr( FORCED_NOT_BLANK, p );
         }
         break;
     case T_DOT_ERRDIF:
-        if( check_dif( TRUE, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr ) ) {
-            AsmErr( FORCED_DIF, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr );
-            return( ERROR );
-        }
-        break;
     case T_DOT_ERRDIFI:
-        if( check_dif( FALSE, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr ) ) {
-            AsmErr( FORCED_DIF, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr );
-            return( ERROR );
-        }
-        break;
     case T_DOT_ERRIDN:
-        if( !check_dif( TRUE, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr ) ) {
-            AsmErr( FORCED_IDN, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr );
-            return( ERROR );
-        }
-        break;
     case T_DOT_ERRIDNI:
-        if( !check_dif( FALSE, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr ) ) {
-            AsmErr( FORCED_IDN, AsmBuffer[i+1]->string_ptr, AsmBuffer[i+3]->string_ptr );
-            return( ERROR );
+        if (Token_Count < i+3) {
+            AsmError(SYNTAX_ERROR);
+            return(ERROR);
+        }
+        if (AsmBuffer[i]->token == T_STRING) {
+            char * p1 = AsmBuffer[i]->string_ptr;
+            i++;
+            if (AsmBuffer[i]->token == T_COMMA) {
+                i++;
+                if (AsmBuffer[i]->token == T_STRING) {
+                    char * p2 = AsmBuffer[i]->string_ptr;
+                    i++;
+                    if (AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token == T_STRING) {
+                        i++;
+                        p = AsmBuffer[i]->string_ptr;
+                        i++;
+                    }
+                    if (AsmBuffer[i]->token != T_FINAL)
+                        break;
+                    switch (direct) {
+                    case T_DOT_ERRDIF:
+                        forced_error = check_dif( TRUE, p1, p2 );
+                        break;
+                    case T_DOT_ERRDIFI:
+                        forced_error = check_dif( FALSE, p1, p2 );
+                        break;
+                    case T_DOT_ERRIDN:
+                        forced_error = !check_dif( TRUE, p1, p2 );
+                        break;
+                    default:
+                        forced_error = !check_dif( FALSE, p1, p2 );
+                    }
+                    if (forced_error == TRUE) {
+                        if (*p == NULLC) {
+                            if (direct == T_DOT_ERRDIF || direct == T_DOT_ERRDIFI)
+                                AsmErr( FORCED_DIF, p1, p2 );
+                            else
+                                AsmErr( FORCED_IDN, p1, p2 );
+                        } else
+                            AsmErr( FORCED_ARBITRARY, p);
+                    }
+                }
+            }
         }
         break;
+    }
+    if (AsmBuffer[i]->token != T_FINAL) {
+        AsmError(SYNTAX_ERROR);
+        return(ERROR);
     }
     return( NOT_ERROR );
 }
@@ -537,4 +677,14 @@ int CheckForOpenConditionals( void )
         return(ERROR);
     }
     return(NOT_ERROR);
+}
+
+// init (called once per module)
+
+void CondInit()
+{
+    CurrIfState = BLOCK_ACTIVE;
+    blocknestlevel = 0;
+    falseblocknestlevel = 0;
+    inside_comment = FALSE;
 }

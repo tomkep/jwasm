@@ -32,7 +32,7 @@
 #ifndef _DIRECTIV_H_
 #define _DIRECTIV_H_
 
-#include "objrec.h"
+#include "omfrec.h"
 
 #define MAX_LNAME       255
 #define LNAME_NULL      0
@@ -77,25 +77,19 @@ enum {
     TAB_PROC,
     TAB_LNAME,
     TAB_CLASS_LNAME,
+    TAB_ALIAS,
     TAB_LAST,
-    TAB_STRUCT,
-    TAB_MACRO,   // TAB_MACRO and TAB_TMACRO are preprocessor items
-    TAB_TMACRO,
+    TAB_TYPE,
+    TAB_MACRO,   // TAB_MACRO is a preprocessor item
     TAB_GLOBAL,  // TAB_GLOBAL and TAB_COMM are in fact TAB_EXT items
     TAB_COMM
 };           
 
-enum {
-    QUERY_COMMENT,
-    QUERY_COMMENT_DELIM,
-    START_COMMENT,
-    END_COMMENT
-};                      // parms to Comment
-
 typedef enum {
-    SEGTYPE_UNDEF = -1,
-    SEGTYPE_ISDATA,
-    SEGTYPE_ISCODE
+    SEGTYPE_UNDEF,
+    SEGTYPE_CODE,
+    SEGTYPE_DATA,
+    SEGTYPE_BSS
 } seg_type;
 
 /*---------------------------------------------------------------------------*/
@@ -148,26 +142,39 @@ typedef struct {
     direct_idx          lname_idx;
 } grp_info;
 
+/* todo: remove the OMF segment record and store the info directly
+   in seg_info */
+
 typedef struct {
-    obj_rec             *segrec;
+    obj_rec             *segrec;        /* OMF segment record */
     struct asm_sym      *group;         // its group
     uint_32             start_loc;      // starting offset of current ledata or lidata
-    unsigned            readonly:1;     // if the segment is readonly
-    unsigned            ignore:1;       // ignore this if the seg is redefined
-    seg_type            iscode;         // segment is belonging to "CODE" or 'DATA' class
-    direct_idx          lname_idx;
     uint_32             current_loc;    // current offset in current ledata or lidata
+    uint_8              *CodeBuffer;
+    asm_sym             *labels;        // linked list of labels in this seg
+    union {
+        struct fixup        *FixupListHead; // head of list of fixups
+        struct asmfixup     *FixupListHeadCoff;
+    };
+    union {
+        struct fixup        *FixupListTail;
+        struct asmfixup     *FixupListTailCoff;
+    };
+    void                *LinnumQueue;   // for COFF line numbers
+    uint_32             num_relocs;     // used by COFF
+    seg_type            segtype;        // segment is belonging to "CODE" or 'DATA' class
+    direct_idx          lname_idx;
+    unsigned            readonly:1;     // if the segment is readonly
+    unsigned            Use32:1;
 } seg_info;
 
 typedef struct {
-    uint                idx;            // external definition index
     unsigned            use32:1;
     unsigned            comm:1;
     unsigned            weak:1;         // 1 if an unused "externdef"
 } ext_info;
 
 typedef struct {
-    uint                idx;            // external definition index
     unsigned            use32:1;
     unsigned            comm:1;
     unsigned            isfar:1;
@@ -192,10 +199,8 @@ typedef struct {
     label_list          *paralist;      // list of parameters
     label_list          *locallist;     // list of local variables
     struct asm_sym      *labellist;     // list of local labels
-    struct dir_node     *ext;           // "external" dir_node (temporary)
     int                 parasize;       // total no. of bytes used by parameters
     int                 localsize;      // total no. of bytes used by local variables
-    uint                idx;            // external definition index
     unsigned            is_vararg:1;    // if it has a vararg
     unsigned            pe_type:1;      // prolog/epilog code type 0:8086/186 1:286 and above
     unsigned            export:1;       // EXPORT procedure
@@ -239,10 +244,10 @@ typedef struct {
     mlocal_list         *locallist; // list of locals
     asmlines            *data;      // the guts of the macro - LL of strings
     const FNAME         *srcfile;
-    unsigned            hidden:1;   // if TRUE don't print error messages
     unsigned            vararg:1;   // if TRUE then accept additional params
     unsigned            isfunc:1;   // if TRUE then it's a macro function
     unsigned            redefined:1;// if TRUE then macro has been redefined
+    unsigned            runsync:1;  // if TRUE then run macro synchronous
 } macro_info;
 
 
@@ -254,7 +259,7 @@ typedef struct field_list {
     struct field_list   *next;
     char                *initializer;
     char                *value;
-    struct asm_sym      *fsym;
+    struct asm_sym      *sym;
 } field_list;
 
 typedef struct {
@@ -302,6 +307,8 @@ typedef struct {
 extern uint                     LnamesIdx;      // Number of LNAMES definition
 
 typedef struct {
+    unsigned            error_count;
+    unsigned            warning_count;
     dist_type           distance;        // stack distance;
     mod_type            model;           // memory model;
     lang_type           langtype;        // language;
@@ -311,12 +318,71 @@ typedef struct {
     unsigned            cmdline:1;
     unsigned            defUse32:1;      // default segment size 32-bit
     unsigned            mseg:1;          // mixed segments (16/32-bit)
+    unsigned            nocasemap:1;     // option casemap:none
+    unsigned            procs_private:1; // option proc:private
+    unsigned            procs_export:1;  // option proc:export
+    unsigned            ljmp:1;          // option ljmp
+    unsigned            m510:1;          // option m510
+    unsigned            scoped:1;        // option scoped
+    unsigned            oldstructs:1;    // option oldstructs
+    unsigned            emulator:1;      // option emulator
+    unsigned            list:1;          // .list/.nolist
+    unsigned            cref:1;          // .cref/.nocref
+    unsigned            dosseg:1;        // .dosseg occured
     unsigned            flat_idx;        // index of FLAT group
     char                name[_MAX_FNAME];// name of module
     const FNAME         *srcfile;
 } module_info;                           // Information about the module
 
 #define MAGIC_FLAT_GROUP        ModuleInfo.flat_idx
+
+extern module_info      ModuleInfo;
+
+#define IS_PROC_FAR()   ( ModuleInfo.model == MOD_MEDIUM || ModuleInfo.model == MOD_LARGE || ModuleInfo.model == MOD_HUGE )
+
+/*---------------------------------------------------------------------------*/
+
+extern dir_node         *dir_insert( const char *, int );
+extern dir_node         *dir_insert_ex( const char *, int );
+extern void             dir_change( dir_node *, int );
+extern void             dir_free( dir_node *, bool );
+
+extern int              SizeFromMemtype(memtype, bool );
+
+extern void             IdxInit( void );
+/* Initialize all the index variables */
+
+extern uint             GetExtIdx( struct asm_sym * );
+/* Get the index of an extrn defn */
+
+extern int              token_cmp( char *token, int start, int end );
+extern int              FindSimpleType( int );  // find simple type
+extern int              RegisterValueToIndex( int, bool *);
+extern int              SizeFromRegister( int );
+extern struct asm_sym   *GetStdAssume( int);
+extern struct asm_sym   *MakeExtern( char *name, memtype type, struct asm_sym * vartype, struct asm_sym *, bool );
+extern int              EchoDef( int );         // handle ECHO directive
+extern int              OptionDef( int );       // handle various OPTIONs
+
+extern int              SetModel( int );        // handle .MODEL statement
+
+extern void             ModuleInit( void );
+/* Initializes the information about the module, which are contained in
+   ModuleInfo */
+
+extern int              ModuleEnd( int );       // handle END statement
+extern void             AssumeInit( void );     // init all assumed-register table
+extern int              FixOverride( int );
+/* Get the correct frame and frame_datum for a label when there is a segment
+   or group override. */
+extern void             push( void *stack, void *elt );
+extern void             *pop( void *stack );
+extern void             *peek( void *stack, int );
+extern void             wipe_space( char *token );
+
+/*---------------------------------------------------------------------------
+ *   included from segment.c
+ *---------------------------------------------------------------------------*/
 
 #define NUM_SEGREGS 6
 #define NUM_STDREGS 8
@@ -344,23 +410,20 @@ enum assume_stdreg {
 #define ASSUME_NOTHING -2
 #define ASSUME_ERROR   -1
 
-extern module_info      ModuleInfo;
-
-#define IS_PROC_FAR()   ( ModuleInfo.model == MOD_MEDIUM || ModuleInfo.model == MOD_LARGE || ModuleInfo.model == MOD_HUGE )
-
 extern seg_list         *CurrSeg;       // points to stack of opened segments
 
-/*---------------------------------------------------------------------------*/
+extern uint_32          GetCurrSegStart(void);
+/* Get offset of segment at the start of current LEDATA record */
 
-extern dir_node         *dir_insert( const char *, int );
-extern dir_node         *dir_insert_ex( const char *, int );
-extern void             dir_change( dir_node *, int );
-extern void             dir_free( dir_node *, bool );
+#define GetSeg( x )     (dir_node *)x->segment
 
-extern int              SizeFromMemtype(memtype, bool );
+#define SEGISCODE( x )  ( x->seg->e.seginfo->segtype == SEGTYPE_CODE )
 
-extern void             IdxInit( void );
-/* Initialize all the index variables */
+extern void             SetSymSegOfs( struct asm_sym * );
+/* Store location information about a symbol */
+extern int              SymIs32( struct asm_sym * );
+extern int              SimSeg( int );          // handle simplified segment
+
 
 extern direct_idx       GetLnameIdx( char * );
 
@@ -370,64 +433,21 @@ extern uint_32          GetCurrAddr( void );    // Get offset from current segme
 extern dir_node         *GetCurrSeg( void );
 /* Get current segment; NULL means none */
 
+extern int              GetCurrClass( void ); /* get curr segment's class index */
+
 extern uint             GetGrpIdx( struct asm_sym * );
 /* get symbol's group index, from the symbol itself or from the symbol's segment */
 
 extern uint             GetSegIdx( struct asm_sym * );
 /* get symbol's segment index, from the symbol itself */
 
-extern uint             GetExtIdx( struct asm_sym * );
-/* Get the index of an extrn defn */
 
-extern int              token_cmp( char *token, int start, int end );
-extern int              FindSimpleType( int );  // find simple type
-extern int              RegisterValueToIndex( int, bool *);
-extern int              SizeFromRegister( int );
-extern struct asm_sym   *GetStdAssume( int);
-extern int              proc_check( void );
-extern int              GlobalDef( int );       // define an global symbol
-extern int              ExtDef( int );          // define an external symbol
-extern int              CommDef( int );         // define an communal symbol
-extern struct asm_sym   *MakeExtern( char *name, memtype type, struct asm_sym * vartype, struct asm_sym *, bool );
-extern int              PubDef( int );          // define a public symbol
 extern int              GrpDef( int );          // define a group
 extern int              SegDef( int );          // open or close a segment
 extern int              SetCurrSeg( int );      // open or close a segment in
                                                 // the second pass
-extern int              EchoDef( int );         // handle ECHO directive
-extern int              OptionDef( int );       // handle various OPTIONs
-extern int              ExamineProc( dir_node *, int , bool );  // common for PROC/PROTO
-extern int              ProcDef( int );         // define a procedure
-extern int              ProtoDef( int, char * );// define a prototype
-extern int              LocalDef( int );        // define local variables to procedure
-extern int              ProcEnd( int );         // end a procedure
-extern int              InvokeDef( int );       // call a prototyped proc
-extern int              Ret( int, int, int );   // emit return statement from procedure
-extern int              WritePrologue( void );  // emit prologue statement after the
-                                                // declaration of a procedure
-extern int              Startup( int );         // handle .startup & .exit
-extern int              SimSeg( int );          // handle simplified segment
-extern int              Include( int );         // handle an INCLUDE statement
-extern int              IncludeLib( int );      // handle an INCLUDELIB statement
-extern int              SetModel( int );        // handle .MODEL statement
-
-extern void             ModuleInit( void );
-/* Initializes the information about the module, which are contained in
-   ModuleInfo */
-
-extern int              ModuleEnd( int );       // handle END statement
-
-extern uint_32          GetCurrSegStart(void);
-/* Get offset of segment at the start of current LEDATA record */
-
-#define GetSeg( x )     (dir_node *)x->segment
-
-#define SEGISCODE( x )  ( x->seg->e.seginfo->iscode == SEGTYPE_ISCODE )
-
+extern void             SegmentInit( int );     // init segments
 extern struct asm_sym   *GetGrp( struct asm_sym * );
-
-extern void             AssumeInit( void );     // init all assumed-register table
-extern int              SetAssume( int );       // Assume a register
 
 extern enum assume_segreg  GetAssume( struct asm_sym*, enum assume_segreg );
 /* Return the assumed register of the symbol, and determine the frame and
@@ -436,46 +456,15 @@ extern enum assume_segreg  GetAssume( struct asm_sym*, enum assume_segreg );
 extern enum assume_segreg  GetPrefixAssume( struct asm_sym*, enum assume_segreg );
 /* Determine the frame and frame_datum of a symbol with a register prefix */
 
-extern int              FixOverride( int );
-/* Get the correct frame and frame_datum for a label when there is a segment
-   or group override. */
-extern void             SetSymSegOfs( struct asm_sym * );
-/* Store location information about a symbol */
-extern int              SymIs32( struct asm_sym * );
 
-extern int              NameDirective( int );
-
-extern int              Comment( int, int ); /* handle COMMENT directives */
-
-extern int              AddAlias( int );
-extern void             push( void *stack, void *elt );
-extern void             *pop( void *stack );
-extern void             *peek( void *stack, int );
 extern uint_32          GetCurrSegAlign( void );
-extern void             wipe_space( char *token );
 extern int              SetUse32Def( bool );
 
-/*---------------------------------------------------------------------------
- *   included from write.c
- *---------------------------------------------------------------------------*/
+// write.c
 
 extern dir_node         *CurrProc;      // current procedure
-#if 0
-extern unsigned long    LineNumber;
-#else
-extern struct asm_sym LineItem;
-#define LineNumber LineItem.offset
-#endif
-extern int_8            PhaseError;
 
-extern void             FlushCurrSeg( void );
-extern const FNAME      *AddFlist( char const *filename );
-extern void             OutSelect( bool );
-extern void             WriteObjModule( void );
-
-/*---------------------------------------------------------------------------
- *   included from asmline.c
- *---------------------------------------------------------------------------*/
+// input.c
 
 extern const FNAME      *get_curr_srcfile( void );
 

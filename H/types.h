@@ -1,5 +1,5 @@
 
-/* prototypes of ASMSTRUC.C */
+/* prototypes of TYPES.C */
 
 /* global structure */
 
@@ -19,4 +19,5 @@ extern asm_sym * CreateTypeDef( char *, int );
 extern char * InitializeStructure( asm_sym *, asm_sym *, char *, bool );
 extern struct asm_sym * AddFieldToStruct( int , int, memtype, struct asm_sym *, int);
 extern void  UpdateStructSize( int );
+extern void TypesInit( void );
 

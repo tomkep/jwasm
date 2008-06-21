@@ -1,4 +1,149 @@
 
+   Changelog
+
+   06/21/2008, v1.8:
+
+   -  bugfix: expression after .BREAK/.CONTINUE wasn't evaluated correctly
+      if it contained "&&" or "||" operators.
+   -  bugfix: if a userdefined prologue macro was executed, the first
+      line of the procedure was "lost".
+   -  bugfix: the value returned by a userdefined prologue macro function
+      was ignored.
+   -  bugfix: a forward reference to a segment name caused a "General
+      Failure" error.
+   -  bugfix: a text symbol defined with cmdline parameter -D got default
+      value <1> if no value was specified, which isn't what Masm does.
+      Now <> is assigned.
+   -  bugfix (known bug): syntax
+        mov eax, [edi.<TYPE>].<Field_name>
+      is accepted now.
+    - bugfix (known bug): sometimes a superfluous type name wasn't skipped,
+      resulting in an error msg of "Symbol <TYPE>.<TYPE> is not defined".
+    - bugfix (known bug): a macro function had always to be called with
+      parameters enclosed in brackets, even if EXITM will return nothing.
+      This has been corrected.
+   -  bugfix: TYPE operator didn't accept register or type operands.
+   -  bugfix: if there were both an EXTERNDEF and a PUBLIC definition for 
+      a symbol, a PUBDEF entry was added to the object module, even if the
+      symbol wasn't defined in the module.
+   -  bugfix: LENGTH operator didn't accept a structure field.
+   -  bugfix: communal variables were stored in one COMDEF record, no matter
+      how large this record might have grown. Now it is ensured that record
+      size won't exceed 1024.
+   -  bugfix: forward reference of a label in a LxS instructions failed
+      with error 'invalid instruction operands'.
+   -  bugfix: labels in data items were stored without optional offset.
+   -  bugfix: FLAT as a group override ("mov eax, offset FLAT:<symbol>") 
+      was rejected.
+   -  bugfix: '%' used as COMMENT delimiter didn't work.
+   -  bugfix: alignment was ignored if the offset of a nested structure 
+      was to be calculated.
+   -  bugfix: COMMENT directive wasn't recognized in an inactive IF block.
+   -  bugfix: an invalid optimization was triggered if a question mark was
+      the last of multiple items in a DUP argument (i.e. "DUP (?,?)"). As
+      a result, the total amount of space reserved was too short.
+   -  bugfix: in 16bit code segments, value 0xFC was used to pad 1 byte,
+      which is the CLD instruction. Now 0x90 (NOP) is used.
+   -  bugfix: a typecast to force JWasm to use the long format of an
+      instruction was ignored. Example:
+        cmp ax,1          ; the "short" (byte) format (83 F8 01) is used
+        cmp ax,word ptr 1 ; the "long" (word) format (3D 0001) is to be used
+      Now the typecast will make JWasm create the "long" format.
+   -  bugfix: .STARTUP created wrong code for TINY model.
+   -  bugfix: field initializer for a bit-field in a RECORD definition was
+      accepted, but wasn't stored.
+   -  bugfix: if a PROC parameter had no explicit type associated with it
+      (that is, the ":<type>" part was missing), then JWasm's behavior tended
+      to be hazardous due to the usage of uninitialized stack variables.
+   -  bugfix: if the fields in a RECORD didn't total exactly to 8,16 or 32,
+      the record wasn't shifted right.
+   -  bugfix: a label before a .ERRxx directive caused a syntax error.
+    - bugfix (known bug): labels in lines containing a "conditional assembly"
+      directive (IF, ELSE, ENDIF, ...) were ignored.
+    - bugfix: if a memory operand was pushed/poped, there was no type check.
+      So memory items with sizes < WORD or > DWORD were accepted.
+    - bugfix: stack <stacksize> reported error "constant operand expected"
+      if stacksize wasn't a single number.
+    - bugfix: stacksize stored for stack segments was a 16bit value only.
+    - bugfix: macro parameter expansion operator % might have caused a GPF
+      if the parameter was the last one and was intended to convert a number
+      to a literal.
+    - bugfix: lines with the FOR/FORC directives were expanded. This was a
+      problem if the directive's first parameter was a valid text macro name.
+    - bugfix: COMMENT delimiter wasn't detected if it was located behind
+      a ';'.
+    - bugfix: if a numeric equate's magnitude exceeded 32bit, the high bits
+      were skipped. Now the equate will be stored as a text macro in this
+      case.
+    - bugfix: there was no parameter syntax check for [ELSE]IFIDN[I], 
+      [ELSE]IFDIF[I], [ELSE]IFB, [ELSE]IFNB.
+    - bugfix: if a segment was open when the END directive was detected, 
+      the segment's content was skipped, no error message was displayed.
+    - bugfix: if a FOR parameter string contained a call of a macro function
+      which had more than 1 parameter, a syntax error occured.
+    - bugfix: parameter syntax check for .ERRxx directive was missing.
+    - bugfix: .ERRDEF and .ERRNDEF checked whether the symbol was defined
+      in all passes, but this can't be done in pass one due to possible
+      forward references.
+    - bugfix: initialization of a structure/union embedded in another 
+      structure might have failed if there were leading spaces before the
+      initialization string.
+    - bugfix: a text macro defined with cmdline option -D must not have
+      contained a '-' or '/'.
+    - bugfix: code for ALIAS didn't check whether the alias name was defined
+      elsewhere in the source.
+    - bugfix: logical operators EQ, NE, LT, LE, GT, GE did accept constant
+      operands only, but they must also work with relocatable direct
+      addresses.
+    - bugfix: there was a chance that an invalid OMF record was written
+      if lots of externals were defined which exceeded the max size of one
+      record.
+   -  bugfix: if a byte array in a structure was initialized with a string,
+      there were too many bytes emitted.
+
+   -  error msg 'Too many arguments to INVOKE' displayed instead of just
+      'Syntax error'.
+   -  undefined publics are now flagged as error when the PUBLIC directive
+      occurs in the source, not at the end of assembly pass one.
+   -  if the expression after .WHILE is a constant value != 0, the initial
+      jump to test the condition is superfluous and is skipped now. Same
+      behavior as Masm.
+   -  cmdline options -Wn, -w and -WX synch'ed with Masm, option -we deleted.
+   -  added missing directives .LALL, .NOLISTMACRO and .NOLISTIF.
+   -  source modules in subdirs WATCOM and WOMP included to the project, 
+      so object modules in WATCOM and WOMP could be deleted.
+   -  string resource handling switched to native Win32, WRES.LIB no longer
+      necessary and deleted.
+   -  speed boost achieved (reduced number of necessary passes) by better
+      handling of forward references.
+   -  GOTO supported.
+   -  more than one source file in the command line accepted.
+   -  directive .UNTILCXZ supported.
+   -  operator THIS implemented.
+   -  OPTION LANGUAGE:<language> implemented.
+   -  OPTION SEGMENT:<segSize> implemented.
+   -  OPTION M510/NOM510 implemented
+   -  OPTION OLDSTRUCTS/NOOLDSTRUCTS implemented.
+   -  OPTION SCOPED/NOSCOPED implemented.
+   -  OPTION LJMP/NOLJMP implemented.
+   -  OPTION EMULATOR/NOEMULATOR implemented.
+   -  .RADIX 10 accepted (it's a noop).
+   -  -Zm, -Sn, -nologo, -zlf, -zls options added.
+   -  -zz option renamed to -zzp for consistency.
+   -  -omf, -coff options added
+   -  -bt option removed.
+   -  -Sg, -c added (noops)
+   -  listing is supported.
+   -  default for floating point instructions has been changed to -FPi87,
+      that is, no emulator fixups are created.
+   -  initialization for RECORD data items implemented.
+   -  support for COFF output format implemented.
+   -  code generated by .STARTUP is now similar to what Masm creates.
+   -  support for segment attribute IGNORE removed.
+   -  predefined numeric equate @WordSize added
+
+   05/20/2008, v1.7 (initial):
+
     Changes in JWasm compared to Open Watcom's WASM.
 
     Bugfixes:

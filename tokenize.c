@@ -24,19 +24,23 @@
 *
 *  ========================================================================
 *
-* Description:  tokenizer
+* Description:  tokenizer.
 *
+*  Currently the tokenizer is called "too early", with the result that it
+*  has to be called multiple times if macro expansion occurs. Furthermore,
+*  the tokenizer is not fully compatible with macro parameter formats. The
+*  correct thing to do is to run the tokenizer AFTER the macro expansion step.
+*  However, this will require some work and intensive tests.
 ****************************************************************************/
 
 
-#include "asmglob.h"
+#include "globals.h"
 #include <ctype.h>
 
+#include "codegen.h"
 #include "parser.h"
-#include "asmdefs.h"
 #include "condasm.h"
 #include "directiv.h"
-#include "macro.h"
 
 char                    *CurrString; // Current Input Line
 char                    *CurrStringEnd; // free space in current line
@@ -46,6 +50,9 @@ extern int              get_instruction_position( char *string );
 static bool no_str_delim;
 
 bool expansion;
+
+#define is_valid_id_char( ch ) \
+    ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
 #if defined( _STANDALONE_ )
 
@@ -491,9 +498,6 @@ static int get_id_in_backquotes( struct asm_tok *buf, char **input, char **outpu
     return( NOT_ERROR );
 }
 
-#define is_valid_id_char( ch ) \
-    ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
-
 static int get_id( unsigned int *buf_index, char **input, char **output )
 /***********************************************************************/
 /* get_id could change buf_index, if a COMMENT directive is found */
@@ -563,6 +567,7 @@ static int get_id( unsigned int *buf_index, char **input, char **output )
                 buf->opcode = AsmOpTable[count].opcode;
             } else if( AsmOpTable[count].rm_byte & OP_DIRECTIVE ) {
                 buf->token = T_DIRECTIVE;
+                buf->opcode = AsmOpTable[count].opcode;
                 /* set flags specific to directive */
                 /* bit 0: avoid '<' being used as string delimiter */
                 if (AsmOpTable[count].opcode & 1) {
@@ -715,9 +720,6 @@ static int get_inc_path( unsigned int *buf_index, char **input, char **output )
 }
 #endif
 
-#define is_valid_id_char( ch ) \
-    ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
-
 // get one token
 
 static int GetToken(unsigned int * pi, char ** input, char ** output)
@@ -739,7 +741,10 @@ static int GetToken(unsigned int * pi, char ** input, char ** output)
         }
         /* allow names at pos 0 beginning with '.' and also
          a hack to make ".type" not split in '.' and "type" */
-    } else if( *iptr == '.' && (buf_index == 0 || ((0 == memicmp(iptr+1,"type",4) && is_valid_id_char(*(iptr+5)) == FALSE)))) {
+    } else if( *iptr == '.' &&
+               (buf_index == 0 ||
+                (buf_index > 1 && AsmBuffer[buf_index-1]->token == T_COLON) ||
+                ((0 == memicmp(iptr+1,"type",4) && is_valid_id_char(*(iptr+5)) == FALSE)))) {
         if( get_id( &buf_index, &iptr, &optr ) == ERROR ) {
             return( ERROR );
         }
@@ -783,11 +788,11 @@ int Tokenize( char *string, int index )
         expansion = FALSE;
         ptr = string;
         while( isspace( *ptr )) ptr++;
+        conditional_assembly_prepare( ptr );
         if (*ptr == '%') {
             *ptr++ = ' ';
             expansion = TRUE;
         }
-        conditional_assembly_prepare( ptr );
     } else {
         output_ptr = CurrStringEnd;
         ptr = string;

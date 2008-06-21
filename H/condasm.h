@@ -32,3 +32,4 @@
 void conditional_assembly_prepare( char *line );
 int conditional_assembly_directive( int i, int directive);
 int conditional_error_directive( int i );
+void CondInit( void );

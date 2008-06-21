@@ -30,7 +30,7 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
+#include "globals.h"
 #include <ctype.h>
 
 #include "memalloc.h"
@@ -39,31 +39,36 @@
 #include "directiv.h"
 #include "queues.h"
 #include "equate.h"
-#include "asmdefs.h"
-#include "asmfixup.h"
+#include "fixup.h"
 #include "mangle.h"
 #include "labels.h"
-#include "asminput.h"
+#include "input.h"
 #include "expreval.h"
 #include "types.h"
 #include "condasm.h"
 #include "hll.h"
 #include "macro.h"
+#include "proc.h"
 
 #include "myassert.h"
 
-extern int_8            DefineProc;
-extern int              in_prologue;
-static proc_info        *ProcStack = NULL;
-char                    *proc_prologue = "";
-char                    *proc_epilogue = "";
+char                    *proc_prologue;
+char                    *proc_epilogue;
+static proc_info        *ProcStack;
+dir_node                *CurrProc;      // current procedure
+
+bool                    in_prologue;
+bool                    DefineProc;     // TRUE if the definition of procedure
+                                        // has not ended
 
 enum {
 #undef fix
 #define fix( tok, str, val, init )              tok
 
-#include "directd.h"
+#include "dirtoken.h"
 };
+
+static char * watc_regs[] = {"eax", "ebx", "ecx", "edx"};
 
 static lang_type lt[] = {LANG_C, LANG_SYSCALL, LANG_STDCALL, LANG_PASCAL, LANG_FORTRAN, LANG_BASIC, LANG_WATCOM_C};
 static int  ltok[]    = {   T_C,    T_SYSCALL,    T_STDCALL,    T_PASCAL,    T_FORTRAN,    T_BASIC,    T_WATCOM_C};
@@ -84,54 +89,6 @@ static dir_node *pop_proc( void )
         return( NULL );
     return( (dir_node *)pop( &ProcStack ) );
 }
-
-#if defined( _STANDALONE_ )
-
-// if proc_check returns TRUE
-// the current line is skipped
-
-int proc_check( void )
-/***************************/
-/* Check if we are inside a procedure and write prologue statements if the
-   current line is the first instruction line following the procedure
-   declaration (and locals) */
-{
-    if( ( CurrProc == NULL ) || ( Token_Count == 0 ) || !DefineProc )
-        return( FALSE );
-
-    /* some directives are ok (LOCAL!) */
-    /* some others are not (INVOKE (which queues text), the hlls, ...) */
-#if 0
-    if (AsmBuffer[0]->token == T_DIRECTIVE)
-        switch (AsmBuffer[0]->value) {
-        case T_DOT_IF:
-        case T_DOT_WHILE:
-        case T_DOT_REPEAT:
-        case T_INVOKE:
-            break;
-        default:
-        return( FALSE );
-        }
-#else
-    /* CS (=index 5) assumed ERROR? */
-    if (AsmBuffer[0]->token == T_DIRECTIVE || SegAssumeTable[5].error == 1)
-        return( FALSE );
-#endif
-    if( Token_Count > 1 ) {
-        if( ( AsmBuffer[1]->token == T_DIRECTIVE )
-            || ( AsmBuffer[1]->token == T_DIRECT_EXPR ) ) {
-            return( FALSE );
-        }
-    }
-
-    /* WriteProlog() may modify in_prologue variable */
-    if( WritePrologue() == ERROR )
-        return( ERROR );
-    DefineProc = FALSE;
-    return( in_prologue );
-}
-
-#endif
 
 #if 0
 static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_number )
@@ -241,7 +198,7 @@ int LocalDef( int i )
     int         idx;
     struct asm_sym      *sym;
     struct asm_sym      *symtype;
-    int         align = Use32 ? 4 : 2;
+    int         align = CurrWordSize;
 
 /*
 
@@ -279,6 +236,7 @@ int LocalDef( int i )
 
         sym->state = SYM_STACK;
         sym->defined = TRUE;
+//        sym->local = TRUE;
         sym->mem_type = Use32 ? MT_DWORD : MT_WORD;
 
         i++;
@@ -324,7 +282,7 @@ int LocalDef( int i )
                     type = SimpleType[idx].mem_type;
             }
             if( type == ERROR ) {
-                if( !(symtype = IsLabelStruct( AsmBuffer[i]->string_ptr ) ) ) {
+                if( !(symtype = IsLabelType( AsmBuffer[i]->string_ptr ) ) ) {
                     AsmError( INVALID_QUALIFIED_TYPE );
                     return( ERROR );
                 }
@@ -346,7 +304,7 @@ int LocalDef( int i )
             i++;
             if (type != MT_TYPE) {
                 sym->mem_type = type;
-                local->sym->first_size = SizeFromMemtype( sym->mem_type, NULL );
+                local->sym->first_size = SizeFromMemtype( sym->mem_type, Use32 );
             } else {
                 sym->mem_type = MT_TYPE;
 //                sym->mem_type = symtype->mem_type;
@@ -419,6 +377,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
 
     if (proc->sym.langtype == LANG_C ||
         proc->sym.langtype == LANG_SYSCALL ||
+        proc->sym.langtype == LANG_WATCOM_C ||
         proc->sym.langtype == LANG_STDCALL)
         for (paracurr = proc->e.procinfo->paralist;paracurr && paracurr->next;paracurr = paracurr->next);
     else
@@ -447,6 +406,12 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
                 i++;
             }
         }
+
+        is_ptr = FALSE;
+        is_far = FALSE;
+        is_vararg = FALSE;
+        is32 = Use32;
+
         /* read colon (optional for PROC!) */
         if( AsmBuffer[i]->token != T_COLON ) {
             if (bDefine) {
@@ -458,10 +423,6 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
             return( ERROR );
         }
         i++;
-        is_ptr = FALSE;
-        is_far = FALSE;
-        is_vararg = FALSE;
-        is32 = Use32;
 
         /* allow NEARxx | FARxx [PTR] [<type>] param types */
         if (AsmBuffer[i]->token == T_RES_ID)
@@ -510,7 +471,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
                 is_vararg = TRUE;
                 mem_type = MT_EMPTY;
             } else {
-                if( !(symtype = IsLabelStruct( AsmBuffer[i]->string_ptr ) ) ) {
+                if( !(symtype = IsLabelType( AsmBuffer[i]->string_ptr ) ) ) {
                     DebugMsg(("ParseProcParams: type invalid for parameter %u\n", cntParam+1));
                     AsmError( INVALID_QUALIFIED_TYPE );
                     return( ERROR );
@@ -535,7 +496,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
         else if (mem_type == MT_EMPTY) /* ignore VARARG */
             newsize = 0;
         else
-            newsize = SizeFromMemtype( mem_type, NULL);
+            newsize = SizeFromMemtype( mem_type, Use32);
 
         if (paracurr) {
 #if 1
@@ -545,7 +506,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
             else if (paracurr->sym->mem_type == MT_EMPTY)
                 oldsize = 0;
             else
-                oldsize = SizeFromMemtype( paracurr->sym->mem_type, NULL );
+                oldsize = SizeFromMemtype( paracurr->sym->mem_type, Use32 );
             if (oldsize != newsize) {
                 DebugMsg(("ParseProcParams: old memtype=%u, new memtype=%u\n", paracurr->sym->mem_type, mem_type));
                 AsmErr( SYMBOL_TYPE_CONFLICT, token );
@@ -570,6 +531,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
             /* set paracurr to next parameter */
             if (proc->sym.langtype == LANG_C ||
                 proc->sym.langtype == LANG_SYSCALL ||
+                proc->sym.langtype == LANG_WATCOM_C ||
                 proc->sym.langtype == LANG_STDCALL) {
                 label_list *l;
                 for (l = proc->e.procinfo->paralist; l && (l->next != paracurr); l = l->next);
@@ -589,13 +551,19 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
                 sym = SymCreate("", FALSE);/* for PROTO, no param name needed */
             if( sym == NULL )
                 return( ERROR );
-            sym->state = SYM_STACK;
             sym->defined = TRUE;
-            if (symtype) {
-                sym->type = symtype;
-                sym->mem_type = MT_TYPE;
-            } else
-                sym->mem_type = mem_type;
+            if (proc->sym.langtype == LANG_WATCOM_C && proc->e.procinfo->parasize < 16) {
+                sym->state = SYM_TMACRO;
+                sym->string_ptr = AsmAlloc(4);
+                strcpy(sym->string_ptr, watc_regs[proc->e.procinfo->parasize >> 2]);
+            } else {
+                sym->state = SYM_STACK;
+                if (symtype) {
+                    sym->type = symtype;
+                    sym->mem_type = MT_TYPE;
+                } else
+                    sym->mem_type = mem_type;
+            }
             paranode = AsmAlloc( sizeof( label_list ) );
 
             paranode->is_ptr = is_ptr;
@@ -610,7 +578,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
             else if (mem_type == MT_EMPTY) /* ignore VARARG */
                 paranode->sym->first_size = 0;
             else
-                paranode->sym->first_size = SizeFromMemtype( mem_type, NULL );
+                paranode->sym->first_size = SizeFromMemtype( mem_type, Use32 );
 
             paranode->sym->total_size = paranode->sym->first_size;
 
@@ -685,11 +653,11 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
         for (;cntParam ;cntParam--) {
             for (curr = 1,paranode = proc->e.procinfo->paralist;curr < cntParam;paranode = paranode->next, curr++);
             DebugMsg(("ParseProcParams: parm=%s, ofs=%u, size=%u\n", paranode->sym->name, offset, paranode->sym->first_size));
-            paranode->sym->offset = offset;
-            if( Use32 ) {
-                offset += ROUND_UP( paranode->sym->first_size, 4 );
-            } else {
-                offset += ROUND_UP( paranode->sym->first_size, 2 );
+            if (paranode->sym->state == SYM_TMACRO)
+                ;
+            else {
+                paranode->sym->offset = offset;
+                offset += ROUND_UP( paranode->sym->first_size, CurrWordSize );
             }
         }
     }
@@ -733,8 +701,8 @@ int ExamineProc( dir_node *proc, int i, bool bDefine )
 
     proc->sym.defined = TRUE;
     if (bDefine) {
-        proc->e.procinfo->export = Options.procs_export;
-        proc->sym.public = ~Options.procs_private;
+        proc->e.procinfo->export = ModuleInfo.procs_export;
+        proc->sym.public = ~ModuleInfo.procs_private;
         proc->e.procinfo->pe_type = ( ( CodeInfo->info.cpu & P_CPU_MASK ) == P_286 ) || ( ( CodeInfo->info.cpu & P_CPU_MASK ) == P_386 );
     }
 
@@ -890,6 +858,7 @@ int ProcDef( int i )
     struct asm_sym      *sym;
     dir_node            *dir;
     char                *name;
+    bool                oldpubstate;
 
     if( Definition.struct_depth > 0 ) {
         AsmError( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION );
@@ -932,9 +901,13 @@ int ProcDef( int i )
 
         SetSymSegOfs( sym );
 
+        oldpubstate = dir->sym.public;
+
         if( ExamineProc( dir, i+1, TRUE ) == ERROR ) {
             return( ERROR );
         }
+        if( dir->sym.public == TRUE && oldpubstate == FALSE)
+            AddPublicData( dir );
     } else {
         /**/myassert( i >= 0 );
         sym = SymSearch( AsmBuffer[i]->string_ptr );
@@ -1029,9 +1002,10 @@ int ProtoDef( int i, char * name )
 static void ProcFini( void )
 /**************************/
 {
-
     CurrProc->sym.total_size = GetCurrAddr() - CurrProc->sym.offset;
     CurrProc = pop_proc();
+
+    DefineProc = FALSE; /* in case there was an empty PROC/ENDP pair */
 }
 
 // ENDP detected
@@ -1042,12 +1016,13 @@ int ProcEnd( int i )
     if( Definition.struct_depth > 0 ) {
         AsmError( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION );
         return( ERROR );
-    } else if( CurrProc == NULL ) {
-        AsmError( BLOCK_NESTING_ERROR );
-        return( ERROR );
     } else if( i < 0 ) {
         AsmError( PROC_MUST_HAVE_A_NAME );
         ProcFini();
+        return( ERROR );
+    } else if( CurrProc == NULL ) {
+        DebugMsg(("ProcEnd: nesting error, CurrProc is NULL\n"));
+        AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
         return( ERROR );
     } else if( (dir_node *)SymSearch( AsmBuffer[i]->string_ptr ) == CurrProc ) {
         ProcFini();
@@ -1073,35 +1048,36 @@ void CheckProcOpen( void )
 // this is to be done after the LOCAL directives
 // and *before* any real instruction
 
-int WritePrologue( void )
+static int WritePrologue( void )
 /***********************/
 {
     char                buffer[80];
     regs_list           *regist;
     int                 len;
     proc_info           *info;
-    int                 align = Use32 ? 4 : 2;
+    dir_node            *dir;
+    int                 align = CurrWordSize;
 
-    /**/myassert( CurrProc != NULL );
     info = CurrProc->e.procinfo;
-
-    /* save 1st instruction following a procedure definition */
-//    InputQueueLine( CurrString );
-
     info->localsize = ROUND_UP( info->localsize, align );
 
-    /* option prologue:NONE? */
-    if (proc_prologue == NULL)
-        return(NOT_ERROR);
+    DefineProc = FALSE;
 
-#if 1
-    /* is a true macro set for prologue creation? */
-    if (*proc_prologue != '\0') {
+    /* there are 3 cases:
+     option prologue:NONE -> exit quickly
+     option prologue:userdefined macro function -> RunMacro()
+     option prologue:default
+     */
+    if (proc_prologue == NULL)
+        return(NOT_ERROR);  /* continue processing */
+    else if (*proc_prologue != '\0') {
         regs_list * regs;
         char reglst[64];
         int flags = CurrProc->sym.langtype; /* set bits 0-2 */
 
-        if (CurrProc->sym.langtype == LANG_C)
+        /* set bit 4 if the caller restores (E)SP */
+        if (CurrProc->sym.langtype == LANG_C ||
+            CurrProc->sym.langtype == LANG_WATCOM_C)
             flags |= 0x10;
 //        if (info->mem_type == MT_FAR)
         if (CurrProc->sym.mem_type == MT_FAR)
@@ -1117,16 +1093,33 @@ int WritePrologue( void )
         }
         strcat(reglst,">");
 
-        sprintf(buffer,"@CurLocal textequ %s(%s, %u, %u, %u,<%s>, %s)", proc_prologue,
-                CurrProc->sym.name, flags, info->parasize, info->localsize,
-                reglst, "");
-        PushLineQueue();
-        InputQueueLine( buffer );
-        in_prologue = TRUE;
-        return (NOT_ERROR);
+        dir = (dir_node *)SymSearch(proc_prologue);
+        if (dir) {
+            char retvalue[MAX_LINE_LEN];
+            char currline[MAX_LINE_LEN];
+            label_list *curr;
+            strcpy( currline, CurrString );
+            sprintf(buffer,"%s(%s, %u, %u, %u, <%s>, %s)", proc_prologue,
+                    CurrProc->sym.name, flags, info->parasize, info->localsize,
+                    reglst, "");
+            in_prologue = TRUE;
+            retvalue[0] = NULLC;
+            RunMacro(dir, buffer, retvalue, TRUE, TRUE, FALSE);
+            DebugMsg(("WritePrologue: macro %s returned >%s<\n", proc_prologue, retvalue));
+            if (Parse_Pass == PASS_1) {
+                len = atoi(retvalue) - info->localsize;
+                for (curr = info->locallist;curr;curr = curr->next) {
+                    curr->sym->offset -= len;
+                }
+            }
+            in_prologue = FALSE;
+            PushLineQueue();
+            InputQueueLine( currline );
+            return (EMPTY);  /* skip further processing of line */
+        }
     }
-#endif
 
+    /* default processing. if no params/locals are defined, continue */
     if( info->localsize == 0 &&
         info->parasize == 0 &&
         info->is_vararg == FALSE &&
@@ -1191,7 +1184,37 @@ int WritePrologue( void )
     }
     InputQueueLine( CurrString );
 
-    return( NOT_ERROR );
+    return( EMPTY );
+}
+
+/* proc_check() checks if the prologue code generation is to be triggered
+ it might return NOT_ERROR, ERROR or EMPTY! if EMPTY is returned, further
+ processing of current line is skipped.
+*/
+int proc_check( void )
+{
+    /* some directives are ignored (LOCAL, ORG, ALIGN, LABEL, ENDP!). */
+    /* others - i.e. SEGMENT/ENDS - will trigger the code generation */
+
+    if (AsmBuffer[0]->token == T_DIRECTIVE &&
+        (AsmBuffer[0]->value == T_LOCAL ||
+         AsmBuffer[0]->value == T_EVEN ||
+         AsmBuffer[0]->value == T_ALIGN ||
+         AsmBuffer[0]->value == T_ORG ||
+         AsmBuffer[0]->value == T_OPTION))
+        return( NOT_ERROR );
+    if (AsmBuffer[0]->token == T_ID &&
+        AsmBuffer[1]->token == T_DIRECTIVE &&
+        (AsmBuffer[1]->value == T_LABEL ||
+        AsmBuffer[1]->value == T_ENDP))
+        return( NOT_ERROR );
+
+    /* masm does also allow data definition directives to occur BEFORE
+     the prologue code is inserted. This might be a bug, however, and
+     therefore it's not copied.
+     */
+
+    return( WritePrologue());
 }
 
 static void pop_register( regs_list *regist )
@@ -1409,3 +1432,15 @@ int Ret( int i, int count, int flag_iret )
     return( NOT_ERROR );
 }
 
+// init this module.
+
+void ProcInit()
+{
+    ProcStack = NULL;
+    CurrProc  = NULL;
+    DefineProc = FALSE;
+    proc_prologue = "";
+    proc_epilogue = "";
+    ModuleInfo.procs_private = FALSE;
+    ModuleInfo.procs_export = FALSE;
+}

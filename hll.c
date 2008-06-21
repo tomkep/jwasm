@@ -1,49 +1,26 @@
 /****************************************************************************
 *
-*                            Open Watcom Project
-*
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
-*
-*  ========================================================================
-*
-*    This file contains Original Code and/or Modifications of Original
-*    Code as defined in and that are subject to the Sybase Open Watcom
-*    Public License version 1.0 (the 'License'). You may not use this file
-*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
-*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
-*    provided with the Original Code and Modifications, and is also
-*    available at www.sybase.com/developer/opensource.
-*
-*    The Original Code and all software distributed under the License are
-*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
-*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
-*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
-*    NON-INFRINGEMENT. Please see the License for the specific language
-*    governing rights and limitations under the License.
+*  This code is Public Domain. It's new for JWasm.
 *
 *  ========================================================================
 *
 * Description:  support the hll constructs .IF, .WHILE, .REPEAT, ...
-* the file is new for JWasm.
 *
 ****************************************************************************/
 
 
-#include "asmglob.h"
 #include <ctype.h>
 
+#include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
 #include "symbols.h"
 #include "directiv.h"
 #include "queues.h"
 #include "equate.h"
-#include "asmdefs.h"
-#include "asmfixup.h"
 #include "mangle.h"
 #include "labels.h"
-#include "asminput.h"
+#include "input.h"
 #include "expreval.h"
 #include "types.h"
 #include "hll.h"
@@ -75,12 +52,12 @@ typedef enum {
     COP_SIGN  // SIGN?   not really a valid C operator
 } c_bop;
 
-static hll_list         *HllStack = NULL; // for .WHILE, .IF, .REPEAT
-static hll_label        = 0;
+static hll_list     *HllStack; // for .WHILE, .IF, .REPEAT
+static unsigned int hll_label;
 
 static char * MakeAnonymousLabel(void)
 {
-    char *p = AsmAlloc(8);
+    char *p = MemAlloc(8);
     sprintf(p, "@C%04u", hll_label);
     hll_label++;
     return (p);
@@ -148,7 +125,7 @@ static c_bop GetCOp(int * i)
 
 // render an instruction operand
 
-void RenderOpnd(expr_list * op, char * buffer, int start, int end)
+static void RenderOpnd(expr_list * op, char * buffer, int start, int end)
 {
     /* just copy the operand's tokens into the buffer */
     for (;start < end;start++) {
@@ -461,6 +438,8 @@ static int GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true,
             break;
         case EXPR_CONST:
             if (opndx.string != NULL) {
+                AsmError(SYNTAX_ERROR);
+                return (ERROR);
             }
             *jmp = buffer;
             if (is_true == TRUE)
@@ -538,7 +517,7 @@ static int GetAndExpression(hll_list * hll, int *i, int ilabel, bool is_true, ch
         op = GetCOp(i);
         if (op != COP_AND)
             break;
-        if (hll->iswhile) {
+        if (hll->cmd == HLL_WHILE || hll->cmd == HLL_BREAK) {
             if (*lastjmp) {
                 char * p = *lastjmp;
                 InvertJmp(p+1);         /* step 1 */
@@ -552,7 +531,7 @@ static int GetAndExpression(hll_list * hll, int *i, int ilabel, bool is_true, ch
 
     if (truelabel) {
         sprintf(ptr+strlen(ptr), "%s:\n", truelabel);
-        AsmFree(truelabel);
+        MemFree(truelabel);
         *lastjmp = NULL;
     }
     *i = cur_pos;
@@ -585,7 +564,7 @@ static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char 
             *i = cur_pos;
             if (truelabel) {
                 sprintf(ptr+strlen(ptr), "%s:\n", truelabel);
-                AsmFree(truelabel);
+                MemFree(truelabel);
             }
             break;
         }
@@ -601,7 +580,7 @@ static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char 
          4b. replace the "false" label in the generated code by the new label
 
          */
-        if (*lastjmp) {
+        if (*lastjmp && (hll->cmd != HLL_BREAK)) {
             char * p = *lastjmp;
             InvertJmp(p+1);         /* step 1 */
             p += 4;
@@ -612,7 +591,7 @@ static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char 
             *lastjmp = NULL;
             nlabel = MakeAnonymousLabel();  /* step 3 */
             olabel = GetLabel(hll, ilabel);
-            if (hll->isrepeat) {
+            if (hll->cmd == HLL_REPEAT) {
                 ReplaceLabel(buffer, olabel, nlabel);
                 sprintf(ptr+strlen(ptr), "%s:\n", nlabel);
             } else {
@@ -624,7 +603,7 @@ static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char 
     return (NOT_ERROR);
 }
 
-int WriteExprSrc(hll_list * hll, char * buffer)
+static int WriteExprSrc(hll_list * hll, char * buffer)
 {
     int size;
     char buffer2[MAX_LINE_LEN];
@@ -635,9 +614,9 @@ int WriteExprSrc(hll_list * hll, char * buffer)
     if (*buffer2)
         strcat(buffer2, "\n");
     strcat(buffer2, buffer);
-    AsmFree(hll->condlines);
+    MemFree(hll->condlines);
     size = strlen(buffer2);
-    hll->condlines = AsmAlloc(size+1);
+    hll->condlines = MemAlloc(size+1);
     strcpy(hll->condlines, buffer2);
     return(1);
 }
@@ -685,21 +664,22 @@ static int PushHllTestLines(hll_list * hll)
             p++;
         InputQueueLine( buffer );
     }
-    AsmFree(hll->condlines);
+    MemFree(hll->condlines);
     hll->condlines = NULL;
 
 
     return (NOT_ERROR);
 }
-void PrepHllLabels(void)
+void HllInit(void)
 {
+    HllStack = NULL;
     hll_label = 0;
     return;
 }
 
 // Start a .IF, .WHILE, .REPEAT item
 
-int StartHllDef( int i )
+int HllStartDef( int i )
 /********************/
 {
     struct hll_list      *hll;
@@ -726,11 +706,9 @@ int StartHllDef( int i )
         }
         break;
     }
-    hll = AsmAlloc( sizeof(hll_list));
+    hll = MemAlloc( sizeof(hll_list));
 
-    hll->isif = FALSE;
-    hll->iswhile = FALSE;
-    hll->isrepeat = FALSE;
+    hll->cmd = HLL_UNDEF;
 
     /* create labels which are always needed */
     hll->symfirst = NULL;
@@ -759,16 +737,16 @@ int StartHllDef( int i )
     //    ...
 
     // structure for .WHILE and .REPEAT:
-    //   jmp testend (for .WHILE only)
+    //   jmp symtest (for .WHILE only)
     // symfirst:
     //   ...
     // symtest: (jumped to by .continue)
-    //   test end condition, cond jump to firstlbl
+    //   test end condition, cond jump to symfirst
     // symexit: (jumped to by .break)
 
     switch (cmd) {
     case T_DOT_IF:
-        hll->isif = TRUE;
+        hll->cmd = HLL_IF;
         /* get the C-style expression, convert to ASM code lines */
         i++;
         if (ERROR == EvaluateHllExpression(hll, &i, LABELTEST, FALSE)) {
@@ -782,18 +760,21 @@ int StartHllDef( int i )
         hll->symfirst = MakeAnonymousLabel();
         if (cmd == T_DOT_WHILE) {
             i++;
-            hll->iswhile = TRUE;
+            hll->cmd = HLL_WHILE;
             if (ERROR == EvaluateHllExpression(hll, &i, LABELFIRST, TRUE)) {
                 return (ERROR);
             }
             DebugMsg(("StartHllDef .WHILE\n"));
             /* create a jump to second label */
-            sprintf(buffer, " jmp %s", hll->symtest);
-            InputQueueLine( buffer );
+            /* optimisation: if second label is just a jump, dont jump! */
+            if (memicmp(hll->condlines, "jmp", 3)) {
+                sprintf(buffer, " jmp %s", hll->symtest);
+                InputQueueLine( buffer );
+            }
         } else {
             i++;
             DebugMsg(("StartHllDef .REPEAT\n"));
-            hll->isrepeat = TRUE;
+            hll->cmd = HLL_REPEAT;
         }
         sprintf(buffer, "%s:", hll->symfirst);
         InputQueueLine( buffer );
@@ -810,7 +791,7 @@ int StartHllDef( int i )
 // End a .IF, .WHILE, .REPEAT item
 // that is: .ENDIF, .ENDW or .UNTIL are handled here
 
-int EndHllDef( int i )
+int HllEndDef( int i )
 /********************/
 {
     struct asm_sym      *sym;
@@ -830,7 +811,7 @@ int EndHllDef( int i )
     switch (cmd) {
     case T_DOT_ENDIF:
         DebugMsg(("EndHllDef .ENDIF\n"));
-        if (hll->isif == FALSE) {
+        if (hll->cmd != HLL_IF) {
             DebugMsg(("EndHllDef no .IF on the hll stack\n"));
             AsmError( SYNTAX_ERROR );
             return( ERROR );
@@ -847,7 +828,7 @@ int EndHllDef( int i )
         break;
     case T_DOT_ENDW:
         DebugMsg(("EndHllDef .ENDW\n"));
-        if (hll->iswhile == FALSE) {
+        if (hll->cmd != HLL_WHILE) {
             DebugMsg(("EndHllDef no .WHILE on the hll stack\n"));
             AsmError( SYNTAX_ERROR );
             return( ERROR );
@@ -863,9 +844,24 @@ int EndHllDef( int i )
         InputQueueLine( buffer );
         i++;
         break;
+    case T_DOT_UNTILCXZ:
+        DebugMsg(("EndHllDef .UNTILCXZ\n"));
+        if (hll->cmd != HLL_REPEAT) {
+            DebugMsg(("EndHllDef no .REPEAT on the hll stack\n"));
+            AsmError( SYNTAX_ERROR );
+            return( ERROR );
+        }
+        i++;
+        sprintf(buffer, "%s:", hll->symtest);
+        InputQueueLine( buffer );
+        sprintf(buffer, " loop %s", hll->symfirst);
+        InputQueueLine( buffer );
+        sprintf(buffer, "%s:", hll->symexit);
+        InputQueueLine( buffer );
+        break;
     case T_DOT_UNTIL:
         DebugMsg(("EndHllDef .UNTIL\n"));
-        if (hll->isrepeat == FALSE) {
+        if (hll->cmd != HLL_REPEAT) {
             DebugMsg(("EndHllDef no .REPEAT on the hll stack\n"));
             AsmError( SYNTAX_ERROR );
             return( ERROR );
@@ -892,11 +888,11 @@ int EndHllDef( int i )
         break;
     }
 
-    AsmFree(hll->symfirst);
-    AsmFree(hll->symtest);
-    AsmFree(hll->symexit);
-    AsmFree(hll->condlines);
-    AsmFree(hll);
+    MemFree(hll->symfirst);
+    MemFree(hll->symtest);
+    MemFree(hll->symexit);
+    MemFree(hll->condlines);
+    MemFree(hll);
 
     if (AsmBuffer[i]->token != T_FINAL) {
         AsmError( SYNTAX_ERROR );
@@ -909,13 +905,14 @@ int EndHllDef( int i )
 // Exit current .IF, .WHILE, .REPEAT item
 // that is: .ELSE, .ELSEIF, .CONTINUE and .BREAK are handled here
 
-int ExitHllDef( int i )
+int HllExitDef( int i )
 /********************/
 {
     int                 level;
     struct asm_sym      *sym;
     struct hll_list     *hll;
     char                *savedlines;
+    hll_cmd             savedcmd;
     int                 cmd = AsmBuffer[i]->value;
     char                buffer[MAX_LINE_LEN];
 
@@ -929,8 +926,8 @@ int ExitHllDef( int i )
     switch (cmd) {
     case T_DOT_ELSE:
     case T_DOT_ELSEIF:
-        if ((hll->isif == FALSE) || (hll->symtest == NULL)) {
-            DebugMsg(("ExitHllDef .ELSE/.ELSEIF: isif=%u, symtest=%X\n", hll->isif, hll->symtest));
+        if ((hll->cmd != HLL_IF) || (hll->symtest == NULL)) {
+            DebugMsg(("ExitHllDef .ELSE/.ELSEIF: cmd=%u, symtest=%X\n", hll->cmd, hll->symtest));
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
@@ -938,7 +935,7 @@ int ExitHllDef( int i )
         InputQueueLine( buffer );
         sprintf(buffer,"%s:", hll->symtest);
         InputQueueLine( buffer );
-        AsmFree(hll->symtest);
+        MemFree(hll->symtest);
         hll->symtest = NULL;
         i++;
         if (cmd == T_DOT_ELSEIF) {
@@ -952,7 +949,7 @@ int ExitHllDef( int i )
         break;
     case T_DOT_BREAK:
     case T_DOT_CONTINUE:
-        for (level = 1;hll && (hll->isif == TRUE);level++) {
+        for (level = 1;hll && (hll->cmd == HLL_IF);level++) {
             hll = peek(HllStack,level);
         }
         if (hll == NULL) {
@@ -965,19 +962,23 @@ int ExitHllDef( int i )
             /* .IF is only seen as a directive if it is at position 1 */
             if ((AsmBuffer[i]->token == T_DOT) && (AsmBuffer[i+1]->token == T_DIRECTIVE) && (AsmBuffer[i+1]->value == T_IF)) {
                 savedlines = hll->condlines;
+                savedcmd = hll->cmd;
                 hll->condlines = NULL;
+                hll->cmd = HLL_BREAK;
                 i = i+2;
-                if (cmd == T_DOT_BREAK)
+                if (cmd == T_DOT_BREAK) {
                     if (ERROR == EvaluateHllExpression(hll, &i, LABELEXIT, TRUE)) {
                         return( ERROR );
                     }
-                if (cmd == T_DOT_CONTINUE)
+                } else { /* T_DOT_CONTINUE */
                     if (ERROR == EvaluateHllExpression(hll, &i, LABELTEST, TRUE)) {
                         return( ERROR );
                     }
+                }
                 PushHllTestLines(hll);
-                AsmFree(hll->condlines);
+                MemFree(hll->condlines);
                 hll->condlines = savedlines;
+                hll->cmd = savedcmd;
             }
         } else {
             if (cmd == T_DOT_BREAK) {

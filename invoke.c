@@ -1,36 +1,15 @@
 /****************************************************************************
 *
-*                            Open Watcom Project
-*
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
-*
-*  ========================================================================
-*
-*    This file contains Original Code and/or Modifications of Original
-*    Code as defined in and that are subject to the Sybase Open Watcom
-*    Public License version 1.0 (the 'License'). You may not use this file
-*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
-*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
-*    provided with the Original Code and Modifications, and is also
-*    available at www.sybase.com/developer/opensource.
-*
-*    The Original Code and all software distributed under the License are
-*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
-*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
-*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
-*    NON-INFRINGEMENT. Please see the License for the specific language
-*    governing rights and limitations under the License.
+*  This code is Public Domain. It's new for JWasm.
 *
 *  ========================================================================
 *
 * Description:  Processing of INVOKE directive.
-* new for JWasm.
 *
 ****************************************************************************/
 
 
-#include "asmglob.h"
+#include "globals.h"
 #include <ctype.h>
 
 #include "memalloc.h"
@@ -40,7 +19,6 @@
 #include "directiv.h"
 #include "queues.h"
 #include "equate.h"
-#include "asmdefs.h"
 #include "mangle.h"
 
 #include "myassert.h"
@@ -90,8 +68,26 @@ int SizeFromRegister( int registername )
     case T_FS:
     case T_GS:
         return( 0 );
-    default:
-        return( ERROR );
+    case T_ST:
+        return( 10 );
+    case T_MM0:
+    case T_MM1:
+    case T_MM2:
+    case T_MM3:
+    case T_MM4:
+    case T_MM6:
+    case T_MM7:
+        return( 8 );
+    case T_XMM0:
+    case T_XMM1:
+    case T_XMM2:
+    case T_XMM3:
+    case T_XMM4:
+    case T_XMM6:
+    case T_XMM7:
+        return( 16 ); /* masm v6x and v7 return 10, v8 returns 16 */
+    default: /* CRx, DRx, TRx ... */
+        return( 4 );
     }
 }
 
@@ -104,6 +100,22 @@ int SizeFromRegister( int registername )
   reqParam: the index of the parameter which is to be pushed
 */
 
+void SkipTypecast(char * fullparam, int i)
+{
+    int j;
+    fullparam[0] = NULLC;
+    for (j = i;;j++) {
+        if ((AsmBuffer[j]->token == T_COMMA) || (AsmBuffer[j]->token == T_FINAL))
+            break;
+        if ((AsmBuffer[j+1]->token == T_RES_ID) && (AsmBuffer[j+1]->value == T_PTR))
+            j = j + 1;
+        else {
+            if (fullparam[0] != NULLC)
+                strcat(fullparam," ");
+            strcat(fullparam, AsmBuffer[j]->string_ptr);
+        }
+    }
+}
 
 int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
 {
@@ -198,7 +210,8 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
                     strcat(buffer, AsmBuffer[opndx.override]->string_ptr);
                 } else if (opndx.sym != NULL && opndx.sym->segment != NULL) {
                     dir_node *dir = (dir_node *)opndx.sym->segment;
-                    if (dir->e.seginfo->iscode == SEGTYPE_ISDATA)
+                    if (dir->e.seginfo->segtype == SEGTYPE_DATA ||
+                        dir->e.seginfo->segtype == SEGTYPE_BSS)
                         strcat(buffer,"ds");
                     else
                         strcat(buffer,"cs");
@@ -219,9 +232,9 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
                 sprintf(buffer, " push offset %s", fullparam);
         }
         if (curr->is_vararg) {
-            size_vararg = size_vararg + (Use32 ? 4 : 2);
+            size_vararg = size_vararg + CurrWordSize;
             if (curr->is_far)
-                size_vararg = size_vararg + (Use32 ? 4 : 2);
+                size_vararg = size_vararg + CurrWordSize;
         }
     } else {
         struct asm_sym * sym;
@@ -237,7 +250,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
             if ((AsmBuffer[j]->token == T_UNARY_OPERATOR) && (AsmBuffer[j]->value == T_OFFSET))
                 useaddr = TRUE;
             if (j == i)
-                strcpy(fullparam,AsmBuffer[i]->string_ptr);
+                strcpy(fullparam,AsmBuffer[j]->string_ptr);
             else {
                 strcat(fullparam," ");
                 strcat(fullparam, AsmBuffer[j]->string_ptr);
@@ -256,7 +269,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
             AsmBuffer[j+3]->token == T_REG) {
             asize = SizeFromRegister(AsmBuffer[j]->value);
             if (asize == 0)
-                asize = Use32 ? 4 : 2;
+                asize = CurrWordSize;
             asize += SizeFromRegister(AsmBuffer[j+3]->value);
             sprintf(buffer, " push %s", AsmBuffer[j]->string_ptr);
             InputQueueLine( buffer );
@@ -272,7 +285,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
             if (opndx.type == EXPR_REG && opndx.indirect == FALSE) {
                 asize = SizeFromRegister(AsmBuffer[opndx.base_reg]->value);
                 if (asize == 0) /* segment register? */
-                    asize = Use32 ? 4 : 2;
+                    asize = CurrWordSize;
             }
             else if (opndx.mem_type == MT_EMPTY)
                 asize = psize;
@@ -298,7 +311,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
         else
             DebugMsg(("PushInvokeParam: arg no name, asize=%u, psize=%u\n", asize, psize));
 #endif
-        pushsize = Use32 ? 4 : 2;
+        pushsize = CurrWordSize;
 
         if ((opndx.type == EXPR_ADDR && opndx.instr != T_OFFSET) ||
             (opndx.type == EXPR_REG && opndx.indirect == TRUE)) {
@@ -311,12 +324,23 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
                 }
                 if (curr->is_vararg)
                     size_vararg += asize;
+
+                /* in params like "qword ptr [eax]" the typecast */
+                /* has to be removed */
+                if (opndx.explicit) {
+                    SkipTypecast(fullparam, i);
+                    opndx.explicit = FALSE;
+                }
+
                 while (asize > 0) {
+#if 0
                     if (opndx.explicit) {
                         sprintf(buffer, " push %s", fullparam);
                         asize = 0;
                     } else if (asize & 2) {
-
+#else
+                    if (asize & 2) {
+#endif
                         /* ensure the stack remains dword-aligned in 32bit */
                         if (pushsize == 4)
                             InputQueueLine( "sub esp,2" );
@@ -400,7 +424,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
                         *eaxused = FALSE;
                     }
             } else {
-                asize = (Use32 ? 4 : 2);
+                asize = CurrWordSize;
                 if (psize < pushsize)  /* ensure that the default pushsize is met */
                     psize = pushsize;
                 if (asize != psize)
@@ -424,7 +448,6 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
 }
 
 // generate a call for a prototyped procedure
-// INVOKE is - like PROTO and PROC - multiline capable.
 
 int InvokeDef( int i )
 /******************/
@@ -463,6 +486,11 @@ int InvokeDef( int i )
                     uselabel = TRUE;
                 goto isfnptr;
             }
+        } else if (opndx.type == EXPR_ADDR &&
+                   opndx.sym != NULL &&
+                   opndx.sym->mem_type == MT_TYPE &&
+                   opndx.sym->type->mem_type == MT_PTR) {
+            sym = opndx.sym;
         } else {
             AsmError(SYNTAX_ERROR);
             return (ERROR);
@@ -505,6 +533,10 @@ int InvokeDef( int i )
     dir = (dir_node *)sym;
     info = dir->e.procinfo;
 
+    if (dir->sym.langtype == LANG_WATCOM_C) {
+        AsmError(LANG_CONV_NOT_SUPPORTED);
+        return(ERROR);
+    }
     /* get the number of parameters */
 
     for (curr = info->paralist, numParam = 0 ; curr ; curr = curr->next, numParam++);
@@ -518,7 +550,7 @@ int InvokeDef( int i )
         /* check if there is a superfluous parameter in the INVOKE call */
         if (PushInvokeParam( NULL, i, numParam, &eaxused) != ERROR) {
             DebugMsg(("PushInvokeParam: superfluous argument, i=%u\n", i));
-            AsmErr(SYNTAX_ERROR);
+            AsmErr(TOO_MANY_ARGUMENTS_TO_INVOKE);
             return( ERROR );
         }
     } else {
@@ -539,6 +571,7 @@ int InvokeDef( int i )
 
     if (sym->langtype == LANG_STDCALL ||
         sym->langtype == LANG_C ||
+        sym->langtype == LANG_WATCOM_C ||
         sym->langtype == LANG_SYSCALL) {
         for ( ; curr ; curr = curr->next) {
             numParam--;

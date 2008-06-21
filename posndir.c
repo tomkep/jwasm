@@ -29,10 +29,9 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
+#include "globals.h"
 
 #include "parser.h"
-#include "asmdefs.h"
 #include "directiv.h"
 #include "expreval.h"
 #include "types.h"
@@ -41,10 +40,15 @@
 
 typedef unsigned char   byte;
 
+extern bool directive_listed;
+
+extern int              ChangeCurrentLocation( bool, int_32, bool );
+
 static byte NopList16[] = {
-    2,                  /* objlen of first NOP pattern */
+    3,                  /* objlen of first NOP pattern */
+    0x2E, 0x8b, 0xc0,   /* MOV AX,AX */
     0x89, 0xc0,         /* MOV AX,AX */
-    0xfc                /* CLD */
+    0x90                /* NOP */
 };
 
 static byte NopList32[] = {
@@ -59,28 +63,6 @@ static byte NopList32[] = {
 };
 
 static byte *NopLists[] = { NopList16, NopList32 };
-
-int ChangeCurrentLocation( bool relative, int_32 value, bool select_data )
-/************************************************************************/
-{
-    if( CurrSeg == NULL )
-        return( ERROR );
-    if( relative ) {
-        value += GetCurrAddr();
-    }
-    FlushCurrSeg( );
-    if( select_data )
-        OutSelect( TRUE );
-    CurrSeg->seg->e.seginfo->current_loc = value;
-    CurrSeg->seg->e.seginfo->start_loc = value;
-
-    if( CurrSeg->seg->e.seginfo->current_loc >=
-        CurrSeg->seg->e.seginfo->segrec->d.segdef.seg_length ) {
-        CurrSeg->seg->e.seginfo->segrec->d.segdef.seg_length = CurrSeg->seg->e.seginfo->current_loc;
-    }
-
-    return( NOT_ERROR );
-}
 
 int OrgDirective( int i )
 /***********************/
@@ -126,7 +108,7 @@ static void fill_in_objfile_space( uint size )
     if( ! SEGISCODE( CurrSeg ) ) {
         /* just output nulls */
         for( i = 0; i < size; i++ ) {
-            AsmByte( 0x00 );
+            OutputByte( 0x00 );
         }
     } else {
         /* output appropriate NOP type instructions to fill in the gap */
@@ -134,7 +116,7 @@ static void fill_in_objfile_space( uint size )
 
         while( size > NopLists[Use32][0] ) {
             for( i = 1; i <= NopLists[Use32][0]; i++ ) {
-                AsmByte( NopLists[Use32][i] );
+                OutputByte( NopLists[Use32][i] );
             }
             size -= NopLists[Use32][0];
         }
@@ -146,7 +128,7 @@ static void fill_in_objfile_space( uint size )
         }
         /* i now is the index of the 1st part of the NOP that we want */
         for( ; nop_type > 0; nop_type--,i++ ) {
-            AsmByte( NopLists[Use32][i] );
+            OutputByte( NopLists[Use32][i] );
         }
     }
 }
@@ -158,6 +140,7 @@ int AlignDirective( uint_16 directive, int i )
     int seg_align;
     expr_list opndx;
     int j = i+1;
+    unsigned int CurrAddr;
 
     switch( directive ) {
     case T_ALIGN:
@@ -201,10 +184,15 @@ int AlignDirective( uint_16 directive, int i )
         }
         /* find out how many bytes past alignment we are & add the remainder */
         //store temp. value
-        seg_align = GetCurrAddr() % align_val;
+        CurrAddr = GetCurrAddr();
+        seg_align = CurrAddr % align_val;
         if( seg_align ) {
             align_val -= seg_align;
             fill_in_objfile_space( align_val );
+        }
+        if (AsmFiles.file[LST]) {
+            WriteLstFile(LSTTYPE_LIDATA, CurrAddr, NULL );
+            directive_listed = TRUE;
         }
     }
     return( NOT_ERROR );

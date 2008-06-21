@@ -29,7 +29,7 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
+#include "globals.h"
 
 #include "symbols.h"
 #include "memalloc.h"
@@ -51,6 +51,8 @@ enum changes {
 
 typedef char *(*mangle_func)( struct asm_sym *, char * );
 
+/* AsmMangler: no change to symbol name */
+
 static char *AsmMangler( struct asm_sym *sym, char *buffer )
 /**********************************************************/
 {
@@ -64,6 +66,8 @@ static char *AsmMangler( struct asm_sym *sym, char *buffer )
     strcpy( name, sym->name );
     return( name );
 }
+
+/* UCaseMangler: convert symbol name to upper case */
 
 static char *UCaseMangler( struct asm_sym *sym, char *buffer )
 /************************************************************/
@@ -80,6 +84,8 @@ static char *UCaseMangler( struct asm_sym *sym, char *buffer )
     return( name );
 }
 
+/* UScoreMangler: add '_' prefix to symbol name */
+
 static char *UScoreMangler( struct asm_sym *sym, char *buffer )
 /*************************************************************/
 {
@@ -95,16 +101,19 @@ static char *UScoreMangler( struct asm_sym *sym, char *buffer )
     return( name );
 }
 
+/* StdUScoreMangler: add '_' prefix and '@size' suffix to proc names */
+/*                   add '_' prefix to other symbols */
+
 static char *StdUScoreMangler( struct asm_sym *sym, char *buffer )
 /*************************************************************/
 {
     char        *name;
     dir_node    *dir = (dir_node *)sym;
 
-    if( !Options.mangle_stdcall )
+    if( Options.no_stdcall_decoration )
         return( AsmMangler( sym, buffer ) );
 
-    if( Options.use_stdcall_at_number && ( sym->state == SYM_PROC ) ) {
+    if( !Options.no_stdcall_suffix && ( sym->state == SYM_PROC ) ) {
         if( buffer == NULL ) {
             int         count;
             dir_node    *dir = (dir_node *)sym;
@@ -122,6 +131,9 @@ static char *StdUScoreMangler( struct asm_sym *sym, char *buffer )
         return( UScoreMangler( sym, buffer ) );
     }
 }
+
+/* WatcomCMangler: add '_' suffix to proc names and labels */
+/*                 add '_' prefix to other symbols */
 
 static char *WatcomCMangler( struct asm_sym *sym, char *buffer )
 /********************************************************/

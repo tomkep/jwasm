@@ -34,24 +34,27 @@
 typedef struct line_num_info {
     unsigned_16 number;
     unsigned_32 offset;
-    const FNAME *srcfile;
+    union {
+        const FNAME *srcfile;
+        asm_sym * sym;
+    };
 } line_num_info;
 
+extern long     GetQueueItems(void *);
 extern void     AddPublicData( dir_node *data );
 extern void     AddLnameData( dir_node *data );
 extern void     AddGlobalData( dir_node *data );
-extern void     AddAliasData( char *data );
 extern void     AddLinnumData( struct line_num_info *data );
 
 extern direct_idx FindLnameIdx( char * );
 extern char     *GetLname( direct_idx );
 
 extern unsigned GetLnameData( char ** );
-extern char     *GetAliasData( bool );
 extern uint     GetPublicData( uint *, uint *, char *, char ***, struct pubdef_data **, bool *, bool );
 extern int      GetLinnumData( struct linnum_data **ldata, bool *need32 );
 extern void     GetGlobalData( void );
 
-extern void     FreeAllQueues( void );
+extern void     QueueInit( void );
+extern void     QueueFini( void );
 
 #endif

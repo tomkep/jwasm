@@ -28,32 +28,40 @@
 *
 ****************************************************************************/
 
+#include <ctype.h>
+#include "globals.h"
 
-/* set this macro to 0 if you do NOT want to allow structures to be defined
- * ie:
- *    struct foo
- *      ...
- *    foo ends
- *    ...
- *    bar foo < 4, 2, 3 >
- */
-#define ALLOW_STRUCT_INIT 1
+#include "parser.h"
 
-#include "asmglob.h"
+#define ONEXMM 1
 
-#include "asminsd.h"
-#include "asmdefs.h"
-#include "equate.h"
-#include "asmfixup.h"
-#include "expreval.h"
-#include "labels.h"
+#define ins(tok,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
+                {tok,prefix,byte1_info,rm_info,op3,op_dir,cpu,{op1,op2},opcode,rm_byte},
 
 #if defined( _STANDALONE_ )
-  #include "directiv.h"
-  #include "myassert.h"
-  #include "asminput.h"
-  #include "types.h"
+    #define insa(tok,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
+                ins(tok,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#else
+    #define insa(tok,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
 #endif
+
+const struct asm_ins ASMFAR AsmOpTable[] = {
+#include "instruct.h"
+};
+
+#define DEFINE_ASMOPS 1
+#include "opcodes.h"
+
+#include "codegen.h"
+#include "equate.h"
+#include "fixup.h"
+#include "expreval.h"
+#include "labels.h"
+#include "directiv.h"
+#include "proc.h"
+#include "myassert.h"
+#include "input.h"
+#include "types.h"
 
 extern int              match_phase_1( void );
 extern int              ptr_operator( memtype, uint_8 );
@@ -64,7 +72,7 @@ struct asm_code         *CodeInfo = &Code_Info;
 
 unsigned char           Opnd_Count;
 
-static void             SizeString( unsigned op_size );
+static void             SizeStringInstr( unsigned op_size );
 static int              check_size( expr_list * );
 static int              segm_override_jumps( expr_list *opndx );
 
@@ -74,14 +82,14 @@ extern int              directive( int , long );
 
 static void             check_assume( struct asm_sym *, enum prefix_reg );
 
-extern int_8            DefineProc;     // TRUE if the definition of procedure
-                                        // has not ended
+extern bool DefineProc;
 
 uint_8                  CheckSeg;       // if checking of opened segment is needed
 int_8                   Frame;          // Frame of current fixup
 uint_8                  Frame_Datum;    // Frame datum of current fixup
 struct asm_sym          *SegOverride;
 
+bool                    directive_listed;
 static int              in_epilogue = 0;
 
 #else
@@ -190,6 +198,10 @@ static void seg_override( int seg_reg, asm_sym *sym )
     default:
         default_seg = PREFIX_DS;
     }
+    /* MOVS(b|w|d) allows an override for the source only, destination
+     is always ES. Therefore "movs es:[di]" MUST NOT generate a prefix,
+     but "movs es:[si]" MUST generate one!
+     */
     if( sym != NULL ) {
         if( CodeInfo->prefix.seg == EMPTY ) {
             if( CodeInfo->info.token == T_LEA ) {
@@ -221,7 +233,7 @@ static void seg_override( int seg_reg, asm_sym *sym )
                 break;
             }
             if( GetPrefixAssume( sym, assume_seg ) == ASSUME_NOTHING ) {
-//                AsmWarn( 3, CANNOT_ADDRESS_WITH_ASSUMED_REGISTER );
+//                AsmWarn( 3, CANNOT_ADDRESS_WITH_ASSUMED_REGISTER, sym );
             }
         }
     }
@@ -278,7 +290,7 @@ static void check_assume( struct asm_sym *sym, enum prefix_reg default_reg )
     if( reg == ASSUME_NOTHING ) {
         if( ( sym->state != SYM_EXTERNAL ) && ( sym->state != SYM_PROC ) ) {
             if( Parse_Pass == PASS_2 ) {
-                AsmWarn( 3, CANNOT_ADDRESS_WITH_ASSUMED_REGISTER );
+                AsmWarn( 3, CANNOT_ADDRESS_WITH_ASSUMED_REGISTER, sym->name );
             }
         } else {
             CodeInfo->prefix.seg = default_reg;
@@ -312,6 +324,7 @@ static void check_assume( struct asm_sym *sym, enum prefix_reg default_reg )
 int check_override( int *i )
 /**************************/
 /* Check if there is a register, segment or group override */
+/* currently not used, was called by asmdata.c! */
 {
     int         index;
 
@@ -371,10 +384,8 @@ int OperandSize( OPNDTYPE opnd )
     if( ( opnd == OP_NONE ) || ( opnd & OP_SPECIAL ) ) {
         return( 0 );
     } else if( opnd == OP_M ) {
-        int i = SizeFromMemtype(CodeInfo->mem_type, NULL);
+        int i = SizeFromMemtype(CodeInfo->mem_type, Use32);
         if (i == ERROR)
-            i = 0;
-        else if (i == 0)
             i = 0;
         return (i);
     } else if( opnd & ( OP_M8_R8 | OP_M_B | OP_I8 | OP_I_1 | OP_I_3 | OP_I8_U ) ) {
@@ -610,12 +621,17 @@ static int comp_opt( uint direct )
         return( P_MMX );
     case T_DOT_K3D:
         return( P_K3D | P_MMX );
+#if ONEXMM
+    case T_DOT_XMM:
+        return( P_686 | P_MMX | P_SSE | P_SSE2 | P_SSE3 );
+#else
     case T_DOT_XMM:
         return( P_SSE | P_MMX );
     case T_DOT_XMM2:
         return( P_SSE2 | P_SSE | P_MMX );
     case T_DOT_XMM3:
         return( P_SSE3 | P_SSE2 | P_SSE | P_MMX );
+#endif
     default:
         // not found
         return( EMPTY );
@@ -686,73 +702,84 @@ int cpu_directive( int i )
 {
     int                 temp;
 
-    if( ( temp = comp_opt( i ) ) != EMPTY ) {
-        if( i == T_DOT_NO87 ) {
-            CodeInfo->info.cpu &= ~P_FPU_MASK;                 // turn off FPU bits
-        } else if( temp & P_EXT_MASK ) {
-            CodeInfo->info.cpu |= temp & P_EXT_MASK;           // turn on desired bit(s)
-        } else if( temp & P_FPU_MASK ) {
-            CodeInfo->info.cpu &= ~P_FPU_MASK;
-            CodeInfo->info.cpu |= temp & P_FPU_MASK;           // setup FPU bits
-        } else {
-            CodeInfo->info.cpu &= ~( P_CPU_MASK | P_PM );
-            CodeInfo->info.cpu |= temp & ( P_CPU_MASK | P_PM );// setup CPU bits
-            CodeInfo->info.cpu &= ~P_FPU_MASK;
-            CodeInfo->info.cpu |= def_fpu( i ) & P_FPU_MASK;   // setup FPU bits
-        }
-        /* set the MASM compatible @CPU value */
-        // 0001: 86
-        // 0002: 186
-        // 0004: 286
-        // 0008: 386
-        // 0010: 486
-        // 0020: Pentium
-        // 0040: PPro
-        // 0080: protected instructions ok
-        // 0100: 87
-        // 0400: 287
-        // 0800: 387
-        DebugMsg(("CodeInfo->info.cpu=%X\n", CodeInfo->info.cpu));
-        ModuleInfo.cpu = 1;
-        temp = CodeInfo->info.cpu & P_CPU_MASK;
-        switch (temp) {
-        case P_186:
-            ModuleInfo.cpu = ModuleInfo.cpu | 0x3;
-            break;
-        case P_286:
-            ModuleInfo.cpu = ModuleInfo.cpu | 0x7;
-            break;
-        case P_386:
-            ModuleInfo.cpu = ModuleInfo.cpu | 0xF;
-            break;
-        case P_486:
-            ModuleInfo.cpu = ModuleInfo.cpu | 0x1F;
-            break;
-        case P_586:
-            ModuleInfo.cpu = ModuleInfo.cpu | 0x3F;
-            break;
-        case P_686:
-            ModuleInfo.cpu = ModuleInfo.cpu | 0x5F;
-            break;
-        }
-        if (CodeInfo->info.cpu & P_PM)
-            ModuleInfo.cpu = ModuleInfo.cpu | 0x80;
-
-        temp = CodeInfo->info.cpu & P_FPU_MASK;
-        switch (temp) {
-        case P_87:
-            ModuleInfo.cpu = ModuleInfo.cpu | 0x100;
-            break;
-        case P_287:
-            ModuleInfo.cpu = ModuleInfo.cpu | 0x500;
-            break;
-        case P_387:
-            ModuleInfo.cpu = ModuleInfo.cpu | 0xD00;
-            break;
-        }
-    } else {
-        AsmError( UNKNOWN_DIRECTIVE );
+    if( i == T_DOT_NO87 ) {
+        CodeInfo->info.cpu &= ~P_FPU_MASK;                 // turn off FPU bits
+        return(NOT_ERROR);
+    }
+    if( ( temp = comp_opt( i ) ) == EMPTY ) {
+        AsmError( SYNTAX_ERROR );
         return( ERROR );
+    }
+    if( temp & P_FPU_MASK ) {
+        CodeInfo->info.cpu &= ~P_FPU_MASK;
+        CodeInfo->info.cpu |= temp & P_FPU_MASK;           // setup FPU bits
+        return(NOT_ERROR);
+    }
+
+    if (temp & P_CPU_MASK) {
+        if (temp & P_EXT_MASK)
+            CodeInfo->info.cpu &= ~( P_CPU_MASK );
+        else
+            CodeInfo->info.cpu &= ~( P_CPU_MASK | P_PM );
+
+        CodeInfo->info.cpu |= temp & ( P_CPU_MASK | P_PM );// setup CPU bits
+        CodeInfo->info.cpu &= ~P_FPU_MASK;
+        CodeInfo->info.cpu |= def_fpu( i ) & P_FPU_MASK;   // setup FPU bits
+    }
+
+    if( temp & P_EXT_MASK ) {
+        CodeInfo->info.cpu &= ~P_EXT_MASK;
+        CodeInfo->info.cpu |= temp & P_EXT_MASK;
+    }
+    /* set the MASM compatible @CPU value */
+    // 0001: 86
+    // 0002: 186
+    // 0004: 286
+    // 0008: 386
+    // 0010: 486
+    // 0020: Pentium
+    // 0040: PPro
+    // 0080: protected instructions ok
+    // 0100: 87
+    // 0400: 287
+    // 0800: 387
+    DebugMsg(("CodeInfo->info.cpu=%X\n", CodeInfo->info.cpu));
+    ModuleInfo.cpu = 1;
+    temp = CodeInfo->info.cpu & P_CPU_MASK;
+    switch (temp) {
+    case P_186:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x3;
+        break;
+    case P_286:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x7;
+        break;
+    case P_386:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0xF;
+        break;
+    case P_486:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x1F;
+        break;
+    case P_586:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x3F;
+        break;
+    case P_686:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x5F;
+        break;
+    }
+    if (CodeInfo->info.cpu & P_PM)
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x80;
+
+    temp = CodeInfo->info.cpu & P_FPU_MASK;
+    switch (temp) {
+    case P_87:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x100;
+        break;
+    case P_287:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x500;
+        break;
+    case P_387:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0xD00;
+        break;
     }
 
 #if defined( _STANDALONE_ )
@@ -778,6 +805,7 @@ int cpu_directive( int i )
         // set FPU
         break;
     }
+
     /* Set @Cpu */
     /* differs from Codeinfo cpu setting */
 
@@ -817,7 +845,7 @@ static int idata_float( long value )
 #endif
     case MT_BYTE:
     case MT_WORD:
-        AsmError( OPERANDS_MUST_BE_THE_SAME_SIZE );
+        AsmErr( OPERANDS_MUST_BE_THE_SAME_SIZE, 4, SizeFromMemtype(CodeInfo->mem_type, Use32) );
         return( ERROR );
 #if defined( _STANDALONE_ )
     case MT_SDWORD:
@@ -969,6 +997,7 @@ static int idata_nofixup( expr_list *opndx )
     switch( CodeInfo->mem_type ) {
     case MT_EMPTY:
         if( CodeInfo->info.token == T_PUSH ) {
+            /* PUSH <type> PTR <value>? */
             if( opndx->explicit ) {
                 if( opndx->mem_type == MT_BYTE ) {
                     op_type = OP_I8;
@@ -991,16 +1020,14 @@ static int idata_nofixup( expr_list *opndx )
                 } else {
                     op_type = OP_I32;
                 }
-            } else if( (unsigned long)value > USHRT_MAX ) {
-                SET_OPSIZ_32( CodeInfo );
+            } else {
+                /* 16bit mode without typecast. extend to DWORD only if
+                 the value cannot be expressed as signed 8bit */
                 if( (int_8)value == (int_32)value ) {
                     op_type = OP_I8;
-                } else {
+                } else if( (unsigned long)value > USHRT_MAX ) {
+                    SET_OPSIZ_32( CodeInfo );
                     op_type = OP_I32;
-                }
-            } else {
-                if( (int_8)value == (int_16)value ) {
-                    op_type = OP_I8;
                 } else {
                     op_type = OP_I16;
                 }
@@ -1020,20 +1047,25 @@ static int idata_nofixup( expr_list *opndx )
             break;
         } else {
             if (opndx->explicit) {
-                int size = SizeFromMemtype(opndx->mem_type, 0);
+                int size = SizeFromMemtype(opndx->mem_type, Use32);
                 if (size == 1)
                     op_type = OP_I8;
                 else if (size == 2)
                     op_type = OP_I16;
                 else if (size == 4)
                     op_type = OP_I32;
-                if (size >= 1 && size <= 4)
+                if (size >= 1 && size <= 4) {
                     break;
+                }
             }
         }
+        /* changing this code is dangerous! */
+        /* creation of the short, signed forms rely on this info */
         if( ( value > SHRT_MAX ) || ( value < SHRT_MIN ) ) {
+//        if( ( value > USHRT_MAX ) || ( value < SHRT_MIN ) ) {
             op_type = OP_I32;
         } else if( ( value > SCHAR_MAX ) || ( value < SCHAR_MIN ) ) {
+//        } else if( ( value > UCHAR_MAX ) || ( value < SCHAR_MIN ) ) {
             op_type = OP_I16;
         } else {
             op_type = OP_I8;
@@ -1183,7 +1215,7 @@ static int idata_nofixup( expr_list *opndx )
         break;
     }
     CodeInfo->info.opnd_type[Opnd_Count] = op_type;
-    DebugMsg(("idata_nofixup exit\n"));
+    DebugMsg(("idata_nofixup exit, op_type=%X [CodeInfo->mem_type=%u]\n", op_type, CodeInfo->mem_type));
     return( NOT_ERROR );
 }
 
@@ -1338,7 +1370,7 @@ static int idata_fixup( expr_list *opndx )
 // currently stack variables also get a fixup (strange)
 // but fortunately it won't find its way to the object module
 // in: opndx=operand to process
-// in: Opnd_Count=no of operand (1,2)
+// in: Opnd_Count=no of operand (0=1,1=2)
 // out: CodeInfo
 
 static int memory_operand( expr_list *opndx, bool with_fixup )
@@ -1365,10 +1397,8 @@ static int memory_operand( expr_list *opndx, bool with_fixup )
     flag = ( opndx->explicit ) ? TRUE : FALSE ;
 #if 1
     /* there's some confusion about PTR, because it's sometimes an operator
-       and sometimes a TYPE. However, memory type MT_PTR is always a TYPE! */
-    if (opndx->mem_type == MT_PTR ||
-        opndx->mem_type == MT_NEAR ||
-        opndx->mem_type == MT_FAR) {
+     and sometimes a TYPE. However, memory type MT_PTR is always a TYPE! */
+    if (opndx->mem_type == MT_PTR) {
         int size;
         switch (opndx->ofs_size) {
         case OFSSIZE_16:
@@ -1385,10 +1415,15 @@ static int memory_operand( expr_list *opndx, bool with_fixup )
             break;
         default:
             if (flag == FALSE) {
-                if (opndx->mbr && opndx->mbr->state == SYM_TYPE)
+                if (opndx->mbr)
+                    if (opndx->mbr->state == SYM_TYPE)
+                        size = sym->type->total_size;
+                    else
+                        size = opndx->mbr->total_size;
+                else if (sym && sym->type)
                     size = sym->type->total_size;
                 else
-                    size = SizeFromMemtype(opndx->mem_type, NULL);
+                    size = SizeFromMemtype(opndx->mem_type, Use32);
                 switch (size) {
                 case 2:
                     opndx->mem_type = MT_WORD;
@@ -1581,7 +1616,7 @@ static int memory_operand( expr_list *opndx, bool with_fixup )
             }
         }
 
-        DebugMsg(("memory_operand: calling AddFixup(%s, %u)\n", sym->name, fixup_type));
+        DebugMsg(("memory_operand: calling AddFixup(%s, %u) [CodeInfo->memtype=%u]\n", sym->name, fixup_type, CodeInfo->mem_type));
         AddFixup( sym, fixup_type, OPTJ_NONE );
 
         if( Modend ) {
@@ -1605,7 +1640,7 @@ static int memory_operand( expr_list *opndx, bool with_fixup )
 #if 1
         /* if an undefined label is moved (mov [xxx],offset yyy)
          change to immediate data */
-        if (sym && sym->state == SYM_UNDEFINED && Opnd_Count == OPND2)
+        if (sym && sym->state == SYM_UNDEFINED && CodeInfo->info.token == T_MOV && Opnd_Count == OPND2)
             CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
 #endif
         if (sym && sym->state == SYM_STACK) {
@@ -1642,15 +1677,23 @@ static int memory_operand( expr_list *opndx, bool with_fixup )
                 CodeInfo->isfar = TRUE;
             }
         }
+    } else if (CodeInfo->info.token == T_PUSH || CodeInfo->info.token == T_POP) {
+        int size = SizeFromMemtype(CodeInfo->mem_type, Use32);
+        if (size == 1 || size > 4) {
+            /* PUSH/POP possible for WORD/DWORD memory operands only */
+            AsmError(INVALID_INSTRUCTION_OPERANDS);
+            return(ERROR);
+        }
     }
-    DebugMsg(("memory_operand exit, no error, type/value=%X/%X\n", opndx->type, opndx->value));
+    DebugMsg(("memory_operand exit, no error, type/value=%X/%X, CodeInfo->memtype=%u\n", opndx->type, opndx->value, CodeInfo->mem_type));
     return( NOT_ERROR );
 }
 
-static int process_address( expr_list *opndx )
+int process_address( expr_list *opndx )
 /********************************************/
 /*
-  parse the memory reference operand
+ parse the memory reference operand
+ Opnd_Count is 0 for first operand, 1 for second, ...
   */
 {
     memtype     mem_type;
@@ -1734,7 +1777,7 @@ static int process_address( expr_list *opndx )
                     return( idata_fixup( opndx ) );
 #endif
                 } else {
-                    DebugMsg(("process_address direct CALL/JMP/...\n"));
+                    DebugMsg(("process_address direct [CALL/JMP/PUSH,...]\n"));
                     // CODE location is converted to OFFSET symbol
                     mem_type = ( opndx->explicit ) ? opndx->mem_type : opndx->sym->mem_type;
 #if defined( _STANDALONE_ )
@@ -1943,17 +1986,17 @@ int ParseItems( void )
     }
 #endif
 
-#if defined( _STANDALONE_ )
     CodeInfo->use32 = Use32;
-    i = proc_check();
-    if( i == ERROR ) {
-        DebugMsg(("ParseItems exit, proc_check error\n"));
-        return( ERROR );
-    } else if( i == TRUE ) {
-        DebugMsg(("ParseItems exit, proc_check causes skip\n"));
-        return( NOT_ERROR );
+    if( DefineProc == TRUE ) {
+        i = proc_check();
+        if( i == ERROR ) {
+            DebugMsg(("ParseItems exit, proc_check error\n"));
+            return( ERROR );
+        } else if( i == EMPTY ) {
+            DebugMsg(("ParseItems exit, proc_check causes skip\n"));
+            return( NOT_ERROR );
+        }
     }
-#endif
 
     //init
     rCode->info.token     = T_NULL;
@@ -2089,33 +2132,34 @@ int ParseItems( void )
             break;
         case T_RES_ID:
             DebugMsg(("ParseItems T_RES_ID, i=%u\n", i));
-            if( rCode->info.token == T_NULL ) {
-                temp = ( i == 0 ) ? -1 : 0;
-                return( data_init( temp, i ) );
+            // if( rCode->info.token == T_NULL ) {
+            if (i <= 1) {
+                return( data_init( i-1, i ) );
+            } else if (ModuleInfo.m510 == TRUE && AsmBuffer[i-1]->token == T_COLON) {
+                return( data_init( -1, i ) );
             }
             AsmError( SYNTAX_ERROR );
             DebugMsg(("ParseItems exit 14, error\n"));
             return( ERROR );
         case T_DIRECTIVE:
             DebugMsg(("ParseItems T_DIRECTIVE\n"));
+            if (AsmFiles.file[LST]) {
+                int rc;
+                asm_sym * sym = NULL;
+                unsigned int ofs = GetCurrAddr();
+                if (CurrSeg)
+                    sym = (asm_sym *)CurrSeg->seg;
+                directive_listed = FALSE;
+                rc = directive( i, AsmBuffer[i]->value );
+                if (directive_listed == FALSE)
+                    WriteLstFile(LSTTYPE_DIRECTIVE, ofs, sym);
+                return( rc );
+            }
             return( directive( i, AsmBuffer[i]->value ) );
             break;
 #if defined( _STANDALONE_ )
         case T_DIRECT_EXPR:
             DebugMsg(("ParseItems T_DIRECT_EXPR\n"));
-            if( Parse_Pass != PASS_1 ) {
-                Modend = TRUE;
-                temp = i;
-                temp++;
-                if( EvalOperand( &temp, Token_Count, &opndx, TRUE ) == ERROR ) {
-                    DebugMsg(("ParseItems exit 13, error\n"));
-                    return( ERROR );
-                }
-                DebugMsg(("ParseItems T_DIRECT EvalOperand type/value=%X/%X\n", opndx.type, opndx.value));
-                if( !opndx.empty && ( opndx.type == EXPR_ADDR ) ) {
-                    process_address( &opndx );
-                }
-            }
             return( directive( i, AsmBuffer[i]->value ) );
             break;
 #endif
@@ -2131,27 +2175,24 @@ int ParseItems( void )
             }
 #endif
             if( i == 0 ) {   // a new label
-#if ALLOW_STRUCT_INIT
 #if defined( _STANDALONE_ )
                 /* <ID=SYM_TYPE> ...? */
-                if( IsLabelStruct( AsmBuffer[i]->string_ptr )
+                if( IsLabelType( AsmBuffer[i]->string_ptr )
                     && ( AsmBuffer[i+1]->token != T_DIRECTIVE ) ) {
                     AsmBuffer[i]->token = T_DIRECTIVE;
                     AsmBuffer[i]->value = T_STRUCT;
                     return( data_init( -1, 0 ) );
                 }
 #endif
-#endif
 
                 switch( AsmBuffer[i+1]->token ) {
                 case T_COLON:
                     cur_opnd = OP_LABEL;
                     break;
-#if ALLOW_STRUCT_INIT
 #if defined( _STANDALONE_ )
                 case T_ID:
-                    /* structure declaration */
-                    if( IsLabelStruct( AsmBuffer[i+1]->string_ptr ) ) {
+                    /* data_label TYPE ...? */
+                    if( IsLabelType( AsmBuffer[i+1]->string_ptr ) ) {
                         AsmBuffer[i+1]->token = T_DIRECTIVE;
                         AsmBuffer[i+1]->value = T_STRUCT;
                     } else {
@@ -2161,12 +2202,21 @@ int ParseItems( void )
                     }
                     /* fall through */
 #endif
-#endif
                 case T_RES_ID:
                     return( data_init( i, i+1 ) );
                     break;
 #if defined( _STANDALONE_ )
                 case T_DIRECTIVE:
+                    if (AsmFiles.file[LST]) {
+                        int rc;
+                        asm_sym * sym = NULL;
+                        unsigned int ofs = GetCurrAddr();
+                        if (CurrSeg)
+                            sym = (asm_sym *)CurrSeg->seg;
+                        rc = directive( i+1 , AsmBuffer[i+1]->value );
+                        WriteLstFile(LSTTYPE_DIRECTIVE, ofs, sym);
+                        return( rc );
+                    }
                     return( directive( i+1, AsmBuffer[i+1]->value ) );
                     break;
 #endif
@@ -2226,6 +2276,20 @@ int ParseItems( void )
             }
             switch( opndx.type ) {
             case EXPR_ADDR:
+#if 1
+                /* assume second operand - if it is undefined and direct -
+                 is a CONST if first operand is a memory reference
+                 example: mov [var], label
+                 */
+                if (opndx.sym != NULL &&
+                    opndx.sym->state == SYM_UNDEFINED &&
+                    Parse_Pass == PASS_1 &&
+                    opndx.indirect == FALSE &&
+                    (CodeInfo->info.opnd_type[OPND1] & OP_M_ANY)) {
+                    opndx.type = EXPR_CONST;
+                    goto process_const;
+                }
+#endif
                 DebugMsg(("ParseItems operand 2 ADDR\n"));
                 temp = process_address( &opndx );
                 if( temp == SCRAP_INSTRUCTION )
@@ -2236,6 +2300,7 @@ int ParseItems( void )
                 }
                 break;
             case EXPR_CONST:
+            process_const:
                 DebugMsg(("ParseItems operand 2 CONST, opndx.memtype=%u\n", opndx.mem_type));
                 process_const( &opndx );
                 break;
@@ -2255,19 +2320,21 @@ int ParseItems( void )
         case T_COLON:
             DebugMsg(("ParseItems T_COLON\n"));
             if ( last_opnd == OP_LABEL ) {
-                if( AsmBuffer[i+1]->token != T_RES_ID ) {
-                    if ((AsmBuffer[i+1]->token == T_COLON) || (CurrProc == NULL)) {
-                        if( MakeLabel( AsmBuffer[i-1]->string_ptr, MT_NEAR, NULL, FALSE )==ERROR ) {
-                            DebugMsg(("ParseItems exit 5, error\n"));
-                            return( ERROR );
-                        }
-                        if (AsmBuffer[i+1]->token == T_COLON)
-                            i++; /* skip the second colon */
-                    } else {
-                        if( MakeLabel( AsmBuffer[i-1]->string_ptr, MT_NEAR, NULL, TRUE )==ERROR ) {
-                            DebugMsg(("ParseItems exit 4, error\n"));
-                            return( ERROR );
-                        }
+                if (SegAssumeTable[5].error == 1) { /* CS assumed to ERROR? */
+                    AsmError(USE_OF_REGISTER_ASSUMED_TO_ERROR);
+                    return( ERROR );
+                }
+                if ((AsmBuffer[i+1]->token == T_COLON) || (CurrProc == NULL)) {
+                    if( LabelCreate( AsmBuffer[i-1]->string_ptr, MT_NEAR, NULL, FALSE )==ERROR ) {
+                        DebugMsg(("ParseItems exit 5, error\n"));
+                        return( ERROR );
+                    }
+                    if (AsmBuffer[i+1]->token == T_COLON)
+                        i++; /* skip the second colon */
+                } else {
+                    if( LabelCreate( AsmBuffer[i-1]->string_ptr, MT_NEAR, NULL, TRUE )==ERROR ) {
+                        DebugMsg(("ParseItems exit 4, error\n"));
+                        return( ERROR );
                     }
                 }
                 cur_opnd = OP_NONE;
@@ -2283,7 +2350,7 @@ int ParseItems( void )
                 DebugMsg(("ParseItems exit 2, error\n"));
                 return( ERROR );
             }
-            if( AsmBuffer[i-1]->token == T_MINUS ) {
+            if( i > 0 && AsmBuffer[i-1]->token == T_MINUS ) {
                 rCode->data[Opnd_Count] ^= 0x80000000;
             }
 #if defined( _STANDALONE_ )
@@ -2293,10 +2360,6 @@ int ParseItems( void )
         default:
             DebugMsg(("ParseItems error, i=%u, token=%X, string=%s\n", i, AsmBuffer[i]->token, AsmBuffer[i]->string_ptr));
 #if defined( _STANDALONE_ )
-            /* in case string/macro expansion has lead to a "void" */
-//            if (Token_Count == 1 && AsmBuffer[0]->token == T_STRING && *(AsmBuffer[0]->string_ptr) == '\0')
-//                return(NOT_ERROR);
-            /* myassert( 0 ) ;*/
             AsmError( SYNTAX_ERROR );
             return( ERROR );
 #endif
@@ -2304,10 +2367,15 @@ int ParseItems( void )
         last_opnd = cur_opnd;
     }
     switch( rCode->info.token ) {
-    case T_LODS:
     case T_SCAS:
     case T_STOS:
-        SizeString( OperandSize( CodeInfo->info.opnd_type[OPND1] ) );
+        if (rCode->prefix.seg != EMPTY)
+            if (rCode->prefix.seg == PREFIX_ES)
+                rCode->prefix.seg = EMPTY;
+            else
+                AsmError(INVALID_INSTRUCTION_OPERANDS);
+    case T_LODS:
+        SizeStringInstr( OperandSize( CodeInfo->info.opnd_type[OPND1] ) );
         break;
     }
     if( Opnd_Count > OPND1 ) {
@@ -2316,11 +2384,17 @@ int ParseItems( void )
             return( ERROR );
         }
     }
+    if (AsmFiles.file[LST]) {
+        int oldofs = GetCurrAddr();
+        i = match_phase_1();
+        WriteLstFile(LSTTYPE_LIDATA, oldofs, NULL );
+        return( i );
+    }
     DebugMsg(("ParseItems exit, jmp to match_phase_1()\n"));
     return( match_phase_1() );
 }
 
-static void SizeString( unsigned op_size )
+static void SizeStringInstr( unsigned op_size )
 /****************************************/
 {
     /* size an string instruction based on it's operand's size */
@@ -2349,6 +2423,7 @@ static int check_size( expr_list * opndx )
 /*
 - use to make sure the size of first operand match the size of second operand;
 - optimize MOV instruction;
+- opndx contains last operand
 */
 {
     OPNDTYPE    op1 = CodeInfo->info.opnd_type[OPND1];
@@ -2418,7 +2493,7 @@ static int check_size( expr_list * opndx )
         if( op_size == 0 )
             op_size = OperandSize( op2 );
 
-        SizeString( op_size );
+        SizeStringInstr( op_size );
         break;
     case T_LEA:
         switch( OperandSize( op1 ) ) {
@@ -2426,7 +2501,7 @@ static int check_size( expr_list * opndx )
         case 4:
             break;
         default:
-            AsmError( OPERANDS_MUST_BE_THE_SAME_SIZE );
+            AsmErr( OPERANDS_MUST_BE_THE_SAME_SIZE, OperandSize(op1), Use32 ? 4 : 2);
             state = ERROR;
         }
         break;
@@ -2501,14 +2576,21 @@ static int check_size( expr_list * opndx )
     case T_MOVSX:
     case T_MOVZX:
         CodeInfo->info.opcode &= NOT_W_BIT;
+        op1_size = OperandSize( op1 );
         op2_size = OperandSize( op2 );
-        switch( OperandSize( op1 ) ) {
+        DebugMsg(("check_size, MOVZX/MOVSX: op2_size=%u, opndx.memtype=%u\n", op2_size, opndx->mem_type));
+        if (op2_size == 0 && Parse_Pass == PASS_2)
+            if (op1_size == 2)
+                AsmWarn(2, ASSUMING_BYTE);
+            else
+                AsmWarn(2, INSTRUCTION_OPERAND_MUST_HAVE_SIZE);
+        switch( op1_size ) {
         case 4:
-            switch( op2_size ) {
-            case 2:
+            if (op2_size < 2)
+                ;
+            else if (op2_size == 2)
                 CodeInfo->info.opcode |= W_BIT;
-                break;
-            case 4:
+            else {
                 AsmError( OP_2_TOO_BIG );
                 state = ERROR;
             }
@@ -2566,7 +2648,7 @@ static int check_size( expr_list * opndx )
         op2_size = OperandSize( op2 );
         if( ( op1_size != 0 ) && ( op1_size != 4 )
             || ( op2_size != 0 ) && ( op2_size != 4 ) ) {
-            AsmError( OPERANDS_MUST_BE_THE_SAME_SIZE );
+            AsmErr( OPERANDS_MUST_BE_THE_SAME_SIZE, op1_size, op2_size );
             state = ERROR;
         }
 #endif
@@ -2617,6 +2699,7 @@ static int check_size( expr_list * opndx )
         // make sure the 2 opnds are of the same type
         op1_size = OperandSize( op1 );
         op2_size = OperandSize( op2 );
+        DebugMsg(("check_size default: size1=%u, size2=%u\n", op1_size, op2_size));
         if( op1_size > op2_size ) {
             if( ( op2 >= OP_I8 ) && ( op2 <= OP_I32 ) ) {     /* immediate */
                 op2_size = op1_size;    /* promote to larger size */
@@ -2634,16 +2717,23 @@ static int check_size( expr_list * opndx )
             /* if one or more are !defined, set them appropriately */
             if( ( op1 | op2 ) & ( OP_MMX | OP_XMM ) ) {
             } else if( ( op1_size != 0 ) && ( op2_size != 0 ) ) {
-                AsmError( OPERANDS_MUST_BE_THE_SAME_SIZE );
+//                printf( "opndx.type=%u, memtype=%u, mbr=%X, assume=%X\n", opndx->type, opndx->mem_type, opndx->mbr, opndx->assume);
+                AsmErr( OPERANDS_MUST_BE_THE_SAME_SIZE, op1_size, op2_size );
 //                state = ERROR;
             }
             if( op1_size == 0 ) {
                 if( ( op1 & OP_M_ANY ) && ( op2 & OP_I ) ) {
                     if( (unsigned long)CodeInfo->data[OPND2] > USHRT_MAX || op2_size == 4) {
-                         CodeInfo->mem_type = MT_DWORD;
-                         CodeInfo->info.opcode |= W_BIT;
-                         CodeInfo->info.opnd_type[OPND2] = OP_I32;
-                         temp = ASSUMING_DWORD;
+                        CodeInfo->info.opcode |= W_BIT;
+                        if (op2_size <= 2 && CodeInfo->data[OPND2] > SHRT_MIN && Use32 == 0) {
+                            CodeInfo->mem_type = MT_WORD;
+                            CodeInfo->info.opnd_type[OPND2] = OP_I16;
+                            temp = ASSUMING_WORD;
+                        } else {
+                            CodeInfo->mem_type = MT_DWORD;
+                            CodeInfo->info.opnd_type[OPND2] = OP_I32;
+                            temp = ASSUMING_DWORD;
+                        }
                     } else if( (unsigned long)CodeInfo->data[OPND2] > UCHAR_MAX || op2_size == 2) {
                          CodeInfo->mem_type = MT_WORD;
                          CodeInfo->info.opcode |= W_BIT;
@@ -2655,7 +2745,7 @@ static int check_size( expr_list * opndx )
                          temp = ASSUMING_BYTE;
                     }
 #if defined( _STANDALONE_ )
-                    if( Parse_Pass > PASS_1 && opndx->explicit == FALSE) {
+                    if( Parse_Pass == PASS_2 && opndx->explicit == FALSE) {
                         AsmWarn( 1, temp );
                     }
 #endif
@@ -2707,6 +2797,7 @@ static int check_size( expr_list * opndx )
             }
         }
     }
+    DebugMsg(("check_size exit [CodeInfo->mem_type=%u]\n", CodeInfo->mem_type));
     return( state );
 }
 
@@ -2718,6 +2809,7 @@ void ParseInit( int cpu, int fpu, int use32, int extn )
     int         size = sizeof( AsmOpTable ) / sizeof( AsmOpTable[0] );
     int         count;
 
+    /* initialize the AsmBuffer table */
     for( count = 0; count < MAX_TOKEN; count ++ ) {
         AsmBuffer[count] = &tokens[count];
     }

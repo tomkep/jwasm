@@ -33,7 +33,7 @@
 #define _ERRMSG_H_INCLUDED
 
 #if defined( _STANDALONE_ )
-    #include "asminput.h"
+    #include "input.h"
 #endif
 
 #ifdef _M_I86
@@ -70,22 +70,16 @@ extern void             AsmNote( int msgnum, ... );
 
 #if defined( _STANDALONE_ )
 
-    #define MSG_SHARE_RC_BASE   1
-    #define MSG_WOMP_RC_BASE    200
-    #define MSG_JWASM_RC_BASE   500
-    #define MSG_USE_BASE        900
+    #define MSG_JWASM_RC_BASE   1
 
     #define MSG_LANG_SPACING    1000
 
     #define MSG_USE_E_BASE      (MSG_USE_BASE + RLE_ENGLISH*MSG_LANG_SPACING)
-    #define MSG_USE_J_BASE      (MSG_USE_BASE + RLE_JAPANESE*MSG_LANG_SPACING)
+//    #define MSG_USE_J_BASE      (MSG_USE_BASE + RLE_JAPANESE*MSG_LANG_SPACING)
 
-    #include "wmpmsg.gh"
     #include "msg.gh"
-    #include "jwasmmsg.gh"
 
     #define MAX_RESOURCE_SIZE   128
-
 
     extern int MsgInit( void );
     extern int MsgGet( int, char * );
@@ -95,27 +89,18 @@ extern void             AsmNote( int msgnum, ... );
     extern void MsgChgeSpec( char *strptr, char specifier );
     extern void LstMsg( const char *format, ... );
     extern void OpenLstFile( void );
+    extern void WriteLstFile( int type, unsigned int ofs, void * sym );
+
+#define LSTTYPE_LIDATA    0
+#define LSTTYPE_EQUATE    1
+#define LSTTYPE_DIRECTIVE 2
+#define LSTTYPE_MACRO     3
 
 #elif defined( _USE_RESOURCES_ )
 
     #define MSG_RC_BASE         15000
     #include "msg.gh"
 
-#else
-    /* set up the enum for error messages */
-
-    #undef pick
-    #define pick(code,msg,japanese_msg)   asmerr(code,msg),
-
-  #ifndef asmerr
-    #define asmerr(code,msg)   code
-    enum    asmerr_codes {
-  #else
-    static char const ASMFAR * const ASMFAR AsmErrMsgs[] = {
-  #endif
-        #include "shared.msg"
-    };
-    #undef pick
 #endif
 
 #endif

@@ -29,37 +29,43 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
+#include "globals.h"
 
 #include <fcntl.h>
-#include <unistd.h>
 
 #ifdef __WATCOMC__
+  #include <unistd.h>
   #include <conio.h>
   #include <process.h>
 #endif
 
-#include "wressetr.h"
-#include "wreslang.h"
+#undef ERROR
+#include "windows.h"
 
+/*
+ USEUSER32=1 will dynamically get address of LoadStringA() and
+ use it to load string resources. USEUSER32=0 will avoid to use
+ LoadStringA() - which is a USER32 function - and do string resource
+ handling with KERNEL32 functions FindResourceA(), LoadResource(),
+ LockResource and WideCharToMultiByte().
+ */
 
-#define NIL_HANDLE      ((int)-1)
-#define STDOUT_HANDLE   ((int)1)
+#define USEUSER32 0
 
-static  HANDLE_INFO     hInstance = { 0 };
-static  unsigned        MsgShift;
-extern  long            FileShift;
+#if USEUSER32
+static HINSTANCE hUser32 = NULL;
+static int WINAPI (*pLoadString)(HINSTANCE, UINT, LPTSTR, int) = NULL;
+#else
+#endif
 
 extern  int             trademark( void );
+extern char             banner_printed;
 
 #ifdef __OSI__
 
 extern char             *_Copyright;
 
 #endif
-
-#define NO_RES_MESSAGE "Error: could not open message resource file.\r\n"
-#define NO_RES_SIZE (sizeof(NO_RES_MESSAGE)-1)
 
 #ifndef __UNIX__
 
@@ -80,66 +86,67 @@ static void con_output( const unsigned char *text )
 }
 #endif
 
-static long res_seek( int handle, off_t position, int where )
-/* fool the resource compiler into thinking that the resource information
- * starts at offset 0 */
-{
-    if( where == SEEK_SET ) {
-        return( lseek( handle, position + FileShift, where ) - FileShift );
-    } else {
-        return( lseek( handle, position, where ) );
-    }
-}
-
-WResSetRtns( open, close, read, write, res_seek, tell, malloc, free );
-
 int MsgInit( void )
 {
-    int         initerror;
-    char        name[_MAX_PATH];
-
-    hInstance.handle = NIL_HANDLE;
-    if( _cmdname( name ) == NULL ) {
-        initerror = 1;
-    } else {
-        hInstance.filename = name;
-        OpenResFile( &hInstance );
-        if( hInstance.handle == NIL_HANDLE ) {
-            initerror = 1;
-        } else {
-            initerror = FindResources( &hInstance );
-            if( !initerror ) {
-                initerror = InitResources( &hInstance );
-            }
-        }
-    }
-    MsgShift = WResLanguage() * MSG_LANG_SPACING;
-    if( !initerror && !MsgGet( MSG_USE_BASE, name ) ) {
-        initerror = 1;
-    }
-    if( initerror ) {
-        write( STDOUT_FILENO, NO_RES_MESSAGE, NO_RES_SIZE );
-        MsgFini();
-        return( 0 );
-    }
     return( 1 );
+}
+
+void MsgFini( void )
+{
+#if USEUSER32
+    if (hUser32) {
+        FreeLibrary(hUser32);
+        hUser32 = NULL;
+    }
+#endif
 }
 
 int MsgGet( int resourceid, char *buffer )
 {
-    if( LoadString( &hInstance, resourceid+MsgShift, (LPSTR) buffer, 128 ) != 0 ) {
-        buffer[0] = '\0';
-        return( 0 );
+#if USEUSER32
+    if (pLoadString == NULL) {
+        if (hUser32 = LoadLibrary("user32"))
+            pLoadString = GetProcAddress(hUser32, "LoadStringA");
+    }
+    if (pLoadString) {
+        if (pLoadString(NULL, resourceid, buffer, 128) == 0) {
+            buffer[0] = '\0';
+            return( 0 );
+        }
     }
     return( 1 );
+#else
+    HRSRC hRsrc;
+    HGLOBAL hRes;
+    WORD * pId;
+    int i;
+
+    buffer[0] = '\0';
+    hRsrc = FindResource(NULL, MAKEINTRESOURCE(1 + (resourceid >> 4)), RT_STRING);
+    if (hRsrc) {
+        hRes = LoadResource(NULL, hRsrc);
+        if (hRes) {
+            pId = LockResource(hRes);
+            for (i = resourceid % 16;i;i--)
+                pId += *pId + 1;
+            i = *pId++;
+            WideCharToMultiByte(CP_ACP, 0, pId, i, buffer, 128, 0, 0);
+            if (i < 128)
+                buffer[i] = 0;
+            return( 1 );
+        }
+    }
+    DebugMsg(("MsgGet(%u): Msg not found!!!\n", resourceid));
+    return( 0 );
+#endif
 }
 
 void MsgPrintf( int resourceid )
 {
     char        msgbuf[128];
 
-    if( !Options.banner_printed ) {
-        Options.banner_printed = TRUE;
+    if( !banner_printed ) {
+        banner_printed = TRUE;
         trademark();
     }
     MsgGet( resourceid, msgbuf );
@@ -150,8 +157,8 @@ void MsgPrintf1( int resourceid, char *token )
 {
     char        msgbuf[128];
 
-    if( !Options.banner_printed ) {
-        Options.banner_printed = TRUE;
+    if( !banner_printed ) {
+        banner_printed = TRUE;
         trademark();
     }
     MsgGet( resourceid, msgbuf );
@@ -169,6 +176,7 @@ static void Wait_for_return( void )
 }
 #endif
 
+#if 0
 void PrintfUsage( int first_ln )
 {
     char        msg_buff[128];
@@ -194,11 +202,5 @@ void PrintfUsage( int first_ln )
         puts( msg_buff );
     }
 }
+#endif
 
-void MsgFini( void )
-{
-    if( hInstance.handle != NIL_HANDLE ) {
-        CloseResFile( &hInstance );
-        hInstance.handle = NIL_HANDLE;
-    }
-}

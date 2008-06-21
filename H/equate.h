@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  prototypes for functions in EQUATE.C
+* Description:  EQU and '=' directives interface
 *
 ****************************************************************************/
 

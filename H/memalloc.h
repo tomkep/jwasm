@@ -33,9 +33,13 @@
 
 #if defined( _STANDALONE_ )
   #include "walloca.h"
-  #include "memutil.h"  // WOMP memory routines declaration
+  #include "memutil.h"
 
-  #define AsmTmpAlloc( amount )   alloca( amount )
+#ifdef __WATCOMC__
+#define AsmTmpAlloc( amount )   alloca( amount )
+#else
+#define AsmTmpAlloc( amount )   _alloca( amount )
+#endif
 #endif
 
 extern  void    *AsmAlloc( size_t );

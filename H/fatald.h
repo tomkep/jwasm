@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  Fatal error messages, they are shared with WOMP
+* Description:  Fatal error messages
 *
 ****************************************************************************/
 
@@ -33,4 +33,4 @@ fix( MSG_CANNOT_OPEN_FILE, 1, CANNOT_OPEN_FILE, NULL, 1 ),
 fix( MSG_CANNOT_CLOSE_FILE, 1, CANNOT_CLOSE_FILE, NULL, 1 ),
 fix( MSG_CANNOT_GET_START_OF_SOURCE_FILE, 0, CANNOT_GET_FILE, AsmShutDown, 1 ),
 fix( MSG_CANNOT_SET_TO_START_OF_SOURCE_FILE, 0, CANNOT_SET_FILE, AsmShutDown, 1 ),
-fix( MSG_TOO_MANY_FILES, 0, TOO_MANY_FILES, NULL, 1 ),
+//fix( MSG_TOO_MANY_FILES, 0, TOO_MANY_FILES, NULL, 1 ),

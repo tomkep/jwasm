@@ -48,7 +48,7 @@
 
 #include <stdlib.h>
 #include <fcntl.h>
-#include <unistd.h>
+//#include <unistd.h>
 #ifdef DEBUG_OUT
 #include <stdio.h>
 #endif
@@ -76,10 +76,10 @@ static void memLine( int *fh, const char *buf, unsigned size )
 #endif
 
 #if FAST
-BYTE * pBase = NULL;
+BYTE * pBase;
 BYTE * pCurr;
-int blocks = 0;
-int currfree = 0;
+int blocks;
+int currfree;
 #endif
 
 void MemInit( void )
@@ -95,6 +95,11 @@ void MemInit( void )
     if( memHandle == NULL ) {
         exit( EXIT_FAILURE );
     }
+#endif
+#if FAST
+    currfree = 0;
+    blocks = 0;
+    pBase = NULL;
 #endif
 }
 

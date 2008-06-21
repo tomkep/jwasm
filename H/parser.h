@@ -41,10 +41,10 @@
 
 #endif
 
-#include "asmopnds.h"
+#include "operands.h"
 #include "symbols.h"
-#include "asmops1.h"
-#include "asmops2.h"
+#include "token.h"
+#include "opcodes.h"
 
 enum prefix_reg {
     PREFIX_EMPTY = EMPTY,
@@ -55,6 +55,54 @@ enum prefix_reg {
     PREFIX_FS = 0x64,
     PREFIX_GS = 0x65
 };
+
+struct AsmCodeName {
+        unsigned short  position;       // starting position in AsmOpTable
+        unsigned short  len :4,         // length of command, e.g. "AX" = 2
+                        index :12;      // index into AsmChars[] in opcode.h
+        struct AsmCodeName *next;
+};
+
+enum asm_cpu {
+        /* bit count from left: ( need at least 7 bits )
+           bit 0-2:   Math coprocessor
+           bit 3:     Protected mode
+           bit 4-6:   cpu type
+           bit 7-11;  extension set */
+
+        P_NO87  = 0x0000,         /* no FPU */
+        P_87    = 0x0001,         /* 8087 */
+        P_287   = 0x0002,         /* 80287 */
+        P_387   = 0x0004,         /* 80387 */
+
+        P_PM    = 0x0008,         /* protect-mode */
+
+        P_86    = 0x0000,         /* 8086, default */
+        P_186   = 0x0010,         /* 80186 */
+        P_286   = 0x0020,         /* 80286 */
+        P_286p  = P_286 | P_PM,   /* 80286, protected mode */
+        P_386   = 0x0030,         /* 80386 */
+        P_386p  = P_386 | P_PM,   /* 80386, protected mode */
+        P_486   = 0x0040,         /* 80486 */
+        P_486p  = P_486 | P_PM,   /* 80486, protected mode */
+        P_586   = 0x0050,         /* pentium */
+        P_586p  = P_586 | P_PM,   /* pentium, protected mode */
+        P_686   = 0x0060,         /* pentium */
+        P_686p  = P_686 | P_PM,   /* pentium, protected mode */
+
+        P_MMX   = 0x0080,         /* MMX extension instructions */
+        P_K3D   = 0x0100,         /* 3DNow extension instructions */
+        P_SSE   = 0x0200,         /* SSE extension instructions */
+        P_SSE2  = 0x0400,         /* SSE extension instructions */
+        P_SSE3  = 0x0800,         /* SSE extension instructions */
+
+        NO_OPPRFX  = P_MMX | P_SSE | P_SSE2 | P_SSE3,
+
+        P_FPU_MASK = 0x0007,
+        P_CPU_MASK = 0x0070,
+        P_EXT_MASK = 0x0F80
+};
+
 
 #if defined( _STANDALONE_ )
     struct asm_ins {
@@ -182,5 +230,8 @@ extern int      cpu_directive( int i );
 extern int      ParseItems( void );
 extern int      NextArrayElement( void );
 extern int      data_init( int, int );
+extern void     ParseInit( int, int, int, int );
+
+
 
 #endif

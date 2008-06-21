@@ -94,6 +94,7 @@ invoke
 irp
 irpc
 label
+.lall
 le
 length
 lengthof
@@ -117,6 +118,8 @@ near16
 near32
 .nocref
 .nolist
+.nolistif
+.nolistmacro
 opattr
 option
 org
@@ -165,6 +168,7 @@ type
 typedef
 union
 .until
+.untilcxz
 use16
 use32
 vararg

@@ -33,12 +33,14 @@
 
 #if defined( _STANDALONE_ )
 
-extern asm_sym *        IsLabelStruct( char * );
-extern void             PrepAnonLabels( void );
+extern void             LabelsInit( void );
+extern asm_sym *        IsLabelType( char * );
 extern int              LabelDirective( int );
+extern char *           GetCurrAnonLabel(char *);
+extern char *           GetNextAnonLabel(char *);
 
 #endif
 
-extern int              MakeLabel( char *, memtype, struct asm_sym * vartype, bool);
+extern int              LabelCreate( char *, memtype, struct asm_sym * vartype, bool);
 
 #endif

@@ -28,25 +28,14 @@
 *
 ****************************************************************************/
 
-#define DOBANSTR( p )   #p
-#define BANSTR( p )     DOBANSTR( p )
-
-#ifndef _BETASTR_
-#define _BETASTR_ "beta"
-#endif
-
-#ifdef _BETAVER
-#define _BETA_                  _BETASTR_ BANSTR( _BETAVER )
-#else
 #define _BETA_
-#endif
 
 #define CURR_YEAR       "2008"
 
 #define banner1p1(p)  p
 #define banner1p2(v)  "Version " v
 #define banner1(p,v) banner1p1(p) " "
-#define banner1w(p,v) "JWasm v" v ", based on Open Watcom " banner1p1(p) " (WASM) "
+#define banner1w(p,v) "JWasm v" v ", Masm-compatible assembler based on Open Watcom's Wasm."
 
 #define banner2p1(year) "Portions Copyright (c) " year "-2002 Sybase, Inc. All Rights Reserved"
 #define banner2p2() ""
@@ -62,8 +51,8 @@
 #define _RC_DELIM_LEFT_         [
 #define _RC_DELIM_RIGHT_        ]
 
-#define BAN_VER_STR "1.7" _BETA_
+#define BAN_VER_STR "1.80" _BETA_
 
 #define _JWASM_VERSION_ BAN_VER_STR
-#define _JWASM_VERSION_INT_ "170"
+#define _JWASM_VERSION_INT_ 180
 

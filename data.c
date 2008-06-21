@@ -29,14 +29,15 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
+#include <ctype.h>
 
-#include "asmdefs.h"
+#include "globals.h"
+#include "codegen.h"
 #include "symbols.h"
 #include "parser.h"
 #include "expreval.h"
 #include "tbyte.h"
-#include "asmfixup.h"
+#include "fixup.h"
 
 #if defined( _STANDALONE_ )
   #include "directiv.h"
@@ -58,6 +59,7 @@ static bool             struct_field;
 static bool             first;
 /* used for structured variables */
 static bool             veryfirst;
+static bool             initwarn;
 
 #endif
 
@@ -128,7 +130,7 @@ static void output_float( unsigned char index, unsigned no_of_bytes, char negati
 
     count = 0;
     while( count < no_of_bytes ) {
-        AsmDataByte( *char_ptr );
+        OutputDataByte( *char_ptr );
         char_ptr++;
         count++;
     }
@@ -177,7 +179,7 @@ rescan:
         DebugMsg(("array_item: ? found\n"));
         /* tiny optimization for uninitialized arrays */
         count = no_of_bytes;
-        if (AsmBuffer[cur_pos+1]->token != T_COMMA) {
+        if (AsmBuffer[cur_pos+1]->token != T_COMMA && cur_pos == start_pos) {
             count *= dup;
             if( sym && Parse_Pass == PASS_1 ) {
                 sym->total_length += dup;
@@ -206,6 +208,7 @@ rescan:
         return(ERROR);
     if (AsmBuffer[cur_pos]->token == T_RES_ID && AsmBuffer[cur_pos]->value == T_DUP) {
         if (opndx.type != EXPR_CONST || opndx.string != NULL) {
+            DebugMsg(("array_item, error, opndx.type=%u, opndx.string=%X\n", opndx.type, opndx.string));
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
@@ -229,7 +232,7 @@ rescan:
         } else {
             returned_pos = array_item( sym, struct_sym, cur_pos, no_of_bytes, opndx.value );
             if( returned_pos == ERROR ) {
-                DebugMsg(("array_item exit 3, error\n"));
+                DebugMsg(("call array_item for DUP, count=%u, returned with error\n", opndx.value));
                 return( ERROR );
             }
             cur_pos = returned_pos;
@@ -250,6 +253,7 @@ rescan:
                 negative = TRUE;
             } else if (AsmBuffer[cur_pos]->token == '+' && AsmBuffer[cur_pos+1]->token == T_FLOAT)
                 cur_pos++;
+
             if (AsmBuffer[cur_pos]->token == T_FLOAT) {
                 if (!struct_field)
                     output_float( cur_pos, no_of_bytes, negative );
@@ -261,6 +265,7 @@ rescan:
                 }
                 cur_pos++;
             } else {
+                DebugMsg(("array_item EXPR_EMPTY, idx=%u, AsmBuffer->token=%X\n", cur_pos, AsmBuffer[cur_pos]->token));
                 AsmError(SYNTAX_ERROR);
                 return(ERROR);
             }
@@ -282,8 +287,21 @@ rescan:
 
                     break;
                 }
+                /* warn about initialized data in BSS */
+                if (struct_field == FALSE  &&
+                    CurrSeg != NULL &&
+                    CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS &&
+                    Parse_Pass == PASS_2 &&
+                    initwarn == FALSE) {
+                    AsmWarn( 2, INITIALIZED_DATA_NOT_SUPPORTED_IN_BSS_SEGMENT);
+                    initwarn = TRUE;
+                };
                 char_ptr = opndx.string;
                 string_len = strlen(opndx.string);
+
+                /* this code needs cleanup */
+                /* a string is possible for a simple data item, but also
+                 as a struct field initializer. */
                 if (struct_field == FALSE) {
                     if ((*char_ptr != '"') && (*char_ptr != '\'')) {
                         AsmError(UNEXPECTED_LITERAL_FOUND_IN_EXPRESSION);
@@ -291,12 +309,26 @@ rescan:
                     }
                     /* this shouldn't happen, but just to be safe */
                     if (string_len < 2) {
+                        DebugMsg(("array_item: error, string len=%d\n", string_len));
                         AsmError(SYNTAX_ERROR);
                         return(ERROR);
                     }
                     string_len -= 2;
                     char_ptr++;
+                } else if (struct_field == TRUE && struct_sym == NULL) {
+                    /* it's a struct field initializer */
+                    if ((*char_ptr == '"') || (*char_ptr == '\'')) {
+                        /* this shouldn't happen, but just to be safe */
+                        if (string_len < 2) {
+                            DebugMsg(("array_item: error, string len=%d\n", string_len));
+                            AsmError(SYNTAX_ERROR);
+                            return(ERROR);
+                        }
+                        string_len -= 2;
+                        char_ptr++;
+                    }
                 }
+
                 /* a string is only regarded as an array if item size is BYTE */
                 /* else it is regarded as ONE item */
                 if( no_of_bytes != 1 ) {
@@ -332,12 +364,12 @@ rescan:
                 }
                 if( !struct_field ) {
                     while( count < string_len ) {
-                        AsmDataByte( *char_ptr );
+                        OutputDataByte( *char_ptr );
                         char_ptr++;
                     count++;
                     }
                     while( count < no_of_bytes ) {
-                        AsmDataByte( 0 );
+                        OutputDataByte( 0 );
                         char_ptr++;
                         count++;
                     }
@@ -354,38 +386,49 @@ rescan:
                 /* it's NOT a string */
                 char_ptr = (char *)&opndx.value;
                 count = 0;
+                DebugMsg(("array_item: const (NOT string!) found, no_of_bytes=%u\n", no_of_bytes));
                 if( sym && Parse_Pass == PASS_1 ) {
                     update_sizes( sym, first, no_of_bytes );
                 }
                 if( !struct_field ) {
+                    /* warn about initialized data in BSS */
+                    if (CurrSeg != NULL &&
+                        CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS &&
+                        Parse_Pass == PASS_2 &&
+                        initwarn == FALSE) {
+                        AsmWarn( 2, INITIALIZED_DATA_NOT_SUPPORTED_IN_BSS_SEGMENT);
+                        initwarn = TRUE;
+                    };
                     /* the evaluator cannot handle types > 16 bytes */
                     /* so if a simple type is larger, clear anything
                      which is above */
                     if (no_of_bytes > 16) {
                         while( count < 16 ) {
-                            AsmDataByte( *(char_ptr++) );
+                            OutputDataByte( *(char_ptr++) );
                             count++;
                         }
                         tmp = 0;
                         if (opndx.xvalue < 0)
                             tmp = 0xFF;
                         while( count < no_of_bytes ) {
-                            AsmDataByte(tmp);
+                            OutputDataByte(tmp);
                             count++;
                         }
                     } else {
                         while( count < no_of_bytes ) {
-                            AsmDataByte( *(char_ptr++) );
+                            OutputDataByte( *(char_ptr++) );
                             count++;
                         }
                     }
-                    while (count < 4) {
-                        if (*(char_ptr) != 0 && *(char_ptr) != 0xFF) {
-                            AsmError(INITIALIZER_MAGNITUDE_TOO_LARGE);
-                            return(ERROR);
+                    if (Parse_Pass > PASS_1) {
+                        while (count < 4) {
+                            if (*(char_ptr) != 0 && *(char_ptr) != 0xFF) {
+                                AsmError(INITIALIZER_MAGNITUDE_TOO_LARGE);
+                                return(ERROR);
+                            }
+                            char_ptr++;
+                            count++;
                         }
-                        char_ptr++;
-                        count++;
                     }
                 } else {
                     UpdateStructSize(no_of_bytes);
@@ -397,13 +440,23 @@ rescan:
                 int i;
                 int fixup_type;
                 char *ptr;
-                long data = 0;
+//                long data = 0;
                 struct asmfixup     *fixup;
 
                 if (opndx.indirect == TRUE || opndx.sym == NULL) {
+                    DebugMsg(("array_item: EXPR_ADDR, error, indirect=%u, sym=%X\n", opndx.indirect, opndx.sym));
                     AsmError(SYNTAX_ERROR);
                     return(ERROR);
                 }
+
+                if (struct_field == FALSE &&
+                    CurrSeg != NULL &&
+                    CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS &&
+                    Parse_Pass == PASS_2 &&
+                    initwarn == FALSE) {
+                    AsmWarn( 2, INITIALIZED_DATA_NOT_SUPPORTED_IN_BSS_SEGMENT);
+                    initwarn = TRUE;
+                };
 
                 switch (opndx.instr) {
                 case T_SEG:
@@ -430,10 +483,9 @@ rescan:
                     fixup_type = FIX_LOBYTE;
                     break;
                 case T_HIGH:
-                    /* this is to be implemented */
-                    //                fixup_type = FIX_HIBYTE;
-                    AsmError( CONSTANT_EXPECTED );
-                    return( ERROR );
+                    fixup_type = FIX_HIBYTE;
+                    // AsmError( CONSTANT_EXPECTED );
+                    // return( ERROR );
                     break;
                 case T_LOWWORD:
                     if (no_of_bytes < 2) {
@@ -461,7 +513,7 @@ rescan:
                         }
                         break;
                     case 6:
-                        // fixme -- this needs work .... check USE_32, etc
+                        // fixme -- this needs work .... check Use32, etc
                         fixup_type = FIX_PTR32;
                         CodeInfo->info.opnd_type[OPND1] = OP_J48;
                         break;
@@ -477,12 +529,14 @@ rescan:
                 /* updates global vars Frame and Frame_Datum */
                 find_frame( opndx.sym );
 
-                /* uses Frame and Frame_Datum */
+                /* uses Frame, Frame_Datum and Opnd_Count */
                 fixup = AddFixup( opndx.sym, fixup_type, OPTJ_NONE );
-                // if( fixup == NULL ) return( ERROR );
-                // fixme
                 InsFixups[OPND1] = fixup;
-                data += fixup->offset;
+                // data += fixup->offset;
+
+                fixup->offset += opndx.value;
+
+                CodeInfo->data[OPND1] = fixup->offset;
 
                 if( store_fixup( 0 ) == ERROR )
                     return( ERROR );
@@ -492,17 +546,17 @@ rescan:
                 }
 
                 /* now actually output the data */
-                ptr = (char *)&data;
+                ptr = (char *)&CodeInfo->data[OPND1];
 
                 if( !struct_field ) {
                     /* only output up to 4 bytes of offset (segment is on fixup) */
                     for( i = 0; i < min( no_of_bytes, 4 ); i++ ) {
-                        AsmDataByte( *ptr );
+                        OutputDataByte( *ptr );
                         ptr++;
                     }
                     /* leave space for segment */
                     for( ; i < no_of_bytes; i++ ) {
-                        AsmDataByte( 0 );
+                        OutputDataByte( 0 );
                     }
                 } else {
                     UpdateStructSize(no_of_bytes);
@@ -513,6 +567,7 @@ rescan:
             AsmError(INVALID_USE_OF_REGISTER);
             return(ERROR);
         default:
+            DebugMsg(("array_item: error, opndx.type=%u\n", opndx.type));
             AsmError(SYNTAX_ERROR);
             return(ERROR);
         }
@@ -547,14 +602,17 @@ int data_init( int sym_loc, int initializer_loc)
     dir_node            *dir;
     uint                old_offset;
     int                 returned_loc;
+    int                 oldofs;
     char                label_dir = FALSE;
 
     struct_field = FALSE;
     first = TRUE;
+    initwarn = FALSE;
 
     DebugMsg(("data_init enter, sym_loc=%d, init_loc=%d\n", sym_loc, initializer_loc));
     if( (sym_loc >= 0) && (Definition.struct_depth == 0) ) {
         /* get/create the label */
+        /* it might be a code label if Masm v5.1 compatibility is enabled */
         DebugMsg(("data_init: calling SymLookup(%s)\n", AsmBuffer[sym_loc]->string_ptr));
         sym = SymLookup( AsmBuffer[sym_loc]->string_ptr );
         if( sym == NULL ) {
@@ -699,6 +757,12 @@ int data_init( int sym_loc, int initializer_loc)
                     AsmErr( SYMBOL_TYPE_CONFLICT, sym->name );
                 }
             }
+            /* add the label to the linked list attached to curr segment */
+            /* this allows to reduce the number of passes (see AsmFixup.c) */
+            if (CurrSeg) {
+                ((dir_node *)sym)->next = (dir_node *)CurrSeg->seg->e.seginfo->labels;
+                CurrSeg->seg->e.seginfo->labels = sym;
+            }
         } else {
             old_offset = sym->offset;
         }
@@ -738,6 +802,9 @@ int data_init( int sym_loc, int initializer_loc)
             struct_sym = NULL;
     }
 
+    if (AsmFiles.file[LST])
+        oldofs = GetCurrAddr();
+
     returned_loc = array_item( sym, struct_sym, initializer_loc + 1, no_of_bytes, 1 );
 
     if (returned_loc == ERROR) {
@@ -749,6 +816,9 @@ int data_init( int sym_loc, int initializer_loc)
         AsmError(SYNTAX_ERROR);
         return(ERROR);
     }
+
+    if (AsmFiles.file[LST])
+        WriteLstFile(LSTTYPE_LIDATA, oldofs, NULL);
 
     DebugMsg(("data_init: exit without error\n"));
     return( NOT_ERROR );

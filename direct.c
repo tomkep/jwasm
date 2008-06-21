@@ -29,31 +29,32 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
 #include <ctype.h>
 
+#include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
 #include "symbols.h"
 #include "directiv.h"
 #include "queues.h"
 #include "equate.h"
-#include "asmdefs.h"
-#include "asmfixup.h"
+#include "fixup.h"
 #include "mangle.h"
 #include "labels.h"
-#include "asminput.h"
+#include "input.h"
 #include "expreval.h"
 #include "types.h"
 #include "condasm.h"
 #include "hll.h"
 #include "macro.h"
+#include "proc.h"
 
 #include "myassert.h"
 
 /* prototypes */
 extern int              OrgDirective( int );
 extern int              AlignDirective( uint_16, int );
+extern const FNAME      *AddFlist( char const *filename );
 
 #define BIT16           0
 #define BIT32           1
@@ -67,23 +68,22 @@ extern int              AlignDirective( uint_16, int );
 
 extern int SegmentModulePrologue(int type);
 extern int SegmentModuleEnd(void);
-extern void DefFlatGroup( void );
+extern void DefineFlatGroup( void );
 extern void set_def_seg_name( void );
 
 enum {
 #undef fix
 #define fix( tok, str, val, init )              tok
 
-#include "directd.h"
+#include "dirtoken.h"
 };
-
 
 extern typeinfo TypeInfo[] = {
 
 #undef fix
 #define fix( tok, string, value, init_val )     { string, value, init_val }
 
-#include "directd.h"
+#include "dirtoken.h"
 };
 
 extern simpletype SimpleType[] = {
@@ -112,24 +112,17 @@ extern simpletype SimpleType[] = {
 //    { T_ABS,     MT_ABS,         0  }
 };
 
-#define DEFAULT_STACK_SIZE      1024
-
-
 static char             *Check4Mangler( int *i );
 static void             ModelAssumeInit( void );
-
-extern  char            write_to_file;  // write if there is no error
 
 extern  char            *proc_prologue;
 extern  char            *proc_epilogue;
 
-extern  uint_32         BufSize;        // buffer for emitted bytes curr seg
 extern char             EndDirectiveFound;
 extern struct asm_sym   *SegOverride;
 
-obj_rec                 *ModendRec;     // Record for Modend
-
-int                     in_prologue;
+obj_rec                 *ModendRec;     // Record for Modend (OMF)
+asm_sym                 *start_label;   // for COFF
 
 // this is for the segment registers:
 // DS=0, ES=1, SS=2, FS=3, GS=4, CS=5
@@ -145,7 +138,9 @@ static assume_info      StdAssumeTable[NUM_STDREGS];
 symbol_queue            Tables[TAB_LAST];// tables of definitions
 module_info             ModuleInfo;
 
-static char *StartupDosNear[] = {
+/* startup code for 8086 */
+
+static char *StartupDosNear0[] = {
         " mov     dx,DGROUP",
         " mov     ds,dx",
         " mov     bx,ss",
@@ -160,6 +155,20 @@ static char *StartupDosNear[] = {
         " sti     ",
         NULL
 };
+
+/* startup code for 80186+ */
+
+static char *StartupDosNear1[] = {
+        " mov     ax,DGROUP",
+        " mov     ds,ax",
+        " mov     bx,ss",
+        " sub     bx,ax",
+        " shl     bx,4",
+        " mov     ss,ax",
+        " add     sp,bx",
+        NULL
+};
+
 static char *StartupDosFar[] = {
         " mov     dx,DGROUP",
         " mov     ds,dx",
@@ -172,19 +181,17 @@ static char *ExitOS2[] = { /* mov al, retval  followed by: */
         " call far DOSEXIT",
         NULL
 };
-static char *ExitDos[] = { /* mov al, retval  followed by: */
+static char *ExitDos[] = {
         " mov     ah,4ch",
         " int     21h",
         NULL
 };
-static char *RetVal = " mov    al, ";
 
-static char *StartAddr = "`symbol_reserved_for_start_address`";
-static char StartupDirectiveFound = FALSE;
+static char *StartAddr = "@Startup";
+static char StartupDirectiveFound;
 
        uint             segdefidx;      // Number of Segment definition
 static uint             grpdefidx;      // Number of Group definition
-static uint             extdefidx;      // Number of External definition
 
 static dir_node *const_CodeSize  = { NULL };
 static dir_node *const_DataSize  = { NULL };
@@ -206,6 +213,7 @@ static dir_node * AddPredefinedConstant( char *name )
 
 
 #ifdef DEBUG_OUT
+#ifdef __WATCOMC__
 void heap( char *func ) // for debugging only
 /*********************/
 {
@@ -221,15 +229,18 @@ void heap( char *func ) // for debugging only
     }
 }
 #endif
+#endif
 
 void IdxInit( void )
 /******************/
 {
-    DebugMsg(("IdxInit: extdefidx reset to 0\n"));
+    DebugMsg(("IdxInit: lnames, segment+group idx reset to 0\n"));
     LnamesIdx   = 0;
     segdefidx   = 0;
     grpdefidx   = 0;
-    extdefidx   = 0;
+
+    memset(Tables, 0, sizeof(Tables));
+
 }
 
 void push( void *stk, void *elt )
@@ -264,7 +275,6 @@ void *peek( void *stk, int level )
     stacknode   *node = (stacknode *)(stk);
 
     for (;node && level;level--) {
-        DebugMsg(("peek: level=%u, node=%X\n", level, node));
         node = node->next;
     }
 
@@ -305,9 +315,26 @@ static void dir_init( dir_node *dir, int tab )
     case TAB_SEG:
         sym->state = SYM_SEG;
         dir->e.seginfo = AsmAlloc( sizeof( seg_info ) );
-        dir->e.seginfo->lname_idx = 0;
+        dir->e.seginfo->segrec = ObjNewRec( CMD_SEGDEF );
         dir->e.seginfo->group = NULL;
-        dir->e.seginfo->segrec = NULL;
+        dir->e.seginfo->num_relocs = 0;
+        dir->e.seginfo->lname_idx = 0;
+        dir->e.seginfo->labels = NULL;
+        dir->e.seginfo->Use32 = ModuleInfo.defUse32;
+        dir->e.seginfo->readonly = FALSE;
+        dir->e.seginfo->segtype = SEGTYPE_UNDEF;
+        dir->e.seginfo->LinnumQueue = NULL;
+        dir->e.seginfo->FixupListHead = NULL;
+        dir->e.seginfo->FixupListTail = NULL;
+        dir->e.seginfo->CodeBuffer = NULL;
+        dir->e.seginfo->start_loc = 0;
+        dir->e.seginfo->current_loc = 0;
+        dir->e.seginfo->segrec->d.segdef.align = ALIGN_PARA;
+        dir->e.seginfo->segrec->d.segdef.combine = COMB_INVALID;
+        /* null class name, in case none is mentioned */
+        dir->e.seginfo->segrec->d.segdef.class_name_idx = 1;
+        dir->e.seginfo->segrec->d.segdef.seg_length = 0;
+        dir->e.seginfo->segrec->d.segdef.access_valid = FALSE;
         break;
     case TAB_GRP:
         sym->state = SYM_GRP;
@@ -320,7 +347,6 @@ static void dir_init( dir_node *dir, int tab )
     case TAB_GLOBAL:
         sym->state = SYM_EXTERNAL;
         dir->e.extinfo = AsmAlloc( sizeof( ext_info ) );
-        dir->e.extinfo->idx = -1;
         dir->e.extinfo->use32 = Use32;
         dir->e.extinfo->comm = 0;
         dir->e.extinfo->weak = 1;
@@ -329,7 +355,6 @@ static void dir_init( dir_node *dir, int tab )
     case TAB_EXT:
         sym->state = SYM_EXTERNAL;
         dir->e.extinfo = AsmAlloc( sizeof( ext_info ) );
-        dir->e.extinfo->idx = ++extdefidx;
         dir->e.extinfo->use32 = Use32;
         dir->e.extinfo->comm = 0;
         dir->e.extinfo->weak = 0;
@@ -337,7 +362,6 @@ static void dir_init( dir_node *dir, int tab )
     case TAB_COMM:
         sym->state = SYM_EXTERNAL;
         dir->e.comminfo = AsmAlloc( sizeof( comm_info ) );
-        dir->e.comminfo->idx = ++extdefidx;
         dir->e.comminfo->use32 = Use32;
         dir->e.comminfo->comm = 1;
         tab = TAB_EXT;
@@ -349,11 +373,8 @@ static void dir_init( dir_node *dir, int tab )
         dir->e.procinfo->paralist = NULL;
         dir->e.procinfo->locallist = NULL;
         dir->e.procinfo->labellist = NULL;
-        dir->e.procinfo->ext = NULL;
         dir->e.procinfo->parasize = 0;
         dir->e.procinfo->localsize = 0;
-        dir->e.procinfo->idx = 0;
-//        dir->e.procinfo->mem_type = MT_EMPTY;
         dir->e.procinfo->is_vararg = FALSE;
         dir->e.procinfo->pe_type = FALSE;
         dir->e.procinfo->defined = FALSE;
@@ -367,14 +388,9 @@ static void dir_init( dir_node *dir, int tab )
         dir->e.macroinfo->locallist = NULL;
         dir->e.macroinfo->data = NULL;
         dir->e.macroinfo->srcfile = NULL;
-        dir->e.macroinfo->hidden = FALSE;
         dir->e.macroinfo->vararg = FALSE;
         dir->e.macroinfo->isfunc = FALSE;
         dir->e.macroinfo->redefined = FALSE;
-        return;
-    case TAB_TMACRO:
-        sym->state = SYM_TMACRO;
-        dir->sym.string_ptr = NULL;
         return;
     case TAB_CLASS_LNAME:
     case TAB_LNAME:
@@ -386,19 +402,23 @@ static void dir_init( dir_node *dir, int tab )
     case TAB_PUB:
         sym->public = TRUE;
         return;
-    case TAB_STRUCT:
+    case TAB_TYPE:
         sym->state = SYM_TYPE;
         dir->e.structinfo = AsmAlloc( sizeof( struct_info ) );
         dir->e.structinfo->head = NULL;
         dir->e.structinfo->tail = NULL;
         dir->e.structinfo->alignment = 0;
         dir->e.structinfo->isInline = FALSE;
+        dir->e.structinfo->isOpen = FALSE;
         dir->e.structinfo->isUnion = FALSE;
         dir->e.structinfo->isRecord = FALSE;
         dir->e.structinfo->isTypedef = FALSE;
         dir->e.structinfo->indirection = 0;
         return;
     case TAB_LIB:
+        break;
+    case TAB_ALIAS:
+        sym->state = SYM_ALIAS;
         break;
     default:
         // unknown table
@@ -432,9 +452,9 @@ static void RemoveFromTable( dir_node *dir )
     case SYM_PROC:
         tab = TAB_PROC;
         break;
-    case SYM_MACRO:
-        tab = TAB_MACRO;
-        break;
+//    case SYM_MACRO:
+//        tab = TAB_MACRO;
+//        break;
     default:
         dir->next = NULL;
         dir->prev = NULL;
@@ -469,19 +489,20 @@ dir_node *dir_insert( const char *name, int tab )
 
     /**/myassert( name != NULL );
 
-    /* don't put class lnames into the symbol table - separate name space */
     if (*name)
-        new = (dir_node *)SymCreate( name, ( tab != TAB_CLASS_LNAME ) );
+        new = (dir_node *)SymCreate( name, TRUE );
     else
-        new = (dir_node *)SymCreate( "", 0 );
+        new = (dir_node *)SymCreate( name, FALSE );
+
     if( new != NULL )
         dir_init( new, tab );
+
     return( new );
 }
 
 // alloc a dir_node and do NOT put it into the symbol table
-// used for (temporary) externals created for PROTO items
-// and nested STRUCTs
+// used for (temporary) externals created for PROTO items,
+// nested STRUCTs, class names, ...
 
 dir_node *dir_insert_ex( const char *name, int tab )
 {
@@ -489,9 +510,10 @@ dir_node *dir_insert_ex( const char *name, int tab )
 
     /**/myassert( name != NULL );
 
-    new = (dir_node *)SymCreate( name, 0 );
+    new = (dir_node *)SymCreate( name, FALSE );
     if( new != NULL )
         dir_init( new, tab );
+
     return( new );
 }
 
@@ -528,7 +550,6 @@ void dir_free( dir_node *dir, bool remove_from_table )
         break;
     case SYM_EXTERNAL:
         AsmFree( dir->e.extinfo );
-        extdefidx--;
         break;
     case SYM_LNAME:
     case SYM_CLASS_LNAME:
@@ -597,7 +618,7 @@ void dir_free( dir_node *dir, bool remove_from_table )
             for( parmcurr = dir->e.macroinfo->parmlist ;parmcurr; ) {
                 parmnext = parmcurr->next;
                 AsmFree( parmcurr->label );
-                AsmFree( parmcurr->replace );
+                /* AsmFree( parmcurr->replace ); */
                 AsmFree( parmcurr->def );
                 AsmFree( parmcurr );
                 parmcurr = parmnext;
@@ -635,7 +656,7 @@ void dir_free( dir_node *dir, bool remove_from_table )
             for( ptr = dir->e.structinfo->head; ptr != NULL; ptr = next ) {
                 /* bitfields field names are global, don't free them here! */
                 if (dir->e.structinfo->isRecord == FALSE)
-                    SymFree( ptr->fsym );
+                    SymFree( ptr->sym );
                 AsmFree( ptr->initializer );
                 AsmFree( ptr->value );
                 next = ptr->next;
@@ -712,16 +733,6 @@ uint checkword( char **token )
 
     *token = ptrhead;
     return( NOT_ERROR );
-}
-
-uint GetExtIdx( struct asm_sym *sym )
-/***********************************/
-{
-    dir_node            *dir;
-
-    dir = (dir_node *)sym;
-    /**/myassert( dir != NULL );
-    return( dir->e.extinfo->idx );
 }
 
 static int GetLangType( int *i )
@@ -812,7 +823,7 @@ int SizeFromMemtype( memtype type, bool is32 )
 // externdef [ attr ] symbol:type
 // called during Pass 1 only
 
-int GlobalDef( int i )
+static int ExterndefDirective( int i )
 /********************/
 {
     char                *token;
@@ -826,7 +837,7 @@ int GlobalDef( int i )
     dir_node            *dir;
     int                 lang_type;
 
-    DebugMsg(("GlobalDef entry\n"));
+    DebugMsg(("ExterndefDirective entry\n"));
 
     mangle_type = Check4Mangler( &i );
     for( ; i < Token_Count; ) {
@@ -865,7 +876,7 @@ int GlobalDef( int i )
         }
 
         if( type == ERROR ) {
-            if( !(symtype = IsLabelStruct( AsmBuffer[i]->string_ptr ) ) ) {
+            if( !(symtype = IsLabelType( AsmBuffer[i]->string_ptr ) ) ) {
                 AsmError( INVALID_QUALIFIED_TYPE );
                 return( ERROR );
             }
@@ -898,7 +909,7 @@ int GlobalDef( int i )
         /* ensure that the type of the symbol won't change */
 
         if (sym->state == SYM_EXTERNAL && sym->mem_type == MT_EMPTY) {
-            DebugMsg(("GlobalDef: type set for %s\n", sym->name));
+            DebugMsg(("ExterndefDirective: type set for %s\n", sym->name));
             if (type != MT_ABS)
                 SetSymSegOfs(sym);
             sym->offset = 0;
@@ -917,7 +928,7 @@ int GlobalDef( int i )
             /* if the symbol is already defined (as SYM_INTERNAL), Masm
              won't display an error. The other way, first externdef and
              then the definition, will make Masm complain, however */
-            DebugMsg(("GlobalDef: type conflict for %s\n", sym->name));
+            DebugMsg(("ExterndefDirective: type conflict for %s\n", sym->name));
             AsmWarn( 1, SYMBOL_TYPE_CONFLICT, sym->name );
         }
 
@@ -958,6 +969,16 @@ int EchoDef( int i )
     return( NOT_ERROR );
 }
 
+// set Masm v5.1 compatibility options
+
+void SetMasm510(bool value)
+{
+    ModuleInfo.m510 = value;
+    ModuleInfo.scoped = !value;
+    ModuleInfo.oldstructs = value;
+    return;
+}
+
 // handle some of MASM's OPTIONs
 
 extern int              get_instruction_position( char *string );
@@ -970,9 +991,8 @@ int OptionDef( int i )
     switch (AsmBuffer[i]->token) {
     case T_DIRECTIVE:
         switch (AsmBuffer[i]->value) {
-        case T_PROC:
+        case T_PROC: /* OPTION PROC:PRIVATE | PUBLIC | EXPORT? */
             i++;
-            /* OPTION PROC:PRIVATE | PUBLIC | EXPORT? */
             if (AsmBuffer[i]->token != T_COLON) {
                 AsmError( COLON_EXPECTED );
                 return( ERROR );
@@ -981,23 +1001,46 @@ int OptionDef( int i )
             switch (AsmBuffer[i]->token) {
             case T_ID:
                 if (0 == stricmp(AsmBuffer[i]->string_ptr,"PRIVATE")) {
-                    Options.procs_private = TRUE;
-                    Options.procs_export = FALSE;
+                    ModuleInfo.procs_private = TRUE;
+                    ModuleInfo.procs_export = FALSE;
                     return( NOT_ERROR );
                 }
                 if (0 == stricmp(AsmBuffer[i]->string_ptr,"EXPORT")) {
-                    Options.procs_private = FALSE;
-                    Options.procs_export = TRUE;
+                    ModuleInfo.procs_private = FALSE;
+                    ModuleInfo.procs_export = TRUE;
                     return( NOT_ERROR );
                 }
                 break;
             case T_RES_ID:
                 if (AsmBuffer[i]->value == T_PUBLIC) {
-                    Options.procs_private = FALSE;
-                    Options.procs_export = FALSE;
+                    ModuleInfo.procs_private = FALSE;
+                    ModuleInfo.procs_export = FALSE;
                     return( NOT_ERROR );
                 }
             }
+            break;
+        case T_SEGMENT:/* OPTION SEGMENT:USE16|USE32|FLAT */
+            i++;
+            if (AsmBuffer[i]->token != T_COLON) {
+                AsmError( COLON_EXPECTED );
+                return( ERROR );
+            }
+            i++;
+            if (AsmBuffer[i]->token == T_RES_ID &&
+                AsmBuffer[i+1]->token == T_FINAL &&
+                (AsmBuffer[i]->value == T_USE16 ||
+                 AsmBuffer[i]->value == T_USE32 ||
+                 AsmBuffer[i]->value == T_FLAT)) {
+                if (AsmBuffer[i]->value == T_USE16)
+                    ModuleInfo.defUse32 = FALSE;
+                else
+                    ModuleInfo.defUse32 = TRUE;
+                return(NOT_ERROR);
+            } else {
+                AsmError( SYNTAX_ERROR );
+                return( ERROR );
+            }
+            break;
         }
         break;
     case T_UNARY_OPERATOR:
@@ -1031,14 +1074,14 @@ int OptionDef( int i )
             i++;
             if (AsmBuffer[i]->token == T_ID) {
                 if (0 == stricmp(AsmBuffer[i]->string_ptr,"NONE")) {
-                    Options.nocasemap = TRUE;
+                    ModuleInfo.nocasemap = TRUE;
                     SymSetCmpFunc(TRUE);
                     i++;
                 } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"NOTPUBLIC")) {
-                    AsmWarn( 4, IGNORING_DIRECTIVE );
+                    AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[i-2]->string_ptr );
                     i++;
                 } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"ALL")) {
-                    Options.nocasemap = FALSE;
+                    ModuleInfo.nocasemap = FALSE;
                     SymSetCmpFunc(FALSE);
                     i++;
                 }
@@ -1049,12 +1092,59 @@ int OptionDef( int i )
         }
         /* OPTION DOTNAME? */
         if (0 == stricmp(AsmBuffer[i]->string_ptr,"DOTNAME")) {
-            /* AsmWarn( 4, IGNORING_DIRECTIVE ); */
+            /* AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[i]->string_ptr ); */
             return( NOT_ERROR );
         }
         /* OPTION NODOTNAME? */
         if (0 == stricmp(AsmBuffer[i]->string_ptr,"NODOTNAME")) {
-            AsmWarn( 4, IGNORING_DIRECTIVE );
+            AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[i]->string_ptr );
+            return( NOT_ERROR );
+        }
+        /* OPTION M510? */
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"M510")) {
+            SetMasm510(TRUE);
+            return( NOT_ERROR );
+        }
+        /* OPTION NOM510? */
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"NOM510")) {
+            SetMasm510(FALSE);
+            return( NOT_ERROR );
+        }
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"SCOPED")) {
+            ModuleInfo.scoped = TRUE;
+            return( NOT_ERROR );
+        }
+        /* OPTION NOOLDSTRUCTS? */
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"NOSCOPED")) {
+            ModuleInfo.scoped = FALSE;
+            return( NOT_ERROR );
+        }
+        /* OPTION OLDSTRUCTS? */
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"OLDSTRUCTS")) {
+            ModuleInfo.oldstructs = TRUE;
+            return( NOT_ERROR );
+        }
+        /* OPTION NOOLDSTRUCTS? */
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"NOOLDSTRUCTS")) {
+            ModuleInfo.oldstructs = FALSE;
+            return( NOT_ERROR );
+        }
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"EMULATOR")) {
+            ModuleInfo.emulator = TRUE;
+            return( NOT_ERROR );
+        }
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"NOEMULATOR")) {
+            ModuleInfo.emulator = FALSE;
+            return( NOT_ERROR );
+        }
+        /* OPTION LJMP? */
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"LJMP")) {
+            ModuleInfo.ljmp = TRUE;
+            return( NOT_ERROR );
+        }
+        /* OPTION NOLJMP? */
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"NOLJMP")) {
+            ModuleInfo.ljmp = FALSE;
             return( NOT_ERROR );
         }
         /* OPTION EXPR32? */
@@ -1087,6 +1177,28 @@ int OptionDef( int i )
             p->rm_byte = p->rm_byte & ~(OP_RES_ID | OP_UNARY_OPERATOR);
             return(NOT_ERROR);
         }
+
+        if (0 == stricmp(AsmBuffer[i]->string_ptr,"LANGUAGE")) {
+            int language = ERROR;
+            i++;
+            if (AsmBuffer[i]->token != T_COLON) {
+                AsmError( COLON_EXPECTED );
+                return( ERROR );
+            }
+            i++;
+            if (AsmBuffer[i]->token == T_RES_ID)
+                language = token_cmp( AsmBuffer[i]->string_ptr, TOK_PROC_BASIC, TOK_PROC_SYSCALL );
+
+            if (language == ERROR || AsmBuffer[i+1]->token != T_FINAL) {
+                AsmError( SYNTAX_ERROR );
+                return( ERROR );
+            }
+
+            ModuleInfo.langtype = TypeInfo[language].value;
+
+            return(NOT_ERROR);
+        }
+
         /* OPTION PROLOGUE?
          prologue must be a macro function with 6 params:
          name macro procname, flag, parmbytes, localbytes, <reglist>, userparms
@@ -1206,7 +1318,7 @@ asm_sym *MakeExtern( char *name, memtype mem_type, struct asm_sym * vartype, asm
     return( sym );
 }
 
-int ExtDef( int i )
+static int ExternDef( int i )
 /*****************/
 {
     char                *token;
@@ -1253,7 +1365,7 @@ int ExtDef( int i )
         }
 
         if( type == ERROR ) {
-            if( !(symtype = IsLabelStruct( typetoken ) ) ) {
+            if( !(symtype = IsLabelType( typetoken ) ) ) {
                 AsmError( INVALID_QUALIFIED_TYPE );
                 return( ERROR );
             }
@@ -1301,7 +1413,7 @@ static char *Check4Mangler( int *i )
     return( mangle_type );
 }
 
-int PubDef( int i )
+static int PublicDirective( int i )
 /*****************/
 {
     char                *mangle_type = NULL;
@@ -1326,29 +1438,39 @@ int PubDef( int i )
         }
 
         sym = SymSearch( token );
+        if (Parse_Pass != PASS_1 && (sym == NULL || sym->state == SYM_UNDEFINED)) {
+            AsmErr( SYMBOL_NOT_DEFINED, sym->name );
+            return(ERROR);
+        }
         if( sym != NULL ) {
             dir = (dir_node *)sym;
-            if (sym->state != SYM_INTERNAL &&
-                sym->state != SYM_UNDEFINED &&
-                sym->state != SYM_EXTERNAL) {
+            if (sym->state != SYM_UNDEFINED &&
+                sym->state != SYM_INTERNAL &&
+                sym->state != SYM_EXTERNAL &&
+                sym->state != SYM_PROC) {
                 AsmErr(CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name);
+                return(ERROR);
+            }
+            if (sym->state == SYM_INTERNAL && sym->local == TRUE) {
+                AsmErr( CANNOT_DECLARE_SCOPED_CODE_LABEL_AS_PUBLIC, sym->name );
                 return(ERROR);
             }
             if (sym->state == SYM_EXTERNAL && dir->e.extinfo->weak != TRUE) {
                 AsmErr( SYMBOL_REDEFINITION, sym->name );
                 return(ERROR);
             }
-            if( !sym->public ) {
+            if( Parse_Pass == PASS_1 && sym->public == FALSE) {
                 /* put it into the pub table */
                 sym->public = TRUE;
                 AddPublicData( dir );
             }
-        } else {
+        } else if (Parse_Pass == PASS_1) {
             dir = dir_insert( token, TAB_PUB );
             AddPublicData( dir );
             sym = &dir->sym;
         }
-        SetMangler( sym, mangle_type, lang_type );
+        if (Parse_Pass == PASS_1)
+            SetMangler( sym, mangle_type, lang_type );
     }
     return( NOT_ERROR );
 }
@@ -1372,15 +1494,13 @@ int token_cmp( char *token, int start, int end )
     return( ERROR );        // No type is found
 }
 
-
-
 // INCLUDE directive
 // there's something missing currently: if a full
 // path is specified, the directory where the included file is located
 // becomes the "source" directory, that is, it is searched FIRST if further
 // INCLUDE directives are found inside the included file.
 
-int Include( int i )
+static int IncludeDirective( int i )
 /******************/
 {
     switch( AsmBuffer[i]->token ) {
@@ -1394,7 +1514,9 @@ int Include( int i )
     }
 }
 
-int IncludeLib( int i )
+// called during pass 1
+
+static int IncludeLibDirective( int i )
 /*********************/
 {
     char *name;
@@ -1406,6 +1528,8 @@ int IncludeLib( int i )
         return( ERROR );
     }
 
+    /* good idea to have the libs in the symbol namespace? Doubt it. */
+
     sym = SymSearch( name );
     if( sym == NULL ) {
         // fixme
@@ -1416,9 +1540,9 @@ int IncludeLib( int i )
     return( NOT_ERROR );
 }
 
+// .STARTUP and .EXIT
 
-
-int Startup( int i )
+static int Startup( int i )
 /******************/
 {
     /* handles .STARTUP directive */
@@ -1435,13 +1559,23 @@ int Startup( int i )
     switch( AsmBuffer[i]->value ) {
     case T_DOT_STARTUP:
         count = 0;
+        if (ModuleInfo.model == MOD_TINY)
+            InputQueueLine( "org 100h" );
         strcpy( buffer, StartAddr );
-        strcat( buffer, ":" );
+        strcat( buffer, "::" );
         InputQueueLine( buffer );
         if( ModuleInfo.ostype == OPSYS_DOS ) {
-            if( ModuleInfo.distance == STACK_NEAR ) {
-                while( StartupDosNear[count] != NULL ) {
-                    InputQueueLine( StartupDosNear[count++] );
+            char **p;
+            if (ModuleInfo.model == MOD_TINY)
+                ;
+            else if( ModuleInfo.distance == STACK_NEAR ) {
+                if ( (ModuleInfo.cpu & 0x7F) <= 1)
+                    p = &StartupDosNear0;
+                else
+                    p = &StartupDosNear1;
+                while( *p != NULL ) {
+                    InputQueueLine( *p );
+                    p++;
                 }
             } else {
                 while( StartupDosFar[count] != NULL ) {
@@ -1453,13 +1587,16 @@ int Startup( int i )
         break;
     case T_DOT_EXIT:
         i++;
+        count = 0;
         if( ( AsmBuffer[i]->string_ptr != NULL )
             && ( *(AsmBuffer[i]->string_ptr) != '\0' ) ) {
-            strcpy( buffer, RetVal );
-            strcat( buffer, AsmBuffer[i]->string_ptr );
+            if( ModuleInfo.ostype == OPSYS_DOS ) {
+                sprintf( buffer, "mov ax,4C00h+(%s and 0FFh)", AsmBuffer[i]->string_ptr);
+            } else
+                sprintf( buffer, "mov ax, %s", AsmBuffer[i]->string_ptr);
             InputQueueLine( buffer );
+            count++;
         }
-        count = 0;
         if( ModuleInfo.ostype == OPSYS_DOS ) {
             while( ExitDos[count] != NULL ) {
                 InputQueueLine( ExitDos[count++] );
@@ -1476,13 +1613,14 @@ int Startup( int i )
     return( NOT_ERROR );
 }
 
+// called by SetModel(), in pass one only!
 
 static void module_prologue( int type )
 /*************************************/
 /* Generates codes for .MODEL; based on optasm pg.142-146 */
 {
     int         bit;
-    dir_node    *dir;
+    asm_sym     *sym;
 
     bit = ( ModuleInfo.defUse32 ) ? BIT32 : BIT16;
 
@@ -1504,10 +1642,11 @@ static void module_prologue( int type )
         const_CodeSize->sym.offset = 0;
         break;
     }
-    dir = dir_insert( "@code", TAB_TMACRO );
-    dir->sym.defined = TRUE;
-    dir->sym.predefined = TRUE;
-    dir->sym.string_ptr = Options.text_seg;
+    sym = SymCreate( "@code", TRUE );
+    sym->state = SYM_TMACRO;
+    sym->defined = TRUE;
+    sym->predefined = TRUE;
+    sym->string_ptr = Options.text_seg;
 
     const_DataSize = AddPredefinedConstant( "@DataSize" );
     const_DataSize->sym.mem_type = MT_ABS;
@@ -1526,21 +1665,23 @@ static void module_prologue( int type )
         break;
     }
 
-    dir = dir_insert( "@data", TAB_TMACRO );
-    dir->sym.defined = TRUE;
-    dir->sym.predefined = TRUE;
+    sym = SymCreate( "@data", TRUE );
+    sym->state = SYM_TMACRO;
+    sym->defined = TRUE;
+    sym->predefined = TRUE;
     if (type == MOD_FLAT)
-        dir->sym.string_ptr = "FLAT";
+        sym->string_ptr = "FLAT";
     else
-        dir->sym.string_ptr = "DGROUP";
+        sym->string_ptr = "DGROUP";
 
-    dir = dir_insert( "@stack", TAB_TMACRO );
-    dir->sym.defined = TRUE;
-    dir->sym.predefined = TRUE;
+    sym = SymCreate( "@stack", TRUE );
+    sym->state = SYM_TMACRO;
+    sym->defined = TRUE;
+    sym->predefined = TRUE;
     if (type == MOD_FLAT)
-        dir->sym.string_ptr = "FLAT";
+        sym->string_ptr = "FLAT";
     else
-        dir->sym.string_ptr = "DGROUP";
+        sym->string_ptr = "DGROUP";
 
     /* Set @Model */
     const_Model = AddPredefinedConstant( "@Model" );
@@ -1553,9 +1694,14 @@ static void module_prologue( int type )
     const_Interface->sym.offset = ModuleInfo.langtype;
 }
 
+// called by write_init(), once per source module
+// symbol table has been initialized
+
 void ModuleInit( void )
 /*********************/
 {
+    ModuleInfo.error_count = 0;
+    ModuleInfo.warning_count = 0;
     ModuleInfo.model = MOD_NONE;
     ModuleInfo.distance = STACK_NONE;
     ModuleInfo.langtype = LANG_NONE;
@@ -1564,10 +1710,28 @@ void ModuleInit( void )
     ModuleInfo.defUse32 = FALSE;
     ModuleInfo.cmdline = FALSE;
     ModuleInfo.mseg = FALSE;
+    // these values are initialized for each pass in ProcInit()
+    // ModuleInfo.procs_private = FALSE;
+    // ModuleInfo.procs_export = FALSE;
+    ModuleInfo.nocasemap = Options.nocasemap;
+    ModuleInfo.ljmp = TRUE;
+    ModuleInfo.emulator = (Options.floating_point == DO_FP_EMULATION);
+    SymSetCmpFunc(ModuleInfo.nocasemap);
+    SetMasm510(Options.masm51_compat);
+    ModuleInfo.list = Options.write_listing;
+    ModuleInfo.cref = TRUE;
+    ModuleInfo.dosseg = FALSE;
     ModuleInfo.flat_idx = 0;
     *ModuleInfo.name = 0;
     // add source file to autodependency list
     ModuleInfo.srcfile = AddFlist( AsmFiles.fname[ASM] );
+
+    StartupDirectiveFound = FALSE;
+
+    const_CurSeg = (dir_node *)SymCreate("@CurSeg", TRUE );
+    const_CurSeg->sym.state = SYM_TMACRO;
+    const_CurSeg->sym.defined = TRUE;
+    const_CurSeg->sym.predefined = TRUE;
 }
 
 static void get_module_name( void )
@@ -1601,6 +1765,7 @@ int SetModel( int i )
     uint        type;           // type of option
 
     if( Parse_Pass != PASS_1 ) {
+        SegmentModulePrologue( ModuleInfo.model );
         ModelAssumeInit();
         return( NOT_ERROR );
     }
@@ -1643,13 +1808,14 @@ int SetModel( int i )
         }
         switch( type ) {
         case TOK_FLAT:
-            DefFlatGroup();
+            DefineFlatGroup();
             SetUse32Def( TRUE );
             // fall through
         case TOK_TINY:
-        case TOK_SMALL:
-        case TOK_COMPACT:
-        case TOK_MEDIUM:
+        case TOK_SMALL:   /* near code, near data */
+        case TOK_MEDIUM:  /* far code, near data */
+            ModuleInfo.distance = STACK_NEAR;
+        case TOK_COMPACT: /* near data, far code */
         case TOK_LARGE:
         case TOK_HUGE:
             ModuleInfo.model = TypeInfo[type].value;
@@ -1683,7 +1849,7 @@ int SetModel( int i )
     }
 
     if( ( initstate & INIT_MEMORY ) == 0 ) {
-        AsmError( MEMORY_NOT_FOUND );
+        AsmError( NO_MEMORY_MODEL_FOUND );
         return( ERROR );
     }
 
@@ -1705,11 +1871,6 @@ void AssumeInit( void )
     for( reg = 0; reg < NUM_STDREGS; reg++ ) {
         StdAssumeTable[reg].symbol = NULL;
         StdAssumeTable[reg].error = FALSE;
-    }
-    if (const_CurSeg == NULL) {
-        const_CurSeg = dir_insert("@CurSeg", TAB_TMACRO );
-        const_CurSeg->sym.defined = TRUE;
-        const_CurSeg->sym.predefined = TRUE;
     }
 }
 
@@ -1765,7 +1926,7 @@ struct asm_sym * GetStdAssume(int reg)
     return (StdAssumeTable[reg].symbol);
 }
 
-int SetAssume( int i )
+static int AssumeDirective( int i )
 /********************/
 /* Handles ASSUME statement
  syntax is :
@@ -1870,7 +2031,7 @@ int SetAssume( int i )
                 AsmError( SYNTAX_ERROR );
                 return( ERROR );
             };
-            DefFlatGroup();
+            DefineFlatGroup();
             info->flat = TRUE;
             info->error = FALSE;
             info->symbol = NULL;
@@ -1886,7 +2047,7 @@ int SetAssume( int i )
                     type = FindSimpleType(AsmBuffer[segloc]->value);
                 }
                 if (type == ERROR) {
-                    sym = IsLabelStruct(AsmBuffer[segloc]->string_ptr);
+                    sym = IsLabelType(AsmBuffer[segloc]->string_ptr);
                     if (sym == NULL) {
                         AsmErr( QUALIFIED_TYPE_EXPECTED, segloc );
                         return( ERROR );
@@ -1914,10 +2075,6 @@ int SetAssume( int i )
     }
     return( NOT_ERROR );
 }
-
-
-
-
 
 static enum assume_segreg search_assume( struct asm_sym *sym,
                          enum assume_segreg def, int override )
@@ -1953,22 +2110,24 @@ static enum assume_segreg search_assume( struct asm_sym *sym,
     return( ASSUME_NOTHING );
 }
 
+// if count == 1, there's NO start address
+// if count > 1, there's one.
 
-int ModuleEnd( int count )
+int process_address(expr_list *);
+
+static int EndDirective( int i )
 /************************/
 {
     struct fixup        *fixup;
+    expr_list           opndx;
+    struct asmfixup     *fix;
+    asm_sym             *sym;
 
     if (SegmentModuleEnd() == EMPTY)
         return(NOT_ERROR);
 
-    if( Parse_Pass == PASS_1 ) {
-        EndDirectiveFound = TRUE;
-        return( NOT_ERROR );
-    }
-
     if( StartupDirectiveFound ) {
-        if( count == 2 ) {
+        if( i > 1 ) {
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
@@ -1981,83 +2140,90 @@ int ModuleEnd( int count )
 
     EndDirectiveFound = TRUE;
 
-    ModendRec = ObjNewRec( CMD_MODEND );
-    ModendRec->d.modend.main_module = FALSE;
-
-    if( count == 1 ) {
-        ModendRec->d.modend.start_addrs = FALSE;
-        return( NOT_ERROR );
+    if( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR ) {
+        return( ERROR );
+    }
+    if( AsmBuffer[i]->token != T_FINAL) {
+        AsmError(SYNTAX_ERROR);
+        return( ERROR );
     }
 
-    ModendRec->d.modend.start_addrs = TRUE;
-    ModendRec->d.modend.is_logical = TRUE;
-
-    if( AsmBuffer[1]->token != T_ID ) {
+    if( opndx.empty)
+        ;
+    else if ( opndx.type == EXPR_ADDR ) {
+        Modend = TRUE;
+        process_address( &opndx );
+        fix = InsFixups[0];
+        if (fix)
+            sym = fix->sym;
+        if (fix == NULL || sym == NULL) {
+            AsmError( INVALID_START_ADDRESS );
+            return( ERROR );
+        } else if (sym->state == SYM_INTERNAL || sym->state == SYM_EXTERNAL || sym->state == SYM_PROC) {
+            if (sym->mem_type == MT_NEAR || sym->mem_type == MT_FAR || sym->mem_type == MT_PROC)
+                ;
+            else {
+                AsmError( MUST_BE_ASSOCIATED_WITH_CODE );
+                return( ERROR );
+            }
+        } else {
+            AsmError( INVALID_START_ADDRESS );
+            return( ERROR );
+        }
+    } else {
         AsmError( INVALID_START_ADDRESS );
         return( ERROR );
     }
-    ModendRec->d.modend.main_module = TRUE;
 
-    fixup = CreateFixupRec( 0 );
-    if( fixup == NULL ) {
-        return( ERROR );
+    if (Options.output_format == OFORMAT_OMF) {
+        ModendRec = ObjNewRec( CMD_MODEND );
+        ModendRec->d.modend.main_module = FALSE;
+
+        if( opndx.empty == TRUE ) {
+            ModendRec->d.modend.start_addrs = FALSE;
+            return( NOT_ERROR );
+        }
+
+        ModendRec->d.modend.start_addrs = TRUE;
+        ModendRec->d.modend.is_logical = TRUE;
+        ModendRec->d.modend.main_module = TRUE;
+
+        fix->offset = sym->offset + opndx.value;
+        fixup = CreateFixupRec( 0 );
+        if( fixup == NULL ) {
+            return( ERROR );
+        }
+        ModendRec->d.modend.ref.log = fixup->lr;
+    } else {
+
+        if (opndx.empty == TRUE )
+            return( NOT_ERROR );
+
+        if (sym->state != SYM_EXTERNAL && sym->public == FALSE) {
+            AddPublicData((dir_node *)sym);
+            sym->public = TRUE;
+        }
+        start_label = sym;
     }
-    ModendRec->d.modend.ref.log = fixup->lr;
     return( NOT_ERROR );
-}
-
-int Comment( int what_to_do, int i  )
-/***********************************/
-{
-    static int in_comment = FALSE;
-    static char delim_char;
-
-    switch( what_to_do ) {
-    case QUERY_COMMENT:
-        return( in_comment );
-    case QUERY_COMMENT_DELIM:
-        /* return delimiting character */
-        return( (int)delim_char );
-        break;
-    case START_COMMENT:
-        i++;
-        if( AsmBuffer[i]->string_ptr == NULL ) {
-            AsmError( COMMENT_DELIMITER_EXPECTED );
-            return( ERROR );
-        }
-        delim_char = *(AsmBuffer[i]->string_ptr+strspn(AsmBuffer[i]->string_ptr," \t") );
-        if( ( delim_char == NULL )
-            || ( strchr( AsmBuffer[i]->string_ptr, delim_char ) == NULL ) ) {
-            AsmError( COMMENT_DELIMITER_EXPECTED );
-            return( ERROR );
-        }
-        if( strchr( AsmBuffer[i]->string_ptr, delim_char )
-            != strrchr( AsmBuffer[i]->string_ptr, delim_char ) ) {
-            /* we have COMMENT delim. ..... delim. -- only 1 line */
-        } else {
-            in_comment = TRUE;
-        }
-        return( NOT_ERROR );
-    case END_COMMENT:
-        in_comment = FALSE;
-        return( NOT_ERROR );
-    }
-    return( ERROR );
 }
 
 /*
  OW Wasm assumed the syntax is
  alias_name ALIAS substitute_name
  bug MASM accepts
- ALIAS <alias_name> = <substitute_name>
+ ALIAS <alias_name> = <actual_name>
  only!
+ <actual_name> is the name which is used in the source (it still must
+ be defined somewhere, internal or external!).
+ <alias_name> must NOT be defined elsewhere in the source!
 */
 
-int AddAlias( int i )
+static int AliasDirective( int i )
 /*******************/
 {
-    /* takes directive of form: <alias_name> alias <substitute_name> */
     char *tmp;
+    asm_sym *sym;
 
     if (( i != 0 ) || (Token_Count < 4) ||
         ((AsmBuffer[i+2]->token != T_DIRECTIVE) && (AsmBuffer[i+2]->value != T_EQU2))) {
@@ -2074,22 +2240,36 @@ int AddAlias( int i )
         return( ERROR );
     }
 
-    /* add this alias to the alias queue */
+    /* make sure <alias_name> isn't defined elsewhere */
+    sym = SymSearch(AsmBuffer[i]->string_ptr);
+    if (sym != NULL) {
+        if (sym->state != SYM_ALIAS || (strcmp(sym->string_ptr, AsmBuffer[i+2]->string_ptr) != 0)) {
+            AsmErr(SYMBOL_REDEFINITION, AsmBuffer[i]->string_ptr);
+            return(ERROR);
+        }
+        /* ignore multiple definitions */
+        return(NOT_ERROR);
+    }
 
-    /* aliases are stored as:  <len><alias_name><len><substitute_name> */
-
-    tmp = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) +
-                    strlen( AsmBuffer[i+2]->string_ptr ) + 2 );
-    AddAliasData( tmp );
-
-    strcpy( tmp, AsmBuffer[i]->string_ptr );
-    tmp += strlen( tmp ) + 1 ;
-    strcpy( tmp, AsmBuffer[i+2]->string_ptr );
-
+    if (Parse_Pass != PASS_1) {
+        /* for COFF, make sure <actual_name> is defined elsewhere */
+        if (Parse_Pass == PASS_2 && Options.output_format == OFORMAT_COFF) {
+            sym = SymSearch(AsmBuffer[i+2]->string_ptr);
+            if (sym == NULL ||
+                (sym->state != SYM_INTERNAL && sym->state != SYM_EXTERNAL && sym->state != SYM_PROC)) {
+                AsmErr(SYMBOL_NOT_DEFINED, AsmBuffer[i+2]->string_ptr);
+                return(ERROR);
+            }
+        }
+    } else {
+        sym = (asm_sym *)dir_insert(AsmBuffer[i]->string_ptr, TAB_ALIAS);
+        sym->string_ptr = AsmAlloc( strlen( AsmBuffer[i+2]->string_ptr ) + 1 );
+        strcpy( sym->string_ptr, AsmBuffer[i+2]->string_ptr );
+    }
     return( NOT_ERROR );
 }
 
-int NameDirective( int i )
+static int NameDirective( int i )
 /************************/
 {
     if( Options.module_name != NULL )
@@ -2097,6 +2277,35 @@ int NameDirective( int i )
     Options.module_name = AsmAlloc( strlen( AsmBuffer[i+1]->string_ptr ) + 1 );
     strcpy( Options.module_name, AsmBuffer[i+1]->string_ptr );
     return( NOT_ERROR );
+}
+
+// .RADIX directive
+// currently only 10 is accepted
+
+static int RadixDirective( int i )
+{
+    expr_list       opndx;
+
+    if (EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR)
+        return( ERROR );
+    if (opndx.type != EXPR_CONST || opndx.string != NULL) {
+        AsmError(CONSTANT_EXPECTED);
+        return( ERROR );
+    }
+    if (opndx.value > 16 || opndx.value < 2) {
+        AsmError( INVALID_RADIX_TAG );
+        return( ERROR );
+    }
+    /* todo: accept radix other than 10 */
+    if (opndx.value != 10) {
+        AsmError( NOT_SUPPORTED );
+        return( ERROR );
+    }
+    if (AsmBuffer[i]->token != T_FINAL) {
+        AsmError(SYNTAX_ERROR);
+        return( ERROR );
+    }
+    return(NOT_ERROR);
 }
 
 static int MakeComm(
@@ -2143,7 +2352,7 @@ static int MakeComm(
  COMM [langtype] [NEAR|FAR] label:type[:count]
  */
 
-int CommDef( int i )
+static int CommDirective( int i )
 /******************/
 {
     char            *token;
@@ -2284,25 +2493,15 @@ int directive( int i, long direct )
     case T_DOT_XMM3:
         ret = cpu_directive(direct);
         if( Parse_Pass != PASS_1 ) ret = NOT_ERROR;
+        if (AsmBuffer[i+1]->token != T_FINAL)
+            AsmError(SYNTAX_ERROR);
         return( ret );
     case T_DOT_DOSSEG:
     case T_DOSSEG:
-        Globals.dosseg = TRUE;
+        ModuleInfo.dosseg = TRUE;
         return( NOT_ERROR );
     case T_PUBLIC:
-        return( Parse_Pass == PASS_1 ? PubDef(i+1) : NOT_ERROR );
-    case T_DOT_ERR:
-    case T_DOT_ERRB:
-    case T_DOT_ERRDEF:
-    case T_DOT_ERRDIF:
-    case T_DOT_ERRDIFI:
-    case T_DOT_ERRE:
-    case T_DOT_ERRIDN:
-    case T_DOT_ERRIDNI:
-    case T_DOT_ERRNB:
-    case T_DOT_ERRNDEF:
-    case T_DOT_ERRNZ:
-        return( conditional_error_directive( i ) );
+        return( PublicDirective(i+1) );
     case T_ENDS:
         if( Definition.struct_depth != 0 ) {
             return( StructDef( i ) );
@@ -2327,45 +2526,52 @@ int directive( int i, long direct )
     case T_DOT_CONST:
         return( SimSeg(i) );
 
-    case T_DOT_LISTALL:
-    case T_DOT_LISTIF:
-    case T_DOT_LISTMACRO:
-    case T_DOT_LISTMACROALL:
     case T_DOT_LIST:
-        Globals.list = TRUE;
+        if (AsmFiles.file[LST])
+            ModuleInfo.list = TRUE;
         return( NOT_ERROR );
     case T_DOT_CREF:
-        Globals.cref = TRUE;
-        return( NOT_ERROR );
-    case T_DOT_XALL:
-        Globals.cref = FALSE;
-        Globals.list = FALSE;
+        ModuleInfo.cref = TRUE;
         return( NOT_ERROR );
     case T_DOT_NOLIST:
     case T_DOT_XLIST:
-        Globals.list = FALSE;
+        ModuleInfo.list = FALSE;
         return( NOT_ERROR );
     case T_DOT_NOCREF:
     case T_DOT_XCREF:
-        Globals.cref = FALSE;
+        ModuleInfo.cref = FALSE;
         return( NOT_ERROR );
-    case T_DOT_SALL:
-    case T_DOT_ALPHA:
-    case T_DOT_SEQ:
-    case T_DOT_TFCOND:
-    case T_DOT_SFCOND:
-    case T_DOT_LFCOND:
+    case T_DOT_LISTALL:
+    case T_DOT_LISTIF:
+    case T_DOT_LFCOND: /* .LFCOND is synonym for .LISTIF */
+    case T_DOT_LISTMACRO:
+    case T_DOT_XALL:   /* .XALL is synonym for .LISTMACRO */
+    case T_DOT_LISTMACROALL:
+    case T_DOT_LALL:   /* .LALL is synonym for .LISTMACROALL */
+    case T_DOT_NOLISTIF:
+    case T_DOT_SFCOND: /* .SFCOND is synonym for .NOLISTIF */
+    case T_DOT_NOLISTMACRO:
+    case T_DOT_SALL:   /* .SALL is synonym for .NOLISTMACRO */
+    case T_DOT_TFCOND: /* .TFCOND toggles .LFCOND, .SFCOND */
     case T_PAGE:
     case T_TITLE:
     case T_SUBTITLE:
     case T_SUBTTL:
+        if (Parse_Pass == PASS_1)
+            AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[i]->string_ptr );
+        return( NOT_ERROR );
     case T_POPCONTEXT:
     case T_PUSHCONTEXT:
-        AsmWarn( 4, IGNORING_DIRECTIVE );
+        if (Parse_Pass == PASS_1)
+            AsmWarn( 3, IGNORING_DIRECTIVE, AsmBuffer[i]->string_ptr );
+        return( NOT_ERROR );
+    case T_DOT_ALPHA:
+        if (Parse_Pass == PASS_1)
+            AsmWarn( 1, IGNORING_DIRECTIVE, AsmBuffer[i]->string_ptr );
+    case T_DOT_SEQ: /* no segment ordering is default behavior */
         return( NOT_ERROR );
     case T_DOT_RADIX:
-        AsmError( NOT_SUPPORTED );
-        return( ERROR );
+        return( RadixDirective(i+1));
     case T_ECHO:
         return(Parse_Pass == PASS_1 ? EchoDef(i+1) : NOT_ERROR );
     case T_OPTION:
@@ -2377,45 +2583,43 @@ int directive( int i, long direct )
     case T_DOT_IF:
     case T_DOT_WHILE:
     case T_DOT_REPEAT:
-        return( StartHllDef(i) );
+        return( HllStartDef(i) );
     case T_DOT_BREAK:
     case T_DOT_CONTINUE:
     case T_DOT_ELSEIF:
     case T_DOT_ELSE:
-        return( ExitHllDef(i) );
+        return( HllExitDef(i) );
     case T_DOT_ENDIF:
     case T_DOT_ENDW:
     case T_DOT_UNTIL:
-        return( EndHllDef(i) );
+    case T_DOT_UNTILCXZ:
+        return( HllEndDef(i) );
     case T_PURGE:
         return( PurgeMacro(i+1) );
-    case T_GOTO:
-        AsmErr( GOTO_NOT_SUPPORTED );
-        return(ERROR);
 
     case T_ALIAS:
-        return( Parse_Pass == PASS_1 ? AddAlias( i ) : NOT_ERROR );
+        return( AliasDirective( i ) );
     case T_EXTERN:
     case T_EXTRN:
-        return( Parse_Pass == PASS_1 ? ExtDef(i+1) : NOT_ERROR );
+        return( Parse_Pass == PASS_1 ? ExternDef(i+1) : NOT_ERROR );
     case T_COMM:
-        return( Parse_Pass == PASS_1 ? CommDef(i+1) : NOT_ERROR );
+        return( Parse_Pass == PASS_1 ? CommDirective(i+1) : NOT_ERROR );
     case T_EXTERNDEF:
-        return( Parse_Pass == PASS_1 ? GlobalDef(i+1) : NOT_ERROR );
+        return( Parse_Pass == PASS_1 ? ExterndefDirective(i+1) : NOT_ERROR );
     case T_DOT_MODEL:
         return( SetModel(i) );
     case T_INCLUDE:
-        return( Include(i+1) );
+        return( IncludeDirective(i+1) );
     case T_INCLUDELIB:
-        return( Parse_Pass == PASS_1 ? IncludeLib(i+1) : NOT_ERROR );
+        return( Parse_Pass == PASS_1 ? IncludeLibDirective(i+1) : NOT_ERROR );
     case T_ASSUME:
-        return( SetAssume(i) );
+        return( AssumeDirective(i) );
     case T_END:
-        return( ModuleEnd(Token_Count) );
+        return( EndDirective(i+1) );
     case T_LOCAL:
         return( Parse_Pass == PASS_1 ? LocalDef(i) : NOT_ERROR );
-    case T_COMMENT:
-        return( Comment( START_COMMENT, i ) );
+//    case T_COMMENT:
+//        return( CommentDirective( START_COMMENT, AsmBuffer[i]->pos + 7 ) );
     case T_STRUC:
     case T_STRUCT:
     case T_UNION:
@@ -2439,8 +2643,11 @@ int directive( int i, long direct )
         /* these directives should never be seen here */
         AsmError(UNMATCHED_MACRO_NESTING);
         return( ERROR );
+    case T_GOTO:
+        AsmError( DIRECTIVE_MUST_APPEAR_INSIDE_A_MACRO );
+        return( ERROR );
     }
     DebugMsg(("directive: i=%u, string=%s\n", i, AsmBuffer[i]->string_ptr));
-    AsmError( UNKNOWN_DIRECTIVE );
+    AsmErr( UNKNOWN_DIRECTIVE, AsmBuffer[i]->string_ptr);
     return( ERROR );
 }

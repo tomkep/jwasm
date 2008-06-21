@@ -24,11 +24,11 @@
 *
 *  ========================================================================
 *
-* Description:  Output OBJ queues routines
+* Description:  queues routines
 *
 ****************************************************************************/
 
-#include "asmglob.h"
+#include "globals.h"
 
 #include "memalloc.h"
 #include "mangle.h"
@@ -39,16 +39,19 @@
 
 #include "myassert.h"
 
+#define COFF_LINNUM 0
+
 typedef struct queuenode {
     void *next;
     void *data;
 } queuenode;
 
-static qdesc   *LnameQueue  = NULL;   // queue of LNAME structs
-static qdesc   *PubQueue    = NULL;   // queue of pubdefs
-static qdesc   *GlobalQueue = NULL;   // queue of global / externdefs
-static qdesc   *AliasQueue  = NULL;   // queue of aliases
-static qdesc   *LinnumQueue = NULL;   // queue of linnum_data structs
+static qdesc   *LnameQueue;  // queue of LNAME structs
+static qdesc   *PubQueue;    // queue of pubdefs
+static qdesc   *GlobalQueue; // queue of global / externdefs
+static qdesc   *LinnumQueue; // queue of linnum_data structs
+
+//
 
 static void QAddQItem( qdesc **queue, queuenode *node )
 /*****************************************************/
@@ -59,6 +62,8 @@ static void QAddQItem( qdesc **queue, queuenode *node )
     }
     QEnqueue( *queue, node );
 }
+
+// add a node to a queue
 
 static void QAddItem( qdesc **queue, void *data )
 /***********************************************/
@@ -74,7 +79,7 @@ static void QAddItem( qdesc **queue, void *data )
     QEnqueue( *queue, node );
 }
 
-static long QCount( qdesc *q )
+long GetQueueItems( void *q )
 /****************************/
 /* count the # of entries in the queue, if the retval is -ve we have an error */
 {
@@ -83,7 +88,7 @@ static long QCount( qdesc *q )
 
     if( q == NULL )
         return( 0 );
-    for( node = q->head; node != NULL; node = node->next ) {
+    for( node = ((qdesc *)q)->head; node != NULL; node = node->next ) {
         if( ++count < 0 ) {
             return( -1 );
         }
@@ -100,6 +105,20 @@ void AddPublicData( dir_node *dir )
 // gather names for publics
 // they are written by the caller (write.c)
 // PUBDEF are true publics, LPUBDEF (CMD_STATIC_PUBLIC) are "static"
+
+dir_node * GetPublicData2( queuenode * *curr)
+{
+    if (PubQueue == NULL)
+        return(NULL);
+    if (*curr == NULL)
+        *curr = PubQueue->head;
+    else
+        *curr = (*curr)->next;
+    if (*curr)
+        return((*curr)->data);
+
+    return(NULL);
+}
 
 uint GetPublicData(
     uint *seg,
@@ -137,16 +156,29 @@ uint GetPublicData(
         sym = (asm_sym *)curr->data;
         DebugMsg(("GetPublicData: %s, lang=%u\n", sym->name, sym->langtype));
         if( sym->state == SYM_UNDEFINED ) {
-            AsmErr( SYMBOL_NOT_DEFINED, sym->name );
-            return( 0 );
-        } else {
-            if( sym->state == SYM_PROC )
-            /* skip PROTOs without PROC */
-                if(!(((dir_node *)sym)->e.procinfo->defined)) {
-                    DebugMsg(("GetPublicData: %s skipped\n", sym->name));
-                    continue;
-                }
+        /* don't display an error here, it's confusing since it will
+         be associated with the END directive. In the next pass, the error
+         will be displayed when the PUBLIC directive is handled
+         */
+//            AsmErr( SYMBOL_NOT_DEFINED, sym->name );
+            continue;
         }
+        if( sym->state == SYM_PROC ) {
+            /* skip PROTOs without matching PROC */
+            if(((dir_node *)sym)->e.procinfo->defined == FALSE) {
+                DebugMsg(("GetPublicData: %s skipped\n", sym->name));
+                continue;
+            }
+        } else if (sym->state == SYM_EXTERNAL) {
+            /* skip EXTERNDEFs which aren't used */
+            if (((dir_node *)sym)->e.extinfo->weak == TRUE)
+                continue;
+        }
+        if( sym->state != SYM_INTERNAL && sym->state != SYM_PROC) {
+            AsmErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
+            continue;
+        }
+
         if( count == MAX_PUB_SIZE )  // don't let the records get too big
             break;
         if (bReset) {
@@ -197,9 +229,15 @@ uint GetPublicData(
     for( curr = start, i = 0; i < count; curr = curr->next ) {
         sym = (asm_sym *)curr->data;
 
-        /* skip PROTOs without PROC */
-        if( sym->state == SYM_PROC )
-            if(!(((dir_node *)sym)->e.procinfo->defined))
+        if ( sym->state == SYM_UNDEFINED )
+            continue;
+        else if( sym->state == SYM_PROC ) {
+            /* skip PROTOs without matching PROC */
+            if(((dir_node *)sym)->e.procinfo->defined == FALSE)
+                continue;
+        } else if ( sym->state == SYM_EXTERNAL )
+            /* skip EXTERNDEFs which aren't used */
+            if (((dir_node *)sym)->e.extinfo->weak == TRUE)
                 continue;
 
         if( sym->segment != curr_seg )
@@ -212,15 +250,8 @@ uint GetPublicData(
 
         DebugMsg(("GetPublicData 2. loop: %s, mangled=%s\n", sym->name, (*NameArray)[i]));
 
-
         d[i].name = i;
-        /* No namecheck is needed by name manager */
-        if( sym->state == SYM_MACRO || sym->state == SYM_TMACRO ) {
-            AsmWarn( 2, PUBLIC_CONSTANT_NOT_NUMERIC );
-            d[i].offset = 0;
-        } else {
-            d[i].offset = sym->offset;
-        }
+        d[i].offset = sym->offset;
         d[i].type.idx = 0;
         i++;
     }
@@ -236,44 +267,7 @@ static void FreePubQueue( void )
             AsmFree( QDequeue( PubQueue ) );
         }
         AsmFree( PubQueue );
-    }
-}
-
-void AddAliasData( char *data )
-/*****************************/
-{
-    QAddItem( &AliasQueue, data );
-}
-
-char *GetAliasData( bool first )
-/******************************/
-{
-    static queuenode    *node;
-    char                *p;
-
-    if( AliasQueue == NULL )
-        return( NULL );
-    if( first )
-        node = AliasQueue->head;
-    if( node == NULL )
-        return( NULL );
-    p = node->data ;
-    node = node->next;
-    return( p );
-}
-
-static void FreeAliasQueue( void )
-/********************************/
-{
-    if( AliasQueue != NULL ) {
-        while( AliasQueue->head != NULL ) {
-            queuenode   *node;
-
-            node = QDequeue( AliasQueue );
-            AsmFree( node->data );
-            AsmFree( node );
-        }
-        AsmFree( AliasQueue );
+        PubQueue = NULL;
     }
 }
 
@@ -378,6 +372,7 @@ static void FreeLnameQueue( void )
             AsmFree( node );
         }
         AsmFree( LnameQueue );
+        LnameQueue = NULL;
     }
 }
 
@@ -392,17 +387,15 @@ void AddGlobalData( dir_node *dir )
 void GetGlobalData( void )
 /************************/
 /* turn the EXTERNDEFs into either externs or publics as appropriate */
+/* this runs just once, after pass 1 */
 {
     queuenode           *curr;
     struct asm_sym      *sym;
 
-    DebugMsg(("GetGlobalData enter, GlobalQueue=%X\n", GlobalQueue));
     if( GlobalQueue == NULL )
         return;
-    for( ; ; ) {
-        curr = (queuenode *)QDequeue( GlobalQueue );
-        if( curr == NULL )
-            break;
+    DebugMsg(("GetGlobalData enter, GlobalQueue=%X\n", GlobalQueue));
+    while ( curr = (queuenode *)QDequeue( GlobalQueue )) {
         sym = (asm_sym *)curr->data;
         DebugMsg(("GetGlobalData: %s, state=%u, lang=%u\n", sym->name, sym->state, sym->langtype));
         if( sym->state == SYM_EXTERNAL ) {
@@ -429,7 +422,48 @@ void GetGlobalData( void )
 void AddLinnumData( struct line_num_info *data )
 /**********************************************/
 {
-    QAddItem( &LinnumQueue, data );
+    /* if output format is OMF, there's just a global
+     queue of line number data. For other formats, the
+     queue is stored in the section */
+    if (Options.output_format == OFORMAT_OMF)
+        QAddItem( &LinnumQueue, data );
+    else {
+#if COFF_LINNUM
+        /* this isn't fully implemented yet */
+        dir_node *seg = GetCurrSeg();
+        if (seg) {
+            /* COFF line numbers must be preceded by a function symbol table
+               index.  */
+            if (seg->e.seginfo->LinnumQueue == NULL && data->number != 0) {
+                static line_num_info dummy;
+                dummy.number = 0;
+                if (CurrProc == NULL) {
+                    dummy.sym = SymLookupLabel( "$$$00001", FALSE );
+                    if (dummy.sym) {
+                        SetSymSegOfs( dummy.sym );
+                        dummy.sym->state = SYM_INTERNAL;
+                        dummy.sym->defined = TRUE;
+                    }
+                } else
+                    dummy.sym = (asm_sym *)CurrProc;
+                DebugMsg(("addlinnumdata: &data=%X\n", &dummy));
+                QAddItem( (qdesc **)&seg->e.seginfo->LinnumQueue, &dummy );
+            }
+            DebugMsg(("addlinnumdata: &data=%X\n", data));
+            QAddItem( (qdesc **)&seg->e.seginfo->LinnumQueue, data );
+        }
+#endif
+    }
+}
+
+// get line numbers
+
+line_num_info * GetLinnumData2( queuenode * *curr)
+{
+    queuenode  *node;
+    if (*curr && ( node = QDequeue( *curr )))
+        return( node->data );
+    return(NULL);
 }
 
 int GetLinnumData( struct linnum_data **ldata, bool *need32 )
@@ -439,7 +473,7 @@ int GetLinnumData( struct linnum_data **ldata, bool *need32 )
     struct line_num_info    *next;
     int                     count, i;
 
-    count = QCount( LinnumQueue );
+    count = GetQueueItems( LinnumQueue );
     if( count == 0 )
         return( count );
     *need32 = FALSE;
@@ -462,10 +496,17 @@ int GetLinnumData( struct linnum_data **ldata, bool *need32 )
     return( count );
 }
 
-void FreeAllQueues( void )
+void QueueInit( void )
+/************************/
+{
+    LnameQueue = NULL;
+    PubQueue   = NULL;
+    GlobalQueue= NULL;
+    LinnumQueue= NULL;
+}
+void QueueFini( void )
 /************************/
 {
     FreePubQueue();
-    FreeAliasQueue();
     FreeLnameQueue();
 }

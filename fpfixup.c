@@ -31,12 +31,10 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
-
+#include "globals.h"
 #include "parser.h"
 #include "directiv.h"
-#include "asmdefs.h"
-#include "asmfixup.h"
+#include "fixup.h"
 #include "mangle.h"
 
 #include "myassert.h"

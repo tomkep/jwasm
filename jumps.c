@@ -29,16 +29,16 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
+#include "globals.h"
 
 #include "parser.h"
-#include "asmdefs.h"
-#include "asmfixup.h"
+#include "codegen.h"
+#include "fixup.h"
 #include "expreval.h"
 
 #if defined( _STANDALONE_ )
   #include "directiv.h"
-  #include "asminput.h"
+  #include "input.h"
 #endif
 
 /* prototypes */
@@ -90,6 +90,13 @@ static enum asm_token getJumpNegation( enum asm_token instruction )
     }
 }
 
+// extend a (conditional) jump
+// example:
+// "jz label"
+// is converted to
+// "jnz SHORT $+3|5"
+// "jmp label"
+
 static void jumpExtend( int far_flag )
 /*************************************/
 {
@@ -115,10 +122,12 @@ static void jumpExtend( int far_flag )
     } else {
         next_ins_size = CodeInfo->use32 ? 5 : 3;
     }
-    sprintf( buffer + strlen( buffer ), " SHORT $+%d ", next_ins_size+2 );
+    sprintf( buffer + strlen( buffer ), " SHORT $+%u", next_ins_size+2 );
     InputQueueLine( buffer );
+
     if( far_flag ) {
-        strcpy( buffer, "jmpf " );
+//        strcpy( buffer, "jmpf " );
+        strcpy( buffer, "jmp " );
     } else {
         strcpy( buffer, "jmp " );
     }
@@ -279,7 +288,7 @@ int jmp( expr_list *opndx )
 #else
             addr = sym->addr;
 #endif
-            addr -= ( AsmCodeAddress + 2 );  // calculate the displacement
+            addr -= ( GetCurrAddr() + 2 );  // calculate the displacement
             addr += CodeInfo->data[Opnd_Count];
             switch( CodeInfo->info.token ) {
             case T_JCXZ:
@@ -369,6 +378,9 @@ int jmp( expr_list *opndx )
                 break;
             }
 
+            /* automatic jump extension */
+            /* for 386 and above this is not needed, since there exists
+             an extended version */
             if( (CodeInfo->info.cpu&P_CPU_MASK) < P_386 && IS_JMP( CodeInfo->info.token ) ) {
                 /* look into jump extension */
                 switch( CodeInfo->info.token ) {
@@ -378,8 +390,8 @@ int jmp( expr_list *opndx )
                 default:
                     if( CodeInfo->info.opnd_type[Opnd_Count] != OP_I8 ) {
 #if defined( _STANDALONE_ )
-                        if( CodeInfo->mem_type == MT_EMPTY ) {
-                            jumpExtend( 0 );
+                        if( CodeInfo->mem_type == MT_EMPTY && ModuleInfo.ljmp == TRUE) {
+                            jumpExtend( FALSE );
                             return( SCRAP_INSTRUCTION );
                         } else if( !PhaseError ) {
                             AsmError( JUMP_OUT_OF_RANGE );
@@ -622,10 +634,10 @@ int jmp( expr_list *opndx )
                     }
                     break;
                 case MT_FAR:
-#if defined( _STANDALONE_ )
-                    jumpExtend( 1 );
-                    return( SCRAP_INSTRUCTION );
-#endif
+                    if (ModuleInfo.ljmp) {
+                        jumpExtend( TRUE );
+                        return( SCRAP_INSTRUCTION );
+                    }
                 default:
                     AsmError( ONLY_SHORT_AND_NEAR_DISPLACEMENT_IS_ALLOWED );
                     return( ERROR );
@@ -646,6 +658,11 @@ int jmp( expr_list *opndx )
                     fixup_type = FIX_RELOFF8;
                     CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
                     break;
+                case MT_FAR:
+                    if (ModuleInfo.ljmp) {
+                        jumpExtend( TRUE );
+                        return( SCRAP_INSTRUCTION );
+                    }
                 default:
                     AsmError( ONLY_SHORT_DISPLACEMENT_IS_ALLOWED );
                     return( ERROR );

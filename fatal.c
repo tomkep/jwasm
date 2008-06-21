@@ -29,12 +29,11 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
 #include <stdarg.h>
 
-#include "objprs.h"
+#include "globals.h"
+#include "omfprs.h"
 #include "memalloc.h"
-#include "womputil.h"
 #include "fatal.h"
 #include "symbols.h"
 #include "directiv.h"
@@ -56,8 +55,7 @@ static const Msg_Struct Fatal_Msg[] = {
 
 extern void             ObjRecFini( void );
 extern void             MsgPrintf( int resourceid );
-
-extern char             write_to_file;  // write if there is no error
+extern pobj_state       pobjState;      // object file information
 
 void AsmShutDown( void )
 /**********************/
@@ -73,13 +71,13 @@ void AsmShutDown( void )
     ObjWriteClose( pobjState.file_out );
 
     ObjRecFini();
-    if( !write_to_file || Options.error_count > 0 ) {
+    if( ModuleInfo.error_count > 0 ) {
         remove( AsmFiles.fname[OBJ] );
     }
-    AsmFree( AsmFiles.fname[ASM] );
-    AsmFree( AsmFiles.fname[ERR] );
-    AsmFree( AsmFiles.fname[LST] );
-    AsmFree( AsmFiles.fname[OBJ] );
+    MemFree( AsmFiles.fname[ASM] );
+    MemFree( AsmFiles.fname[ERR] );
+    MemFree( AsmFiles.fname[LST] );
+    MemFree( AsmFiles.fname[OBJ] );
     MemFini();
 }
 

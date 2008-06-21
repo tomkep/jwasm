@@ -42,7 +42,8 @@ extern int     CatStrDef( int, asm_sym** ); // CatStr + TEXTEQU directive
 extern int     SubStrDef( int, char *);     // SubStr directive
 extern int     SizeStrDef( int );           // SizeStr directive
 extern int     InStrDef( int, char *);      // InStr directive
-extern int     ForDirective( int, int );
+extern int     LoopDirective( int, int );   // FOR,FORC,IRP,IRPC,REPT,...
+extern int     MacroInit( int );
 
 #define STRING_EXPANDED (NOT_ERROR+1)
 

@@ -29,19 +29,36 @@
 ****************************************************************************/
 
 
-#include "asmglob.h"
-
+#include "globals.h"
 #include "parser.h"
 
 #ifdef __USE_BSD
 #define strnicmp strncasecmp
 #endif
 
-#include "hash.h"
+//#define HASH_TABLE_SIZE 211
+#define HASH_TABLE_SIZE 599
+//#define HASH_TABLE_SIZE 811
+//#define HASH_TABLE_SIZE 2003
 
 //static struct AsmCodeName *inst_table[ HASH_TABLE_SIZE ] = { NULL };
 static struct AsmCodeName *inst_table[ HASH_TABLE_SIZE ];
 
+static unsigned int hashpjw( const char *s )
+/******************************************/
+{
+    unsigned h;
+    unsigned g;
+
+    for( h = 0; *s; ++s ) {
+        /* ( h & ~0x0fff ) == 0 is always true here */
+        h = (h << 4) + (*s | ' ');
+        g = h & ~0x0fff;
+        h ^= g;
+        h ^= g >> 12;
+    }
+    return( h % HASH_TABLE_SIZE );
+}
 
 static struct AsmCodeName **find( char *name )
 /********************************************/
@@ -66,6 +83,7 @@ static struct AsmCodeName *add( struct AsmCodeName *inst )
 {
     struct AsmCodeName  **location;
     char buffer[20];
+
     strncpy( buffer, (char *)&(AsmChars[inst->index]), inst->len );
     buffer[ inst->len ] = '\0';
 
@@ -73,7 +91,7 @@ static struct AsmCodeName *add( struct AsmCodeName *inst )
 
     if( *location != NULL ) {
         /* we already have one */
-        AsmError( SYMBOL_ALREADY_DEFINED ); // fixme
+        AsmErr( SYMBOL_ALREADY_DEFINED, buffer ); // fixme
         return( NULL );
     }
 
@@ -101,7 +119,7 @@ int get_instruction_position( char *string )
 void make_inst_hash_table( void )
 /*******************************/
 {
-    unsigned short i;
+    unsigned i;
 
     for( i=0; i != T_NULL; i++ ) {
         add( &AsmOpcode[i] );
