@@ -32,15 +32,7 @@
 #ifndef _ERRMSG_H_INCLUDED
 #define _ERRMSG_H_INCLUDED
 
-#if defined( _STANDALONE_ )
-    #include "input.h"
-#endif
-
-#ifdef _M_I86
-    #define ASMFAR far
-#else
-    #define ASMFAR
-#endif
+#define ASMFAR
 
 #ifdef DEBUG_OUT
     extern void DoDebugMsg( const char *format, ... );
@@ -52,15 +44,12 @@
 
 #define         AsmWarning( errno )             AsmWarn( 0,errno )
 
-extern void             AsmError( int msgnum );
-extern void             AsmErr( int msgnum, ... );
-extern void             AsmWarn( int level, int msgnum, ... );
-extern void             AsmNote( int msgnum, ... );
+extern void AsmError( int msgnum );
+extern void AsmErr( int msgnum, ... );
+extern void AsmWarn( int level, int msgnum, ... );
+extern void AsmNote( int msgnum, ... );
 
-#if !defined( _STANDALONE_ )
-    #define DebugCurrLine()
-    #define AsmIntErr( x )
-#elif DEBUG_OUT
+#if DEBUG_OUT
     #define DebugCurrLine() printf( "%s\n", CurrString );
     #define AsmIntErr( x ) DebugCurrLine(); printf( "Internal error = %d\n", x )
 #else
@@ -68,39 +57,36 @@ extern void             AsmNote( int msgnum, ... );
     #define AsmIntErr( x ) printf( "Internal error = %d\n", x )
 #endif
 
-#if defined( _STANDALONE_ )
+#if 0
 
-    #define MSG_JWASM_RC_BASE   1
+#define MSG_JWASM_RC_BASE   1
+#include "msg.gh"
 
-    #define MSG_LANG_SPACING    1000
+#else
 
-    #define MSG_USE_E_BASE      (MSG_USE_BASE + RLE_ENGLISH*MSG_LANG_SPACING)
-//    #define MSG_USE_J_BASE      (MSG_USE_BASE + RLE_JAPANESE*MSG_LANG_SPACING)
+#undef pick
+#define pick( code, string_eng, string_jap )  code,
 
-    #include "msg.gh"
+enum msgno {
+    MSG_USAGE = 0,
+#include "msgtext.h"
+    MSG_LAST
+};
+#endif
 
-    #define MAX_RESOURCE_SIZE   128
+#define MAX_RESOURCE_SIZE   128
 
-    extern int MsgInit( void );
-    extern int MsgGet( int, char * );
-    extern void MsgPutUsage( void );
-    extern void MsgFini( void );
-    extern void MsgSubStr( char *, char *, char );
-    extern void MsgChgeSpec( char *strptr, char specifier );
-    extern void LstMsg( const char *format, ... );
-    extern void OpenLstFile( void );
-    extern void WriteLstFile( int type, unsigned int ofs, void * sym );
+extern int  MsgInit( void );
+extern void MsgFini( void );
+extern char * MsgGet( int, char * );
+extern void LstMsg( const char *format, ... );
+extern void OpenLstFile( void );
+extern void WriteLstFile( int type, unsigned int ofs, void * sym );
 
 #define LSTTYPE_LIDATA    0
 #define LSTTYPE_EQUATE    1
 #define LSTTYPE_DIRECTIVE 2
 #define LSTTYPE_MACRO     3
-
-#elif defined( _USE_RESOURCES_ )
-
-    #define MSG_RC_BASE         15000
-    #include "msg.gh"
-
-#endif
+#define LSTTYPE_STRUCT    4
 
 #endif

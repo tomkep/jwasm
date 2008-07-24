@@ -57,30 +57,6 @@ extern void             ObjRecFini( void );
 extern void             MsgPrintf( int resourceid );
 extern pobj_state       pobjState;      // object file information
 
-void AsmShutDown( void )
-/**********************/
-{
-    /* close ASM file */
-    if( AsmFiles.file[ASM] != NULL ) {
-        if( fclose( AsmFiles.file[ASM] ) != 0 ) {
-            Fatal( MSG_CANNOT_CLOSE_FILE, AsmFiles.fname[ASM] );
-        }
-    }
-
-    /* close OBJ file */
-    ObjWriteClose( pobjState.file_out );
-
-    ObjRecFini();
-    if( ModuleInfo.error_count > 0 ) {
-        remove( AsmFiles.fname[OBJ] );
-    }
-    MemFree( AsmFiles.fname[ASM] );
-    MemFree( AsmFiles.fname[ERR] );
-    MemFree( AsmFiles.fname[LST] );
-    MemFree( AsmFiles.fname[OBJ] );
-    MemFini();
-}
-
 // fatal error (out of memory, unable to open files for write, ...)
 // don't use functions which need to alloc memory here!
 

@@ -178,4 +178,3 @@ time_t _getFilenameTimeStamp( char const *filename )
         return( statbuf.st_mtime );
     }
 }
-

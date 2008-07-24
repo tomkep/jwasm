@@ -51,6 +51,13 @@
 #define MAX_PUB_SIZE            100     // max # of entries in pubdef record
 #define MAX_EXT_LENGTH          1024    // max length ( in chars ) of extdef
 
+#define COFF_SUPPORT 1 /* support COFF output format             */
+#define ELF_SUPPORT  1 /* support ELF output format              */
+#define BIN_SUPPORT  0 /* support BIN output format              */
+#define IMAGERELSUPP 1 /* support IMAGEREL operator (COFF+ELF)   */
+#define SECRELSUPP   1 /* support SECTIONREL operator (COFF+ELF) */
+#define BUILD_TARGET 0 /* support "build target" (obsolete)      */
+
 #ifndef PATH_MAX
 #define PATH_MAX 259
 #endif
@@ -126,7 +133,8 @@ extern File_Info        AsmFiles;   // files information
 enum oformat {
     OFORMAT_OMF,
     OFORMAT_COFF,
-    OFORMAT_ELF
+    OFORMAT_ELF,
+    OFORMAT_BIN
 };
 
 enum fpe {
@@ -135,9 +143,34 @@ enum fpe {
     NO_FP_ALLOWED
 };
 
+typedef enum {
+    LANG_NONE     = 0,
+    LANG_C        = 1,
+    LANG_SYSCALL  = 2,
+    LANG_STDCALL  = 3,
+    LANG_PASCAL   = 4,
+    LANG_FORTRAN  = 5,
+    LANG_BASIC    = 6,
+    LANG_WATCOM_C = 7
+} lang_type;
+
+/* Paul Edwards
+   Note that there is code that is dependent on the ordering
+   of these model types. */
+typedef enum {
+    MOD_NONE    = 0,
+    MOD_TINY    = 1,
+    MOD_SMALL   = 2,
+    MOD_COMPACT = 3,
+    MOD_MEDIUM  = 4,
+    MOD_LARGE   = 5,
+    MOD_HUGE    = 6,
+    MOD_FLAT    = 7,
+} mod_type;             // Memory model type
+
 typedef struct global_options {
     bool        sign_value;            /* -j, -s options */
-    char        quiet;                 /* -q, -nologo options */
+    bool        quiet;                 /* -q option */
     bool        line_numbers;          /* -Zd option */
     char        naming_convention;     /* obsolete (OW specific) */
     enum fpe    floating_point;        /* -FPi, -FPi87, -FPc */
@@ -146,12 +179,12 @@ typedef struct global_options {
     int         error_limit;             /* -e option  */
     char        warning_level;           /* -Wn option */
     char        warning_error;           /* -WX option */
-  #ifdef DEBUG_OUT
+#ifdef DEBUG_OUT
     char        debug;                   /* -d6 option */
-  #endif
-
+#endif
+#if BUILD_TARGET
     char        *build_target;           /* -bt option */
-
+#endif
     char        *code_class;             /* -nc option */
     char        *data_seg;               /* -nd option */
     char        *text_seg;               /* -nt option */
@@ -174,6 +207,9 @@ typedef struct global_options {
     bool        no_symbol_listing;       /* -Sn option  */
     bool        list_generated_code;     /* -Sg option  */
     enum oformat output_format;          /* -omf, -coff, -elf options */
+    uint_8      alignment_default;       /* -Zp option  */
+    lang_type   langtype;                /* -Gc|d|z option */
+    mod_type    model;                   /* -mt|s|m|c|l|h|f option */
 } global_options;
 
 extern global_options Options;
@@ -200,11 +236,11 @@ extern struct asm_tok   *AsmBuffer[];   // token buffer
 extern struct asm_code  *CodeInfo;      // input for codegen
 extern int_8            Frame;
 extern uint_8           Frame_Datum;
-extern unsigned int     Parse_Pass;     // phase of parsing
-extern unsigned char    Opnd_Count;     // operand cound of current instr
+extern unsigned int     Parse_Pass;     // assembly pass
+extern unsigned char    Opnd_Count;     // operand count of current instr
 extern bool             Modend;         // end of module is reached
-extern bool             Use32;          // if 32-bit code is use
-extern int              Token_Count;    // number of tokens on line
+extern bool             Use32;          // if current segment is 32-bit
+extern int              Token_Count;    // number of tokens in current line
 
 // defined in write.c
 
@@ -223,6 +259,10 @@ extern void             OutputDataByte( unsigned char );
 extern void             OutputByte( unsigned char );
 extern void             OutSelect( bool );
 extern void             WriteObjModule( void );
+
+// main.c
+
+extern void             CloseFiles( void );
 
 // functions in tokenize.c
 

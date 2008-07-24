@@ -49,13 +49,16 @@
 #include "hll.h"
 #include "macro.h"
 #include "proc.h"
+#include "fastpass.h"
 
 #include "myassert.h"
 
-char                    *proc_prologue;
-char                    *proc_epilogue;
-static proc_info        *ProcStack;
+#define NESTEDPROCS 0
+
 dir_node                *CurrProc;      // current procedure
+#if NESTEDPROCS
+static proc_info        *ProcStack;
+#endif
 
 bool                    in_prologue;
 bool                    DefineProc;     // TRUE if the definition of procedure
@@ -75,6 +78,7 @@ static int  ltok[]    = {   T_C,    T_SYSCALL,    T_STDCALL,    T_PASCAL,    T_F
 
 #define ROUND_UP( i, r ) (((i)+((r)-1)) & ~((r)-1))
 
+#if NESTEDPROCS
 static void push_proc( dir_node *proc )
 /*************************************/
 {
@@ -89,6 +93,7 @@ static dir_node *pop_proc( void )
         return( NULL );
     return( (dir_node *)pop( &ProcStack ) );
 }
+#endif
 
 #if 0
 static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_number )
@@ -293,9 +298,10 @@ int LocalDef( int i )
              */
             if (AsmBuffer[i]->token == T_RES_ID && AsmBuffer[i]->value == T_PTR) {
                 if (AsmBuffer[i+1]->token != T_FINAL && AsmBuffer[i+1]->token != T_COMMA) {
-                    if ((symtype = CreateTypeDef("", i)) == NULL)
+                    if ((symtype = CreateTypeDef("", &i)) == NULL)
                         return (ERROR);
                     type = MT_TYPE;
+                    i--;
                 }
                 while (AsmBuffer[i+1]->token != T_FINAL && AsmBuffer[i+1]->token != T_COMMA)
                     i++;
@@ -362,7 +368,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
     int             offset;
     int             newsize;
     int             oldsize;
-    int             ptrpos = EMPTY;
+    int             ptrpos;
     bool            is_ptr;
     bool            is_far;
     bool            is32;
@@ -411,6 +417,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
         is_far = FALSE;
         is_vararg = FALSE;
         is32 = Use32;
+        ptrpos = EMPTY;
 
         /* read colon (optional for PROC!) */
         if( AsmBuffer[i]->token != T_COLON ) {
@@ -447,12 +454,38 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
                 type = FindSimpleType( AsmBuffer[i]->value );
         if ((AsmBuffer[i]->token == T_RES_ID) && (AsmBuffer[i]->value == T_PTR)) {
             is_ptr = TRUE;
-            for (;(AsmBuffer[i]->token == T_RES_ID)
-                 && (AsmBuffer[i]->value == T_PTR)
-                 && (AsmBuffer[i+1]->token != T_COMMA)
-                 && (AsmBuffer[i+1]->token != T_FINAL) ; i++);
+            /* a valid syntax is 'name:ptr near' */
+            if (AsmBuffer[i+1]->token == T_RES_ID && ptrpos == EMPTY) {
+                switch (AsmBuffer[i+1]->value) {
+                case T_FAR:
+                case T_FAR16:
+                case T_FAR32:
+                    is_far = TRUE;
+                case T_NEAR:
+                case T_NEAR16:
+                case T_NEAR32:
+                    ptrpos = i++;
+                    goto no_arbitrary;
+                }
+            }
+            /* if a pointer to an arbitrary type is given, an
+             anonymous type has to be created
+             */
+            if (AsmBuffer[i+1]->token != T_FINAL && AsmBuffer[i+1]->token != T_COMMA) {
+                if (ptrpos != EMPTY)
+                    i = ptrpos;
+                if ((bDefine == TRUE && (symtype = CreateTypeDef("", &i)))) {
+                    is_ptr = FALSE;
+                    mem_type = symtype->mem_type;
+                    i--;
+                }
+                while (AsmBuffer[i+1]->token != T_FINAL && AsmBuffer[i+1]->token != T_COMMA)
+                    i++;
+                if (symtype)
+                    goto type_is_set;
+            }
         }
-
+    no_arbitrary:
         DebugMsg(("ParseProcParams: cnpParam=%u, i=%u, token=%s, type=%s\n", cntParam, i, token, typetoken));
 
         if( type == ERROR ) {
@@ -486,6 +519,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
         }
     type_is_set:
 
+        /* check if parameter name is defined already */
         if ((bDefine) && (sym = SymSearch( token )) && sym->state != SYM_UNDEFINED) {
              AsmErr( SYMBOL_PREVIOUSLY_DEFINED, token );
              return( ERROR );
@@ -511,6 +545,14 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
                 DebugMsg(("ParseProcParams: old memtype=%u, new memtype=%u\n", paracurr->sym->mem_type, mem_type));
                 AsmErr( SYMBOL_TYPE_CONFLICT, token );
                 return( ERROR );
+            }
+            /* the parameter type used in PROC has highest priority! */
+            if (bDefine) {
+                if (symtype) {
+                    paracurr->sym->type = symtype;
+                    paracurr->sym->mem_type = MT_TYPE;
+                } else
+                    paracurr->sym->mem_type = mem_type;
             }
 #else
             if (paracurr->sym->mem_type != mem_type) {
@@ -652,7 +694,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
 
         for (;cntParam ;cntParam--) {
             for (curr = 1,paranode = proc->e.procinfo->paralist;curr < cntParam;paranode = paranode->next, curr++);
-            DebugMsg(("ParseProcParams: parm=%s, ofs=%u, size=%u\n", paranode->sym->name, offset, paranode->sym->first_size));
+            DebugMsg(("ParseProcParams: parm=%s, ofs=%u, size=%d\n", paranode->sym->name, offset, paranode->sym->first_size));
             if (paranode->sym->state == SYM_TMACRO)
                 ;
             else {
@@ -689,14 +731,11 @@ int ExamineProc( dir_node *proc, int i, bool bDefine )
     if (ModuleInfo.model == MOD_FLAT && bDefine == FALSE)
         is32 = TRUE;
 
-    // if the proc item has existed previously, check if there is a
-    // type conflict
+    // set some default values
 
     if (proc->e.procinfo->init == FALSE) {
-        proc->sym.langtype = ModuleInfo.langtype;
         proc->sym.mem_type = IS_PROC_FAR() ? MT_FAR : MT_NEAR;
-//        proc->e.procinfo->mem_type = proc->sym.mem_type;
-        proc->e.procinfo->use32 = is32;
+        proc->sym.use32 = is32;
     }
 
     proc->sym.defined = TRUE;
@@ -734,12 +773,12 @@ int ExamineProc( dir_node *proc, int i, bool bDefine )
 
             if (proc->e.procinfo->init == TRUE)
                 if (proc->sym.mem_type != SimpleType[type].mem_type ||
-                    proc->e.procinfo->use32 != is32) {
+                    proc->sym.use32 != is32) {
                     AsmError( PROC_AND_PROTO_CALLING_CONV_CONFLICT );
                     break;
                 }
             proc->sym.mem_type = SimpleType[type].mem_type;
-            proc->e.procinfo->use32 = is32;
+            proc->sym.use32 = is32;
             i++;
             break;
         }
@@ -756,9 +795,8 @@ int ExamineProc( dir_node *proc, int i, bool bDefine )
         case T_SYSCALL:
             for (type = 0; type < 7; type++) {
                 if (ltok[type] == AsmBuffer[i]->value) {
-                    if (proc->e.procinfo->init == TRUE)
-                        if (proc->sym.langtype != lt[type])
-                            AsmError( PROC_AND_PROTO_CALLING_CONV_CONFLICT );
+                    if (proc->sym.langtype != LANG_NONE && proc->sym.langtype != lt[type])
+                        AsmError( PROC_AND_PROTO_CALLING_CONV_CONFLICT );
                     proc->sym.langtype = lt[type];
                     break;
                 }
@@ -789,6 +827,7 @@ int ExamineProc( dir_node *proc, int i, bool bDefine )
     if (AsmBuffer[i]->token == T_ID) {
         if (stricmp(AsmBuffer[i]->string_ptr, "USES") == 0) {
             if (!bDefine) {/* not for PROTO! */
+                DebugMsg(("ExamineProc: USES found in PROTO\n"));
                 AsmError( SYNTAX_ERROR );
             }
             /* check for register name */
@@ -814,6 +853,7 @@ int ExamineProc( dir_node *proc, int i, bool bDefine )
                 }
             }
             if (proc->e.procinfo->regslist == NULL) {
+                DebugMsg(("ExamineProc: regslist is NULL\n"));
                 AsmError( SYNTAX_ERROR );
             }
         }
@@ -823,6 +863,10 @@ int ExamineProc( dir_node *proc, int i, bool bDefine )
 
     if (AsmBuffer[i]->token == T_COMMA)
         i++;
+
+    /* if no lang type has been set for PROC, use the default one */
+    if (proc->sym.langtype == LANG_NONE)
+        proc->sym.langtype = ModuleInfo.langtype;
 
     DebugMsg(("ExamineProc: i=%u, Token_Count=%u\n", i, Token_Count));
 
@@ -857,6 +901,7 @@ int ProcDef( int i )
 {
     struct asm_sym      *sym;
     dir_node            *dir;
+    unsigned int        addr;
     char                *name;
     bool                oldpubstate;
 
@@ -865,18 +910,31 @@ int ProcDef( int i )
         return( ERROR );
     }
 
-    if( CurrProc != NULL ) {
-        /* nested procs ... push currproc on a stack */
-        push_proc( CurrProc );
+    if( i < 0 ) {
+        AsmError( PROC_MUST_HAVE_A_NAME );
+        return( ERROR );
     }
 
+    if( CurrProc != NULL ) {
+#if NESTEDPROCS
+        /* nested procs ... push currproc on a stack */
+        push_proc( CurrProc );
+#else
+        AsmErr( CANNOT_NEST_PROCEDURES, AsmBuffer[i]->string_ptr);
+        return( ERROR );
+#endif
+    }
+
+#if FASTPASS
+    if (StoreState == FALSE && Parse_Pass == PASS_1) {
+        SaveState();
+    }
+#endif
+
+    name = AsmBuffer[i++]->string_ptr;
+    sym = SymSearch( name );
+
     if( Parse_Pass == PASS_1 ) {
-        if( i < 0 ) {
-            AsmError( PROC_MUST_HAVE_A_NAME );
-            return( ERROR );
-        }
-        name = AsmBuffer[i++]->string_ptr;
-        sym = SymSearch( name );
 
         if( sym == NULL ) {
             dir = dir_insert( name, TAB_PROC );
@@ -885,8 +943,8 @@ int ProcDef( int i )
             dir = (dir_node *)sym;
             if( sym->state == SYM_UNDEFINED)
                 dir_change( dir, TAB_PROC );
-            else if (sym->state == SYM_EXTERNAL && dir->e.extinfo->weak == 1) {
-                /* additional check for matching type? */
+            else if (sym->state == SYM_EXTERNAL && sym->weak == TRUE) {
+                /* additional check for matching language type? */
                 dir_change( dir, TAB_PROC );
             } else {
                 /* does a PROTO exist? */
@@ -909,11 +967,22 @@ int ProcDef( int i )
         if( dir->sym.public == TRUE && oldpubstate == FALSE)
             AddPublicData( dir );
     } else {
-        /**/myassert( i >= 0 );
-        sym = SymSearch( AsmBuffer[i]->string_ptr );
+        /**/myassert( sym != NULL );
+
+        /* it's necessary to check for a phase error here
+         as it is done in LabelCreate() and data_init()!
+         */
+        addr = GetCurrAddr();
+
+        if (addr != sym->offset) {
+            sym->offset = addr;
+#ifdef DEBUG_OUT
+            if (!PhaseError)
+                DebugMsg(("ProcDef: phase error, pass %u, sym >%s<\n", Parse_Pass+1, sym->name));
+#endif
+            PhaseError = TRUE;
+        }
         CurrProc = (dir_node *)sym;
-        /**/myassert( CurrProc != NULL );
-        SetSymSegOfs( sym );
         DefineProc = TRUE;
     }
     BackPatch( sym );
@@ -1003,8 +1072,11 @@ static void ProcFini( void )
 /**************************/
 {
     CurrProc->sym.total_size = GetCurrAddr() - CurrProc->sym.offset;
+#if NESTEDPROCS
     CurrProc = pop_proc();
-
+#else
+    CurrProc = NULL;
+#endif
     DefineProc = FALSE; /* in case there was an empty PROC/ENDP pair */
 }
 
@@ -1018,19 +1090,20 @@ int ProcEnd( int i )
         return( ERROR );
     } else if( i < 0 ) {
         AsmError( PROC_MUST_HAVE_A_NAME );
-        ProcFini();
+        // ProcFini();
         return( ERROR );
     } else if( CurrProc == NULL ) {
         DebugMsg(("ProcEnd: nesting error, CurrProc is NULL\n"));
         AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
         return( ERROR );
-    } else if( (dir_node *)SymSearch( AsmBuffer[i]->string_ptr ) == CurrProc ) {
+    // } else if( (dir_node *)SymSearch( AsmBuffer[i]->string_ptr ) == CurrProc ) {
+    } else if( SymCmpFunc(CurrProc->sym.name, AsmBuffer[i]->string_ptr ) == 0 ) {
         ProcFini();
         return( NOT_ERROR );
     } else {
         AsmError( PROC_NAME_DOES_NOT_MATCH );
-        ProcFini();
-        return( NOT_ERROR );
+        // ProcFini();
+        return( ERROR );
     }
 }
 
@@ -1068,9 +1141,9 @@ static int WritePrologue( void )
      option prologue:userdefined macro function -> RunMacro()
      option prologue:default
      */
-    if (proc_prologue == NULL)
+    if (ModuleInfo.proc_prologue == NULL)
         return(NOT_ERROR);  /* continue processing */
-    else if (*proc_prologue != '\0') {
+    else if (*ModuleInfo.proc_prologue != '\0') {
         regs_list * regs;
         char reglst[64];
         int flags = CurrProc->sym.langtype; /* set bits 0-2 */
@@ -1093,19 +1166,19 @@ static int WritePrologue( void )
         }
         strcat(reglst,">");
 
-        dir = (dir_node *)SymSearch(proc_prologue);
+        dir = (dir_node *)SymSearch(ModuleInfo.proc_prologue);
         if (dir) {
             char retvalue[MAX_LINE_LEN];
             char currline[MAX_LINE_LEN];
             label_list *curr;
             strcpy( currline, CurrString );
-            sprintf(buffer,"%s(%s, %u, %u, %u, <%s>, %s)", proc_prologue,
+            sprintf(buffer,"%s(%s, %u, %u, %u, <%s>, %s)", ModuleInfo.proc_prologue,
                     CurrProc->sym.name, flags, info->parasize, info->localsize,
                     reglst, "");
             in_prologue = TRUE;
             retvalue[0] = NULLC;
             RunMacro(dir, buffer, retvalue, TRUE, TRUE, FALSE);
-            DebugMsg(("WritePrologue: macro %s returned >%s<\n", proc_prologue, retvalue));
+            DebugMsg(("WritePrologue: macro %s returned >%s<\n", ModuleInfo.proc_prologue, retvalue));
             if (Parse_Pass == PASS_1) {
                 len = atoi(retvalue) - info->localsize;
                 for (curr = info->locallist;curr;curr = curr->next) {
@@ -1206,7 +1279,12 @@ int proc_check( void )
     if (AsmBuffer[0]->token == T_ID &&
         AsmBuffer[1]->token == T_DIRECTIVE &&
         (AsmBuffer[1]->value == T_LABEL ||
-        AsmBuffer[1]->value == T_ENDP))
+#if FASTPASS
+         AsmBuffer[1]->value == T_EQU ||
+         AsmBuffer[1]->value == T_SIZESTR ||
+         AsmBuffer[1]->value == T_INSTR ||
+#endif
+         AsmBuffer[1]->value == T_ENDP))
         return( NOT_ERROR );
 
     /* masm does also allow data definition directives to occur BEFORE
@@ -1240,12 +1318,12 @@ static void write_epilogue( void )
     /**/myassert( CurrProc != NULL );
     info = CurrProc->e.procinfo;
 
-    if (proc_epilogue == NULL)
+    if (ModuleInfo.proc_epilogue == NULL)
         return;
 
 #if 1
     /* is a true macro set for prologue creation? */
-    if (*proc_epilogue != '\0') {
+    if (*ModuleInfo.proc_epilogue != '\0') {
         regs_list * regs;
         char reglst[64];
         int flags = CurrProc->sym.langtype; /* set bits 0-2 */
@@ -1273,7 +1351,7 @@ static void write_epilogue( void )
         }
         strcat(reglst,">");
 
-        sprintf(buffer," %s %s, %02XH, %02XH, %02XH,<%s>, %s", proc_epilogue,
+        sprintf(buffer," %s %s, %02XH, %02XH, %02XH,<%s>, %s", ModuleInfo.proc_epilogue,
                 CurrProc->sym.name, flags, info->parasize, info->localsize,
                 reglst, "");
         InputQueueLine( buffer );
@@ -1367,7 +1445,9 @@ static void write_epilogue( void )
     InputQueueLine( buffer );
 }
 
-int Ret( int i, int count, int flag_iret )
+// a RET has occured inside a PROC.
+
+int RetInstr( int i, int count, int flag_iret )
 /****************************************/
 {
     char        buffer[20];
@@ -1397,7 +1477,7 @@ int Ret( int i, int count, int flag_iret )
         /* the RET is part of the EPILOGUE! Don't write it if an epilogue
          macro is set.
          */
-        if (proc_epilogue && (*proc_epilogue != '\0'))
+        if (ModuleInfo.proc_epilogue && (*ModuleInfo.proc_epilogue != '\0'))
             return (NOT_ERROR);
 
         if( count == i + 1 ) {
@@ -1419,7 +1499,9 @@ int Ret( int i, int count, int flag_iret )
             }
         } else {
             ++i;
-            if( (EvalOperand( &i, count, &opndx, TRUE ) == ERROR) || (opndx.type != EXPR_CONST) ) {
+            if( EvalOperand( &i, count, &opndx, TRUE ) == ERROR)
+                return( ERROR );
+            if (opndx.type != EXPR_CONST || opndx.string != NULL ) {
                 AsmError( CONSTANT_EXPECTED );
                 return( ERROR );
             }
@@ -1436,11 +1518,13 @@ int Ret( int i, int count, int flag_iret )
 
 void ProcInit()
 {
+#if NESTEDPROCS
     ProcStack = NULL;
+#endif
     CurrProc  = NULL;
     DefineProc = FALSE;
-    proc_prologue = "";
-    proc_epilogue = "";
+    ModuleInfo.proc_prologue = "";
+    ModuleInfo.proc_epilogue = "";
     ModuleInfo.procs_private = FALSE;
     ModuleInfo.procs_export = FALSE;
 }

@@ -41,13 +41,14 @@
 #include "parser.h"
 #include "condasm.h"
 #include "directiv.h"
+#include "input.h"
 
 char                    *CurrString; // Current Input Line
 char                    *CurrStringEnd; // free space in current line
 
 extern int              get_instruction_position( char *string );
 
-static bool no_str_delim;
+static uint_8 g_opcode; /* directive flags for current line */
 
 bool expansion;
 
@@ -57,6 +58,8 @@ bool expansion;
 #if defined( _STANDALONE_ )
 
 extern global_options   Options;
+
+// get instruction string
 
 void GetInsString( enum asm_token token, char *string, int len )
 /**************************************************************/
@@ -183,7 +186,7 @@ static int get_string( struct asm_tok *buf, char **input, char **output )
         symbol_c = '}';
         break;
     case '>':
-        if (no_str_delim) {
+        if (g_opcode & OPCF_CEXPR) {
             *(optr)++ = *(iptr)++;
             buf->value = 1;
             if (*(iptr) == '=') {
@@ -251,23 +254,45 @@ static int get_string( struct asm_tok *buf, char **input, char **output )
                 buf->value = count;
                 break;
             }
-#if 0
-            /* a "" inside a <>/{} string? Won't work, since there's no
-              request that quotes must be paired in such an item */
-        } else if( *iptr == '"') {
+#if 1
+            /*
+             a "" inside a <>/{} string? Since it's not a must that
+             [double-]quotes are paired in a literal it must be done
+             directive-dependant!
+             see: IFIDN <">,<">
+             */
+        } else if( *iptr == '"' && symbol_c != 0 && (g_opcode & OPCF_STRPARM) == 0) {
+            char *toptr;
+            char *tiptr;
+            int tcount;
             *optr++ = *iptr++;
             count++;
-            while (*iptr != '"' && *iptr != 0 && count < MAX_STRING_LEN-1) {
+            toptr = optr;
+            tiptr = iptr;
+            tcount = count;
+            while (*iptr != '"' && *iptr != NULLC && count < MAX_STRING_LEN-1) {
                 *optr++ = *iptr++;
                 count++;
             }
+            if (*iptr == '"') {
+                *optr++ = *iptr++;
+                count++;
+                continue;
+            } else {
+                /* restore values */
+                iptr = tiptr;
+                optr = toptr;
+                count = tcount;
+            }
+#endif
+        } else if( *iptr == '!' && symbol_o == '<' && *(iptr+1) != '\0') {
+            /* handle literal-character operator '!'.
+               it makes the next char to enter the literal uninterpreted.
+            */
             *optr++ = *iptr++;
             count++;
-            continue;
-#endif
-            /* handle literal-character operator "!" */
-        } else if( *iptr == '!' && symbol_o == '<' && *(iptr+1) != '\0') {
-            iptr++;
+            if (count == MAX_STRING_LEN)
+                break;
             *optr++ = *iptr++;
             count++;
         } else if( *iptr == '\0' || *iptr == '\n' ) {
@@ -500,7 +525,6 @@ static int get_id_in_backquotes( struct asm_tok *buf, char **input, char **outpu
 
 static int get_id( unsigned int *buf_index, char **input, char **output )
 /***********************************************************************/
-/* get_id could change buf_index, if a COMMENT directive is found */
 {
     struct asm_tok  *buf;
     char            cur_char;
@@ -537,73 +561,51 @@ static int get_id( unsigned int *buf_index, char **input, char **output )
     if( buf->token == T_PATH ) {
         return( NOT_ERROR );
     }
+    if( buf->string_ptr[0] == '?' && buf->string_ptr[1] == '\0' ) {
+        buf->token = T_QUESTION_MARK;
+        return( NOT_ERROR );
+    }
     count = get_instruction_position( buf->string_ptr );
     if( count == EMPTY ) {
         buf->token = T_ID;
-        if( buf->string_ptr[1] == '\0' && buf->string_ptr[0] == '?' ) {
-            buf->token = T_QUESTION_MARK;
+        return( NOT_ERROR );
+    }
+//  DebugMsg(("found item >%s< in instruction table, rm=%X\n", buf->string_ptr, AsmOpTable[count].rm_byte));
+    buf->value = AsmOpTable[count].token;
+
+    /* OP_SPECIAL might be:
+     OP_REGISTER, OP_RES_ID, OP_UNARY_OPERATOR, OP_DIRECTIVE,
+     OP_DIRECT_EXPR, OP_ARITHOP
+     OP_PTR_MODIFIER might be combined with OP_RES_ID (for DWORD, ...)
+     */
+
+    if( AsmOpTable[count].opnd_type[OPND1] != OP_SPECIAL ) {
+        buf->token = T_INSTRUCTION;
+        return( NOT_ERROR );
+    }
+
+    if( AsmOpTable[count].rm_byte & OP_REGISTER ) {
+        buf->token = T_REG;
+    } else if( AsmOpTable[count].rm_byte & OP_RES_ID ) {
+        buf->token = T_RES_ID;
+        buf->rm_byte = AsmOpTable[count].rm_byte;
+        buf->opcode = AsmOpTable[count].opcode;
+    } else if( AsmOpTable[count].rm_byte & OP_UNARY_OPERATOR ) {
+        buf->token  = T_UNARY_OPERATOR;
+        buf->opcode = AsmOpTable[count].opcode;
+    } else if( AsmOpTable[count].rm_byte & OP_DIRECTIVE ) {
+        buf->token = T_DIRECTIVE;
+        buf->opcode = AsmOpTable[count].opcode;
+        if (g_opcode == 0) {
+            g_opcode = AsmOpTable[count].opcode;
         }
+    } else if( AsmOpTable[count].rm_byte & OP_DIRECT_EXPR ) {
+        buf->token = T_DIRECT_EXPR;
+    } else if( AsmOpTable[count].rm_byte & OP_ARITHOP ) {
+        buf->token = T_INSTRUCTION;
     } else {
-//      DebugMsg(("found item >%s< in instruction table, rm=%X\n", buf->string_ptr, AsmOpTable[count].rm_byte));
-        buf->value = AsmOpTable[count].token;
-        // count = AsmOpcode[count].position;
-
-        /* OP_SPECIAL might be:
-         OP_REGISTER, OP_RES_ID, OP_UNARY_OPERATOR, OP_DIRECTIVE,
-         OP_DIRECT_EXPR, OP_ARITHOP
-         OP_PTR_MODIFIER might be combined with OP_DIRECTIVE (hack for .IF,...)
-         or with OP_RES_ID (for DWORD, ...)
-         */
-
-        if( AsmOpTable[count].opnd_type[OPND1] == OP_SPECIAL ) {
-            if( AsmOpTable[count].rm_byte & OP_REGISTER ) {
-                buf->token = T_REG;
-            } else if( AsmOpTable[count].rm_byte & OP_RES_ID ) {
-                buf->token = T_RES_ID;
-                buf->rm_byte = AsmOpTable[count].rm_byte;
-                buf->opcode = AsmOpTable[count].opcode;
-            } else if( AsmOpTable[count].rm_byte & OP_UNARY_OPERATOR ) {
-                buf->token  = T_UNARY_OPERATOR;
-                buf->opcode = AsmOpTable[count].opcode;
-            } else if( AsmOpTable[count].rm_byte & OP_DIRECTIVE ) {
-                buf->token = T_DIRECTIVE;
-                buf->opcode = AsmOpTable[count].opcode;
-                /* set flags specific to directive */
-                /* bit 0: avoid '<' being used as string delimiter */
-                if (AsmOpTable[count].opcode & 1) {
-                    no_str_delim = TRUE;
-                }
-#if defined( _STANDALONE_ )
-                switch( AsmOpTable[count].token ) {
-                case T_COMMENT:
-                    /* save the whole line .. we need to check
-                     * if the delim. char shows up 2 times */
-                    (*output)++;
-                    *(*output) = '\0';
-                    (*output)++;
-                    (*buf_index)++;
-                    buf = AsmBuffer[ *buf_index ];
-                    buf->string_ptr = *output;
-                    strcpy( buf->string_ptr, *input );
-                    (*output) += strlen( *input );
-                    *(*output) = '\0';
-                    (*output)++;
-                    (*input) += strlen( *input );
-                    buf->token = T_STRING;
-                    buf->value = 0;
-                    break;
-                } /* default do nothing */
-#endif
-            } else if( AsmOpTable[count].rm_byte & OP_DIRECT_EXPR ) {
-                buf->token = T_DIRECT_EXPR;
-            } else if( AsmOpTable[count].rm_byte & OP_ARITHOP ) {
-                buf->token = T_INSTRUCTION;
-            } else {
-                buf->token = T_ID;
-            }
-        } else {
-            buf->token = T_INSTRUCTION;
-        }
+        /* the keyword has been removed by OPTION NOKEYWORD */
+        buf->token = T_ID;
     }
     return( NOT_ERROR );
 }
@@ -641,7 +643,8 @@ static int get_special_symbol( struct asm_tok *buf,
 #if defined( _STANDALONE_ )
     case '=' :
         buf->token = T_DIRECTIVE;
-        buf->value = T_EQU2;
+        buf->value = T_EQU;
+        buf->opcode = 1; /* for EQU, this value is 0 */
         *(*output)++ = *(*input)++;
         *(*output)++ = '\0';
         break;
@@ -652,7 +655,7 @@ static int get_special_symbol( struct asm_tok *buf,
         /* no_str_delim is TRUE if .IF, .WHILE, .ELSEIF or .UNTIL */
         /* has been detected in the current line */
         /* it will also store "<=" as a string, not as 2 tokens */
-        if (no_str_delim) {
+        if (g_opcode & OPCF_CEXPR) {
             *(*output)++ = *(*input)++;
             buf->value = 1;
             if (*(*input) == '=') {
@@ -672,7 +675,7 @@ static int get_special_symbol( struct asm_tok *buf,
     default:
         /* a '<' in the source will prevent comments to be removed */
         /* so they might appear here. Remove! */
-        if (no_str_delim && symbol == ';') {
+        if ((g_opcode & OPCF_CEXPR) && symbol == ';') {
             while (**input) *(*input)++;
             return( EMPTY );
         }
@@ -784,7 +787,7 @@ int Tokenize( char *string, int index )
     if (index == 0) {
         CurrString = string;
         output_ptr = stringbuf;
-        no_str_delim = FALSE;
+        g_opcode = 0;
         expansion = FALSE;
         ptr = string;
         while( isspace( *ptr )) ptr++;

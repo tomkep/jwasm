@@ -76,13 +76,10 @@ static void             SizeStringInstr( unsigned op_size );
 static int              check_size( expr_list * );
 static int              segm_override_jumps( expr_list *opndx );
 
-#if defined( _STANDALONE_ )
-
 extern int              directive( int , long );
 
 static void             check_assume( struct asm_sym *, enum prefix_reg );
 
-extern bool DefineProc;
 
 uint_8                  CheckSeg;       // if checking of opened segment is needed
 int_8                   Frame;          // Frame of current fixup
@@ -90,13 +87,9 @@ uint_8                  Frame_Datum;    // Frame datum of current fixup
 struct asm_sym          *SegOverride;
 
 bool                    directive_listed;
-static int              in_epilogue = 0;
+static int              in_epilogue = FALSE;
 
-#else
-
-#define     directive( i, value )   cpu_directive( value )
-
-#endif
+extern asm_sym *sym_Cpu;
 
 extern void             make_inst_hash_table( void );
 
@@ -205,7 +198,8 @@ static void seg_override( int seg_reg, asm_sym *sym )
     if( sym != NULL ) {
         if( CodeInfo->prefix.seg == EMPTY ) {
             if( CodeInfo->info.token == T_LEA ) {
-                check_assume( sym, EMPTY );
+                /* why should LEA need a segment register assume? */
+                // check_assume( sym, EMPTY );
             } else {
                 check_assume( sym, default_seg );
             }
@@ -233,7 +227,8 @@ static void seg_override( int seg_reg, asm_sym *sym )
                 break;
             }
             if( GetPrefixAssume( sym, assume_seg ) == ASSUME_NOTHING ) {
-//                AsmWarn( 3, CANNOT_ADDRESS_WITH_ASSUMED_REGISTER, sym );
+// activating this line will flag any segment register overrides!
+//                AsmWarn( 2, CANNOT_ACCESS_LABEL_WITH_SEGMENT_REGISTERS, sym );
             }
         }
     }
@@ -288,9 +283,9 @@ static void check_assume( struct asm_sym *sym, enum prefix_reg default_reg )
     reg = GetAssume( sym, def_reg );
 
     if( reg == ASSUME_NOTHING ) {
-        if( ( sym->state != SYM_EXTERNAL ) && ( sym->state != SYM_PROC ) ) {
+        if( sym->state != SYM_EXTERNAL && sym->state != SYM_PROC && sym->state != SYM_STACK ) {
             if( Parse_Pass == PASS_2 ) {
-                AsmWarn( 3, CANNOT_ADDRESS_WITH_ASSUMED_REGISTER, sym->name );
+                AsmWarn( 2, CANNOT_ACCESS_LABEL_WITH_SEGMENT_REGISTERS, sym->name );
             }
         } else {
             CodeInfo->prefix.seg = default_reg;
@@ -810,7 +805,7 @@ int cpu_directive( int i )
     /* differs from Codeinfo cpu setting */
 
     DebugMsg(("cpu_directive: @Cpu=%X\n", ModuleInfo.cpu));
-    CreateConstant( "@Cpu", ModuleInfo.cpu, -1, TRUE);
+    sym_Cpu = CreateConstant( "@Cpu", ModuleInfo.cpu, -1, TRUE);
 
 #endif
 
@@ -1357,12 +1352,22 @@ static int idata_fixup( expr_list *opndx )
 #endif
 
     fixup = AddFixup( opndx->sym, fixup_type, OPTJ_NONE );
-//    add_frame();  ???
-    if( fixup == NULL ) {
+    if( fixup == NULL )
         return( ERROR );
-    } else {
-        return( NOT_ERROR );
-    }
+
+    if (opndx->instr == T_LROFFSET)
+        fixup->loader_resolved = TRUE;
+
+#if IMAGERELSUPP
+    if (opndx->instr == T_IMAGEREL && fixup_type == FIX_OFF32)
+        fixup->type = FIX_OFF32_IMGREL;
+#endif
+#if SECRELSUPP
+    if (opndx->instr == T_SECTIONREL && fixup_type == FIX_OFF32)
+        fixup->type = FIX_OFF32_SECREL;
+#endif
+
+    return( NOT_ERROR );
 }
 
 // important function
@@ -1987,16 +1992,6 @@ int ParseItems( void )
 #endif
 
     CodeInfo->use32 = Use32;
-    if( DefineProc == TRUE ) {
-        i = proc_check();
-        if( i == ERROR ) {
-            DebugMsg(("ParseItems exit, proc_check error\n"));
-            return( ERROR );
-        } else if( i == EMPTY ) {
-            DebugMsg(("ParseItems exit, proc_check causes skip\n"));
-            return( NOT_ERROR );
-        }
-    }
 
     //init
     rCode->info.token     = T_NULL;
@@ -2039,7 +2034,8 @@ int ParseItems( void )
                 return( ERROR );
             }
             cur_opnd = OP_NONE;
-#if defined( _STANDALONE_ )
+#if 0
+            /* seems a bad idea to allow intruction names as label */
             if( ( AsmBuffer[i+1]->token == T_DIRECTIVE )
                 || ( AsmBuffer[i+1]->token == T_COLON ) ) {
                 // instruction name is label
@@ -2064,33 +2060,29 @@ int ParseItems( void )
                     return( ERROR );
                 }
                 continue;
-#if defined( _STANDALONE_ )
             case T_RET:
-                if( ( CurrProc != NULL ) && ( in_epilogue == 0 ) ) {
-                    in_epilogue = 1;
-                    return( Ret( i, Token_Count, FALSE ) );
+                if( ( CurrProc != NULL ) && ( in_epilogue == FALSE ) ) {
+                    in_epilogue = TRUE;
+                    return( RetInstr( i, Token_Count, FALSE ) );
                 }
+                /* fall through */
             case T_RETN:
             case T_RETF:
-                in_epilogue = 0;
-                rCode->info.token = AsmBuffer[i]->value;
+                in_epilogue = FALSE;
                 break;
             case T_IRET:
             case T_IRETD:
                 if( ( CurrProc != NULL ) && ( in_epilogue == 0 ) ) {
-                    in_epilogue = 1;
-                    return( Ret( i, Token_Count, TRUE ) );
+                    in_epilogue = TRUE;
+                    return( RetInstr( i, Token_Count, TRUE ) );
                 }
+                /* fall through */
             case T_IRETF:
             case T_IRETDF:
-                in_epilogue = 0;
-                rCode->info.token = AsmBuffer[i]->value;
-                break;
-#endif
-            default:
-                rCode->info.token = AsmBuffer[i]->value;
+                in_epilogue = FALSE;
                 break;
             }
+            rCode->info.token = AsmBuffer[i]->value;
 
             i++;
             DebugMsg(("ParseItems T_INSTRUCTION: call EvalOperand i=%u for first operand\n", i));
@@ -2114,6 +2106,16 @@ int ParseItems( void )
                 }
                 break;
             case EXPR_CONST:
+                /* optimization: skip <value> if it is 0 and instruction
+                 is RET[F]. <value> must not be external */
+                if (opndx.value == 0 &&
+                    (rCode->info.token == T_RET ||
+                     rCode->info.token == T_RETN ||
+                     rCode->info.token == T_RETF)) {
+                    if (opndx.sym == NULL || opndx.sym->state == SYM_INTERNAL) {
+                        break;
+                    }
+                }
                 DebugMsg(("ParseItems operand CONST, opndx.memtype=%u\n", opndx.mem_type));
                 process_const( &opndx );
                 break;
@@ -2213,8 +2215,10 @@ int ParseItems( void )
                         unsigned int ofs = GetCurrAddr();
                         if (CurrSeg)
                             sym = (asm_sym *)CurrSeg->seg;
+                        directive_listed = FALSE;
                         rc = directive( i+1 , AsmBuffer[i+1]->value );
-                        WriteLstFile(LSTTYPE_DIRECTIVE, ofs, sym);
+                        if (directive_listed == FALSE)
+                            WriteLstFile(LSTTYPE_DIRECTIVE, ofs, sym);
                         return( rc );
                     }
                     return( directive( i+1, AsmBuffer[i+1]->value ) );

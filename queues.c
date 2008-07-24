@@ -36,6 +36,7 @@
 #include "directiv.h"
 #include "queue.h"
 #include "queues.h"
+#include "fastpass.h"
 
 #include "myassert.h"
 
@@ -45,6 +46,10 @@ typedef struct queuenode {
     void *next;
     void *data;
 } queuenode;
+
+#if FASTPASS
+extern bool UseSavedState;
+#endif
 
 static qdesc   *LnameQueue;  // queue of LNAME structs
 static qdesc   *PubQueue;    // queue of pubdefs
@@ -114,9 +119,32 @@ dir_node * GetPublicData2( queuenode * *curr)
         *curr = PubQueue->head;
     else
         *curr = (*curr)->next;
-    if (*curr)
-        return((*curr)->data);
 
+    for (;*curr;*curr = (*curr)->next) {
+        asm_sym *sym = (*curr)->data;
+        if( sym->state == SYM_UNDEFINED ) {
+#if FASTPASS
+            /* do not use saved state, scan full source in second pass */
+            ResetUseSavedState();
+#endif
+            // AsmErr( SYMBOL_NOT_DEFINED, sym->name );
+            continue;
+        } else if( sym->state == SYM_PROC ) {
+            /* skip PROTOs without matching PROC */
+            if(((dir_node *)sym)->e.procinfo->defined == FALSE) {
+                continue;
+            }
+        } else if (sym->state == SYM_EXTERNAL) {
+            /* skip EXTERNDEFs which aren't used */
+            if (sym->weak == TRUE)
+                continue;
+        }
+        if( sym->state != SYM_INTERNAL && sym->state != SYM_PROC) {
+            AsmErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
+            continue;
+        }
+        return((dir_node *)sym);
+    }
     return(NULL);
 }
 
@@ -156,11 +184,15 @@ uint GetPublicData(
         sym = (asm_sym *)curr->data;
         DebugMsg(("GetPublicData: %s, lang=%u\n", sym->name, sym->langtype));
         if( sym->state == SYM_UNDEFINED ) {
-        /* don't display an error here, it's confusing since it will
-         be associated with the END directive. In the next pass, the error
-         will be displayed when the PUBLIC directive is handled
-         */
-//            AsmErr( SYMBOL_NOT_DEFINED, sym->name );
+            /* don't display an error here, it's confusing since it will
+             be associated with the END directive. In the next pass, the error
+             will be displayed when the PUBLIC directive is handled
+             */
+            // AsmErr( SYMBOL_NOT_DEFINED, sym->name );
+#if FASTPASS
+            /* do not use saved state, scan full source in second pass */
+            ResetUseSavedState();
+#endif
             continue;
         }
         if( sym->state == SYM_PROC ) {
@@ -171,7 +203,7 @@ uint GetPublicData(
             }
         } else if (sym->state == SYM_EXTERNAL) {
             /* skip EXTERNDEFs which aren't used */
-            if (((dir_node *)sym)->e.extinfo->weak == TRUE)
+            if (sym->weak == TRUE)
                 continue;
         }
         if( sym->state != SYM_INTERNAL && sym->state != SYM_PROC) {
@@ -237,7 +269,7 @@ uint GetPublicData(
                 continue;
         } else if ( sym->state == SYM_EXTERNAL )
             /* skip EXTERNDEFs which aren't used */
-            if (((dir_node *)sym)->e.extinfo->weak == TRUE)
+            if (sym->weak == TRUE)
                 continue;
 
         if( sym->segment != curr_seg )
@@ -401,7 +433,7 @@ void GetGlobalData( void )
         if( sym->state == SYM_EXTERNAL ) {
             // dir_change( (dir_node *)curr->data, TAB_EXT );
             if( sym->used == TRUE)
-                ((dir_node *)curr->data)->e.extinfo->weak = 0;
+                sym->weak = FALSE;
             else {
                 AsmFree( curr );
             }
@@ -458,10 +490,10 @@ void AddLinnumData( struct line_num_info *data )
 
 // get line numbers
 
-line_num_info * GetLinnumData2( queuenode * *curr)
+line_num_info * GetLinnumData2( qdesc *curr)
 {
     queuenode  *node;
-    if (*curr && ( node = QDequeue( *curr )))
+    if (curr && ( node = QDequeue( curr )))
         return( node->data );
     return(NULL);
 }

@@ -40,20 +40,6 @@
 typedef int     direct_idx;     // directive index, such as segment index,
                                 // group index or lname index, etc.
 
-/* Paul Edwards
-   Note that there is code that is dependent on the ordering
-   of these model types. */
-typedef enum {
-    MOD_NONE    = 0,
-    MOD_TINY    = 1,
-    MOD_SMALL   = 2,
-    MOD_COMPACT = 3,
-    MOD_MEDIUM  = 4,
-    MOD_LARGE   = 5,
-    MOD_HUGE    = 6,
-    MOD_FLAT    = 7,
-} mod_type;             // Memory model type
-
 typedef enum {
     STACK_NONE,
     STACK_NEAR,
@@ -130,14 +116,14 @@ extern typeinfo TypeInfo[];
 /* procedure and symbolic integer constants.                                 */
 /*---------------------------------------------------------------------------*/
 
-typedef struct seg_list {
-    struct seg_list     *next;
+typedef struct seg_item {
+    struct seg_item     *next;
     struct dir_node     *seg;
-} seg_list;
+} seg_item;
 
 typedef struct {
     direct_idx          idx;            // its group index
-    seg_list            *seglist;       // list of segments in the group
+    seg_item            *seglist;       // list of segments in the group
     uint                numseg;         // number of segments in the group
     direct_idx          lname_idx;
 } grp_info;
@@ -149,36 +135,29 @@ typedef struct {
     obj_rec             *segrec;        /* OMF segment record */
     struct asm_sym      *group;         // its group
     uint_32             start_loc;      // starting offset of current ledata or lidata
-    uint_32             current_loc;    // current offset in current ledata or lidata
+    union {
+        uint_32         current_loc;    // current offset in current ledata or lidata
+        uint_32         reloc_offset;   // used by ELF to store reloc file offset
+    };
     uint_8              *CodeBuffer;
     asm_sym             *labels;        // linked list of labels in this seg
     union {
         struct fixup        *FixupListHead; // head of list of fixups
         struct asmfixup     *FixupListHeadCoff;
+        struct asmfixup     *FixupListHeadElf;
     };
     union {
         struct fixup        *FixupListTail;
         struct asmfixup     *FixupListTailCoff;
+        struct asmfixup     *FixupListTailElf;
     };
     void                *LinnumQueue;   // for COFF line numbers
-    uint_32             num_relocs;     // used by COFF
+    uint_32             num_relocs;     // used by COFF/ELF
     seg_type            segtype;        // segment is belonging to "CODE" or 'DATA' class
     direct_idx          lname_idx;
     unsigned            readonly:1;     // if the segment is readonly
     unsigned            Use32:1;
 } seg_info;
-
-typedef struct {
-    unsigned            use32:1;
-    unsigned            comm:1;
-    unsigned            weak:1;         // 1 if an unused "externdef"
-} ext_info;
-
-typedef struct {
-    unsigned            use32:1;
-    unsigned            comm:1;
-    unsigned            isfar:1;
-} comm_info;
 
 typedef struct regs_list {
     struct regs_list    *next;
@@ -206,7 +185,6 @@ typedef struct {
     unsigned            export:1;       // EXPORT procedure
     unsigned            defined:1;      // does a PROC exist?
     unsigned            init:1;         // has PROTO/PROC been called?
-    unsigned            use32:1;        // used for PROTO
 } proc_info;
 
 // macro parameter
@@ -244,10 +222,6 @@ typedef struct {
     mlocal_list         *locallist; // list of locals
     asmlines            *data;      // the guts of the macro - LL of strings
     const FNAME         *srcfile;
-    unsigned            vararg:1;   // if TRUE then accept additional params
-    unsigned            isfunc:1;   // if TRUE then it's a macro function
-    unsigned            redefined:1;// if TRUE then macro has been redefined
-    unsigned            runsync:1;  // if TRUE then run macro synchronous
 } macro_info;
 
 
@@ -280,11 +254,9 @@ typedef struct {
 union entry {
     seg_info            *seginfo;       // info about segment definition
     grp_info            *grpinfo;       // info about group definition
-    ext_info            *extinfo;       // info about external definition
     proc_info           *procinfo;
     lname_info          *lnameinfo;
     struct_info         *structinfo;
-    comm_info           *comminfo;
     macro_info          *macroinfo;
 };
 
@@ -309,13 +281,15 @@ extern uint                     LnamesIdx;      // Number of LNAMES definition
 typedef struct {
     unsigned            error_count;
     unsigned            warning_count;
+    char                *proc_prologue;
+    char                *proc_epilogue;
     dist_type           distance;        // stack distance;
     mod_type            model;           // memory model;
     lang_type           langtype;        // language;
     os_type             ostype;          // operating system;
     short               cpu;             // cpu setting;
     unsigned            use32:1;         // If 32-bit segment is used
-    unsigned            cmdline:1;
+    unsigned            cmdline:1;       // memory model set by cmdline opt?
     unsigned            defUse32:1;      // default segment size 32-bit
     unsigned            mseg:1;          // mixed segments (16/32-bit)
     unsigned            nocasemap:1;     // option casemap:none
@@ -329,6 +303,7 @@ typedef struct {
     unsigned            list:1;          // .list/.nolist
     unsigned            cref:1;          // .cref/.nocref
     unsigned            dosseg:1;        // .dosseg occured
+    unsigned            setif2:1;        // option setif2
     unsigned            flat_idx;        // index of FLAT group
     char                name[_MAX_FNAME];// name of module
     const FNAME         *srcfile;
@@ -362,7 +337,7 @@ extern int              SizeFromRegister( int );
 extern struct asm_sym   *GetStdAssume( int);
 extern struct asm_sym   *MakeExtern( char *name, memtype type, struct asm_sym * vartype, struct asm_sym *, bool );
 extern int              EchoDef( int );         // handle ECHO directive
-extern int              OptionDef( int );       // handle various OPTIONs
+extern int              OptionDirective( int ); // handle OPTION directive
 
 extern int              SetModel( int );        // handle .MODEL statement
 
@@ -379,6 +354,7 @@ extern void             push( void *stack, void *elt );
 extern void             *pop( void *stack );
 extern void             *peek( void *stack, int );
 extern void             wipe_space( char *token );
+extern void             SetMasm510( bool );
 
 /*---------------------------------------------------------------------------
  *   included from segment.c
@@ -410,7 +386,7 @@ enum assume_stdreg {
 #define ASSUME_NOTHING -2
 #define ASSUME_ERROR   -1
 
-extern seg_list         *CurrSeg;       // points to stack of opened segments
+extern seg_item         *CurrSeg;       // points to stack of opened segments
 
 extern uint_32          GetCurrSegStart(void);
 /* Get offset of segment at the start of current LEDATA record */

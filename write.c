@@ -52,12 +52,13 @@
 #include "fixup.h"
 #include "omfprs.h"
 #include "omf.h"
-
-#define COFF_SUPPORT 1
-#define ELF_SUPPORT  0
+#include "fastpass.h"
 
 #if COFF_SUPPORT
 #include "coff.h"
+#endif
+#if ELF_SUPPORT
+#include "elf.h"
 #endif
 
 extern int              CheckForOpenConditionals( void );
@@ -68,7 +69,9 @@ extern void             CmdlParamsInit( int );
 
 // a Win32 external (to get timer res in ms)
 
+#ifndef __UNIX__
 extern unsigned int _stdcall GetTickCount(void);
+#endif
 
 extern symbol_queue     Tables[];       // tables of definitions
 extern obj_rec          *ModendRec;     // Record for Modend (OMF)
@@ -91,9 +94,21 @@ static unsigned         seg_pos;        // file pos of SEGDEF record(s)
 static unsigned         public_pos;     // file pos of PUBDEF record(s)
 unsigned                total_segs;
 
+#if FASTPASS
+
+void preprocessor_output( void );
+
+mod_state modstate;
+line_item *LineStoreHead;
+line_item *LineStoreTail;
+bool StoreState;
+bool UseSavedState;
+uint_32 list_pos;
+
+#endif
+
 bool                    write_to_file;  // write object module
 bool                    Modend;         // end of module is reached
-bool                    Use32;          // if 32-bit code is used
 bool                    PhaseError;     // phase error occured
 bool                    EndDirectiveFound;
 
@@ -104,7 +119,7 @@ void AddLinnumDataRef( void )
     struct line_num_info    *curr;
     unsigned long           line_num;
 
-    if( in_prologue ) {
+    if( in_prologue && CurrProc ) {
         line_num = CurrProc->line_num;
     } else {
         line_num = LineNumber;
@@ -121,6 +136,86 @@ void AddLinnumDataRef( void )
         }
     }
 }
+
+#if FASTPASS
+void SaveState( void )
+{
+    line_item *p;
+    int i;
+    DebugMsg(("SaveState enter\n"));
+    StoreState = TRUE;
+    UseSavedState = TRUE;
+    modstate.init = TRUE;
+    modstate.EquHead = modstate.EquTail = NULL;
+
+    memcpy(&modstate.modinfo, &ModuleInfo, sizeof(module_info));
+
+    SegmentSaveState();
+    AssumeSaveState();
+
+    i = strlen(CurrString);
+    p = AsmAlloc(i+1+sizeof(line_item));
+    p->next = NULL;
+    strcpy(p->line, CurrString);
+
+    if (AsmFiles.file[LST])
+        list_pos = ftell(AsmFiles.file[LST]);
+
+    LineStoreHead = LineStoreTail = p;
+    DebugMsg(("SaveState: curr line=>%s<\n", CurrString));
+}
+
+void ResetUseSavedState( void )
+{
+    if (UseSavedState == TRUE) {
+        UseSavedState = FALSE;
+        if (AsmFiles.file[LST]) {
+            rewind( AsmFiles.file[LST] );
+        }
+    }
+}
+
+static void RestoreState( void )
+{
+    static line_item endl = {NULL, 0, "END"};
+
+    DebugMsg(("RestoreState enter\n"));
+    if (modstate.init) {
+        equ_item *curr;
+        for (curr = modstate.EquHead; curr; curr = curr->next) {
+//            printf("RestoreState: sym >%s<, value=%u, defined=%u\n", curr->sym->name, curr->value, curr->defined);
+            if (curr->sym->mem_type == MT_ABS) {
+                curr->sym->value   = curr->value;
+                curr->sym->defined = curr->defined;
+            }
+        }
+        memcpy(&ModuleInfo, &modstate.modinfo, sizeof(module_info));
+    }
+
+    if (AsmFiles.file[LST])
+        fseek(AsmFiles.file[LST], list_pos, SEEK_SET);
+
+    if (LineStoreHead == NULL) {
+        endl.lineno = LineNumber;
+        LineStoreHead = &endl;
+    }
+    return;
+}
+
+void StoreLine( char * string )
+{
+    int i;
+    line_item *p;
+    i = strlen(string);
+    p = AsmAlloc(i+1+sizeof(line_item));
+    p->next = NULL;
+    p->lineno = LineNumber;
+    strcpy(p->line, string);
+    LineStoreTail->next = p;
+    LineStoreTail = p;
+}
+
+#endif
 
 void OutputByte( unsigned char byte )
 /********************************/
@@ -147,6 +242,11 @@ void OutputByte( unsigned char byte )
             omf_FlushCurrSeg();
         }
     }
+#if FASTPASS
+    if (StoreState == FALSE && Parse_Pass == PASS_1) {
+        SaveState();
+    }
+#endif
     BytesTotal++;
 }
 
@@ -199,12 +299,17 @@ int ChangeCurrentLocation( bool relative, int_32 value, bool select_data )
         CurrSeg->seg->e.seginfo->segrec->d.segdef.seg_length = CurrSeg->seg->e.seginfo->current_loc;
     }
 
+#if FASTPASS
+    if (StoreState == FALSE && Parse_Pass == PASS_1) {
+        SaveState();
+    }
+#endif
     return( NOT_ERROR );
 }
 
 // finish module writes
 // for OMF, just write the MODEND record
-// for COFF, write the section data and symbol table
+// for COFF,ELF and BIN, write the section data and symbol table
 
 static int WriteContent( void )
 /*****************************/
@@ -227,7 +332,11 @@ static int WriteContent( void )
 #if ELF_SUPPORT
     case OFORMAT_ELF:
         elf_write_data(pobjState.file_out->fh);
-        elf_write_symbols(pobjState.file_out->fh);
+        break;
+#endif
+#if BIN_SUPPORT
+    case OFORMAT_BIN:
+        bin_write_data(pobjState.file_out->fh);
         break;
 #endif
     }
@@ -239,7 +348,7 @@ static int WriteContent( void )
  write the OMF/COFF header
  for OMF, this is called twice, once after Pass 1 is done
  and then again after assembly has finished without errors.
- for COFF, it's just called once.
+ for COFF/ELF/BIN, it's just called once.
 */
 static int WriteHeader( bool initial )
 /*********************************/
@@ -297,8 +406,17 @@ static int WriteHeader( bool initial )
 #if ELF_SUPPORT
     case OFORMAT_ELF:
         elf_write_header(pobjState.file_out->fh);
-        elf_write_section_table(pobjState.file_out->fh);
         break;
+#endif
+#if BIN_SUPPORT
+    case OFORMAT_BIN:
+        /* nothing to do */
+        break;
+#endif
+#ifdef DEBUG_OUT
+    default:
+        /* this shouldn't happen */
+        printf("unknown output format: %u\n", Options.output_format);
 #endif
     }
     DebugMsg(("WriteHeader exit\n"));
@@ -306,6 +424,15 @@ static int WriteHeader( bool initial )
 }
 
 // do ONE assembly pass
+// the FASTPASS variant (which is default now) doesn't scan the full source
+// for each pass. For this to work, the following things are implemented:
+// 1. in pass one, save state if the first byte is to be emitted
+//    state is the segment stack, moduleinfo state, ...
+// 2. once the state is saved, all preprocessed lines must be stored.
+//    this can be done here, in OnePass, the line is in <string>.
+// 3. for subsequent passes do
+//    - restore the state
+//    - read preprocessed lines and feed ParseItems() with it
 
 static unsigned long OnePass( char *string )
 /******************************************/
@@ -329,10 +456,31 @@ static unsigned long OnePass( char *string )
     lastLineNumber = 0;
     GlobalVars.data_in_code = FALSE;
 
+#if FASTPASS
+    StoreState = FALSE;
+    if (Parse_Pass > PASS_1 && UseSavedState == TRUE) {
+        line_item *p;
+        RestoreState();
+        p = LineStoreHead;
+        while (p && EndDirectiveFound == FALSE) {
+            strcpy(string, p->line);
+            DebugMsg(("AsmLine(%u): >%s<\n", Parse_Pass+1, string));
+            LineNumber = p->lineno;
+            p = p->next;
+            if (Token_Count = Tokenize(string, 0))
+                ParseItems();
+        }
+        return( BytesTotal);
+    }
+#endif
     while (EndDirectiveFound == FALSE) {
         while (0 == (i = AsmLine( string )));
         if (i < 0)
             break;
+#if FASTPASS
+        if (StoreState)
+            StoreLine(string);
+#endif
         ParseItems();
     }
     CheckProcOpen();
@@ -359,7 +507,7 @@ static void set_ext_idx( )
     // first scan the EXTERN/EXTERNDEF items
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
-        if ((curr->e.extinfo->comm == 1) || (curr->e.extinfo->weak == 1))
+        if ((curr->sym.comm == 1) || (curr->sym.weak == 1))
             continue;
         index++;
         curr->sym.idx = index;
@@ -378,7 +526,7 @@ static void set_ext_idx( )
     // now scan the COMM items
 
     for( curr = Tables[TAB_EXT].head; curr != NULL; curr = curr->next ) {
-        if (curr->e.comminfo->comm == 0)
+        if (curr->sym.comm == 0)
             continue;
         index++;
         curr->sym.idx = index;
@@ -393,11 +541,16 @@ static void write_init( void )
 {
     ModendRec     = NULL; /* OMF */
     start_label   = NULL; /* COFF */
-    Use32         = FALSE;
     write_to_file = FALSE;
     GlobalVars.sel_idx = 0;
     GlobalVars.sel_start = 0;
     GlobalVars.code_seg = FALSE;
+#if FASTPASS
+    modstate.init = FALSE;
+    LineStoreHead = NULL;
+    LineStoreTail = NULL;
+    UseSavedState = FALSE;
+#endif
 
     SymInit();
     QueueInit();
@@ -440,7 +593,11 @@ void WriteObjModule( void )
 
     OpenLstFile();
 
+#ifndef __UNIX__
     starttime = GetTickCount();
+#else
+    starttime = clock();
+#endif
 
     for(Parse_Pass = PASS_1;;Parse_Pass++) {
 
@@ -503,7 +660,7 @@ void WriteObjModule( void )
         DebugMsg(("WriteObjModule(%u) segment sizes:\n", Parse_Pass + 1));
         for( dir = Tables[TAB_SEG].head; dir; dir = dir->next ) {
             if( ( dir->sym.state != SYM_SEG ) || ( dir->sym.segment == NULL ) )
-            continue;
+                continue;
             DebugMsg(("WriteObjModule(%u): segm=%s size=%8X:\n", Parse_Pass + 1, dir->sym.name, dir->e.seginfo->segrec->d.segdef.seg_length));
         }
 #endif
@@ -517,8 +674,10 @@ void WriteObjModule( void )
             lseek(pobjState.file_out->fh, end_of_header, SEEK_SET);
 
         rewind( AsmFiles.file[ASM] );
+#if FASTPASS==0
         if (AsmFiles.file[LST])
             rewind( AsmFiles.file[LST] );
+#endif
     }
 
     DebugMsg(("WriteObjModule: finished, cleanup\n"));
@@ -526,13 +685,17 @@ void WriteObjModule( void )
     /* Write a symbol listing file (if requested) */
     SymWriteCRef();
 
+#ifndef __UNIX__
     endtime = GetTickCount();
+#else
+    endtime = clock(); // is in ms already
+#endif
     if (Parse_Pass == PASS_1)
         p = "";
     else
         p = "es";
 
-    if (Options.quiet < 2) {
+    if (Options.quiet == FALSE) {
         sprintf( string, "%s: %lu lines, %u pass%s, time: %u ms, %u warnings, %u errors \n",
                  ModuleInfo.srcfile->name,
                  LineNumber,

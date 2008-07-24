@@ -40,8 +40,6 @@
 
 typedef unsigned char   byte;
 
-extern bool directive_listed;
-
 extern int              ChangeCurrentLocation( bool, int_32, bool );
 
 static byte NopList16[] = {

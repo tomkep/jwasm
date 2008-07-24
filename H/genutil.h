@@ -33,11 +33,13 @@
 #ifndef GENUTIL_H
 #include <stddef.h>
 
-#include "msg.gh"
+//#include "msg.gh"
 
 #define WRN 0x8000
+#ifdef __WATCOMC__
 #ifndef __AXP__
 #pragma aux Fatal aborts;
+#endif
 #endif
 extern void Fatal( unsigned msg, ... );
 extern size_t PrtFmt( const char *fmt, ... );

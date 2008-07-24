@@ -5,11 +5,19 @@
 "                    80286(=2), 80386(=3), 80486(=4), Pentium(=5) or\n"
 "                    Pentium Pro(=6) cpu. {p} suffix includes privileged\n"
 "                    instructions.\n"
+#if BIN_SUPPORT
+"-bin                generate plain binary file\n"
+#endif
 "-c                  assemble without linking (always set)\n"
+#if COFF_SUPPORT
 "-coff               generate COFF format object file\n"
+#endif
 "-Cp                 preserve case of identifiers\n"
 "-D<name>[=text]     define text macro\n"
 "-e<number>          set error limit number (default=50)\n"
+#if ELF_SUPPORT
+"-elf                generate ELF format object file\n"
+#endif
 "-EP                 Output preprocessed listing to stdout\n"
 "-Fi<file_name>      force <file_name> to be included\n"
 "-Fl[=<file_name>]   write listing file\n"
@@ -20,6 +28,7 @@
 "-fpc                disallow floating-point instructions (.NO87)\n"
 "-fp{n}              floating-point instructions for 8087(n=0), 80287(n=2),\n"
 "                    80387(n=3), Pentium(n=5) or Pentium Pro(n=6).\n"
+"-G{c,d,z}           Use Pascal, C or Stdcall calling convention\n"
 "-I<directory>       add directory to list of include directories\n"
 "-j                  force signed types to be used for signed values\n"
 "-m{t,s,m,c,l,h,f}   set memory model:\n"
@@ -36,11 +45,13 @@
 "-zcm                set C name mangler to standard mode (default)\n"
 "-zcw                set C name mangler to Watcom compatible mode\n"
 "-Zd                 add line number debug information\n"
+"-Zi                 symbolic debug info (not implemented yet)\n"
 "-zlc                no OMF records about data in code\n"
 "-zld                no OMF records about file dependencies\n"
 "-zlf                no COFF .file entry in symbol table\n"
 "-zls                no COFF auxiliary entries for sections in symbol table\n"
 "-Zm                 Masm v5.1 compatibility\n"
+"-Zp[n]              set structure alignment, n={1,2,4,8,16,32}\n"
 "-zzo                no name decoration for STDCALL symbols\n"
 "-zzp                no '@size' suffix for STDCALL procedure names\n"
 "-zzs                store decorated name of start address (COFF only)\n"

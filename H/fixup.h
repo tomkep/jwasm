@@ -43,7 +43,9 @@ enum fixup_types {
         FIX_OFF16,
         FIX_OFF32,
         FIX_PTR16,
-        FIX_PTR32
+        FIX_PTR32,
+        FIX_OFF32_IMGREL,
+        FIX_OFF32_SECREL
 };
 
 enum fixup_options {
@@ -61,14 +63,12 @@ struct asmfixup {
         unsigned                fixup_loc;     /* location of fixup */
         enum fixup_types        type;
         enum fixup_options      fixup_option;
-//        char                    external;
-//        unsigned                line;
+        unsigned loader_resolved:1;
 
         int_8                   frame;          // frame of the fixup
         uint_16                 frame_datum;    // frame_datum of the fixup
         struct dir_node         *def_seg;       // segment fixup is in
         struct asm_sym          *sym;
-
 };
 
 extern struct asmfixup  *InsFixups[3];

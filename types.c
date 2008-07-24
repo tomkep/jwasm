@@ -141,7 +141,7 @@ int StructDef( int i )
 /********************/
 {
     char *name;
-    unsigned alignment = 0;
+    unsigned alignment;
     unsigned int offset;
     int name_loc;
     struct asm_sym *sym;
@@ -183,10 +183,11 @@ int StructDef( int i )
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
+        alignment = Options.alignment_default;
         /* get an optional alignment argument */
         if ((Definition.struct_depth == 0) && (AsmBuffer[i+1]->token != T_FINAL)) {
             int j = i+1;
-            int power;
+            unsigned int power;
             expr_list opndx;
             /* get the optional alignment parameter */
             if ((EvalOperand( &j, Token_Count, &opndx, TRUE ) == ERROR) ||
@@ -264,6 +265,11 @@ int StructDef( int i )
         dir->sym.offset = 0;
         dir->e.structinfo->isOpen = TRUE;
 
+        if (AsmFiles.file[LST]) {
+            WriteLstFile(LSTTYPE_STRUCT, 0, dir->sym.name);
+            directive_listed = TRUE;
+        }
+
         if (AsmBuffer[i]->value == T_UNION)
             dir->e.structinfo->isUnion = TRUE;
 
@@ -325,6 +331,10 @@ int StructDef( int i )
                 Definition.curr_struct = pop( &( Definition.struct_stack ) );
                 Definition.struct_depth--;
 
+                if (AsmFiles.file[LST]) {
+                    WriteLstFile(LSTTYPE_STRUCT, size, dir->sym.name);
+                    directive_listed = TRUE;
+                }
 #if 1
                 /* to allow a direct structure access */
                 switch (dir->sym.total_size) {
@@ -513,6 +523,12 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, stru
             else if (size)
                 offset = (offset + (size - 1)) & (-size);
         }
+        /* adjust the struct's size.
+         The field's size is added in  UpdateStructSize()
+         */
+        if (Definition.curr_struct->e.structinfo->isUnion == FALSE)
+            if (offset > Definition.curr_struct->sym.total_size)
+                Definition.curr_struct->sym.total_size = offset;
     }
 
     sym->offset = offset;
@@ -575,14 +591,23 @@ static char * InitializeArray(field_list *f, char * ptr, char * buffer)
                 char *ptr4;
                 *ptr2++ = *ptr++;
                 ptr4 = ptr;
-                while (*ptr != c && *ptr != '0')
+                while (*ptr != '0') {
+                    if (*ptr == c) {
+                        if (*(ptr+1) == c) {
+                            *ptr2++ = *ptr++;
+                            ptr4++;
+                        } else
+                            break;
+                    }
                     *ptr2++ = *ptr++;
+                }
                 if (*ptr == 0) {
                     AsmError(MISSING_QUOTE_IN_STRING);
                     return(ptr);
                 }
                 if (f->sym->mem_type == MT_BYTE || f->sym->mem_type == MT_SBYTE) {
                     count = count - (ptr - ptr4) + 1;
+                    DebugMsg(("InitializeArray: string init, count=%u\n", count ));
                     if (count <= 0) {
                         AsmError(STRING_OR_TEXT_LITERAL_TOO_LONG);
                         return(ptr);
@@ -608,6 +633,7 @@ static char * InitializeArray(field_list *f, char * ptr, char * buffer)
         InputQueueLine( buffer );
     }
     if (count) {
+        DebugMsg(("InitializeArray: remaining items=%u\n", count));
         if (count == f->sym->total_length)
             strcat(buffer, f->value);
         else {
@@ -616,8 +642,12 @@ static char * InitializeArray(field_list *f, char * ptr, char * buffer)
                 sym = sym->type;
             if (sym->state == SYM_TYPE && ((dir_node *)sym)->e.structinfo->isTypedef == FALSE)
                 sprintf(buffer, "%s %u dup (<>)", f->initializer, count);
-            else
-                sprintf(buffer, "%s %u dup (?)", f->initializer, count);
+            else {
+                if (CurrSeg && CurrSeg->seg->e.seginfo->segtype != SEGTYPE_BSS)
+                    sprintf(buffer, "%s %u dup (0)", f->initializer, count);
+                else
+                    sprintf(buffer, "%s %u dup (?)", f->initializer, count);
+            }
         }
         InputQueueLine( buffer );
     }
@@ -908,9 +938,10 @@ nodelim:
 
 // TYPEDEF
 
-asm_sym * CreateTypeDef(char * name, int i)
+asm_sym * CreateTypeDef(char * name, int * pi)
 {
     char        *token;
+    int         i = *pi;
     struct asm_sym      *sym = NULL;
     struct asm_sym      *symtype;
     dir_node            *dir;
@@ -952,7 +983,7 @@ asm_sym * CreateTypeDef(char * name, int i)
 
     token = AsmBuffer[i]->string_ptr;
     type = ERROR;
-    if (AsmBuffer[i]->token == T_FINAL)
+    if (AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_COMMA)
         type = 0; /* for a VOID type, use first index in simple type */
     else if (AsmBuffer[i]->token == T_RES_ID || AsmBuffer[i]->token == T_DIRECTIVE)
         type = FindSimpleType( AsmBuffer[i]->value );
@@ -968,6 +999,7 @@ asm_sym * CreateTypeDef(char * name, int i)
             DebugMsg(("TypeDef PROTO, returned from ExamineProc\n"));
             sym->mem_type = MT_PROC;
             dir->e.structinfo->target = (asm_sym *)dir2;
+            *pi = Token_Count;
             return( sym );
         }
         /* besides PROTO typedef, an arbitrary type is ok */
@@ -1048,6 +1080,8 @@ asm_sym * CreateTypeDef(char * name, int i)
                     ptrqual = AsmBuffer[i]->value;
                     type = FindSimpleType(ptrqual);
                     size = SimpleType[type].size;
+                    if (size == -1)
+                        size = SizeFromMemtype(SimpleType[type].mem_type, Use32);
                 }
                 i++;
                 if (indirection == 0 &&
@@ -1097,11 +1131,7 @@ asm_sym * CreateTypeDef(char * name, int i)
         }
         sym->total_size = size;
     }
-    if (AsmBuffer[i]->token != T_FINAL) {
-        DebugMsg(("TypeDef: unexpected token %u, idx=%u\n", AsmBuffer[i]->token, i));
-        AsmError( SYNTAX_ERROR );
-        return( NULL );
-    }
+    *pi = i;
     return((asm_sym *)dir);
 }
 
@@ -1114,15 +1144,24 @@ asm_sym * CreateTypeDef(char * name, int i)
 
 int TypeDef( int i )
 {
+    char *name;
 
     DebugMsg(("TypeDef enter, i=%d\n", i));
     if( i < 0 ) {
         AsmError( TYPE_MUST_HAVE_A_NAME );
         return( ERROR );
     }
+    name = AsmBuffer[i]->string_ptr;
 
-    if (CreateTypeDef(AsmBuffer[i]->string_ptr, i+2) == NULL)
+    i += 2;
+
+    if (CreateTypeDef( name, &i) == NULL)
         return(ERROR);
+    if (AsmBuffer[i]->token != T_FINAL) {
+        DebugMsg(("TypeDef: unexpected token %u, idx=%u\n", AsmBuffer[i]->token, i));
+        AsmError( SYNTAX_ERROR );
+        return( ERROR );
+    }
 
     return( NOT_ERROR );
 }

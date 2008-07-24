@@ -29,11 +29,7 @@
 ****************************************************************************/
 
 
-#if defined( _STANDALONE_ )
-
-extern int    DefineConstant( int i, bool redefine );
+extern int    DefineConstant( bool redefine );
 extern void   MakeConstantUnderscored( int token );
-extern void * CreateConstant( char *, int, int, bool );
-
-#endif
+extern asm_sym * CreateConstant( char *, int, int, bool );
 

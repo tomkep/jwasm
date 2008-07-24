@@ -110,14 +110,14 @@ int LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, b
     if( Parse_Pass == PASS_1 ) {
         if( sym->state == SYM_UNDEFINED )
             ;
-        else if( sym->state == SYM_EXTERNAL &&
-                 ((dir_node *)sym)->e.extinfo->weak == 1) {
+        else if( sym->state == SYM_EXTERNAL && sym->weak == 1) {
             /* don't accept EXTERNDEF for a local label! */
             if (bLocal && CurrProc) {
+                DebugMsg(("LabelCreate(%s): error, EXTERNDEF for local label\n", sym->name));
                 AsmErr( SYMBOL_REDEFINITION, symbol_name );
                 return( ERROR );
             }
-            dir_free((dir_node *)sym, TRUE);
+            dir_free( (dir_node *)sym, TRUE );
         } else {
             AsmErr( SYMBOL_PREVIOUSLY_DEFINED, symbol_name );
             return( ERROR );
@@ -128,7 +128,9 @@ int LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, b
             ((dir_node *)sym)->next = (dir_node *)CurrSeg->seg->e.seginfo->labels;
             CurrSeg->seg->e.seginfo->labels = sym;
         }
-        sym->langtype = ModuleInfo.langtype;
+        /* a possible language type set by EXTERNDEF must be kept! */
+        if (sym->langtype == LANG_NONE)
+            sym->langtype = ModuleInfo.langtype;
     } else {
         /* save old offset */
         addr = sym->offset;
@@ -144,7 +146,7 @@ int LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, b
     if( Parse_Pass != PASS_1 && sym->offset != addr ) {
 #ifdef DEBUG_OUT
         if (!PhaseError)
-            DebugMsg(("LabelCreate: Phase error, first time, new=%X - old=%X\n", sym->offset, addr));
+            DebugMsg(("LabelCreate: Phase error, pass %u, sym >%s< first time, new=%X - old=%X\n", Parse_Pass+1, sym->name, sym->offset, addr));
 #endif
         PhaseError = TRUE;
     }

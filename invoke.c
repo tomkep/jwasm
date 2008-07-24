@@ -17,6 +17,7 @@
 #include "parser.h"
 #include "expreval.h"
 #include "directiv.h"
+#include "input.h"
 #include "queues.h"
 #include "equate.h"
 #include "mangle.h"
@@ -299,6 +300,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
             psize = asize;
 
         if (asize > psize) { /* argument's size too big */
+            DebugMsg(("PushInvokeParm: error, arg size=%u, parm size=%u\n", asize, psize));
             AsmErr(INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1);
             return (NOT_ERROR);
         }
@@ -475,7 +477,7 @@ int InvokeDef( int i )
     if (AsmBuffer[i+1]->token != T_COMMA && AsmBuffer[i+1]->token != T_FINAL) {
         if (ERROR == EvalOperand( &i, Token_Count, &opndx, TRUE ))
             return (ERROR);
-        DebugMsg(("InvokeDef: target is expression, opndx->sym=%X, opndx->mbr=%X\n", opndx.sym, opndx.mbr));
+        DebugMsg(("InvokeDef: target is expression, opndx->sym=%X, opndx->mbr=%X, opndx->assume=%X\n", opndx.sym, opndx.mbr, opndx.assume));
         if (opndx.mbr != NULL) {
             sym = opndx.mbr;
             // it may be a typecast. then the mbr member contains the explicit type
@@ -492,7 +494,7 @@ int InvokeDef( int i )
                    opndx.sym->type->mem_type == MT_PTR) {
             sym = opndx.sym;
         } else {
-            AsmError(SYNTAX_ERROR);
+            AsmErr( INVOKE_REQUIRES_PROTOTYPE );
             return (ERROR);
         }
     } else {

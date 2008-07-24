@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  hash table for fast instruction search
+* Description:  instruction search functions
 *
 ****************************************************************************/
 
@@ -60,25 +60,24 @@ static unsigned int hashpjw( const char *s )
     return( h % HASH_TABLE_SIZE );
 }
 
-static struct AsmCodeName **find( char *name )
+static struct AsmCodeName *InstrFind( char *name )
 /********************************************/
 /* find an instruction in the hash table */
 {
-    struct AsmCodeName **inst;
+    struct AsmCodeName *inst;
 
-    inst = &inst_table[ hashpjw( name ) ];
+    inst = inst_table[ hashpjw( name ) ];
 
-    for( ; *inst; inst = &((*inst)->next) ) {
+    for( ; inst; inst = inst->next ) {
         /* check if the name matches the entry for this inst in AsmChars */
-        if( strnicmp( name, &AsmChars[ (*inst)->index ], (*inst)->len ) == 0
-            && name[ (*inst)->len ] == '\0' ) {
+        if( name[ inst->len ] == NULLC && strnicmp( name, &AsmChars[ inst->index ], inst->len ) == 0) {
             return( inst );
         }
     }
-    return( inst );
+    return( NULL );
 }
 
-static struct AsmCodeName *add( struct AsmCodeName *inst )
+static struct AsmCodeName *InstrAdd( struct AsmCodeName *inst )
 /********************************************************/
 {
     struct AsmCodeName  **location;
@@ -87,12 +86,16 @@ static struct AsmCodeName *add( struct AsmCodeName *inst )
     strncpy( buffer, (char *)&(AsmChars[inst->index]), inst->len );
     buffer[ inst->len ] = '\0';
 
-    location = find( buffer );
+    location = &inst_table[ hashpjw( buffer ) ];
 
-    if( *location != NULL ) {
-        /* we already have one */
-        AsmErr( SYMBOL_ALREADY_DEFINED, buffer ); // fixme
-        return( NULL );
+    for( ; *location; location = &((*location)->next) ) {
+        /* check if the name matches the entry for this inst in AsmChars */
+        if( strnicmp( buffer, &AsmChars[ (*location)->index ], (*location)->len ) == 0
+            && buffer[ (*location)->len ] == '\0' ) {
+            /* we already have one, shouldn't happen */
+            AsmErr( SYMBOL_ALREADY_DEFINED, buffer );
+            return( NULL );
+        }
     }
 
     inst->next = *location;
@@ -106,15 +109,14 @@ static struct AsmCodeName *add( struct AsmCodeName *inst )
 int get_instruction_position( char *string )
 /******************************************/
 {
-    struct AsmCodeName **inst;
+    struct AsmCodeName *inst;
 
-    inst = find( string );
-
-    if( *inst ) return( (*inst)->position );
+    inst = InstrFind( string );
+    if( inst ) return( inst->position );
     return( EMPTY );
 }
 
-// fixme -- make this whole table static? use indices instead of pointers
+// make this whole table static? use indices instead of pointers
 
 void make_inst_hash_table( void )
 /*******************************/
@@ -122,7 +124,30 @@ void make_inst_hash_table( void )
     unsigned i;
 
     for( i=0; i != T_NULL; i++ ) {
-        add( &AsmOpcode[i] );
+        InstrAdd( &AsmOpcode[i] );
     }
     return;
+}
+
+// remove a reserved word.
+
+struct AsmCodeName *InstrRemove( char *string )
+{
+    struct AsmCodeName  *prev = NULL;
+    struct AsmCodeName  *curr;
+    int i;
+
+    i = hashpjw( string );
+    curr = inst_table[i];
+
+    for( ; curr ; prev = curr, curr = curr->next)  {
+        if( strnicmp( string, &AsmChars[ curr->index ], curr->len ) == 0 && *(string + curr->len) == '\0' ) {
+            if (prev)
+                prev->next = curr->next;
+            else
+                inst_table[i] = curr->next;
+            return( curr );
+        }
+    }
+    return( NULL );
 }

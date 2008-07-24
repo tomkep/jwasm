@@ -176,6 +176,15 @@ struct asm_code {
 #define SSE2_SET    0x09   // XMM instruction set
 #define SSE3_SET    0x0A   // XMM instruction set
 
+// values for opcode flags (OP_DIRECTIVE)
+#define OPCF_CEXPR    0x01 /* avoid '<' being used as string delimiter (.IF, ...) */
+#define OPCF_CONDDIR  0x02 /* conditional assembly directive (IF, ELSE, ...) */
+#define OPCF_ERRDIR   0x04 /* error directive (.ERR, .ERRNZ, ...) */
+#define OPCF_LOOPDIR  0x08 /* loop directive (FOR, REPEAT, WHILE, ...) */
+#define OPCF_STRPARM  0x10 /* directive expects string param(s) (IFB, IFDIF, ...) */
+                           /* enclose strings in <> in macro expansion step */
+#define OPCF_NOEXPAND 0x20 /* don't expand params for directive (PURGE, FOR, IFDEF, ...) */
+
 // values for byte1_info
 
 #define F_16        0x1
@@ -216,6 +225,7 @@ struct asm_code {
 extern const struct asm_ins ASMFAR AsmOpTable[];
 extern struct AsmCodeName          AsmOpcode[];
 extern char                        AsmChars[];
+extern bool directive_listed;
 
 #if defined( _STANDALONE_ )
 

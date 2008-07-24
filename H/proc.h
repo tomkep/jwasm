@@ -42,7 +42,7 @@ extern int              ProcDef( int );         // PROC directive
 extern int              ProtoDef( int, char * );// PROTO directive
 extern int              ProcEnd( int );         // ENDP directive
 extern int              InvokeDef( int );       // INVOKE directive
-extern int              Ret( int, int, int );   // emit return statement from procedure
+extern int              RetInstr( int, int, int );// emit return statement from procedure
 //extern int              WritePrologue( void );  // emit prologue statement after the
                                                 // declaration of a procedure
 extern void             ProcInit( void );

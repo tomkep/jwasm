@@ -31,13 +31,15 @@
 #ifndef _MACRO_H_
 #define _MACRO_H_
 
-extern void    AddTokens( ASM_TOK **buffer, int start, int count );
+extern void    AddTokens( int start, int count );
 extern int     MacroDef( int );  // define a macro
 extern int     FillMacro( dir_node *, int, bool );  // set macro content
 extern int     PurgeMacro( int );      // remove a macro
 extern int     ExpandMacro( char * );
 extern int     RunMacro( dir_node *, char *, char *, bool, bool, bool );
 extern int     EndMacro( int, int );
+extern asm_sym *SetTextMacro( asm_sym*, char *, char *);
+extern int     GetTextMacroValue( char *, char *);
 extern int     CatStrDef( int, asm_sym** ); // CatStr + TEXTEQU directive
 extern int     SubStrDef( int, char *);     // SubStr directive
 extern int     SizeStrDef( int );           // SizeStr directive

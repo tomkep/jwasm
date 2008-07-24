@@ -102,6 +102,7 @@ struct asmfixup *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enu
     fixup->next = sym->fixup;
     sym->fixup = fixup;
     fixup->type = fixup_type;
+    fixup->loader_resolved = FALSE;
     fixup->fixup_option = fixup_option;
     InsFixups[Opnd_Count] = fixup;
     return( fixup );
@@ -118,7 +119,6 @@ static int DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
     long                max_disp;
     unsigned            size;
     asm_sym             *sym2;
-#if defined( _STANDALONE_ )
     dir_node            *seg;
 
     // all relative fixups should occure only at first pass and they signal forward references
@@ -131,10 +131,10 @@ static int DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
         return( NOT_ERROR );
     } else if( Parse_Pass != PASS_1 ) {
     } else if( sym->mem_type == MT_FAR && fixup->fixup_option == OPTJ_CALL ) {
-        // convert far call to near, only at first pass
+        // convert far call to push cs + near call, only at first pass
         DebugMsg(("DoPatch: Phase error!\n"));
         PhaseError = TRUE;
-        sym->offset++;
+        sym->offset++;  /* a PUSH CS will be added */
         OutputByte( 0 );
         AsmFree( fixup );
         return( NOT_ERROR );
@@ -147,12 +147,6 @@ static int DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
             return( NOT_ERROR );
         }
     }
-#else
-    if( fixup->name != sym->name ) {
-        SkipFixup();
-        return( NOT_ERROR );
-    }
-#endif
     size = 0;
     switch( fixup->type ) {
     case FIX_RELOFF32:
@@ -224,7 +218,9 @@ int BackPatch( struct asm_sym *sym )
 /**********************************/
 /*
 - patching for forward reference labels in Jmp/Call instructions;
-- call only when a new label appears (which is sym then);
+- called by LabelCreate(), ProcDef() and data_init(), that is, whenever
+- a new label appears. The new label is the <sym> parameter.
+- During the process, the label's offset might be changed!
 */
 {
     struct asmfixup     *fixup;
@@ -308,7 +304,8 @@ struct fixup *CreateFixupRec( int index )
 
     DebugMsg(("CreateFixupRec: sym=%s, state=%u\n", sym->name, sym->state));
 
-    fixnode->loader_resolved = FALSE;
+    /* loader_resolved is FALSE for OFFSET, TRUE for LROFFSET */
+    fixnode->loader_resolved = fixup->loader_resolved;
 
     /* set the fixup's location in current LEDATA */
     /* CurrSeg->curr_loc - CurrSeg->start_loc */
@@ -462,9 +459,12 @@ void mark_fixupp( OPNDTYPE determinant, int index )
     }
 }
 
+/* Store asmfixup information of InsFixup[index] in current segment's
+   fixup linked list.
+*/
+
 int store_fixup( int index )
 /**************************/
-/* Store fixup information */
 {
     struct asmfixup     *fixup;
 
@@ -486,9 +486,7 @@ int store_fixup( int index )
     if (Options.output_format == OFORMAT_OMF) {
         struct fixup *fixnode;
 
-        /* for OMF, the target's offset is stored an the fixup's
-         location. For COFF, just the difference to the target's
-         symbol offset is stored an the fixup location!
+        /* for OMF, the target's offset is stored an the fixup's location.
         */
         if( fixup->type != FIX_SEG ) {
             CodeInfo->data[index] += fixup->sym->offset;
@@ -507,6 +505,10 @@ int store_fixup( int index )
         }
     } else {
         fixup->next2 = NULL;
+
+        /* For COFF, just the difference to the target's
+         symbol offset is stored an the fixup location!
+        */
 
         /* for COFF/ELF, store the asmfixup records directly! */
 

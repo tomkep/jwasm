@@ -73,17 +73,6 @@ typedef enum {
         MT_ERROR = -1
 } memtype;
 
-typedef enum {
-    LANG_NONE     = 0,
-    LANG_C        = 1,
-    LANG_SYSCALL  = 2,
-    LANG_STDCALL  = 3,
-    LANG_PASCAL   = 4,
-    LANG_FORTRAN  = 5,
-    LANG_BASIC    = 6,
-    LANG_WATCOM_C = 7
-} lang_type;
-
 // symbols can be
 // - "labels" (data or code, internal, external, stack)
 //   which have mem_type MT_BYTE..MT_OWORD, MT_NEAR, MT_FAR, MT_PTR
@@ -98,6 +87,7 @@ typedef struct asm_sym {
         struct asm_sym  *next;
         char            *name;
 
+        /* for SYM_INTERNAL, SYM_EXTERNAL */
         struct asm_sym  *segment;
         union {
             uint_32         offset;
@@ -105,16 +95,38 @@ typedef struct asm_sym {
             char *          string_ptr;/* used by SYM_TMACRO */
             macro_func      func_ptr;  /* used by SYM_MACRO */
         };
-        uint_32         first_size;   /* size of 1st initializer in bytes */
-        /* first length is used for data items only
+        /* first_size is used for data items (SYM_INTERNAL & SYM_STRUCT_FIELD).
+         */
+        union {
+            /* for SYM_INTERNAL */
+            uint_32         first_size;   /* size of 1st initializer in bytes */
+            /* for SYM_EXTERNAL, SYM_PROC */
+            struct {
+                unsigned    use32:1;
+                unsigned    comm:1;  /* is communal */
+                unsigned    weak:1;  /* 1 if an unused "externdef" */
+                unsigned    isfar:1; /* for communal only */
+            };
+            /* for SYM_MACRO */
+            struct {
+                unsigned    vararg:1;   // accept additional params
+                unsigned    isfunc:1;   // it's a macro function
+                unsigned    runsync:1;  // run macro synchronous
+            };
+        };
+        /* first_length is used for data items only
          (SYM_INTERNAL & SYM_STRUCT_FIELD).
          idx is used by SYM_EXTERNAL, SYM_PROC (proto)
          */
         union {
+            /* for SYM_INTERNAL */
             uint_32         first_length; /* size of 1st initializer--elts. dup'd */
+            /* for SYM_EXTERNAL */
             uint            idx;      /* external definition index */
         };
+        /* for SYM_INTERNAL, SYM_STRUCT_FIELD, SYM_TYPE */
         uint_32         total_size;   /* total number of bytes (sizeof) */
+        /* for SYM_INTERNAL, SYM_STRUCT_FIELD */
         uint_32         total_length; /* total number of elements (lengthof) */
         char            *(*mangler)( struct asm_sym *sym, char *buffer );
         unsigned        used:1;       /* symbol has been referenced */
@@ -127,6 +139,7 @@ typedef struct asm_sym {
         unsigned        public:1;     /* symbol is to make public */
         unsigned        list:1;       /* symbol is to be listed */
         unsigned        included:1;   /* symbol is in COFF symbol table */
+        unsigned        saved:1;      /* symbol has been saved ("fast pass") */
         lang_type       langtype;
         enum sym_state  state;
         memtype         mem_type;

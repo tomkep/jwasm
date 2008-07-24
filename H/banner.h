@@ -30,12 +30,10 @@
 
 #define _BETA_
 
-#define CURR_YEAR       "2008"
-
 #define banner1p1(p)  p
 #define banner1p2(v)  "Version " v
 #define banner1(p,v) banner1p1(p) " "
-#define banner1w(p,v) "JWasm v" v ", Masm-compatible assembler based on Open Watcom's Wasm."
+#define banner1w(p,v) "JWasm v" v ", " __DATE__ ", Masm-compatible assembler."
 
 #define banner2p1(year) "Portions Copyright (c) " year "-2002 Sybase, Inc. All Rights Reserved"
 #define banner2p2() ""
@@ -46,13 +44,8 @@
 #define banner3       "Source code is available under the Sybase Open Watcom Public License."
 #define banner3a      ""
 
-// the following macros define the delimeters used by the resource
-// compiler when concatenating strings
-#define _RC_DELIM_LEFT_         [
-#define _RC_DELIM_RIGHT_        ]
-
-#define BAN_VER_STR "1.80" _BETA_
+#define BAN_VER_STR "1.90" _BETA_
 
 #define _JWASM_VERSION_ BAN_VER_STR
-#define _JWASM_VERSION_INT_ 180
+#define _JWASM_VERSION_INT_ 190
 

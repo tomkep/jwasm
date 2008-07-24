@@ -41,6 +41,5 @@ enum {
 /* number = number of arguments that follow; ret = return value */
 
 extern void   Fatal( unsigned msg, ... );
-extern void   AsmShutDown( void );
 
 #endif

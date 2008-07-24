@@ -34,6 +34,7 @@
 #include "expreval.h"
 #include "myassert.h"
 #include "directiv.h"
+#include "input.h"
 #include "types.h"
 #include "stddef.h"
 #include "labels.h"
@@ -362,7 +363,7 @@ static int get_operand( expr_list *new, int *start, int end )
                 }
                 if( sti.type != EXPR_CONST ) {
                     if( error_msg )
-                        AsmError( CONSTANT_EXPECTED );
+                        AsmError( CONSTANT_OPERAND_EXPECTED );
                     new->type = EXPR_UNDEF;
                     return( ERROR );
                 }
@@ -466,8 +467,9 @@ static int get_operand( expr_list *new, int *start, int end )
                         sprintf(CurrStringEnd, "%s.%s", new->assume->name, AsmBuffer[i]->string_ptr);
                         AsmErr( SYMBOL_NOT_DEFINED, CurrStringEnd );
 #endif
-                    } else
+                    } else {
                         AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
+                    }
                 new->type = EXPR_UNDEF;
                 new->sym = NULL;
                 return( ERROR );
@@ -875,6 +877,8 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
         if( check_same( token_1, token_2, EXPR_CONST ) ) {
 
             token_1->llvalue += token_2->llvalue;
+            if (token_2->labeldiff)
+                token_1->labeldiff = token_2->labeldiff;
 
         } else if( check_same( token_1, token_2, EXPR_ADDR ) ) {
 
@@ -1096,8 +1100,14 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
                 token_2->idx_reg = EMPTY;
             } else {
                 /* for [reg].TYPE.xxx, return offset instead of size */
-                if ((token_2->mbr) && (token_2->mbr->state == SYM_TYPE))
-                    token_2->value = token_2->mbr->offset;
+                /* this is most likely obsolete */
+                if (token_2->mbr) {
+                    if (token_2->mbr->state == SYM_TYPE)
+                        token_2->value = token_2->mbr->offset;
+                    else if (token_1->mbr == NULL)
+                        token_1->mbr = token_2->mbr;
+                }
+
                 if( token_1->mem_type == MT_EMPTY)
                     token_1->mem_type = token_2->mem_type;
 #if SETCURRSTR == 0
@@ -1194,6 +1204,7 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
                     DebugMsg(("calculate exit 13, error\n"));
                     return( ERROR );
                 }
+                /* handle first operand */
                 sym = token_1->sym;
                 if( sym == NULL ) {
                     DebugMsg(("calculate exit 13a, error\n"));
@@ -1212,19 +1223,37 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
 #else
                 token_1->value += sym->addr;
 #endif
+                /* handle second operand */
                 sym = token_2->sym;
                 if( sym == NULL ) {
                     DebugMsg(("calculate exit 14a, error\n"));
                     return( ERROR );
                 }
 #if defined( _STANDALONE_ )
-//                if( Parse_Pass > PASS_1 && sym->defined == FALSE ) {
-                if( Parse_Pass > PASS_1 && sym->state == SYM_UNDEFINED ) {
-                    if( error_msg )
-                        AsmErr( LABEL_NOT_DEFINED, sym->name );
-                    token_1->type = EXPR_UNDEF;
-                    DebugMsg(("calculate exit 15, error\n"));
-                    return( ERROR );
+                if( Parse_Pass > PASS_1) {
+                    if( sym->state == SYM_UNDEFINED ) {
+                        if( error_msg )
+                            AsmErr( LABEL_NOT_DEFINED, sym->name );
+                        token_1->type = EXPR_UNDEF;
+                        DebugMsg(("calculate exit 15, error\n"));
+                        return( ERROR );
+                    }
+                    /* if symbol is external, error - unless it's the same symbol */
+                    if ((sym->state == SYM_EXTERNAL ||
+                         token_1->sym->state == SYM_EXTERNAL) &&
+                        sym != token_1->sym) {
+                        if ( error_msg )
+                            AsmError(INVALID_USE_OF_EXTERNAL_SYMBOL);
+                        token_1->type = EXPR_UNDEF;
+                        return( ERROR );
+                    }
+                    /* check if the 2 offsets belong to the same segment */
+                    if (sym->segment != token_1->sym->segment ) {
+                        if ( error_msg )
+                            AsmError(OPERANDS_MUST_BE_IN_SAME_SEGMENT);
+                        token_1->type = EXPR_UNDEF;
+                        return( ERROR );
+                    }
                 }
                 token_1->value -= sym->offset;
 #else
@@ -1498,7 +1527,7 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
         if( AsmBuffer[index]->value == T_NOT ) {
             if( token_2->type != EXPR_CONST ) {
                 if( error_msg )
-                    AsmError( CONSTANT_EXPECTED );
+                    AsmError( CONSTANT_OPERAND_EXPECTED );
                 token_1->type = EXPR_UNDEF;
                 DebugMsg(("calculate exit 27, error\n"));
                 return( ERROR );
@@ -1526,11 +1555,12 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
                                 token_2->value += token_2->sym->offset;
                             }
             } else {
+                DebugMsg(("calculate: token1.type=%u, token2.type=%u\n", token_1->type, token_2->type));
                 if( error_msg )
                     if (token_1->type == EXPR_ADDR && token_1->indirect == FALSE)
                         AsmError( OPERAND_MUST_BE_RELOCATABLE );
                     else
-                        AsmError( CONSTANT_EXPECTED );
+                        AsmError( CONSTANT_OPERAND_EXPECTED );
                 token_1->type = EXPR_UNDEF;
                 DebugMsg(("calculate exit 28, error\n"));
                 return( ERROR );
@@ -1595,6 +1625,10 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
         else if( token_2->type == EXPR_CONST ) {
             switch (AsmBuffer[index]->value) {
             case T_OFFSET:
+            case T_LROFFSET:
+#if IMAGERELSUPP
+            case T_IMAGEREL:
+#endif
             case T_SIZEOF: /* SIZEOF/SIZE and TYPE accept a type as well */
             case T_SIZE:
             case T_TYPE:
@@ -1805,12 +1839,16 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
             DebugMsg(("OPATTR returns %u\n", token_1->value));
             token_1->mem_type = MT_EMPTY;
             break;
+        case T_LROFFSET:
         case T_OFFSET:
+#if IMAGERELSUPP
+        case T_IMAGEREL:
+#endif
             if (token_2->stackbased == TRUE) {
                 AsmError( CANNOT_OFFSET_AUTO );
             }
             TokenAssign( token_1, token_2 );
-            token_1->instr = T_OFFSET;
+            token_1->instr = AsmBuffer[index]->value;
             /* skip memory type of operand, just address is needed */
             token_1->mem_type = MT_EMPTY;
             /* clear overrides ("offset SEG:xxx") */
@@ -2348,9 +2386,10 @@ static bool is_expr( int i )
     case T_COLON:
 //        DebugMsg(("is_expr: T_COLON\n"));
 #if defined( _STANDALONE_ )
-        if( ( AsmBuffer[i+1]->token == T_DIRECTIVE )
-            && ( AsmBuffer[i+1]->value == T_EQU2 ) )
-            /* It is a := */
+        /* check if it is a ":=". Is this relevant at all? */
+        if( AsmBuffer[i+1]->token == T_DIRECTIVE &&
+            AsmBuffer[i+1]->value == T_EQU &&
+            AsmBuffer[i+1]->opcode == 1)
             break;
 #endif
         return( TRUE );

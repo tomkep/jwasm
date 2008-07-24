@@ -24,6 +24,7 @@
 #include "expreval.h"
 #include "types.h"
 #include "hll.h"
+#include "fastpass.h"
 
 #include "myassert.h"
 
@@ -67,8 +68,8 @@ static char * MakeAnonymousLabel(void)
 // there is a problem with the '<' because it is a "string delimiter"
 // which Tokenize() usually is to remove.
 // There has been a hack implemented in Tokenize() so that it won't touch the
-// '<' if .IF, .ELSEIF, .WHILE, .UNTIL or .BREAK/.CONTINUE has been detected
-// as first token in the line.
+// '<' if .IF, .ELSEIF, .WHILE, .UNTIL, .UNTILCXZ or .BREAK/.CONTINUE has been
+// detected as first token in the line.
 
 static c_bop GetCOp(int * i)
 {
@@ -445,9 +446,13 @@ static int GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true,
             if (is_true == TRUE)
                 if (opndx.value)
                     sprintf(buffer,"jmp %s", label);
+                else
+                    strcpy(buffer," "); /* make sure there is a char */
             if (is_true == FALSE)
                 if (opndx.value == 0)
                     sprintf(buffer,"jmp %s", label);
+                else
+                    strcpy(buffer," "); /* make sure there is a char */
             break;
         }
     }
@@ -580,7 +585,7 @@ static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char 
          4b. replace the "false" label in the generated code by the new label
 
          */
-        if (*lastjmp && (hll->cmd != HLL_BREAK)) {
+        if (*lastjmp && (hll->cmd != HLL_BREAK) && (hll->cmd != HLL_WHILE)) {
             char * p = *lastjmp;
             InvertJmp(p+1);         /* step 1 */
             p += 4;
@@ -603,6 +608,8 @@ static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char 
     return (NOT_ERROR);
 }
 
+// update hll->condlines
+
 static int WriteExprSrc(hll_list * hll, char * buffer)
 {
     int size;
@@ -622,10 +629,10 @@ static int WriteExprSrc(hll_list * hll, char * buffer)
 }
 
 // evaluate the C like boolean expression found in HLL structs
-// like .IF, .ELSEIF, .WHILE and .UNTIL
+// like .IF, .ELSEIF, .WHILE, .UNTIL and .UNTILCXZ
 // might return multiple lines (strings separated by 0x0A)
 // i = index in AsmBuffer where expression starts. Is restricted
-// to one line (till T_FINAL)
+// to one source line (till T_FINAL)
 // label: label to jump to if expression is <is_true>!
 // is_true: TRUE/FALSE
 
@@ -638,21 +645,24 @@ static int EvaluateHllExpression(hll_list * hll, int *i, int ilabel, bool is_tru
 
     buffer[0] = '\0';
     if (ERROR == GetExpression(hll, i, ilabel, is_true, buffer, &lastjmp))
-        return (ERROR);
+        return( ERROR );
     if (buffer[0])
         WriteExprSrc(hll, buffer);
+    if (*hll->condlines == '\n') {
+        AsmError(SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE);
+    }
     return (NOT_ERROR);
 }
 
 // write ASM test lines
 
-static int PushHllTestLines(hll_list * hll)
+static int HllPushTestLines(hll_list * hll)
 {
     char *p = hll->condlines;
     char *p2;
     char buffer[MAX_LINE_LEN];
 
-    DebugMsg(("PushHllTestLines enter\n"));
+    DebugMsg(("HllPushTestLines enter\n"));
     if (!p)
         return (ERROR);
 
@@ -668,9 +678,42 @@ static int PushHllTestLines(hll_list * hll)
     hll->condlines = NULL;
 
 
-    return (NOT_ERROR);
+    return( NOT_ERROR );
 }
-void HllInit(void)
+
+// for .UNTILCXZ check if expression is simple enough
+
+static int HllCheckTestLines(hll_list * hll)
+{
+    int lines = 0;
+    int i;
+    char *p = hll->condlines;
+
+    for (;*p;p++) {
+        if (*p == 0x0a) {
+            lines++;
+            if (*(p+1) == 'j') {
+                p++;
+                if (*(p+1) == 'z' || (*(p+1) == 'n' && *(p+2) == 'z'))
+                    if (lines == 1) {
+                        i = strlen(p);
+                        while (i) {
+                            *(p+3+i) = *(p+i);
+                            i--;
+                        }
+                        memcpy(p,"loop",4);
+                    }
+                else
+                    return( ERROR );
+            }
+        }
+    }
+    if (lines > 2)
+        return( ERROR );
+    return( NOT_ERROR );
+}
+
+void HllInit()
 {
     HllStack = NULL;
     hll_label = 0;
@@ -687,6 +730,12 @@ int HllStartDef( int i )
     char                 buffer[MAX_LINE_LEN];
 
     DebugMsg(("StartHllDef\n"));
+
+#if FASTPASS
+    if (StoreState == FALSE && Parse_Pass == PASS_1) {
+        SaveState();
+    }
+#endif
 
     switch (cmd) {
     case T_DOT_REPEAT:
@@ -752,7 +801,7 @@ int HllStartDef( int i )
         if (ERROR == EvaluateHllExpression(hll, &i, LABELTEST, FALSE)) {
             return (ERROR);
         }
-        PushHllTestLines(hll);
+        HllPushTestLines(hll);
         break;
     case T_DOT_WHILE:
     case T_DOT_REPEAT:
@@ -764,7 +813,7 @@ int HllStartDef( int i )
             if (ERROR == EvaluateHllExpression(hll, &i, LABELFIRST, TRUE)) {
                 return (ERROR);
             }
-            DebugMsg(("StartHllDef .WHILE\n"));
+            DebugMsg(("StartHllDef .WHILE (start expr=%s)\n", hll->condlines));
             /* create a jump to second label */
             /* optimisation: if second label is just a jump, dont jump! */
             if (memicmp(hll->condlines, "jmp", 3)) {
@@ -784,12 +833,12 @@ int HllStartDef( int i )
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
-    push (&HllStack, hll);
+    push(&HllStack, hll);
     return( NOT_ERROR );
 }
 
 // End a .IF, .WHILE, .REPEAT item
-// that is: .ENDIF, .ENDW or .UNTIL are handled here
+// that is: .ENDIF, .ENDW, .UNTIL and .UNTILCXZ are handled here
 
 int HllEndDef( int i )
 /********************/
@@ -804,7 +853,7 @@ int HllEndDef( int i )
 
     if (hll == NULL) {
         DebugMsg(("EndHllDef: hll stack is empty\n"));
-        AsmError( SYNTAX_ERROR );
+        AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
 
@@ -813,7 +862,7 @@ int HllEndDef( int i )
         DebugMsg(("EndHllDef .ENDIF\n"));
         if (hll->cmd != HLL_IF) {
             DebugMsg(("EndHllDef no .IF on the hll stack\n"));
-            AsmError( SYNTAX_ERROR );
+            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         /* if a test label isn't created yet, create it */
@@ -830,7 +879,7 @@ int HllEndDef( int i )
         DebugMsg(("EndHllDef .ENDW\n"));
         if (hll->cmd != HLL_WHILE) {
             DebugMsg(("EndHllDef no .WHILE on the hll stack\n"));
-            AsmError( SYNTAX_ERROR );
+            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         /* create test label  */
@@ -838,7 +887,7 @@ int HllEndDef( int i )
         DebugMsg(("EndHllDef: created: %s\n", buffer));
         InputQueueLine( buffer );
 
-        PushHllTestLines(hll);
+        HllPushTestLines(hll);
 
         sprintf(buffer, "%s:", hll->symexit);
         InputQueueLine( buffer );
@@ -848,14 +897,28 @@ int HllEndDef( int i )
         DebugMsg(("EndHllDef .UNTILCXZ\n"));
         if (hll->cmd != HLL_REPEAT) {
             DebugMsg(("EndHllDef no .REPEAT on the hll stack\n"));
-            AsmError( SYNTAX_ERROR );
+            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
-        i++;
         sprintf(buffer, "%s:", hll->symtest);
         InputQueueLine( buffer );
-        sprintf(buffer, " loop %s", hll->symfirst);
-        InputQueueLine( buffer );
+
+        i++;
+        /* read in optional (simple) expression */
+        if (AsmBuffer[i]->token != T_FINAL) {
+            if (ERROR == EvaluateHllExpression(hll, &i, LABELFIRST, FALSE)) {
+                return( ERROR );
+            }
+            if ( HllCheckTestLines(hll) == ERROR) {
+                AsmError(EXPR_TOO_COMPLEX_FOR_UNTILCXZ);
+                return( ERROR );
+            }
+            /* write condition lines */
+            HllPushTestLines(hll);
+        } else {
+            sprintf(buffer, " loop %s", hll->symfirst);
+            InputQueueLine( buffer );
+        }
         sprintf(buffer, "%s:", hll->symexit);
         InputQueueLine( buffer );
         break;
@@ -863,20 +926,20 @@ int HllEndDef( int i )
         DebugMsg(("EndHllDef .UNTIL\n"));
         if (hll->cmd != HLL_REPEAT) {
             DebugMsg(("EndHllDef no .REPEAT on the hll stack\n"));
-            AsmError( SYNTAX_ERROR );
+            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         sprintf(buffer, "%s:", hll->symtest);
         InputQueueLine( buffer );
 
-        /* read in expression */
         i++;
+        /* read in expression */
         if (ERROR == EvaluateHllExpression(hll, &i, LABELFIRST, FALSE)) {
             return( ERROR );
         }
 
         /* write condition lines */
-        PushHllTestLines(hll);
+        HllPushTestLines(hll);
 
 #if 0
         sprintf(buffer, " jmp %s", hll->symfirst);
@@ -944,7 +1007,7 @@ int HllExitDef( int i )
             if (ERROR == EvaluateHllExpression(hll, &i, LABELTEST, FALSE)) {
                 return( ERROR );
             }
-            PushHllTestLines(hll);
+            HllPushTestLines(hll);
         }
         break;
     case T_DOT_BREAK:
@@ -975,7 +1038,7 @@ int HllExitDef( int i )
                         return( ERROR );
                     }
                 }
-                PushHllTestLines(hll);
+                HllPushTestLines(hll);
                 MemFree(hll->condlines);
                 hll->condlines = savedlines;
                 hll->cmd = savedcmd;

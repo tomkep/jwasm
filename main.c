@@ -54,13 +54,14 @@
   #include "ostype.h"
 #endif
 
-#define BUILD_TARGET 0
-
 extern void             Fatal( unsigned msg, ... );
 extern void             ObjRecInit( void );
 extern void             InitErrFile( void );
 //extern void             PrintfUsage( int first_ln );
+extern void             MsgPrintf( int resourceid );
 extern void             MsgPrintf1( int resourceid, char *token );
+extern void             MsgPrintUsage( );
+extern void             *InstrRemove( char * );
 
 extern const char       *FingerMsg[];
 
@@ -97,6 +98,7 @@ static char             *OptParm;
 static char             *ForceInclude = NULL;
 char                    banner_printed = FALSE;
 
+
 global_options Options = {
     /* sign_value       */          FALSE,
     /* quiet            */          FALSE,
@@ -110,8 +112,9 @@ global_options Options = {
 #ifdef DEBUG_OUT
     /* debug            */          FALSE,
 #endif
+#if BUILD_TARGET
     /* build_target     */          NULL,
-
+#endif
     /* code_class       */          NULL,
     /* data_seg         */          NULL,
     /* text_seg         */          NULL,
@@ -133,7 +136,10 @@ global_options Options = {
     /* masm51_compat         */     FALSE,
     /* no_symbol_listing     */     FALSE,
     /* list_generated_code   */     TRUE,
-    /* output_format         */     OFORMAT_OMF
+    /* output_format         */     OFORMAT_OMF,
+    /* alignment_default     */     0,
+    /* langtype              */     LANG_NONE,
+    /* model                 */     MOD_NONE
 };
 
 struct qitem {
@@ -144,17 +150,10 @@ struct qitem {
 struct qitem * SymQueue = NULL;
 struct qitem * IncQueue = NULL;
 
-static char usage[] = {
-"\nusage: JWasm [options] asm-file [options] [asm-file] ... [@env_var]\n"
-"Run \"JWasm /?\" or \"JWasm /h\" for more info\n"
-};
-
-static char usagex[] = {
-#include "usage.h"
-};
-
 #define is_valid_id_char( ch ) \
     ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
+
+#if !defined(__UNIX__)
 
 typedef union cu {
     int c;
@@ -181,6 +180,7 @@ char * _stdcall CharUpperA(char * lpsz)
                 *p.p = *p.p - 0x20;
     return(lpsz);
 }
+#endif
 
 static char *CopyOfParm( void )
 /*****************************/
@@ -332,64 +332,26 @@ static void SetFPU( void )
     }
 }
 
-static char memory_model = 0;
-
-static void SetMM( void )
-/***********************/
-{
-    char buffer[20];
-
-    switch( OptValue ) {
-    case 'c':
-    case 'f':
-    case 'h':
-    case 'l':
-    case 'm':
-    case 's':
-    case 't':
-        break;
-    default:
-        strcpy( buffer, "/m" );
-        strcat( buffer, (char *)&OptValue );
-        MsgPrintf1( MSG_UNKNOWN_OPTION, buffer );
-        exit( 1 );
-    }
-
-    memory_model = OptValue;
-}
-
 static void SetMemoryModel( void )
 /********************************/
 {
-    char buffer[20];
     char *model;
+    char buffer[20];
 
-    switch( memory_model ) {
-    case 'c':
-        model = "COMPACT";
-        break;
-    case 'f':
+    switch( Options.model ) {
+    case MOD_FLAT:
         model = "FLAT";
+        if (SWData.cpu < 3) /* ensure that a 386 cpu is set */
+            SWData.cpu = 3;
         break;
-    case 'h':
-        model = "HUGE";
-        break;
-    case 'l':
-        model = "LARGE";
-        break;
-    case 'm':
-        model = "MEDIUM";
-        break;
-    case 's':
-        model = "SMALL";
-        break;
-    case 't':
-        model = "TINY";
-        break;
-    default:
-        return;
+    case MOD_COMPACT:  model = "COMPACT";   break;
+    case MOD_HUGE:     model = "HUGE";      break;
+    case MOD_LARGE:    model = "LARGE";     break;
+    case MOD_MEDIUM:   model = "MEDIUM";    break;
+    case MOD_SMALL:    model = "SMALL";     break;
+    case MOD_TINY:     model = "TINY";      break;
+    default: return;
     }
-
     strcpy( buffer, ".MODEL " );
     strcat( buffer, model );
     InputQueueLine( buffer );
@@ -653,19 +615,10 @@ static void set_some_kinda_name( char token, char *name )
     strcpy( *tmp, name );
 }
 
-static void usage_msg( void )
-/***************************/
-{
-    //    PrintfUsage( MSG_USE_BASE );
-    trademark();
-    printf("%s", usage);
-    exit(1);
-}
-
 static void usagex_msg( void )
 /***************************/
 {
-    printf("%s", usagex);
+    MsgPrintf(0);
     exit(1);
 }
 
@@ -680,12 +633,31 @@ static void Set_C( void ) { }
 static void Set_COFF( void ) {
     Options.output_format = OFORMAT_COFF;
 }
-
+#if ELF_SUPPORT
+static void Set_ELF( void ) {
+    Options.output_format = OFORMAT_ELF;
+}
+#endif
+#if BIN_SUPPORT
+static void Set_BIN( void ) {
+    Options.output_format = OFORMAT_BIN;
+}
+#endif
 static void Set_CP( void ) { Options.nocasemap = TRUE; }
 
 static void Set_ZD( void ) { Options.line_numbers = TRUE; }
 
 static void Set_ZM( void ) { Options.masm51_compat = TRUE; }
+
+static void Set_ZP( void ) {
+    uint_8 power;
+    for (power = 1;power < OptValue && power < 32; power = power << 1);
+    if (power == OptValue)
+        Options.alignment_default = OptValue;
+    else {
+        AsmWarn(1, INVALID_CMDLINE_VALUE, "/Zp");
+    }
+}
 
 static void DefineMacro( void ) { queue_item( &SymQueue, CopyOfParm() ); }
 
@@ -701,6 +673,10 @@ static void Set_FL( void ) { get_fname( GetAFileName(), LST ); Options.write_lis
 
 static void Set_FO( void ) { get_fname( GetAFileName(), OBJ ); }
 
+static void Set_Gc( void ) { Options.langtype = LANG_PASCAL; }
+static void Set_Gd( void ) { Options.langtype = LANG_C; }
+static void Set_Gz( void ) { Options.langtype = LANG_STDCALL; }
+
 static void SetInclude( void ) { queue_item( &IncQueue, GetAFileName() ); }
 
 static void Set_J( void ) { Options.sign_value = TRUE; }
@@ -708,6 +684,14 @@ static void Set_J( void ) { Options.sign_value = TRUE; }
 static void Set_SG( void ) { }
 
 static void Set_SN( void ) { Options.no_symbol_listing = TRUE; }
+
+static void Set_Mt( void ) { Options.model = MOD_TINY; }
+static void Set_Ms( void ) { Options.model = MOD_SMALL; }
+static void Set_Mm( void ) { Options.model = MOD_MEDIUM; }
+static void Set_Mc( void ) { Options.model = MOD_COMPACT; }
+static void Set_Ml( void ) { Options.model = MOD_LARGE; }
+static void Set_Mh( void ) { Options.model = MOD_HUGE; }
+static void Set_Mf( void ) { Options.model = MOD_FLAT; }
 
 static void Set_N( void ) { set_some_kinda_name( OptValue, CopyOfParm() ); }
 
@@ -725,13 +709,15 @@ static void Set_ZCM( void ) { Options.watcom_c_mangler = FALSE; }
 
 static void Set_ZCW( void ) { Options.watcom_c_mangler = TRUE; }
 
+static void Set_ZI( void ) { }
+
 static void Set_ZLC( void ) { Options.no_comment_data_in_code_records = TRUE; }
 static void Set_ZLD( void ) { Options.no_dependencies       = TRUE; }
 static void Set_ZLF( void ) { Options.no_file_entry         = TRUE; }
 static void Set_ZLS( void ) { Options.no_section_aux_entry  = TRUE; }
 
-static void Set_NOLOGO( void ) { Options.quiet = 1; }
-static void Set_Q( void )      { Options.quiet = 2; }
+static void Set_NOLOGO( void ) { banner_printed = TRUE; }
+static void Set_Q( void )      { Set_NOLOGO(); Options.quiet = TRUE; }
 
 static void Set_ZZO( void ) { Options.no_stdcall_decoration = TRUE; }
 static void Set_ZZP( void ) { Options.no_stdcall_suffix     = TRUE; }
@@ -757,6 +743,9 @@ static struct option const cmdl_options[] = {
     { "6$",     6,        SetCPU },
     { "7",      7,        SetFPU },
     { "?",      0,        HelpUsage },
+#if BIN_SUPPORT
+    { "bin",    0,        Set_BIN },
+#endif
 #if BUILD_TARGET
     { "bt=$",   0,        Set_BT },
 #endif
@@ -769,6 +758,9 @@ static struct option const cmdl_options[] = {
     { "d+",     0,        Ignore },
     { "D$",     0,        DefineMacro },
     { "e=#",    0,        SetErrorLimit },
+#if ELF_SUPPORT
+    { "elf",    0,        Set_ELF },
+#endif
     { "EP",     0,        Set_EP },
     { "Fi=^@",  0,        Set_FI },
     { "Fl=@",   0,        Set_FL },
@@ -782,19 +774,22 @@ static struct option const cmdl_options[] = {
     { "FPi87",  '7',      SetFPU },
     { "FPi",    'i',      SetFPU },
     { "Fr=^@",  0,        Set_FR },
+    { "Gc",     0,        Set_Gc },
+    { "Gd",     0,        Set_Gd },
+    { "Gz",     0,        Set_Gz },
     { "h",      0,        HelpUsage },
     { "hc",     'c',      Ignore },
     { "hd",     'd',      Ignore },
     { "hw",     'w',      Ignore },
     { "I=^@",   0,        SetInclude },
     { "j",      0,        Set_J },
-    { "mc",     'c',      SetMM },
-    { "mf",     'f',      SetMM },
-    { "mh",     'h',      SetMM },
-    { "ml",     'l',      SetMM },
-    { "mm",     'm',      SetMM },
-    { "ms",     's',      SetMM },
-    { "mt",     't',      SetMM },
+    { "mc",     0,        Set_Mc },
+    { "mf",     0,        Set_Mf },
+    { "mh",     0,        Set_Mh },
+    { "ml",     0,        Set_Ml },
+    { "mm",     0,        Set_Mm },
+    { "ms",     0,        Set_Ms },
+    { "mt",     0,        Set_Mt },
     { "nc=$",   'c',      Set_N },
     { "nd=$",   'd',      Set_N },
     { "nm=$",   'm',      Set_N },
@@ -809,14 +804,16 @@ static struct option const cmdl_options[] = {
     { "w",      0,        Set_w },
     { "WX",     0,        Set_WX },
     { "W=#",    0,        SetWarningLevel },
-    { "Zd",     0,        Set_ZD },
     { "zcm",    0,        Set_ZCM },
     { "zcw",    0,        Set_ZCW },
+    { "Zd",     0,        Set_ZD },
+    { "Zi",     0,        Set_ZI },
     { "zlc",    0,        Set_ZLC },
     { "zld",    0,        Set_ZLD },
     { "zlf",    0,        Set_ZLF },
     { "zls",    0,        Set_ZLS },
     { "Zm",     0,        Set_ZM },
+    { "Zp=#",   0,        Set_ZP },
     { "zzo",    0,        Set_ZZO },
     { "zzp",    0,        Set_ZZP },
     { "zzs",    0,        Set_ZZS },
@@ -857,7 +854,8 @@ int trademark( void )
 {
     int         count = 0;
 
-    if( !Options.quiet ) {
+    if( banner_printed == FALSE ) {
+        banner_printed = TRUE;
         while( FingerMsg[count] != NULL ) {
             printf( "%s\n", FingerMsg[count++] );
         }
@@ -872,27 +870,25 @@ static void free_names( void )
 #if BUILD_TARGET
     if( Options.build_target != NULL ) {
         AsmFree( Options.build_target );
+        Options.build_target = NULL;
     }
 #endif
     if( Options.code_class != NULL ) {
         AsmFree( Options.code_class );
+        Options.code_class = NULL;
     }
     if( Options.data_seg != NULL ) {
         AsmFree( Options.data_seg );
+        Options.data_seg = NULL;
     }
     if( Options.module_name != NULL ) {
         AsmFree( Options.module_name );
+        Options.module_name = NULL;
     }
     if( Options.text_seg != NULL ) {
         AsmFree( Options.text_seg );
+        Options.text_seg = NULL;
     }
-#if BUILD_TARGET
-    Options.build_target = NULL;
-#endif
-    Options.code_class = NULL;
-    Options.data_seg = NULL;
-    Options.module_name = NULL;
-    Options.text_seg = NULL;
 }
 
 static void main_init( void )
@@ -909,12 +905,36 @@ static void main_init( void )
     omf_GenMSInit();
 }
 
+void CloseFiles( void )
+/**********************/
+{
+    /* close ASM file */
+    if( AsmFiles.file[ASM] != NULL ) {
+        if( fclose( AsmFiles.file[ASM] ) != 0 ) {
+            Fatal( MSG_CANNOT_CLOSE_FILE, AsmFiles.fname[ASM] );
+        }
+    }
+
+    /* close OBJ file */
+    ObjWriteClose( pobjState.file_out );
+
+    ObjRecFini();
+    if( ModuleInfo.error_count > 0 ) {
+        remove( AsmFiles.fname[OBJ] );
+    }
+    MemFree( AsmFiles.fname[ASM] );
+    MemFree( AsmFiles.fname[ERR] );
+    MemFree( AsmFiles.fname[LST] );
+    MemFree( AsmFiles.fname[OBJ] );
+    MemFini();
+}
+
 static void main_fini( void )
 /***************************/
 {
     free_names();
     omf_GenMSFini();
-    AsmShutDown();
+    CloseFiles();
 }
 
 static void open_files( void )
@@ -1258,15 +1278,15 @@ static int set_build_target( void )
 }
 #endif
 
-static void parse_cmdline( char **cmdline )
+static int parse_cmdline( char **cmdline )
 /*****************************************/
 {
-    char msgbuf[80];
+    char msgbuf[128];
     int  level = 0;
 
-    if( cmdline == NULL || *cmdline == NULL || **cmdline == 0 ) {
-        usage_msg();
-    }
+    if( cmdline == NULL || *cmdline == NULL || **cmdline == 0 )
+        return( FALSE );
+
     for( ;*cmdline != NULL; ++cmdline ) {
         *cmdline = ProcessOptions( *cmdline, &level );
     }
@@ -1274,9 +1294,10 @@ static void parse_cmdline( char **cmdline )
         MsgGet( NO_FILENAME_SPECIFIED, msgbuf );
         Fatal( MSG_CANNOT_OPEN_FILE, msgbuf );
     }
+    return( TRUE );
 }
 
-static void do_init_stuff( char **cmdline, bool first )
+static int do_init_stuff( char **cmdline, bool first )
 /*****************************************/
 {
     char        *env;
@@ -1284,14 +1305,26 @@ static void do_init_stuff( char **cmdline, bool first )
     if (first) {
         MsgInit();
         ParseInit( -1, -1, -1, -1 );       // initialize hash table
+        do_envvar_cmdline( "JWASM" );
     }
 
     InputInit();
-#if 0
-    ForceInclude = getenv( "FORCE" );
+
+    if (parse_cmdline( cmdline ) == 0)
+        return( FALSE );
+
+    trademark();
+
+    /* for OMF, IMAGEREL and SECTIONREL make no sense */
+    if (first && Options.output_format == OFORMAT_OMF) {
+#if IMAGERELSUPP
+        InstrRemove("IMAGEREL");
 #endif
-    do_envvar_cmdline( "JWASM" );
-    parse_cmdline( cmdline );
+#if SECRELSUPP
+        InstrRemove("SECTIONREL");
+#endif
+    }
+
 #if BUILD_TARGET
     set_build_target();
     /* search for <os>_INCLUDE and add it to the include search path */
@@ -1303,24 +1336,17 @@ static void do_init_stuff( char **cmdline, bool first )
     if( env != NULL )
         AddStringToIncludePath( env );
 
-    if (first) {
-        if( !Options.quiet && !banner_printed ) {
-            banner_printed = TRUE;
-            trademark();
-        }
-    }
-
     open_files();
     PushLineQueue();
-
+    return( TRUE );
 }
 
 void genfailure(int signo)
 {
     if (signo != SIGBREAK)
-        AsmError(GENERAL_FAILURE);
-    AsmShutDown();
-    exit (1);
+        AsmError( GENERAL_FAILURE );
+    CloseFiles();
+    exit ( EXIT_FAILURE );
 }
 
 #ifdef __UNIX__
@@ -1328,10 +1354,6 @@ void genfailure(int signo)
 int main( int argc, char **argv )
 /*******************************/
 {
-    argc = argc;
-#ifndef __WATCOMC__
-    _argv = argv;
-#endif
 
 #else
 
@@ -1341,13 +1363,13 @@ int main( void )
 /**************/
 {
     char       *argv[2];
+#endif
     int        len;
     bool       first = TRUE;
     char       *buff;
     char       *pCmd;
-#endif
 
-    main_init();
+#ifndef __UNIX__
 //    SwitchChar = _dos_switch_char();
     SwitchChar = '/';
     pCmd = (char *)GetCommandLineA();
@@ -1371,27 +1393,38 @@ int main( void )
     } else {
         return( -1 );
     }
+#endif
+
 #ifndef DEBUG_OUT
     signal(SIGSEGV, genfailure);
 #endif
     signal(SIGBREAK, genfailure);
 
     while (1) {
-        do_init_stuff( argv , first);
+        ModuleInfo.srcfile = NULL; /* remove any old value, to be sure */
+        main_init();
+#ifndef __UNIX__
+        if (do_init_stuff( argv , first) == 0) {
+#else
+        if (do_init_stuff( &argv[1] , first) == 0) {
+#endif
+            if (first == TRUE) {
+                MsgPrintUsage();
+                return(1);
+            }
+            break;
+        }
         SetMemoryModel();
-
         WriteObjModule();           // main body: parse the source file
         MsgFini();
         main_fini();
-//        if (ModuleInfo.error_count > 0)
-//            break;
-
+#ifndef __UNIX__
         pCmd = argv[0];
         while (isspace(*pCmd)) pCmd++;
-        if (*pCmd == 0)
+        if (*pCmd == NULLC)
             break;
+#endif
         first = FALSE;
-        main_init();
     };
 #ifndef __UNIX__
     free( buff );

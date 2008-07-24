@@ -35,6 +35,7 @@
 #include "parser.h"
 #include "expreval.h"
 #include "myassert.h"
+#include "directiv.h"
 
 extern int              get_instruction_position( char *string );
 
@@ -206,6 +207,8 @@ void conditional_assembly_prepare( char *line )
 #endif
         break;
     case T_ELSEIF:
+    case T_ELSEIF1:
+    case T_ELSEIF2:
     case T_ELSEIFB:
     case T_ELSEIFDEF:
     case T_ELSEIFDIF:
@@ -459,9 +462,14 @@ int conditional_assembly_directive( int i, int directive )
         }
         break;
     case T_IF1:
+    case T_ELSEIF1:
         CurrIfState = Parse_Pass == PASS_1 ? BLOCK_ACTIVE : BLOCK_INACTIVE;
         break;
     case T_IF2:
+    case T_ELSEIF2:
+        if (ModuleInfo.setif2 == FALSE) {
+            AsmError(IF2_NOT_ALLOWED);
+        }
         CurrIfState = Parse_Pass == PASS_1 ? BLOCK_INACTIVE : BLOCK_ACTIVE;
         break;
     case T_IFDEF:
@@ -513,7 +521,19 @@ int conditional_error_directive( int i )
 
     /* get an expression if necessary */
     switch( direct ) {
+    case T_DOT_ERR2:
+        if (ModuleInfo.setif2 == FALSE) {
+            AsmError(IF2_NOT_ALLOWED);
+            return( ERROR );
+        }
+    case T_DOT_ERR1:
     case T_DOT_ERR:
+        if (ModuleInfo.setif2 == TRUE) {
+            if (direct == T_DOT_ERR1 && Parse_Pass != PASS_1)
+                return(NOT_ERROR);
+            else if (direct == T_DOT_ERR2 && Parse_Pass == PASS_1)
+                return(NOT_ERROR);
+        }
         if (AsmBuffer[i]->token == T_STRING) {
             p = AsmBuffer[i]->string_ptr;
             i++;

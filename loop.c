@@ -41,8 +41,6 @@
 #include "labels.h"
 #include "macro.h"
 
-extern void             AddTokens( struct asm_tok **, int, int );
-
 #define is_valid_id_char( ch ) \
     ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
@@ -166,7 +164,7 @@ int LoopDirective( int i, int directive )
     }
     /* EXITM is allowed inside a loop construct */
     /* this doesn't make the loop a macro function, reset the bit! */
-    macro->e.macroinfo->isfunc = FALSE;
+    macro->sym.isfunc = FALSE;
 
     /* now run the just created macro in a loop */
 

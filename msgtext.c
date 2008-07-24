@@ -24,14 +24,14 @@
 *
 *  ========================================================================
 *
-* Description:  handle/display error messages
+* Description:  handle/display (error) message texts
 *
 ****************************************************************************/
 
+#include <fcntl.h>
 
 #include "globals.h"
-
-#include <fcntl.h>
+#include "banner.h"
 
 #ifdef __WATCOMC__
   #include <unistd.h>
@@ -39,27 +39,42 @@
   #include <process.h>
 #endif
 
+#define USERESOURCES 0
+
+#if USERESOURCES
 #undef ERROR
 #include "windows.h"
 
-/*
- USEUSER32=1 will dynamically get address of LoadStringA() and
- use it to load string resources. USEUSER32=0 will avoid to use
- LoadStringA() - which is a USER32 function - and do string resource
- handling with KERNEL32 functions FindResourceA(), LoadResource(),
- LockResource and WideCharToMultiByte().
- */
-
-#define USEUSER32 0
-
-#if USEUSER32
-static HINSTANCE hUser32 = NULL;
-static int WINAPI (*pLoadString)(HINSTANCE, UINT, LPTSTR, int) = NULL;
 #else
+
+#include "errmsg.h"
+
+static const char usagex[] = {
+#include "usage.h"
+};
+
+#undef pick
+#define pick( code, string_eng, string_jap )  string_eng,
+
+static const char * msgtexts[] = { usagex,
+#include "msgtext.h"
+};
+
 #endif
 
+static const char usage[] = {
+"\nusage: JWasm [options] asm-file [options] [asm-file] ... [@env_var]\n"
+"Run \"JWasm -?\" or \"JWasm -h\" for more info\n"
+};
+
+const char *FingerMsg[] = {
+    banner1w( "Assembler", _JWASM_VERSION_ ),
+    banner2( "1992" ),
+    banner3,
+    0
+};
+
 extern  int             trademark( void );
-extern char             banner_printed;
 
 #ifdef __OSI__
 
@@ -68,10 +83,6 @@ extern char             *_Copyright;
 #endif
 
 #ifndef __UNIX__
-
-static const unsigned char PressReturn[] = {
-"    (Press return to continue)"
-};
 
 static void con_output( const unsigned char *text )
 {
@@ -93,35 +104,16 @@ int MsgInit( void )
 
 void MsgFini( void )
 {
-#if USEUSER32
-    if (hUser32) {
-        FreeLibrary(hUser32);
-        hUser32 = NULL;
-    }
-#endif
 }
 
-int MsgGet( int resourceid, char *buffer )
+char * MsgGet( int resourceid, char *buffer )
 {
-#if USEUSER32
-    if (pLoadString == NULL) {
-        if (hUser32 = LoadLibrary("user32"))
-            pLoadString = GetProcAddress(hUser32, "LoadStringA");
-    }
-    if (pLoadString) {
-        if (pLoadString(NULL, resourceid, buffer, 128) == 0) {
-            buffer[0] = '\0';
-            return( 0 );
-        }
-    }
-    return( 1 );
-#else
+#if USERESOURCES
+    static char sbuffer[128];
     HRSRC hRsrc;
     HGLOBAL hRes;
     WORD * pId;
     int i;
-
-    buffer[0] = '\0';
     hRsrc = FindResource(NULL, MAKEINTRESOURCE(1 + (resourceid >> 4)), RT_STRING);
     if (hRsrc) {
         hRes = LoadResource(NULL, hRsrc);
@@ -130,77 +122,41 @@ int MsgGet( int resourceid, char *buffer )
             for (i = resourceid % 16;i;i--)
                 pId += *pId + 1;
             i = *pId++;
+            if (buffer == NULL)
+                buffer = sbuffer;
             WideCharToMultiByte(CP_ACP, 0, pId, i, buffer, 128, 0, 0);
             if (i < 128)
                 buffer[i] = 0;
-            return( 1 );
+            return( buffer );
         }
     }
-    DebugMsg(("MsgGet(%u): Msg not found!!!\n", resourceid));
-    return( 0 );
+#else
+    if (resourceid < MSG_LAST) {
+        if (buffer) {
+            strncpy(buffer, msgtexts[resourceid], 128);
+            return( buffer );
+        } else
+            return( (char *)msgtexts[resourceid] );
+    }
 #endif
+    DebugMsg(("MsgGet(%u): Msg not found!!!\n", resourceid));
+    sprintf(buffer, "Msg %u", resourceid);
+    return( buffer );
 }
 
 void MsgPrintf( int resourceid )
 {
-    char        msgbuf[128];
-
-    if( !banner_printed ) {
-        banner_printed = TRUE;
-        trademark();
-    }
-    MsgGet( resourceid, msgbuf );
-    printf( msgbuf );
+    trademark();
+    printf( MsgGet( resourceid, NULL ));
 }
 
 void MsgPrintf1( int resourceid, char *token )
 {
-    char        msgbuf[128];
-
-    if( !banner_printed ) {
-        banner_printed = TRUE;
-        trademark();
-    }
-    MsgGet( resourceid, msgbuf );
-    printf( msgbuf, token );
+    trademark();
+    printf( MsgGet( resourceid, NULL ), token );
 }
-
-#ifndef __UNIX__
-static void Wait_for_return( void )
+void MsgPrintUsage( void )
 {
-    if( isatty( fileno(stdout) ) ) {
-        con_output( PressReturn );
-        fflush( stdout );
-        getch();
-    }
+    trademark();
+    printf("%s", usage);
 }
-#endif
-
-#if 0
-void PrintfUsage( int first_ln )
-{
-    char        msg_buff[128];
-    unsigned    count;
-
-    count = trademark();
-#ifdef __OSI__
-    if( _Copyright != NULL ) {
-        puts( _Copyright );
-        count += 1;
-    }
-#endif
-    for( ;; first_ln++ ) {
-#ifndef __UNIX__
-        if( ++count >= 23 ) {
-            Wait_for_return();
-            count = 0;
-        }
-#endif
-        MsgGet( first_ln, msg_buff );
-        if( ( msg_buff[ 0 ] == '.' ) && ( msg_buff[ 1 ] == 0 ) )
-            break;
-        puts( msg_buff );
-    }
-}
-#endif
-

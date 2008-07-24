@@ -44,11 +44,14 @@
 #include "macro.h"
 #include "labels.h"
 #include "input.h"
+#include "proc.h"
+#include "fastpass.h"
 
 extern bool in_prologue;
 extern int MacroLevel;
 extern bool expansion;
 extern bool SkipMacroMode;
+extern bool DefineProc;
 
 #define DETECTEOC 1
 
@@ -621,7 +624,7 @@ void PushMacro( asm_sym * sym, bool hidden )
     line_queue = line_queue->next;
 }
 
-static void preprocessor_output( void )
+void preprocessor_output( char *string )
 /****************************/
 /* print out a simplied version of the source line
    after it is parsed and text is expanded */
@@ -629,23 +632,13 @@ static void preprocessor_output( void )
     int             i;
     static bool PrintEmptyLine = TRUE;
 
+    /* flag generated code */
     for (i = MacroLevel;i;i--)
         printf("*");
 
-    for( i = 0; i < Token_Count; i++ ) {
-        if (AsmBuffer[i]->token == T_STRING)
-            if (*AsmBuffer[i]->string_ptr == '"' ||
-                *AsmBuffer[i]->string_ptr == '\'' ||
-                *AsmBuffer[i]->string_ptr == '{')
-                printf("%s ", AsmBuffer[i]->string_ptr);
-            else
-                printf("<%s> ", AsmBuffer[i]->string_ptr);
-        else
-            printf("%s ", AsmBuffer[i]->string_ptr);
-    }
     if (Token_Count > 0) {
         PrintEmptyLine = TRUE;
-        printf("\n");
+        printf("%s\n", string);
     } else if (PrintEmptyLine) {
         PrintEmptyLine = FALSE;
         printf("\n");
@@ -744,7 +737,8 @@ int AsmLine( char *string )
     // .ERR, ...
     // FOR, REPEAT, WHILE, ...
 
-    if (AsmBuffer[i]->token == T_DIRECTIVE && (AsmBuffer[i]->opcode & 0xE)) {
+    if (AsmBuffer[i]->token == T_DIRECTIVE &&
+        (AsmBuffer[i]->opcode & (OPCF_CONDDIR + OPCF_ERRDIR + OPCF_LOOPDIR))) {
 
         if (i > 1 && SkipMacroMode == FALSE) {
             if (AsmBuffer[i-2]->token != T_ID) {
@@ -755,32 +749,38 @@ int AsmLine( char *string )
                 return(0);
         }
 
-        if (AsmBuffer[i]->opcode & 2) { /* conditional directive? */
+        if ( AsmBuffer[i]->opcode & OPCF_CONDDIR ) { /* conditional directive? */
             conditional_assembly_directive( i, AsmBuffer[i]->value );
-        } else if (AsmBuffer[i]->opcode & 4) { /* error directive? */
+        } else if ( AsmBuffer[i]->opcode & OPCF_ERRDIR ) { /* error directive? */
             if (SkipMacroMode == FALSE)
                 conditional_error_directive( i );
-        } else if (AsmBuffer[i]->opcode & 8) { /* loop directive? */
+        } else if ( AsmBuffer[i]->opcode & OPCF_LOOPDIR ) { /* loop directive? */
             if (SkipMacroMode == FALSE)
                 LoopDirective ( i+1, AsmBuffer[i]->value );
         }
         return(0);
     }
 
-    if (Options.preprocessor_stdout == TRUE)
-        preprocessor_output();
+    if (Options.preprocessor_stdout == TRUE && SkipMacroMode == FALSE)
+        preprocessor_output(string);
 
     if (Token_Count > 1 &&  AsmBuffer[1]->token == T_DIRECTIVE && SkipMacroMode == FALSE) {
         switch (AsmBuffer[1]->value) {
         case T_MACRO:
             MacroDef ( 0 );
             return(0);
+#if FASTPASS
+#else
         case T_EQU:
-            DefineConstant( 0, FALSE );
+            DefineConstant( AsmBuffer[1]->opcode & 1 );
             return(0);
-        case T_EQU2:
-            DefineConstant( 0, TRUE );
+        case T_SIZESTR:
+            SizeStrDef( 1 );
             return(0);
+        case T_INSTR:
+            InStrDef( 1, string );
+            return(0);
+#endif
         case T_TEXTEQU:
             CatStrDef( 2, NULL );
             return(0);
@@ -790,18 +790,22 @@ int AsmLine( char *string )
         case T_SUBSTR:
             SubStrDef( 1, string  );
             return(0);
-        case T_SIZESTR:
-            SizeStrDef( 1 );
-            return(0);
-        case T_INSTR:
-            InStrDef( 1, string );
-            return(0);
         }
     }
 #if 0 //def DEBUG_OUT
     else
         DebugMsg(("No scan for preprocessor cmds, reason: count=%u, skipmode=%u\n", Token_Count, SkipMacroMode));
 #endif
+
+    /* this has been moved from ParseItems() because inside proc_check
+     there's an optional call of RunMacro(), which might be a problem if
+     FASTPASS is on */
+    if( DefineProc == TRUE && SkipMacroMode == FALSE) {
+        if (proc_check() == EMPTY) {
+            DebugMsg(("AsmLine: proc_check() skips line processing\n"));
+            return( 0 );
+        }
+    }
 
     return (Token_Count);
 

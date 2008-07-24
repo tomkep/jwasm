@@ -25,7 +25,9 @@
 #include "coff.h"
 #include "myassert.h"
 
-#define SETDATAPOS 1
+#if COFF_SUPPORT
+
+#define SETDATAPOS   1
 
 typedef struct stringitem {
     struct stringitem *next;
@@ -214,7 +216,7 @@ int coff_write_section_table( int fh )
 
         /* set relocation pos+count in section header */
 
-        ish.PointerToRelocations = NULL;
+        ish.PointerToRelocations = 0;
         ish.NumberOfRelocations = 0;
         if (curr->e.seginfo->FixupListHeadCoff) {
             for ( fix = curr->e.seginfo->FixupListHeadCoff; fix ; fix = fix->next2) {
@@ -235,7 +237,7 @@ int coff_write_section_table( int fh )
             ish.NumberOfLinenumbers = GetQueueItems(curr->e.seginfo->LinnumQueue);
             offset += ish.NumberOfLinenumbers * sizeof(IMAGE_LINENUMBER);
         } else {
-            ish.PointerToLinenumbers = NULL;
+            ish.PointerToLinenumbers = 0;
             ish.NumberOfLinenumbers = 0;
         }
 
@@ -347,7 +349,7 @@ int coff_write_symbols(int fh )
         if (len <= 8)
             strncpy(is.N.ShortName, p, 8);
         else {
-            is.N.Name.Short = NULL;
+            is.N.Name.Short = 0;
             is.N.Name.Long = Coff_AllocString(p, len);
         }
         is.Value = 0;
@@ -376,7 +378,7 @@ int coff_write_symbols(int fh )
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
         /* skip "weak" (=unused) externdefs */
-        if (curr->e.extinfo->comm == FALSE && curr->e.extinfo->weak == TRUE)
+        if (curr->sym.comm == FALSE && curr->sym.weak == TRUE)
             continue;
         DebugMsg(("coff_write_symbols: %s\n", curr->sym.name));
         Mangle( &curr->sym, buffer );
@@ -386,7 +388,7 @@ int coff_write_symbols(int fh )
         is.StorageClass = CoffGetClass(&curr->sym);
 
         /* for COMMUNALs, store their size in the Value field */
-        if (curr->e.extinfo->comm == TRUE)
+        if (curr->sym.comm == TRUE)
             is.Value = curr->sym.total_size;
         else
             is.Value = curr->sym.offset; /* is always 0 */
@@ -396,7 +398,7 @@ int coff_write_symbols(int fh )
         if (len <= 8)
             strncpy(is.N.ShortName, buffer, 8);
         else {
-            is.N.Name.Short = NULL;
+            is.N.Name.Short = 0;
             is.N.Name.Long = Coff_AllocString(buffer, len);
         }
         write(fh, &is, sizeof(is));
@@ -422,7 +424,7 @@ int coff_write_symbols(int fh )
         if (len <= 8)
             strncpy(is.N.ShortName, buffer, 8);
         else {
-            is.N.Name.Short = NULL;
+            is.N.Name.Short = 0;
             is.N.Name.Long = Coff_AllocString(buffer, len);
         }
         write(fh, &is, sizeof(is));
@@ -434,18 +436,6 @@ int coff_write_symbols(int fh )
 
     vp = NULL;
     while ( curr = GetPublicData2(&vp) ) {
-        if( curr->sym.state == SYM_UNDEFINED ) {
-            continue;
-        } else if( curr->sym.state == SYM_PROC ) {
-            /* skip PROTOs without matching PROC */
-            if(curr->e.procinfo->defined == FALSE) {
-                continue;
-            }
-        } else if (curr->sym.state == SYM_EXTERNAL) {
-            /* skip EXTERNDEFs which aren't used */
-            if (curr->e.extinfo->weak == TRUE)
-                continue;
-        }
         Mangle( &curr->sym, buffer );
         len = strlen( buffer );
 
@@ -467,7 +457,7 @@ int coff_write_symbols(int fh )
         if (len <= 8)
             strncpy(is.N.ShortName, buffer, 8);
         else {
-            is.N.Name.Short = NULL;
+            is.N.Name.Short = 0;
             is.N.Name.Long = Coff_AllocString(buffer, len);
         }
 
@@ -489,7 +479,7 @@ int coff_write_symbols(int fh )
         if (len <= 8)
             strncpy(is.N.ShortName, buffer, 8);
         else {
-            is.N.Name.Short = NULL;
+            is.N.Name.Short = 0;
             is.N.Name.Long = Coff_AllocString(buffer, len);
         }
 
@@ -529,6 +519,31 @@ int coff_write_symbols(int fh )
 
     DebugMsg(("coff_write_symbols: exit\n"));
     return(NOT_ERROR);
+}
+
+static int GetStartLabel(char * buffer, bool msg)
+{
+    int size = 0;
+    if ( start_label ) {
+        if (Options.entry_decorated)
+            Mangle(start_label, buffer);
+        else {
+            if (start_label->langtype != LANG_C &&
+                start_label->langtype != LANG_STDCALL &&
+                start_label->langtype != LANG_SYSCALL ) {
+                if (*start_label->name != '_') {
+                    if (msg)
+                        AsmWarn( 2, LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL, start_label->name );
+                    strcpy(buffer, start_label->name);
+                } else {
+                    strcpy(buffer, start_label->name+1);
+                }
+            } else
+                strcpy(buffer, start_label->name);
+        }
+        size = strlen(buffer) + sizeof(" -entry:");
+    }
+    return( size );
 }
 
 // write COFF file header
@@ -581,15 +596,11 @@ int coff_write_header( int fh )
                 }
             }
             for( dir = Tables[TAB_LIB].head; dir ; dir = dir->next ) {
-                size += strlen(dir->sym.name) + sizeof(" -defaultlib:") + 2;
+                size += strlen(dir->sym.name) + sizeof(" -defaultlib:");
+                if (strchr(dir->sym.name, ' '))
+                    size += 2;
             }
-            if ( start_label ) {
-                if (Options.entry_decorated)
-                    Mangle(start_label, buffer);
-                else
-                    strcpy(buffer, start_label->name);
-                size += strlen(buffer) + sizeof(" -entry:");
-            }
+            size += GetStartLabel(buffer, TRUE);
             size++;
             directives->e.seginfo->segrec->d.segdef.seg_length = size;
             directives->e.seginfo->CodeBuffer = AsmAlloc(size);
@@ -608,14 +619,14 @@ int coff_write_header( int fh )
                 }
             }
             for( dir = Tables[TAB_LIB].head; dir ; dir = dir->next ) {
-                size = sprintf(p,"-defaultlib:\"%s\" ", dir->sym.name);
+                if (strchr(dir->sym.name, ' '))
+                    size = sprintf(p,"-defaultlib:\"%s\" ", dir->sym.name);
+                else
+                    size = sprintf(p,"-defaultlib:%s ", dir->sym.name);
                 p += size;
             }
             if ( start_label) {
-                if (Options.entry_decorated)
-                    Mangle(start_label, buffer);
-                else
-                    strcpy(buffer, start_label->name);
+                GetStartLabel(buffer, FALSE);
                 size = sprintf(p, "-entry:%s ", buffer);
                 p += size;
             }
@@ -629,7 +640,7 @@ int coff_write_header( int fh )
     ifh.Machine = IMAGE_FILE_MACHINE_I386;
     ifh.NumberOfSections = total_segs;
     time(&ifh.TimeDateStamp);
-    ifh.PointerToSymbolTable = NULL;
+    ifh.PointerToSymbolTable = 0;
     ifh.NumberOfSymbols = 0;
     ifh.SizeOfOptionalHeader = 0;
     ifh.Characteristics = 0;
@@ -667,7 +678,7 @@ static uint_32 CoffGetSymIndex(void)
 
     /* count externals and protos */
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
-        if (curr->e.extinfo->comm == 0 && curr->e.extinfo->weak == 1)
+        if (curr->sym.comm == 0 && curr->sym.weak == 1)
             continue;
         curr->sym.idx = index++;
     }
@@ -684,7 +695,7 @@ static uint_32 CoffGetSymIndex(void)
             continue;
         } else if( curr->sym.state == SYM_PROC && curr->e.procinfo->defined == FALSE) {
             continue;
-        } else if (curr->sym.state == SYM_EXTERNAL && curr->e.extinfo->weak == TRUE) {
+        } else if (curr->sym.state == SYM_EXTERNAL && curr->sym.weak == TRUE) {
             continue;
         }
         curr->sym.idx = index++;
@@ -753,6 +764,16 @@ int coff_write_data(int fh)
                 case FIX_OFF32: /* 32bit offset */
                     ir.Type = IMAGE_REL_I386_DIR32;
                     break;
+#if IMAGERELSUPP
+                case FIX_OFF32_IMGREL:
+                    ir.Type = IMAGE_REL_I386_DIR32NB;
+                    break;
+#endif
+#if SECRELSUPP
+                case FIX_OFF32_SECREL:
+                    ir.Type = IMAGE_REL_I386_SECREL;
+                    break;
+#endif
                 case FIX_SEG: /* segment fixup */
                     ir.Type = IMAGE_REL_I386_SECTION; /* ??? */
                     break;
@@ -763,6 +784,7 @@ int coff_write_data(int fh)
                     ir.Type = IMAGE_REL_I386_ABSOLUTE; /* ??? */
                     break;
                 default:
+                    AsmErr( UNKNOWN_FIXUP_TYPE, fix->type );
                     break;
                 }
                 /* if it's not EXTERNAL/PUBLIC, add symbol */
@@ -783,9 +805,8 @@ int coff_write_data(int fh)
             }
             /* write line number data */
             if( Options.line_numbers ) {
-                void *vp = dir->e.seginfo->LinnumQueue;
                 line_num_info *lni;
-                while ( lni = GetLinnumData2(&vp) ) {
+                while ( lni = GetLinnumData2(dir->e.seginfo->LinnumQueue) ) {
                     DebugMsg(("coff_write_data(%s): linnum, &data=%X\n", dir->sym.name, &lni));
                     il.Linenumber = lni->number;
                     if (lni->number == 0) {
@@ -805,4 +826,6 @@ int coff_write_data(int fh)
 
     return(NOT_ERROR);
 }
+
+#endif
 

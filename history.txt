@@ -1,6 +1,94 @@
 
    Changelog
 
+   07/24/2008, v1.9:
+
+   -  bugfix: a forward jump to a PROC label which wasn't reachable with
+      a short jump might have caused invalid code to be generated.
+   -  bugfix: for OMF, if a starting address was specified, there was
+      a MODEND record emitted anyway, but for 32bit segments it must
+      be a MODE32 record, else the highwword of the address' offset
+      is ignored.
+   -  bugfix: if a data item contained a label offset and the item's size
+      was >= 4, there was a 32bit fixup record generated, no matter what
+      the label's segment was telling about the offset's magnitude.
+   -  bugfix: an equate with format <name> EQU <override>:[number], that
+      is, the value is an address without a symbol, caused an exception.
+   -  bugfix: "nested" procedures are no longer supported (actually, they
+      never were, but now an error is displayed).
+   -  bugfix: opcode PUSHAW was missing.
+   -  bugfix: PUSHA always generated the 16-bit form. In Masm PUSHA will
+      generate PUSHAW in 16-bit segments and PUSHAD in 32-bit segments.
+   -  bugfix: procedure parameters which were function pointers weren't
+      accepted by INVOKE.
+   -  bugfix: if a label was defined which had an associated EXTERNDEF,
+      the optional language specifier of the EXTERNDEF wasn't used.
+   -  bugfix: optional simple expression after .UNTILCXZ was ignored.
+   -  bugfix: if the difference of two offsets was calculated, it wasn't
+      ensured that the two labels are in the same segment.
+   -  bugfix: operator LROFFSET was accepted, but handled just like the
+      OFFSET operator.
+   -  bugfix: parameters for OPTION directive weren't expanded.
+   -  bugfix: if the RVALUE of a '=' directive wasn't a constant number,
+      error message "undefined symbol" was displayed. Changed to message
+      "constant expected".
+   -  bugfix: literal character operator ('!') wasn't handled the way Masm
+      does. So sometimes a '!' in a literal got "lost".
+   -  bugfix: padding a struct with bytes because of alignment didn't work
+      reliably.
+   -  bugfix: an undefined segment in a group wasn't flagged as error.
+   -  bugfix: || operator in .WHILE didn't work reliable.
+   -  bugfix: if a start label is emitted undecorated in /coff and its
+      language type is NONE, the underscore prefix must be omitted which
+      wasn't done.
+   -  bugfix: syntax errors in control-flow directives (.IF, .WHILE, ...)
+      weren't noticed sometimes.
+   -  bugfix: if an assembly error occured in a line which contained a %s
+      and -Fl switch was set, a GPF might have occured.
+   -  bugfix: .model parameter FARSTACK didn't set text equate @stack to 
+      'STACK'.
+   -  bugfix: stack segment was added to DGROUP even if .model parameter
+      FARSTACK was set.
+   -  bugfix: changing language with <OPTION language> didn't update assembly
+      time variable @Interface.
+
+   -  if instruction is RET[F] <value> and <value> is 0 (and it is not 
+      external, it's now optimized to the one-byte short RET[F].
+   -  EXTERNDEF's type comparison was too rigid for arbitrary types.
+      Now a symbol type conflict will be reported only if the base types
+      differ.
+   -  type modifiers for DWORD data items containing label addresses will
+      now affect code generation.
+   -  reserved words EQU2, .XMM2 and .XMM3 (all WASM specific) removed.
+   -  error message texts no longer stored as string resources.
+   -  there's now a JWasm binary for Linux available, distributed in a
+      separate package.
+   -  speed optimisation: the second and further passes will no longer
+      scan the full source.
+   -  the DOS binary JWASMD.EXE now includes the HDPMI DOS extender code,
+      making it a stand-alone binary.
+   -  directives ELSEIF1, ELSEIF2, .ERR1 and .ERR2 supported.
+   -  -Zi option added (currently it's a no-op).
+   -  better syntax check for the NAME directive to help to avoid using
+      this reserved name as an identifier.
+   -  IMAGEREL and SECTIONREL operators supported for /coff.
+   -  previous versions allowed instruction names used as labels. This
+      has been deactivated.
+   -  -Zp[n] option added.
+   -  structure fields are displayed in standard listing, not just in
+      symbol-table listing.
+   -  for /coff, default library names are now enclosed in double quotes
+      only if the name contains a space (some linkers have problems with
+      the quotes).
+   -  OPTION NOKEYWORD now works with all reserved words.
+   -  improved syntax check for parameters of OPTION directive.
+   -  ELF output format supported.
+   -  OPTION NOREADONLY and OPTION NOOLDMACROS accepted (dummies).
+   -  cmdline option -G<c|d|z> implemented.
+   -  PUSHCONTEXT/POPCONTEXT implemented.
+   -  level of warning 'cannot access label with segment registers' changed
+      from 3 to default level 2.
+
    06/21/2008, v1.8:
 
    -  bugfix: expression after .BREAK/.CONTINUE wasn't evaluated correctly
@@ -17,9 +105,9 @@
    -  bugfix (known bug): syntax
         mov eax, [edi.<TYPE>].<Field_name>
       is accepted now.
-    - bugfix (known bug): sometimes a superfluous type name wasn't skipped,
+   -  bugfix (known bug): sometimes a superfluous type name wasn't skipped,
       resulting in an error msg of "Symbol <TYPE>.<TYPE> is not defined".
-    - bugfix (known bug): a macro function had always to be called with
+   -  bugfix (known bug): a macro function had always to be called with
       parameters enclosed in brackets, even if EXITM will return nothing.
       This has been corrected.
    -  bugfix: TYPE operator didn't accept register or type operands.
@@ -58,44 +146,44 @@
    -  bugfix: if the fields in a RECORD didn't total exactly to 8,16 or 32,
       the record wasn't shifted right.
    -  bugfix: a label before a .ERRxx directive caused a syntax error.
-    - bugfix (known bug): labels in lines containing a "conditional assembly"
+   -  bugfix (known bug): labels in lines containing a "conditional assembly"
       directive (IF, ELSE, ENDIF, ...) were ignored.
-    - bugfix: if a memory operand was pushed/poped, there was no type check.
+   -  bugfix: if a memory operand was pushed/poped, there was no type check.
       So memory items with sizes < WORD or > DWORD were accepted.
-    - bugfix: stack <stacksize> reported error "constant operand expected"
+   -  bugfix: stack <stacksize> reported error "constant operand expected"
       if stacksize wasn't a single number.
-    - bugfix: stacksize stored for stack segments was a 16bit value only.
-    - bugfix: macro parameter expansion operator % might have caused a GPF
+   -  bugfix: stacksize stored for stack segments was a 16bit value only.
+   -  bugfix: macro parameter expansion operator % might have caused a GPF
       if the parameter was the last one and was intended to convert a number
       to a literal.
-    - bugfix: lines with the FOR/FORC directives were expanded. This was a
+   -  bugfix: lines with the FOR/FORC directives were expanded. This was a
       problem if the directive's first parameter was a valid text macro name.
-    - bugfix: COMMENT delimiter wasn't detected if it was located behind
+   -  bugfix: COMMENT delimiter wasn't detected if it was located behind
       a ';'.
-    - bugfix: if a numeric equate's magnitude exceeded 32bit, the high bits
+   -  bugfix: if a numeric equate's magnitude exceeded 32bit, the high bits
       were skipped. Now the equate will be stored as a text macro in this
       case.
-    - bugfix: there was no parameter syntax check for [ELSE]IFIDN[I], 
+   -  bugfix: there was no parameter syntax check for [ELSE]IFIDN[I], 
       [ELSE]IFDIF[I], [ELSE]IFB, [ELSE]IFNB.
-    - bugfix: if a segment was open when the END directive was detected, 
+   -  bugfix: if a segment was open when the END directive was detected, 
       the segment's content was skipped, no error message was displayed.
-    - bugfix: if a FOR parameter string contained a call of a macro function
+   -  bugfix: if a FOR parameter string contained a call of a macro function
       which had more than 1 parameter, a syntax error occured.
-    - bugfix: parameter syntax check for .ERRxx directive was missing.
-    - bugfix: .ERRDEF and .ERRNDEF checked whether the symbol was defined
+   -  bugfix: parameter syntax check for .ERRxx directive was missing.
+   -  bugfix: .ERRDEF and .ERRNDEF checked whether the symbol was defined
       in all passes, but this can't be done in pass one due to possible
       forward references.
-    - bugfix: initialization of a structure/union embedded in another 
+   -  bugfix: initialization of a structure/union embedded in another 
       structure might have failed if there were leading spaces before the
       initialization string.
-    - bugfix: a text macro defined with cmdline option -D must not have
+   -  bugfix: a text macro defined with cmdline option -D must not have
       contained a '-' or '/'.
-    - bugfix: code for ALIAS didn't check whether the alias name was defined
+   -  bugfix: code for ALIAS didn't check whether the alias name was defined
       elsewhere in the source.
-    - bugfix: logical operators EQ, NE, LT, LE, GT, GE did accept constant
+   -  bugfix: logical operators EQ, NE, LT, LE, GT, GE did accept constant
       operands only, but they must also work with relocatable direct
       addresses.
-    - bugfix: there was a chance that an invalid OMF record was written
+   -  bugfix: there was a chance that an invalid OMF record was written
       if lots of externals were defined which exceeded the max size of one
       record.
    -  bugfix: if a byte array in a structure was initialized with a string,
@@ -262,5 +350,4 @@
     - directive DP has been removed (was an alias for DF).
     - directive GLOBAL has been removed (was an alias for EXTERNDEF).
     - support for JMPF/CALLF has been removed.
-
 

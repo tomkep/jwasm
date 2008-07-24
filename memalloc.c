@@ -43,7 +43,9 @@
 #define BLKSIZE 0x80000
 #define WIN32_LEAN_AND_MEAN 1
 //#define __W32API_USE_DLLIMPORT__
+#ifndef __UNIX__
 #include <windows.h>
+#endif
 #endif
 
 #include <stdlib.h>
@@ -75,9 +77,37 @@ static void memLine( int *fh, const char *buf, unsigned size )
 }
 #endif
 
+#ifdef __UNIX__
+
+#define SYS_mmap                 90
+#define SYS_munmap               91
+
+uint_32 sys_call1( uint_32 func, uint_32 r_ebx );
+#pragma aux sys_call1 =                         \
+    "int    0x80"                               \
+    parm [eax] [ebx]                            \
+    value [eax];
+
+uint_32 sys_call2( uint_32 func, uint_32 r_ebx, uint_32 r_ecx );
+#pragma aux sys_call2 =                         \
+    "int    0x80"                               \
+    parm [eax] [ebx] [ecx]                      \
+    value [eax];
+
+typedef struct mmap {
+    uint_32 base;   // linear base (or 0)
+    uint_32 size;   // size in bytes
+    uint_32 access; // prot_read + prot_write = 3
+    uint_32 flags;  // 0x22 = map_anonymous + map_private
+    uint_32 fd;     // should be -1
+    uint_32 offset; // ignored
+} mmap;
+static mmap mymmap = {0, 0, 3, 0x22, -1, 0};
+#endif
+
 #if FAST
-BYTE * pBase;
-BYTE * pCurr;
+uint_8 * pBase;
+uint_8 * pCurr;
 int blocks;
 int currfree;
 #endif
@@ -120,8 +150,12 @@ void MemFini( void )
     printf("memory used: %u kB\n", (blocks * BLKSIZE - currfree) / 1024);
 #endif
     while (pBase) {
-        BYTE * pNext = *((BYTE * *)pBase);
+        uint_8 * pNext = *((uint_8 * *)pBase);
+#ifndef __UNIX__
         VirtualFree(pBase, 0, MEM_RELEASE);
+#else
+        sys_call2(SYS_munmap, (uint_32)pBase, 0);
+#endif
         pBase = pNext;
     }
 #endif
@@ -135,18 +169,28 @@ void *AsmAlloc( size_t size )
     size = (size + 3) & ~3;
     if (currfree < size) {
         if (size > BLKSIZE-4) {
+#ifndef __UNIX__
             pCurr = VirtualAlloc(0, size+4, MEM_COMMIT, PAGE_READWRITE);
+#else
+            mymmap.size = size+4;
+            pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
+#endif
             currfree = size;
         } else {
+#ifndef __UNIX__
             pCurr = VirtualAlloc(0, BLKSIZE, MEM_COMMIT, PAGE_READWRITE);
-            currfree = BLKSIZE-sizeof(BYTE *);
+#else
+            mymmap.size = BLKSIZE;
+            pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
+#endif
+            currfree = BLKSIZE-sizeof(uint_8 *);
         }
         if (!pCurr) {
             Fatal( MSG_OUT_OF_MEMORY );
         }
-        *(BYTE * *)pCurr = pBase;
+        *(uint_8 * *)pCurr = pBase;
         pBase = pCurr;
-        pCurr += sizeof(BYTE *);
+        pCurr += sizeof(uint_8 *);
         blocks++;
     }
     ptr = pCurr;

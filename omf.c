@@ -48,10 +48,15 @@
 #include "omfname.h"
 #include "omfio.h"
 #include "omfprs.h"
+#include "fastpass.h"
 
 #include "myassert.h"
 
 #define SEPARATE_FIXUPP_16_32
+
+#if FASTPASS
+extern bool UseSavedState;
+#endif
 
 extern symbol_queue     Tables[];       // tables of definitions
 extern obj_rec          *ModendRec;     // Record for Modend (OMF)
@@ -432,11 +437,12 @@ void omf_write_grp( void )
 {
     dir_node        *curr;
     dir_node        *segminfo;
-    seg_list        *seg;
+    seg_item        *seg;
     obj_rec         *grp;
     unsigned long   line_num;
     char            writeseg;
 
+    DebugMsg(("omf_write_grp enter\n"));
     line_num = LineNumber;
 
     for( curr = Tables[TAB_GRP].head; curr; curr = curr->next ) {
@@ -454,9 +460,13 @@ void omf_write_grp( void )
             writeseg = TRUE;
             segminfo = (dir_node *)(seg->seg);
             if( ( segminfo->sym.state != SYM_SEG ) || ( segminfo->sym.segment == NULL ) ) {
-                LineNumber = curr->line_num;
-                AsmErr( SEG_NOT_DEFINED, segminfo->sym.name );
-                LineNumber = line_num;
+#if FASTPASS
+                /* make a full second pass and report errors there */
+                ResetUseSavedState();
+#endif
+                // LineNumber = curr->line_num;
+                // AsmErr( SEG_NOT_DEFINED, segminfo->sym.name );
+                // LineNumber = line_num;
             } else {
                 ObjPut8( grp, GRP_SEGIDX );
                 ObjPutIndex( grp, segminfo->e.seginfo->segrec->d.segdef.idx);
@@ -465,6 +475,7 @@ void omf_write_grp( void )
         ObjTruncRec( grp );
         omf_write_record( grp, TRUE );
     }
+    DebugMsg(("omf_write_grp exit\n"));
 }
 
 /* write segment table */
@@ -476,6 +487,7 @@ void omf_write_seg( void )
     obj_rec     *objr;
     uint        seg_index;
 
+    DebugMsg(("omf_write_seg enter\n"));
     for( seg_index = 1; seg_index <= total_segs; seg_index++ ) {
         /* find segment by index */
         for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
@@ -507,6 +519,7 @@ void omf_write_seg( void )
             omf_write_record( rec, TRUE );
         }
     }
+    DebugMsg(("omf_write_seg exit\n"));
 }
 
 void omf_write_lnames( void )
@@ -520,10 +533,11 @@ void omf_write_lnames( void )
     objr->d.lnames.first_idx = 1;
     objr->d.lnames.num_names = LnamesIdx;
     total_size = GetLnameData( &lname );
+    /* fixme: what if lnames are > 1024? */
     if( total_size > 0 ) {
         ObjAttachData( objr, (uint_8 *)lname, total_size );
     }
-    ObjCanFree( objr );
+//    ObjCanFree( objr ); /* tell that data attachment can be freed */
     omf_write_record( objr, TRUE );
 }
 
@@ -545,15 +559,16 @@ void omf_write_extdef( )
     i = 0;
     num = 0;
 
+    DebugMsg(("omf_write_extdef enter\n"));
     objr = ObjNewRec( CMD_EXTDEF );
     objr->d.extdef.first_idx = 0;
 
     // first scan the EXTERN/EXTERNDEF items
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
-        if ((curr->e.extinfo->comm == 1) || (curr->e.extinfo->weak == 1))
+        if ((curr->sym.comm == 1) || (curr->sym.weak == 1))
             continue;
-        DebugMsg(("write_extdef: %s\n", curr->sym.name));
+        DebugMsg(("omf_write_extdef: %s\n", curr->sym.name));
         Mangle( &curr->sym, buffer );
         len = strlen( buffer );
 
@@ -582,7 +597,7 @@ void omf_write_extdef( )
     for(curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         /* the item must be USED and UNDEFINED */
         if( curr->sym.used && (curr->e.procinfo->defined == 0 )) {
-            DebugMsg(("write_extdef: %s\n", curr->sym.name));
+            DebugMsg(("omf_write_extdef: %s\n", curr->sym.name));
             Mangle( &curr->sym, buffer );
             len = strlen( buffer );
 
@@ -606,7 +621,7 @@ void omf_write_extdef( )
             name[i++] = 0;      // for the type index
         }
     }
-    DebugMsg(("write_extdef: attach data, curr=%X, size=%u, last=%u, names=%u, MAX=%u\n", curr, total_size, len, num, MAX_EXT_LENGTH));
+    DebugMsg(("omf_write_extdef: attach data, curr=%X, size=%u, last=%u, names=%u, MAX=%u\n", curr, total_size, len, num, MAX_EXT_LENGTH));
     if( num != 0 ) {
         ObjAttachData( objr, (uint_8 *)name, total_size );
         objr->d.extdef.num_names = num;
@@ -614,6 +629,7 @@ void omf_write_extdef( )
     } else {
         ObjKillRec( objr );
     }
+    DebugMsg(("omf_write_extdef exit\n"));
     return;
 }
 
@@ -666,10 +682,11 @@ int omf_write_comdef( )
     char        buffer[MAX_LINE_LEN];
     char        name[MAX_EXT_LENGTH];
 
+    DebugMsg(("omf_write_comdef enter\n"));
     curr = Tables[TAB_EXT].head;
     while (curr) {
         for(num = 0, total_size = 0, i = 0; curr != NULL ; curr = curr->next ) {
-            if (curr->e.comminfo->comm == FALSE)
+            if (curr->sym.comm == FALSE)
                 continue;
             ptr = Mangle( &curr->sym, buffer );
             len = strlen( ptr );
@@ -679,7 +696,7 @@ int omf_write_comdef( )
             varsize = opsize( curr->sym.mem_type );
             if (varsize == 0)
                 varsize = curr->sym.total_size / curr->sym.total_length;
-            if( curr->e.comminfo->isfar == TRUE ) {
+            if( curr->sym.isfar == TRUE ) {
                 symsize += get_number_of_bytes_for_size_in_commdef( varsize );
                 symsize += get_number_of_bytes_for_size_in_commdef( curr->sym.total_length );
             } else {
@@ -702,7 +719,7 @@ int omf_write_comdef( )
             name[i++] = 0;      // for the type index
 
             /* now add the data type & communal length */
-            if( curr->e.comminfo->isfar == TRUE ) {
+            if( curr->sym.isfar == TRUE ) {
                 name[i++] = COMDEF_FAR;
             } else {
                 name[i++] = COMDEF_NEAR;
@@ -729,7 +746,7 @@ int omf_write_comdef( )
             symsize = opsize( curr->sym.mem_type );
             if (symsize == 0)
                 symsize = curr->sym.total_size / curr->sym.total_length;
-            if( curr->e.comminfo->isfar == FALSE ) {
+            if( curr->sym.isfar == FALSE ) {
                 value *= symsize;
             }
 
@@ -738,7 +755,7 @@ int omf_write_comdef( )
                 value >>= 8;
             }
 
-            if( curr->e.comminfo->isfar == TRUE ) {
+            if( curr->sym.isfar == TRUE ) {
                 /* mem type always needs <= 1 byte */
                 myassert( symsize < UCHAR_MAX );
                 name[i++] = symsize;
@@ -753,6 +770,7 @@ int omf_write_comdef( )
             omf_write_record( objr, TRUE );
         }
     }
+    DebugMsg(("omf_write_comdef exit\n"));
     return( NOT_ERROR );
 }
 
@@ -768,6 +786,9 @@ void omf_write_header( void )
         name = Options.module_name;
     } else {
         name = ModuleInfo.srcfile->fullname;
+        len = strlen( name );
+        name += len;
+        for (;name > ModuleInfo.srcfile->fullname && *(name-1) != '/' && *(name-1) != '\\';name--);
     }
     len = strlen( name );
     ObjAllocData( objr, len + 1 );
@@ -860,6 +881,7 @@ int omf_write_pub( void )
     bool                first = TRUE;
     bool                need32 = FALSE;
 
+    DebugMsg(("omf_write_pub enter\n"));
     while( ( count = GetPublicData( &seg, &grp, &cmd, &NameArray, &data, &need32, first) ) > 0 ) {
 
         /* create a public record for this segment */
@@ -871,7 +893,8 @@ int omf_write_pub( void )
         objr->d.pubdef.base.frame = 0;
         objr->d.pubdef.num_pubs = count;
         objr->d.pubdef.pubs = data;
-        objr->d.pubdef.free_pubs = TRUE;
+//        objr->d.pubdef.free_pubs = TRUE;
+        objr->d.pubdef.free_pubs = FALSE; /* don't free the data */
         omf_write_record( objr, TRUE );
 
         /* free the names table */
@@ -883,6 +906,7 @@ int omf_write_pub( void )
         AsmFree( NameArray );
         first = FALSE;
     }
+    DebugMsg(("omf_write_pub exit\n"));
     return( NOT_ERROR );
 }
 

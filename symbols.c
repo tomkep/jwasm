@@ -37,7 +37,9 @@
 #include "queues.h"
 #include "fixup.h"
 #include "token.h"
+#include "fastpass.h"
 #include "myassert.h"
+#include "macro.h"
 
 // reorganize the symbol table permanently, so the last found item
 // is always first in a line. Gives no significant speed boost.
@@ -132,6 +134,7 @@ static struct asm_sym *SymAlloc( const char *name )
     sym->public = FALSE;
     sym->list = ModuleInfo.cref;
     sym->included = FALSE; /* for COFF: is symbol in COFF symbol table? */
+//    sym->saved = FALSE;
 
     sym->langtype = LANG_NONE;
     sym->state = SYM_UNDEFINED;
@@ -536,6 +539,8 @@ void SymPassInit( int pass )
     if (pass == PASS_1)
         return;
 
+#if FASTPASS
+#else
     /* mark as "undefined":
      - text macros (SYM_TMACRO)
      - macros (SYM_MACRO)
@@ -553,6 +558,7 @@ void SymPassInit( int pass )
             }
         }
     }
+#endif
 }
 
 #if defined( _STANDALONE_ )
@@ -657,7 +663,7 @@ static void log_macro( struct asm_sym *sym )
 {
     int i = strlen ( sym->name);
     char *pdots = dots + i + 1;
-    char *type = ((dir_node *)sym)->e.macroinfo->isfunc ? "Func" : "Proc";
+    char *type = (sym->isfunc) ? "Func" : "Proc";
 
     if (i >= DOTSMAX)
         pdots = "";
@@ -867,7 +873,9 @@ static const char *get_sym_type( struct asm_sym *sym )
     case MT_ABS:
         return( "Number" );
     case MT_TYPE:
-        return( sym->type->name );
+        if (*(sym->type->name))
+            return( sym->type->name );
+        return( "Ptr");
     default:
         return( "?" );
     }
@@ -926,6 +934,8 @@ static void log_symbol( struct asm_sym *sym )
 {
     int i = strlen( sym->name );
     char *pdots = dots + i + 1;
+    char buffer[MAX_LINE_LEN];
+
     if (i >= DOTSMAX)
         pdots = "";
 
@@ -934,10 +944,13 @@ static void log_symbol( struct asm_sym *sym )
     case SYM_EXTERNAL:
         LstMsg( "%s %s        ", sym->name, pdots );
 
-        if (sym->total_length > 1)
-            LstMsg( "%s[%u] %8X     ", get_sym_type( sym ), sym->total_length, sym->offset );
-        else
-            LstMsg( "%-7s  %8X     ", get_sym_type( sym ), sym->offset );
+        if (sym->total_length > 1) {
+            i = sprintf( buffer, "%s[%u]", get_sym_type( sym ), sym->total_length );
+            LstMsg( "%-10s ", buffer );
+        } else
+            LstMsg( "%-10s ", get_sym_type( sym ) );
+
+        LstMsg( "%8X  ", sym->offset );
 
         if (sym->mem_type == MT_ABS)
             ;
@@ -948,9 +961,8 @@ static void log_symbol( struct asm_sym *sym )
             LstMsg( "Public " );
 
         if (sym->state == SYM_EXTERNAL) {
-            dir_node    *dir = (dir_node *)sym;
 
-            if (dir->e.extinfo->weak == 1)
+            if (sym->weak == 1)
                 LstMsg( "*External " );
             else
                 LstMsg( "External  " );
@@ -959,7 +971,8 @@ static void log_symbol( struct asm_sym *sym )
         LstMsg( "%s\n", get_sym_lang( sym ) );
         break;
     case SYM_TMACRO:
-        LstMsg( "%s %s        Text   %s\n", sym->name, pdots, sym->string_ptr );
+        GetTextMacroValue(sym->string_ptr, buffer);
+        LstMsg( "%s %s        Text   %s\n", sym->name, pdots, buffer );
         break;
     case SYM_ALIAS:
         LstMsg( "%s %s        Alias  %s\n", sym->name, pdots, sym->string_ptr );
@@ -981,7 +994,7 @@ static void log_proc( struct asm_sym *sym )
         char *pdots = dots + i + 1;
         if (i >= DOTSMAX)
             pdots = "";
-        if (dir->e.procinfo->use32)
+        if (sym->use32)
             p = "%s %s        P %s  %08X %s\t";
         else
             p = "%s %s        P %s  %04X     %s\t";
@@ -991,7 +1004,7 @@ static void log_proc( struct asm_sym *sym )
                 get_proc_type( sym ),
                 sym->offset,
                 get_sym_seg_name( sym ));
-        if (dir->e.procinfo->use32)
+        if (sym->use32)
             LstMsg( "Length= %08X ", sym->total_size );
         else
             LstMsg( "Length= %04X ", sym->total_size );
@@ -1042,7 +1055,7 @@ static void log_proc( struct asm_sym *sym )
                 pdots = dots + i + 1 + 2;
                 if (i >= DOTSMAX)
                     pdots = "";
-                if (dir->e.procinfo->use32)
+                if (sym->use32)
                     p = "  %s %s        L %s  %08X %s\n";
                 else
                     p = "  %s %s        L %s  %04X     %s\n";
@@ -1164,7 +1177,7 @@ void SymWriteCRef( void )
         /* next write out symbols */
         LstMsg( "\n\nSymbols:\n\n" );
         LstMsg( "                N a m e                 Type" );
-        LstMsg( "      Value    Attr\n\n" );
+        LstMsg( "       Value     Attr\n\n" );
         for( i = 0; i < AsmSymCount; ++i ) {
             if (syms[i]->list == TRUE)
                 log_symbol( syms[i] );
@@ -1199,7 +1212,7 @@ static void DumpSymbol( struct asm_sym *sym )
         type = "GROUP";
         break;
     case SYM_EXTERNAL:
-        if (dir->e.extinfo->comm)
+        if (sym->comm)
             type = "COMMUNAL";
         else
             type = "EXTERNAL";
@@ -1290,7 +1303,7 @@ void DumpASym( void )
         if (max < curr)
             max = curr;
     }
-    printf("%u items in symbol table\n", count);
+    printf("%u items in symbol table, ", count);
     printf("%u items max in one line, %u lines empty\n", max, empty);
 }
 #endif

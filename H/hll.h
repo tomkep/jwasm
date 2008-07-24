@@ -47,7 +47,7 @@ typedef struct hll_list {
     char                *symtest;       // continue, test for exit
     char                *symexit;       // exit loop
     char                *condlines;     // for .WHILE: lines to add after test
-    hll_cmd             cmd;
+    hll_cmd             cmd;            // start cmd (IF, WHILE, REPEAT)
 } hll_list;
 
 /*---------------------------------------------------------------------------*/

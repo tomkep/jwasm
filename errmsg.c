@@ -41,9 +41,10 @@
 #include "input.h"
 #include "symbols.h"
 #include "queues.h"
+#include "macro.h"
 
 extern void             MsgPrintf( int resourceid ); // don't use this
-extern int              MsgGet( int resourceid, char *buffer );
+extern char             *MsgGet( int resourceid, char *buffer );
 extern int              trademark( void );
 extern char             banner_printed;
 
@@ -125,8 +126,8 @@ void AsmErr( int msgnum, ... )
     print_include_file_nesting_structure();
     if( ErrLimit != -1  &&  ErrCount >= ErrLimit ) {
         PrtMsg1( "", ERR_TOO_MANY_ERRORS, args1, args2 );
-        AsmShutDown();
-        exit (1);
+        CloseFiles();
+        exit( 1 );
     }
 }
 
@@ -156,9 +157,12 @@ void AsmWarn( int level, int msgnum, ... )
 
 static void PrtMsg1( char *prefix, int msgnum, va_list args1, va_list args2 )
 /***************************************************************************/
-// print messages from WOMP !!!
 {
-    if( ErrFile == NULL ) OpenErrFile();
+    if( !banner_printed )
+        trademark();
+
+    if( ErrFile == NULL )
+        OpenErrFile();
     PutMsg( errout, prefix, msgnum, args1 );
     fflush( errout );                       /* 27-feb-90 */
     if( ErrFile ) {
@@ -169,14 +173,12 @@ static void PrtMsg1( char *prefix, int msgnum, va_list args1, va_list args2 )
 
 void PrtMsg( int msgnum, ... )
 /****************************/
-// print messages from WOMP !!!
 {
     va_list args1;
 
-    if( !banner_printed ) {
-        banner_printed = TRUE;
+    if( !banner_printed )
         trademark();
-    }
+
     if( ErrFile == NULL )
         OpenErrFile();
     va_start( args1, msgnum );
@@ -288,7 +290,9 @@ void WriteLstFile( int type, unsigned int oldofs, void * value )
             sprintf(buffer, " = %-23X", sym->value);
             fwrite(buffer, 1, strlen(buffer), AsmFiles.file[LST]);
         } else if (sym->state == SYM_TMACRO) {
-            sprintf(buffer, " = %-23.80s", sym->string_ptr);
+            char buffer2[MAX_LINE_LEN];
+            GetTextMacroValue(sym->string_ptr, buffer2);
+            sprintf(buffer, " = %-23.80s", buffer2);
             fwrite(buffer, 1, strlen(buffer), AsmFiles.file[LST]);
         }
     } else {
@@ -312,7 +316,9 @@ static void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args )
 /********************************************************************/
 {
     const FNAME     *fname;
+    int             i;
     char            msgbuf[MAX_LINE_LEN];
+    char            buffer[MAX_LINE_LEN];
 
     if( fp != NULL ) {
         fname = get_curr_srcfile();
@@ -321,18 +327,20 @@ static void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args )
                 fprintf( fp, "%s(%lu): ", fname->name, LineNumber );
             }
         }
-        fprintf( fp, "%s %c%03d: ", prefix, *prefix, msgnum );
+        i = sprintf( buffer, "%s %c%03d: ", prefix, *prefix, msgnum );
         // CGetMsg( msgbuf, msgnum );
         MsgGet( msgnum, msgbuf );
-        vfprintf( fp, msgbuf, args );
-        fprintf( fp, "\n" );
-#if 0
+        vsprintf( buffer+i, msgbuf, args );
+        strcat(buffer, "\n");
+        fprintf( fp, buffer );
         if (AsmFiles.file[LST] && fp == ErrFile) {
-            fprintf( AsmFiles.file[LST], "%s %c%03d: ", prefix, *prefix, msgnum );
-            fprintf( AsmFiles.file[LST], msgbuf );
-            fprintf( AsmFiles.file[LST], "\n" );
+            fprintf( AsmFiles.file[LST], "                           ");
+            fprintf( AsmFiles.file[LST], "%s\n", CurrString);
+            if( LineNumber != 0 && fname != NULL ) {
+                fprintf( AsmFiles.file[LST], "%s(%lu): ", fname->name, LineNumber );
+            }
+            fprintf( AsmFiles.file[LST], buffer );
         }
-#endif
     }
 }
 
@@ -348,7 +356,7 @@ int InternalError( const char *file, unsigned line )
     MsgGet( MSG_INTERNAL_ERROR, msgbuf );
     fprintf( errout, msgbuf, file, line );
     fflush( errout );
-    AsmShutDown();
+    CloseFiles();
     exit( EXIT_FAILURE );
     return( 0 );
 }
@@ -358,7 +366,7 @@ void WriteError( void )
 /************************/
 {
     MsgPrintf( OBJECT_WRITE_ERROR );
-    AsmShutDown();
+    CloseFiles();
     exit( EXIT_FAILURE );
 };
 
