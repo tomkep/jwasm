@@ -29,8 +29,8 @@
 ****************************************************************************/
 
 
-#ifndef _ASMINPUT_H_INCLUDED
-#define _ASMINPUT_H_INCLUDED
+#ifndef _INPUT_H_INCLUDED
+#define _INPUT_H_INCLUDED
 
 #include "bool.h"
 

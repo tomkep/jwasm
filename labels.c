@@ -41,23 +41,21 @@
 
 #include "types.h"
 
-static unsigned             AnonymousCounter = 0;
-
 void LabelsInit( void )
 /*************************/
 {
-    AnonymousCounter = 0;
+    ModuleInfo.anonymous_label = 0;
 }
 char * GetCurrAnonLabel( char * buffer )
 /*************************/
 {
-    sprintf( buffer, "L&_%04u", AnonymousCounter );
+    sprintf( buffer, "L&_%04u", ModuleInfo.anonymous_label );
     return( buffer );
 }
 char * GetNextAnonLabel( char * buffer )
 /*************************/
 {
-    sprintf( buffer, "L&_%04u", AnonymousCounter+1);
+    sprintf( buffer, "L&_%04u", ModuleInfo.anonymous_label+1);
     return( buffer );
 }
 
@@ -91,12 +89,12 @@ int LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, b
         AsmError( LABEL_OUTSIDE_SEGMENT );
 
     if( strcmp( symbol_name, "@@" ) == 0 ) {
-        sprintf( buffer, "L&_%04u", ++AnonymousCounter );
+        sprintf( buffer, "L&_%04u", ++ModuleInfo.anonymous_label );
         symbol_name = buffer;
     }
 
     /* inside a STRUCT definition? */
-    if (Definition.struct_depth) {
+    if (StructDef.struct_depth) {
         if( Parse_Pass == PASS_1 ) {
             if (!(sym = AddFieldToStruct( 0, -1, MT_NEAR, 0, 0 )))
                 return( ERROR );

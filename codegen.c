@@ -109,9 +109,10 @@ static int output( int i )
     /*
      * Check if CPU and FPU is valid for output code
      */
-    if( ( ins->cpu & P_CPU_MASK ) > ( rCode->info.cpu & P_CPU_MASK )
-        || ( ins->cpu & P_FPU_MASK ) > ( rCode->info.cpu & P_FPU_MASK )
-        || ( ins->cpu & P_EXT_MASK ) > ( ins->cpu & rCode->info.cpu & P_EXT_MASK ) ) {
+    if( ( ins->cpu & P_CPU_MASK ) > ( curr_cpu & P_CPU_MASK )
+        || ( ins->cpu & P_FPU_MASK ) > ( curr_cpu & P_FPU_MASK )
+        || ( ins->cpu & P_EXT_MASK ) > ( ins->cpu & curr_cpu & P_EXT_MASK ) ) {
+        DebugMsg(("output: wrong cpu setting\n"));
         AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
         return( ERROR );
     }
@@ -173,7 +174,7 @@ static int output( int i )
      * Output FP FWAIT if required
      */
     if( ins->token == T_FWAIT ) {
-        if(( rCode->info.cpu&P_CPU_MASK ) < P_386 ) {
+        if(( curr_cpu & P_CPU_MASK ) < P_386 ) {
 #if defined( _STANDALONE_ )
             if(( ModuleInfo.emulator == TRUE ) && ( !rCode->use32 )) {
                 OutputCodeByte( OP_NOP );
@@ -188,13 +189,13 @@ static int output( int i )
     } else if(( ModuleInfo.emulator == TRUE )
         && ( !rCode->use32 )
         && ( ins->allowed_prefix != NO_FWAIT )
-        && (( ins->allowed_prefix == FWAIT ) || (( ins->cpu&P_FPU_MASK ) != P_NO87 ))) {
+        && (( ins->allowed_prefix == FWAIT ) || (( ins->cpu & P_FPU_MASK ) != P_NO87 ))) {
         OutputCodeByte( OP_WAIT );
 #endif
     } else if( ins->allowed_prefix != NO_FWAIT ) {
         // implicit FWAIT synchronization for 8087 (CPU 8086/80186)
-        if((( rCode->info.cpu&P_CPU_MASK ) < P_286 )
-            && (( ins->cpu&P_FPU_MASK ) == P_87 )) {
+        if((( curr_cpu & P_CPU_MASK ) < P_286 )
+            && (( ins->cpu & P_FPU_MASK ) == P_87 )) {
             OutputCodeByte( OP_WAIT );
         }
     }
@@ -241,7 +242,8 @@ static int output( int i )
         break;
     }
     if( rCode->prefix.opsiz == TRUE ) {
-        if(( rCode->info.cpu & P_CPU_MASK ) < P_386 ) {
+        if(( curr_cpu & P_CPU_MASK ) < P_386 ) {
+            DebugMsg(("output: wrong cpu setting\n"));
             AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
             return( ERROR );
         }
@@ -438,7 +440,7 @@ static int match_phase_2( int *i )
     }
 }
 
-int match_phase_1( void )
+int match_phase_1( struct asm_code *CodeInfo )
 /************************
 - this routine will look up the assembler opcode table and try to match
   the first operand in table with what we get;
@@ -480,7 +482,8 @@ int match_phase_1( void )
 
     // make sure the user want 80x87 ins
     if( ( AsmOpTable[i].cpu & P_FPU_MASK ) != P_NO87 ) {
-        if( ( CodeInfo->info.cpu & P_FPU_MASK ) == P_NO87 ) {
+        if( ( curr_cpu & P_FPU_MASK ) == P_NO87 ) {
+            DebugMsg(("match_phase_1: wrong cpu setting: curr=%X - table=%X\n", curr_cpu, AsmOpTable[i].cpu));
             AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
             return( ERROR );
         } else {
@@ -490,7 +493,7 @@ int match_phase_1( void )
 
     // make sure the user want 80x86 protected mode ins
     if( ( AsmOpTable[i].cpu & P_PM ) != 0 ) {
-        if( ( CodeInfo->info.cpu & P_PM ) == 0 ) {
+        if( ( curr_cpu & P_PM ) == 0 ) {
             AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
             return( ERROR );
         }

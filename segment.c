@@ -42,6 +42,7 @@
 #include "omf.h"
 #include "fastpass.h"
 #include "macro.h"
+#include "fixup.h"
 
 #include "myassert.h"
 
@@ -262,7 +263,7 @@ direct_idx LnameInsert( char *name )
     return( LnamesIdx );
 }
 
-uint_32 GetCurrAddr( void )
+uint_32 GetCurrOffset( void )
 /*************************/
 {
     if( CurrSeg )
@@ -408,7 +409,7 @@ int GrpDef( int i )
                     continue;
                 // segment is in another group
                 DebugMsg(("GrpDef: segment >%s< is in group >%s< already\n", name, seg->e.seginfo->group->name));
-                AsmError( SEGMENT_IN_GROUP );
+                AsmErr( SEGMENT_IN_GROUP, name );
                 return( ERROR );
             }
         } else {
@@ -448,7 +449,7 @@ static int SetUse32( void )
     } else {
         GlobalVars.code_seg = SEGISCODE( CurrSeg );
         Use32 = CurrSeg->seg->e.seginfo->Use32;
-        if( Use32 && ( ( CodeInfo->info.cpu & P_CPU_MASK ) < P_386 ) ) {
+        if( Use32 && ( ( curr_cpu & P_CPU_MASK ) < P_386 ) ) {
             AsmError( WRONG_CPU_FOR_32BIT_SEGMENT );
             return( ERROR );
         }
@@ -531,14 +532,18 @@ int  SetCurrSeg( int i )
 }
 
 
-static seg_type ClassNameType( char *name )
+static seg_type ClassNameType( dir_node * dir, char *name )
 /*****************************************/
 {
     int     slen;
     char    uname[257];
 
+    if (dir->e.seginfo->segrec->d.segdef.align == SEGDEF_ALIGN_ABS)
+        return( SEGTYPE_ABS );
+
     if( name == NULL )
         return( SEGTYPE_UNDEF );
+
     if( ModuleInfo.model != MOD_NONE ) {
         if( stricmp( name, Options.code_class ) == 0 ) {
             return( SEGTYPE_CODE );
@@ -716,12 +721,15 @@ int SegDef( int i )
 
                 /* the class name - the only token which is of type STRING */
                 token = AsmBuffer[i]->string_ptr;
-                /* remove the quote delimiters */
-                if ((*token == '"') || (*token == '\'')) {
-                    token++;
-                    *(token+AsmBuffer[i]->value) = 0;
+                /* string must be delimited by [double]quotes */
+                if (AsmBuffer[i]->string_delim == '<' ||
+                    (*token != '"' && *token != '\'')) {
+                    AsmErr( SYNTAX_ERROR_EX, token );
+                    continue;
                 }
-
+                /* remove the quote delimiters */
+                token++;
+                *(token+AsmBuffer[i]->value) = NULLC;
 
                 classidx = FindLnameIdx( token );
                 if( classidx == LNAME_NULL ) {
@@ -737,13 +745,14 @@ int SegDef( int i )
             /* go through all tokens EXCEPT the class name */
             token = AsmBuffer[i]->string_ptr;
 
-            // look up the type of token
-            type = token_cmp( token, TOK_READONLY, TOK_AT );
+            /* look up the type of token.
+             check readonly, align, combine and word size types */
+            type = token_cmp( token, TOK_READONLY, TOK_USE32 );
             if( type == ERROR ) {
                 type = token_cmp(token, TOK_FLAT, TOK_FLAT );
                 if( type == ERROR ) {
-                    AsmError( UNDEFINED_SEGMENT_OPTION );
-                    return( ERROR );
+                    AsmErr( UNKNOWN_SEGMENT_ATTRIBUTE, token );
+                    continue;
                 }
             }
 
@@ -751,8 +760,8 @@ int SegDef( int i )
             initialized */
 
             if( initstate & TypeInfo[type].init ) {
-                AsmError( SEGMENT_PARA_DEFINED ); // initialized already
-                return( ERROR );
+                AsmErr( SEGMENT_ATTRIBUTE_DEFINED_ALREADY, token );
+                continue;
             } else {
                 initstate |= TypeInfo[type].init; // mark it initialized
             }
@@ -774,36 +783,38 @@ int SegDef( int i )
             case TOK_MEMORY:
                 seg->d.segdef.combine = TypeInfo[type].value;
                 break;
+            case TOK_AT:
+                seg->d.segdef.combine = TypeInfo[type].value;
+                seg->d.segdef.align = SEGDEF_ALIGN_ABS;
+                i++;
+                if (EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR)
+                    break;
+                if (opndx.type == EXPR_CONST && opndx.string == NULL) {
+                    seg->d.segdef.abs.frame = opndx.value;
+                    seg->d.segdef.abs.offset = 0;
+                } else {
+                    AsmError( CONSTANT_EXPECTED );
+                }
+                break;
             case TOK_USE16:
             case TOK_USE32:
                 dir->e.seginfo->Use32 = TypeInfo[type].value;
-                break;
-            case TOK_AT:
-                seg->d.segdef.align = SEGDEF_ALIGN_ABS;
-                i++;
-                if ((EvalOperand( &i, Token_Count, &opndx, TRUE ) != ERROR) &&
-                    opndx.type == EXPR_CONST && opndx.string == NULL) {
-                    seg->d.segdef.abs.frame = AsmBuffer[i]->value;
-                    seg->d.segdef.abs.offset = 0;
-                } else {
-                    AsmError( UNDEFINED_SEGMENT_OPTION );
-                    return( ERROR );
-                }
                 break;
             case TOK_FLAT:
                 dir->e.seginfo->Use32 = 1;
                 dir->e.seginfo->group = &flat_grp->sym;
                 break;
             default:
-                AsmError( UNDEFINED_SEGMENT_OPTION );
-                return( ERROR );
+                AsmErr( UNKNOWN_SEGMENT_ATTRIBUTE, token );
+                break;
             }
-        }
+        } /* end for */
+
         token = GetLname( seg->d.segdef.class_name_idx );
         if( dir->e.seginfo->segtype != SEGTYPE_CODE ) {
             seg_type res;
 
-            res = ClassNameType( token );
+            res = ClassNameType( dir, token );
             if( res != SEGTYPE_UNDEF ) {
                 dir->e.seginfo->segtype = res;
             } else {
@@ -831,7 +842,7 @@ int SegDef( int i )
             if (p) {
                 DebugMsg(("seg attr changed: %s, %s\n", dir->sym.name, p));
                 AsmErr( SEGDEF_CHANGED, dir->sym.name, p);
-//                return( ERROR );
+                return( ERROR );
             }
             // definition is the same as before
             if( push_seg( dir ) == ERROR ) {
@@ -876,7 +887,9 @@ static void input_group( int type, char *name )
     char        buffer[MAX_LINE_LEN];
 
     /* no DGROUP for FLAT or COFF */
-    if( ModuleInfo.model == MOD_FLAT || Options.output_format != OFORMAT_OMF)
+    if( ModuleInfo.model == MOD_FLAT ||
+        Options.output_format == OFORMAT_COFF ||
+        Options.output_format == OFORMAT_ELF)
         return;
 
     strcpy( buffer, "DGROUP GROUP " );
@@ -944,7 +957,7 @@ static char * SetSimSeg(int segm, char * name, char * buffer)
             pUse = "FLAT";
         else
             pUse = "USE32";
-        if ((CodeInfo->info.cpu & P_CPU_MASK ) <= P_386)
+        if ((curr_cpu & P_CPU_MASK ) <= P_386)
             pAlign = "DWORD";
         else
             pAlign = "PARA";
@@ -1306,6 +1319,8 @@ int Use32Assume( enum assume_segreg prefix )
     return( EMPTY );
 }
 
+/* sets Frame and Frame_Datum */
+
 enum assume_segreg GetPrefixAssume( struct asm_sym *sym, enum assume_segreg prefix )
 /****************************************************************************/
 {
@@ -1355,6 +1370,8 @@ enum assume_segreg GetPrefixAssume( struct asm_sym *sym, enum assume_segreg pref
     }
 }
 
+/* sets Frame and Frame_Datum */
+
 enum assume_segreg GetAssume( struct asm_sym *sym, enum assume_segreg def )
 /*******************************************************************/
 {
@@ -1393,7 +1410,7 @@ void SetSymSegOfs( struct asm_sym *sym )
 /*******************************************/
 {
     sym->segment = &GetCurrSeg()->sym;
-    sym->offset = GetCurrAddr();
+    sym->offset = GetCurrOffset();
 }
 
 // called when a model is set
@@ -1415,8 +1432,10 @@ int SegmentModulePrologue(int type)
         InputQueueLine( SetSimSeg( SIM_DATA, NULL, buffer )) ;
         InputQueueLine( EndSimSeg( SIM_DATA, buffer));
 
-        /* create DGROUP for OMF if model isn't FLAT */
-        if( Options.output_format == OFORMAT_OMF && type != MOD_FLAT ) {
+        /* create DGROUP for BIN/OMF if model isn't FLAT */
+        if( type != MOD_FLAT &&
+            (Options.output_format == OFORMAT_OMF ||
+             Options.output_format == OFORMAT_BIN)) {
             /* Generates codes for grouping */
             strcpy( buffer, "DGROUP GROUP " );
             if( type == MOD_TINY ) {
@@ -1465,9 +1484,11 @@ void SegmentInit(int pass)
             continue;
         if (curr->e.seginfo->CodeBuffer == NULL) {
             switch (Options.output_format) {
-            case OFORMAT_COFF:
-            case OFORMAT_ELF:
-                /* the segment can grow due in step 2-n due to jump
+            case OFORMAT_OMF:
+                curr->e.seginfo->CodeBuffer = codebuf;
+                break;
+            default: /* COFF, ELF, BIN */
+                /* the segment can grow in step 2-n due to jump
                   modifications. worst case is no_of_short_jumps * 3 for 32bit.
                   for a quick solution just add 25% to the size if segment
                   contains labels */
@@ -1476,8 +1497,6 @@ void SegmentInit(int pass)
                     i = i + (i >> 2);
                 curr->e.seginfo->CodeBuffer = AsmAlloc(i);
                 break;
-            default:
-                curr->e.seginfo->CodeBuffer = codebuf;
             }
         }
         if( curr->e.seginfo->segrec->d.segdef.combine != COMB_STACK ) {
@@ -1485,6 +1504,9 @@ void SegmentInit(int pass)
         }
         curr->e.seginfo->start_loc = 0;
         curr->e.seginfo->current_loc = 0;
+#if BIN_SUPPORT
+        curr->e.seginfo->initial = FALSE;
+#endif
 
         if (Options.output_format == OFORMAT_COFF) {
             curr->e.seginfo->FixupListHeadCoff = NULL;

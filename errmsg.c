@@ -35,7 +35,6 @@
 #include <ctype.h>
 
 #include "globals.h"
-#include "fatal.h"
 #include "symbols.h"
 #include "directiv.h"
 #include "input.h"
@@ -236,7 +235,7 @@ void WriteLstFile( int type, unsigned int oldofs, void * value )
     if (ModuleInfo.list == FALSE || AsmFiles.file[LST] == NULL)
         return;
     if (type == LSTTYPE_LIDATA) {
-        newofs = GetCurrAddr();
+        newofs = GetCurrOffset();
         len = sprintf(buffer, "%08X: ", oldofs);
         fwrite(buffer, 1, len, AsmFiles.file[LST]);
 
@@ -348,7 +347,7 @@ static void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args )
 
 int InternalError( const char *file, unsigned line )
 /**************************************************/
-// it is used by WOMP myassert function in debug version
+// it's used by myassert() function in debug version
 {
 
     char msgbuf[80];

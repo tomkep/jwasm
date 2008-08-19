@@ -54,7 +54,6 @@
   #include "ostype.h"
 #endif
 
-extern void             Fatal( unsigned msg, ... );
 extern void             ObjRecInit( void );
 extern void             InitErrFile( void );
 //extern void             PrintfUsage( int first_ln );
@@ -74,19 +73,6 @@ struct  option {
     void        (*function)( void );
 };
 
-
-static struct SWData {
-    bool register_conventions;
-    bool privileged_mode;
-    int cpu;
-    int fpu;
-} SWData = {
-    FALSE, // register conventions
-    FALSE, // privileged mode CPU instructions set
-    0,     // default CPU (=8086)
-    -1     // unspecified FPU
-};
-
 #define MAX_NESTING 15
 #define BUF_SIZE 512
 
@@ -97,7 +83,6 @@ static char             *OptScanPtr;
 static char             *OptParm;
 static char             *ForceInclude = NULL;
 char                    banner_printed = FALSE;
-
 
 global_options Options = {
     /* sign_value       */          FALSE,
@@ -139,7 +124,13 @@ global_options Options = {
     /* output_format         */     OFORMAT_OMF,
     /* alignment_default     */     0,
     /* langtype              */     LANG_NONE,
-    /* model                 */     MOD_NONE
+    /* model                 */     MOD_NONE,
+    /* cpu                   */     0,
+    /* fpu                   */     -1,
+#if OWREGCONV
+    /* open watcom reg conv  */     FALSE,
+#endif
+    /* privileged mode       */     FALSE
 };
 
 struct qitem {
@@ -253,21 +244,21 @@ static void SetCPUPMC( void )
 
     for( tmp=OptParm; tmp < OptScanPtr; tmp++ ) {
         if( *tmp == 'p' ) {
-            if( SWData.cpu >= 2 ) {         // set privileged mode
-                SWData.privileged_mode = TRUE;
+            if( Options.cpu >= 2 ) {         // set privileged mode
+                Options.privileged_mode = TRUE;
             } else {
                 MsgPrintf1( MSG_CPU_OPTION_INVALID, CopyOfParm() );
             }
-#if 0
+#if OWREGCONV
         } else if( *tmp == 'r' ) {
-            if( SWData.cpu >= 3 ) {  // set register calling convention
-                SWData.register_conventions = TRUE;
+            if( Options.cpu >= 3 ) {  // set register calling convention
+                Options.register_conventions = TRUE;
             } else {
                 MsgPrintf1( MSG_CPU_OPTION_INVALID, CopyOfParm() );
             }
         } else if( *tmp == 's' ) {
-            if( SWData.cpu >= 3 ) {  // set stack calling convention
-                SWData.register_conventions = FALSE;
+            if( Options.cpu >= 3 ) {  // set stack calling convention
+                Options.register_conventions = FALSE;
             } else {
                 MsgPrintf1( MSG_CPU_OPTION_INVALID, CopyOfParm() );
             }
@@ -290,12 +281,12 @@ static void SetCPUPMC( void )
             exit( 1 );
         }
     }
-#if 0
-    if( SWData.cpu < 2 ) {
-        SWData.privileged_mode = FALSE;
-        SWData.register_conventions = TRUE;
-    } else if( SWData.cpu < 3 ) {
-        SWData.register_conventions = TRUE;
+#if OWREGCONV
+    if( Options.cpu < 2 ) {
+        Options.privileged_mode = FALSE;
+        Options.register_conventions = TRUE;
+    } else if( Options.cpu < 3 ) {
+        Options.register_conventions = TRUE;
     }
 #endif
 }
@@ -303,7 +294,7 @@ static void SetCPUPMC( void )
 static void SetCPU( void )
 /************************/
 {
-    SWData.cpu = OptValue;
+    Options.cpu = OptValue;
     SetCPUPMC();
 }
 
@@ -327,7 +318,7 @@ static void SetFPU( void )
     case 5:
     case 6:
     case 7:
-        SWData.fpu = OptValue;
+        Options.fpu = OptValue;
         break;
     }
 }
@@ -341,8 +332,8 @@ static void SetMemoryModel( void )
     switch( Options.model ) {
     case MOD_FLAT:
         model = "FLAT";
-        if (SWData.cpu < 3) /* ensure that a 386 cpu is set */
-            SWData.cpu = 3;
+        if (Options.cpu < 3) /* ensure that a 386 cpu is set */
+            Options.cpu = 3;
         break;
     case MOD_COMPACT:  model = "COMPACT";   break;
     case MOD_HUGE:     model = "HUGE";      break;
@@ -511,7 +502,12 @@ static void get_fname( char *token, int type )
         /* set up default object and error filename */
 
         if( AsmFiles.fname[OBJ] == NULL ) {
-            _makepath( name, NULL, NULL, fname, OBJ_EXT );
+#if BIN_SUPPORT
+            if (Options.output_format == OFORMAT_BIN)
+                _makepath( name, NULL, NULL, fname, "BIN" );
+            else
+#endif
+                _makepath( name, NULL, NULL, fname, OBJ_EXT );
         } else {
             _splitpath( AsmFiles.fname[OBJ], drive2,
                          dir2, fname2, ext2 );
@@ -651,7 +647,7 @@ static void Set_ZM( void ) { Options.masm51_compat = TRUE; }
 
 static void Set_ZP( void ) {
     uint_8 power;
-    for (power = 1;power < OptValue && power < 32; power = power << 1);
+    for (power = 1;power < OptValue && power < MAX_STRUCT_ALIGN; power = power << 1);
     if (power == OptValue)
         Options.alignment_default = OptValue;
     else {
@@ -729,7 +725,7 @@ static void HelpUsage( void ) { usagex_msg();}
 static void Set_D6( void )
 {
     Options.debug = TRUE;
-    DebugMsg(( "debugging output on \n" ));
+    DebugMsg(( "debugging output on\n" ));
 }
 #endif
 
@@ -1304,15 +1300,18 @@ static int do_init_stuff( char **cmdline, bool first )
 
     if (first) {
         MsgInit();
-        ParseInit( -1, -1, -1, -1 );       // initialize hash table
         do_envvar_cmdline( "JWASM" );
     }
+#ifdef DEBUG_OUT
+    ModuleInfo.cref = TRUE; /* enable debug displays */
+#endif
 
-    InputInit();
-
+    /* no debug displays possible before cmdline has been parsed! */
     if (parse_cmdline( cmdline ) == 0)
         return( FALSE );
 
+    ParseInit();   // initialize hash table
+    InputInit();
     trademark();
 
     /* for OMF, IMAGEREL and SECTIONREL make no sense */
@@ -1337,7 +1336,7 @@ static int do_init_stuff( char **cmdline, bool first )
         AddStringToIncludePath( env );
 
     open_files();
-    PushLineQueue();
+//    PushLineQueue();
     return( TRUE );
 }
 
@@ -1416,7 +1415,6 @@ int main( void )
         }
         SetMemoryModel();
         WriteObjModule();           // main body: parse the source file
-        MsgFini();
         main_fini();
 #ifndef __UNIX__
         pCmd = argv[0];
@@ -1426,6 +1424,7 @@ int main( void )
 #endif
         first = FALSE;
     };
+    MsgFini();
 #ifndef __UNIX__
     free( buff );
 #endif
@@ -1438,43 +1437,43 @@ void set_cpu_parameters( void )
     int token;
 
     DebugMsg(("set_cpu_parameters enter\n"));
-#if 0
+#if OWREGCONV
     // set naming convention
-    if( SWData.register_conventions || ( SWData.cpu < 3 ) ) {
+    if( Options.register_conventions || ( Options.cpu < 3 ) ) {
         Options.naming_convention = ADD_USCORES;
     } else {
         Options.naming_convention = DO_NOTHING;
     }
     // set parameters passing convention
-    if( SWData.cpu >= 3 ) {
-        if( SWData.register_conventions ) {
+    if( Options.cpu >= 3 ) {
+        if( Options.register_conventions ) {
             add_constant( "__REGISTER__" );
         } else {
             add_constant( "__STACK__" );
         }
     }
 #endif
-    switch( SWData.cpu ) {
-    case 0:
-        token = T_DOT_8086;
-        break;
+    switch( Options.cpu ) {
     case 1:
         token = T_DOT_186;
         break;
     case 2:
-        token =  SWData.privileged_mode ? T_DOT_286P : T_DOT_286;
+        token =  Options.privileged_mode ? T_DOT_286P : T_DOT_286;
         break;
     case 3:
-        token =  SWData.privileged_mode ? T_DOT_386P : T_DOT_386;
+        token =  Options.privileged_mode ? T_DOT_386P : T_DOT_386;
         break;
     case 4:
-        token =  SWData.privileged_mode ? T_DOT_486P : T_DOT_486;
+        token =  Options.privileged_mode ? T_DOT_486P : T_DOT_486;
         break;
     case 5:
-        token =  SWData.privileged_mode ? T_DOT_586P : T_DOT_586;
+        token =  Options.privileged_mode ? T_DOT_586P : T_DOT_586;
         break;
     case 6:
-        token =  SWData.privileged_mode ? T_DOT_686P : T_DOT_686;
+        token =  Options.privileged_mode ? T_DOT_686P : T_DOT_686;
+        break;
+    default:
+        token = T_DOT_8086;
         break;
     }
     cpu_directive( token );
@@ -1495,7 +1494,7 @@ void set_fpu_parameters( void )
         cpu_directive( T_DOT_NO87 );
         return;
     }
-    switch( SWData.fpu ) {
+    switch( Options.fpu ) {
     case 0:
     case 1:
         cpu_directive( T_DOT_8087 );
@@ -1508,23 +1507,13 @@ void set_fpu_parameters( void )
     case 6:
         cpu_directive( T_DOT_387 );
         break;
-    case 7:
     default: // unspecified FPU
-        switch( SWData.cpu ) {
-        case 0:
-        case 1:
+        if ( Options.cpu < 2 )
             cpu_directive( T_DOT_8087 );
-            break;
-        case 2:
+        else if ( Options.cpu == 2 )
             cpu_directive( T_DOT_287 );
-            break;
-        case 3:
-        case 4:
-        case 5:
-        case 6:
+        else
             cpu_directive( T_DOT_387 );
-            break;
-        }
         break;
     }
 }

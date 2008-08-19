@@ -16,7 +16,6 @@
 
 #include "globals.h"
 #include "symbols.h"
-#include "fatal.h"
 #include "mangle.h"
 #include "memalloc.h"
 #include "fixup.h"
@@ -28,6 +27,7 @@
 #if COFF_SUPPORT
 
 #define SETDATAPOS   1
+#define HELPSYMS     0 /* use helper symbols for assembly time symbol refs */
 
 typedef struct stringitem {
     struct stringitem *next;
@@ -51,6 +51,7 @@ static IMAGE_FILE_HEADER ifh;
 static stringitem *LongNamesHead;
 static stringitem *LongNamesTail;
 static uint_32 SizeLongNames;
+static uint_32 sectionstart; /* symbol table index start sections */
 static char *srcname; /* name of source module (name + extension) */
 
 #if SETDATAPOS
@@ -280,6 +281,10 @@ static short CoffGetClass(asm_sym * sym)
         return( IMAGE_SYM_CLASS_EXTERNAL );
     else if (sym->state == SYM_PROC && ((dir_node *)sym)->e.procinfo->defined == FALSE)
         return( IMAGE_SYM_CLASS_EXTERNAL );
+#if HELPSYMS
+    else if (sym->variable == TRUE) /* assembly time variable in fixup */
+        return( IMAGE_SYM_CLASS_LABEL );
+#endif
     return( IMAGE_SYM_CLASS_STATIC );
 }
 
@@ -662,19 +667,23 @@ static uint_32 CoffGetSymIndex(void)
     uint_32 index;
     uint_32 i;
 
-    index = total_segs;
-    if (Options.no_section_aux_entry == FALSE)
-        index += index;
-
     /* count AUX entries for .file. Depends on sizeof filename */
 
+    sectionstart = 0;
+    index = 0;
     if (Options.no_file_entry == FALSE) {
-        index++;
         i = strlen(srcname);
-        index += i / sizeof(IMAGE_AUX_SYMBOL);
+        sectionstart = i / sizeof(IMAGE_AUX_SYMBOL) + 1;
         if (i % sizeof(IMAGE_AUX_SYMBOL))
-            index++;
+            sectionstart++;
+        index = sectionstart;
     }
+
+    /* add entries for sections */
+
+    index += total_segs;
+    if (Options.no_section_aux_entry == FALSE)
+        index += total_segs;
 
     /* count externals and protos */
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
@@ -708,11 +717,12 @@ static uint_32 CoffGetSymIndex(void)
 
 int coff_write_data(int fh)
 {
-    dir_node *dir;
+    dir_node *section;
     struct asmfixup *fix;
     uint_32 offset = 0;
     IMAGE_RELOCATION ir;
     IMAGE_LINENUMBER il;
+    int i;
     uint_32 index;
 
     DebugMsg(("coff_write_data: enter\n"));
@@ -726,25 +736,42 @@ int coff_write_data(int fh)
 #if SETDATAPOS
     lseek(fh, data_pos, SEEK_SET);
 #endif
-    for( dir = Tables[TAB_SEG].head; dir; dir = dir->next ) {
+
+#if HELPSYMS==0
+    for( i = 0, section = Tables[TAB_SEG].head; section ; i++, section = section->next ) {
+        if( section->sym.state != SYM_SEG )
+            continue;
+        section->sym.idx = sectionstart + i;
+        if (Options.no_section_aux_entry == FALSE)
+            section->sym.idx += i;
+    }
+#endif
+
+    /* now scan all section's relocations. If a relocation refers to
+     a symbol which is not public/external, it must be added to the
+     symbol table. If the symbol is an assembly time variable, a helper
+     symbol - name is $$<offset:6> is to be added.
+     */
+
+    for( section = Tables[TAB_SEG].head; section ; section = section->next ) {
         int size;
-        if( ( dir->sym.state != SYM_SEG ) || ( dir->sym.segment == NULL ) )
+        if( section->sym.state != SYM_SEG )
             continue;
-        if (dir->e.seginfo->segrec->d.segdef.combine == COMB_STACK)
+        if ( section->e.seginfo->segrec->d.segdef.combine == COMB_STACK)
             continue;
-        if (dir->e.seginfo->segtype == SEGTYPE_BSS)
+        if ( section->e.seginfo->segtype == SEGTYPE_BSS)
             continue;
 
-        size = dir->e.seginfo->segrec->d.segdef.seg_length;
+        size = section->e.seginfo->segrec->d.segdef.seg_length;
         if (size) {
             offset += size;
-            if ((offset & 1) && dir->e.seginfo->FixupListHeadCoff) {
+            if ((offset & 1) && section->e.seginfo->FixupListHeadCoff) {
                 offset++;
                 size++;
             }
-            DebugMsg(("coff_write_data(%s): size=%X, content=[%02X %02X]\n", dir->sym.name, size, *(dir->e.seginfo->CodeBuffer), *(dir->e.seginfo->CodeBuffer+1)));
-            write(fh, dir->e.seginfo->CodeBuffer, size);
-            for (fix = dir->e.seginfo->FixupListHeadCoff; fix ; fix = fix->next2) {
+            DebugMsg(("coff_write_data(%s): size=%X, content=[%02X %02X]\n", section->sym.name, size, *(section->e.seginfo->CodeBuffer), *(section->e.seginfo->CodeBuffer+1)));
+            write(fh, section->e.seginfo->CodeBuffer, size);
+            for (fix = section->e.seginfo->FixupListHeadCoff; fix ; fix = fix->next2) {
                 switch (fix->type) {
                 case FIX_LOBYTE:
                 case FIX_HIBYTE:
@@ -788,7 +815,29 @@ int coff_write_data(int fh)
                     break;
                 }
                 /* if it's not EXTERNAL/PUBLIC, add symbol */
-                if ((fix->sym->state == SYM_INTERNAL ||
+                /* if it's an assembly time variable, create helper symbol */
+                if ( fix->sym->variable == TRUE ) {
+#if HELPSYMS
+                    asm_sym *sym;
+                    char buffer[12];
+                    sprintf( buffer, "$$%06X", fix->offset );
+                    sym = SymCreate( buffer, FALSE );
+                    sym->state = fix->sym->state;
+                    sym->mem_type = fix->sym->mem_type;
+                    sym->offset = fix->offset;
+                    sym->segment = fix->segment;
+                    sym->variable = TRUE; /* storage class LABEL */
+                    fix->sym = sym;
+                    AddPublicData((dir_node *)(fix->sym));
+                    fix->sym->idx = index++;
+#else
+                    /* just use the segment entry. This approach requires
+                     that the offset is stored inline at the reloc location
+                     (patch in fixup.c)
+                     */
+                    fix->sym = fix->segment;
+#endif
+                } else if (( fix->sym->state == SYM_INTERNAL ||
                      (fix->sym->state == SYM_PROC && ((dir_node *)fix->sym)->e.procinfo->defined == TRUE)) &&
                     fix->sym->included == FALSE &&
                     fix->sym->public == FALSE) {
@@ -799,15 +848,15 @@ int coff_write_data(int fh)
                 ir.VirtualAddress = fix->fixup_loc;
                 ir.SymbolTableIndex = fix->sym->idx;
                 write(fh, &ir, sizeof(ir));
-                DebugMsg(("coff_write_data(%s): reloc loc=%X type=%u idx=%u sym=%s\n", dir->sym.name, ir.VirtualAddress, ir.Type, ir.SymbolTableIndex, fix->sym->name));
+                DebugMsg(("coff_write_data(%s): reloc loc=%X type=%u idx=%u sym=%s\n", section->sym.name, ir.VirtualAddress, ir.Type, ir.SymbolTableIndex, fix->sym->name));
                 offset += sizeof(ir);
-                dir->e.seginfo->num_relocs++;
+                section->e.seginfo->num_relocs++;
             }
             /* write line number data */
             if( Options.line_numbers ) {
                 line_num_info *lni;
-                while ( lni = GetLinnumData2(dir->e.seginfo->LinnumQueue) ) {
-                    DebugMsg(("coff_write_data(%s): linnum, &data=%X\n", dir->sym.name, &lni));
+                while ( lni = GetLinnumData2(section->e.seginfo->LinnumQueue) ) {
+                    DebugMsg(("coff_write_data(%s): linnum, &data=%X\n", section->sym.name, &lni));
                     il.Linenumber = lni->number;
                     if (lni->number == 0) {
                         AddPublicData((dir_node *)(lni->sym));

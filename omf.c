@@ -39,7 +39,6 @@
 #include "symbols.h"
 #include "autodept.h"
 #include "directiv.h"
-#include "fatal.h"
 #include "mangle.h"
 #include "queues.h"
 #include "fixup.h"
@@ -171,7 +170,7 @@ void omf_OutSelect( bool starts )
             !GlobalVars.code_seg ||
             Options.output_format != OFORMAT_OMF)
             return;
-        GlobalVars.sel_start = GetCurrAddr();
+        GlobalVars.sel_start = GetCurrOffset();
         GlobalVars.data_in_code = TRUE;
     } else {
         if( !GlobalVars.data_in_code || CurrSeg == NULL)
@@ -185,17 +184,17 @@ void omf_OutSelect( bool starts )
             objr->d.coment.class = CMT_DISASM_DIRECTIVE;
 
             ObjAllocData( objr, 11 );
-            curr = GetCurrAddr();
+            curr = GetCurrOffset();
             if( (GlobalVars.sel_start > 0xffffUL) || (curr > 0xffffUL) ) {
                 ObjPut8( objr, DDIR_SCAN_TABLE_32 );
                 ObjPutIndex( objr, GlobalVars.sel_idx );
                 ObjPut32( objr, GlobalVars.sel_start );
-                ObjPut32( objr, GetCurrAddr() );
+                ObjPut32( objr, GetCurrOffset() );
             } else {
                 ObjPut8( objr, DDIR_SCAN_TABLE );
                 ObjPutIndex( objr, GlobalVars.sel_idx );
                 ObjPut16( objr, GlobalVars.sel_start );
-                ObjPut16( objr, GetCurrAddr() );
+                ObjPut16( objr, GetCurrOffset() );
             }
             ObjTruncRec( objr );
             omf_write_record( objr, TRUE );

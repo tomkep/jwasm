@@ -29,8 +29,8 @@
 ****************************************************************************/
 
 
-#ifndef _ASMSYM_H_
-#define _ASMSYM_H_
+#ifndef _SYMBOLS_H_
+#define _SYMBOLS_H_
 
 enum sym_state {
         SYM_UNDEFINED,
@@ -90,7 +90,7 @@ typedef struct asm_sym {
         /* for SYM_INTERNAL, SYM_EXTERNAL */
         struct asm_sym  *segment;
         union {
-            uint_32         offset;
+            int_32          offset;
             int_32          value;     /* used by MT_ABS */
             char *          string_ptr;/* used by SYM_TMACRO */
             macro_func      func_ptr;  /* used by SYM_MACRO */
@@ -157,8 +157,8 @@ extern  void            SymSetCmpFunc( bool nocasemap );
 
 extern  void            SymTakeOut( const char *name );
 extern  void            SymFree( struct asm_sym *sym);
-extern  int             SymChangeName( const char *old, const char *new );
-extern  void            SymSetName( struct asm_sym * sym, const char *name );
+//extern  int             SymChangeName( const char *old, const char *new );
+extern  struct asm_sym  *SymSetName( struct asm_sym * sym, const char *name );
 extern  void            SymWriteCRef( void );
 extern  void            SymInit( void );
 extern  void            SymFini( void );
@@ -171,9 +171,7 @@ typedef int (* StrCmpFunc)(const char *, const char * );
 #endif
 extern StrCmpFunc SymCmpFunc;
 
-extern  struct asm_sym  *SymCreate( const char *, int );
-
-#define IS_SYM_COUNTER( x ) ( ( x[0] == '$' ) && ( x[1] == 0 ) )
+extern  struct asm_sym  *SymCreate( const char *, bool );
 
 #endif
 

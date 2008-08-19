@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  Declaration for OBJ output queues
+* Description:  Declarations for output queues
 *
 ****************************************************************************/
 

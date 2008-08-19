@@ -28,11 +28,15 @@
 
 #include "myassert.h"
 
+#define LABELSIZE 8
+
 static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp);
 
 #define LABELFIRST 0
 #define LABELTEST  1
 #define LABELEXIT  2
+
+#define IS_SIGNED(x)  x == MT_SBYTE || x == MT_SWORD || x == MT_SDWORD
 
 // c binary ops
 
@@ -54,13 +58,12 @@ typedef enum {
 } c_bop;
 
 static hll_list     *HllStack; // for .WHILE, .IF, .REPEAT
-static unsigned int hll_label;
 
 static char * MakeAnonymousLabel(void)
 {
-    char *p = MemAlloc(8);
-    sprintf(p, "@C%04u", hll_label);
-    hll_label++;
+    char *p = AsmAlloc( LABELSIZE );
+    sprintf(p, "@C%04u", ModuleInfo.hll_label);
+    ModuleInfo.hll_label++;
     return (p);
 }
 
@@ -212,7 +215,7 @@ static int GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true,
         DebugMsg(("return from GetExpression, i=%u\n", *i));
 
         if (AsmBuffer[*i]->token != T_CL_BRACKET) {
-            AsmError(SYNTAX_ERROR);
+            AsmError(SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE);
             return (ERROR);
         }
         (*i)++;
@@ -270,7 +273,7 @@ static int GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true,
         if (hll->condlines)
             return (NOT_ERROR);
         else {
-            AsmError(SYNTAX_ERROR);
+            AsmError(SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE);
             return (NOT_ERROR);
         }
     }
@@ -312,12 +315,11 @@ static int GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true,
         p = buffer + strlen(buffer);
         *jmp = p;
 
-        if (opndx.mem_type == MT_SBYTE ||
-            opndx.mem_type == MT_SWORD ||
-            opndx.mem_type == MT_SDWORD)
+        if (IS_SIGNED(opndx.mem_type) || IS_SIGNED(op2.mem_type))
             issigned = TRUE;
         else
             issigned = FALSE;
+
         switch (op) {
         case COP_EQ:
             if (is_true)
@@ -439,7 +441,7 @@ static int GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true,
             break;
         case EXPR_CONST:
             if (opndx.string != NULL) {
-                AsmError(SYNTAX_ERROR);
+                AsmError(SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE);
                 return (ERROR);
             }
             *jmp = buffer;
@@ -536,7 +538,7 @@ static int GetAndExpression(hll_list * hll, int *i, int ilabel, bool is_true, ch
 
     if (truelabel) {
         sprintf(ptr+strlen(ptr), "%s:\n", truelabel);
-        MemFree(truelabel);
+        AsmFree(truelabel);
         *lastjmp = NULL;
     }
     *i = cur_pos;
@@ -569,7 +571,7 @@ static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char 
             *i = cur_pos;
             if (truelabel) {
                 sprintf(ptr+strlen(ptr), "%s:\n", truelabel);
-                MemFree(truelabel);
+                AsmFree(truelabel);
             }
             break;
         }
@@ -613,18 +615,22 @@ static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char 
 static int WriteExprSrc(hll_list * hll, char * buffer)
 {
     int size;
-    char buffer2[MAX_LINE_LEN];
+    char *p;
 
-    *buffer2 = '\0';
-    if (hll->condlines)
-        strcpy(buffer2, hll->condlines);
-    if (*buffer2)
-        strcat(buffer2, "\n");
-    strcat(buffer2, buffer);
-    MemFree(hll->condlines);
-    size = strlen(buffer2);
-    hll->condlines = MemAlloc(size+1);
-    strcpy(hll->condlines, buffer2);
+    size = strlen(buffer) + 1;
+    if (hll->condlines) {
+        size += strlen(hll->condlines) + 1;
+    }
+    p = AsmAlloc(size);
+    if (hll->condlines) {
+        strcpy(p, hll->condlines);
+        strcat(p, "\n");
+        strcat(p, buffer);
+    } else
+        strcpy(p, buffer);
+
+    AsmFree(hll->condlines);
+    hll->condlines = p;
     return(1);
 }
 
@@ -648,8 +654,9 @@ static int EvaluateHllExpression(hll_list * hll, int *i, int ilabel, bool is_tru
         return( ERROR );
     if (buffer[0])
         WriteExprSrc(hll, buffer);
-    if (*hll->condlines == '\n') {
+    if (hll->condlines != NULL && *hll->condlines == '\n') {
         AsmError(SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE);
+        return( ERROR );
     }
     return (NOT_ERROR);
 }
@@ -674,7 +681,7 @@ static int HllPushTestLines(hll_list * hll)
             p++;
         InputQueueLine( buffer );
     }
-    MemFree(hll->condlines);
+    AsmFree(hll->condlines);
     hll->condlines = NULL;
 
 
@@ -716,7 +723,7 @@ static int HllCheckTestLines(hll_list * hll)
 void HllInit()
 {
     HllStack = NULL;
-    hll_label = 0;
+    ModuleInfo.hll_label = 0;
     return;
 }
 
@@ -729,7 +736,7 @@ int HllStartDef( int i )
     int                  cmd = AsmBuffer[i]->value;
     char                 buffer[MAX_LINE_LEN];
 
-    DebugMsg(("StartHllDef\n"));
+    DebugMsg(("HllStartDef\n"));
 
 #if FASTPASS
     if (StoreState == FALSE && Parse_Pass == PASS_1) {
@@ -739,23 +746,26 @@ int HllStartDef( int i )
 
     switch (cmd) {
     case T_DOT_REPEAT:
-        DebugMsg(("StartHllDef .REPEAT\n"));
+        DebugMsg(("HllStartDef .REPEAT\n"));
         if (AsmBuffer[i+1]->token != T_FINAL) {
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
         break;
     case T_DOT_IF:
-        DebugMsg(("StartHllDef .IF\n"));
+        DebugMsg(("HllStartDef .IF\n"));
     case T_DOT_WHILE:
-        DebugMsg(("StartHllDef .WHILE\n"));
+        DebugMsg(("HllStartDef .WHILE\n"));
+#if 0
+        /* Masm allows a missing expression */
         if (AsmBuffer[i+1]->token == T_FINAL) {
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
+#endif
         break;
     }
-    hll = MemAlloc( sizeof(hll_list));
+    hll = AsmAlloc( sizeof(hll_list));
 
     hll->cmd = HLL_UNDEF;
 
@@ -793,6 +803,8 @@ int HllStartDef( int i )
     //   test end condition, cond jump to symfirst
     // symexit: (jumped to by .break)
 
+    PushLineQueue();
+
     switch (cmd) {
     case T_DOT_IF:
         hll->cmd = HLL_IF;
@@ -813,16 +825,16 @@ int HllStartDef( int i )
             if (ERROR == EvaluateHllExpression(hll, &i, LABELFIRST, TRUE)) {
                 return (ERROR);
             }
-            DebugMsg(("StartHllDef .WHILE (start expr=%s)\n", hll->condlines));
+            DebugMsg(("HllStartDef .WHILE (start expr=%s)\n", hll->condlines));
             /* create a jump to second label */
             /* optimisation: if second label is just a jump, dont jump! */
-            if (memicmp(hll->condlines, "jmp", 3)) {
+            if (hll->condlines && memicmp(hll->condlines, "jmp", 3)) {
                 sprintf(buffer, " jmp %s", hll->symtest);
                 InputQueueLine( buffer );
             }
         } else {
             i++;
-            DebugMsg(("StartHllDef .REPEAT\n"));
+            DebugMsg(("HllStartDef .REPEAT\n"));
             hll->cmd = HLL_REPEAT;
         }
         sprintf(buffer, "%s:", hll->symfirst);
@@ -852,16 +864,18 @@ int HllEndDef( int i )
         hll = pop( &HllStack );
 
     if (hll == NULL) {
-        DebugMsg(("EndHllDef: hll stack is empty\n"));
+        DebugMsg(("HllEndDef: hll stack is empty\n"));
         AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
 
+    PushLineQueue();
+
     switch (cmd) {
     case T_DOT_ENDIF:
-        DebugMsg(("EndHllDef .ENDIF\n"));
+        DebugMsg(("HllEndDef .ENDIF\n"));
         if (hll->cmd != HLL_IF) {
-            DebugMsg(("EndHllDef no .IF on the hll stack\n"));
+            DebugMsg(("HllEndDef no .IF on the hll stack\n"));
             AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
@@ -876,15 +890,15 @@ int HllEndDef( int i )
         i++;
         break;
     case T_DOT_ENDW:
-        DebugMsg(("EndHllDef .ENDW\n"));
+        DebugMsg(("HllEndDef .ENDW\n"));
         if (hll->cmd != HLL_WHILE) {
-            DebugMsg(("EndHllDef no .WHILE on the hll stack\n"));
+            DebugMsg(("HllEndDef no .WHILE on the hll stack\n"));
             AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         /* create test label  */
         sprintf(buffer, "%s:", hll->symtest);
-        DebugMsg(("EndHllDef: created: %s\n", buffer));
+        DebugMsg(("HllEndDef: created: %s\n", buffer));
         InputQueueLine( buffer );
 
         HllPushTestLines(hll);
@@ -894,9 +908,9 @@ int HllEndDef( int i )
         i++;
         break;
     case T_DOT_UNTILCXZ:
-        DebugMsg(("EndHllDef .UNTILCXZ\n"));
+        DebugMsg(("HllEndDef .UNTILCXZ\n"));
         if (hll->cmd != HLL_REPEAT) {
-            DebugMsg(("EndHllDef no .REPEAT on the hll stack\n"));
+            DebugMsg(("HllEndDef no .REPEAT on the hll stack\n"));
             AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
@@ -923,9 +937,9 @@ int HllEndDef( int i )
         InputQueueLine( buffer );
         break;
     case T_DOT_UNTIL:
-        DebugMsg(("EndHllDef .UNTIL\n"));
+        DebugMsg(("HllEndDef .UNTIL\n"));
         if (hll->cmd != HLL_REPEAT) {
-            DebugMsg(("EndHllDef no .REPEAT on the hll stack\n"));
+            DebugMsg(("HllEndDef no .REPEAT on the hll stack\n"));
             AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
@@ -951,11 +965,11 @@ int HllEndDef( int i )
         break;
     }
 
-    MemFree(hll->symfirst);
-    MemFree(hll->symtest);
-    MemFree(hll->symexit);
-    MemFree(hll->condlines);
-    MemFree(hll);
+    AsmFree(hll->symfirst);
+    AsmFree(hll->symtest);
+    AsmFree(hll->symexit);
+    AsmFree(hll->condlines);
+    AsmFree(hll);
 
     if (AsmBuffer[i]->token != T_FINAL) {
         AsmError( SYNTAX_ERROR );
@@ -982,15 +996,18 @@ int HllExitDef( int i )
     hll = peek(HllStack, 0);
 
     if (hll == NULL) {
-        DebugMsg(("ExitHllDef stack error\n"));
+        DebugMsg(("HllExitDef stack error\n"));
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
+
+    PushLineQueue();
+
     switch (cmd) {
     case T_DOT_ELSE:
     case T_DOT_ELSEIF:
         if ((hll->cmd != HLL_IF) || (hll->symtest == NULL)) {
-            DebugMsg(("ExitHllDef .ELSE/.ELSEIF: cmd=%u, symtest=%X\n", hll->cmd, hll->symtest));
+            DebugMsg(("HllExitDef .ELSE/.ELSEIF: cmd=%u, symtest=%X\n", hll->cmd, hll->symtest));
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
@@ -998,7 +1015,7 @@ int HllExitDef( int i )
         InputQueueLine( buffer );
         sprintf(buffer,"%s:", hll->symtest);
         InputQueueLine( buffer );
-        MemFree(hll->symtest);
+        AsmFree(hll->symtest);
         hll->symtest = NULL;
         i++;
         if (cmd == T_DOT_ELSEIF) {
@@ -1039,16 +1056,16 @@ int HllExitDef( int i )
                     }
                 }
                 HllPushTestLines(hll);
-                MemFree(hll->condlines);
+                AsmFree(hll->condlines);
                 hll->condlines = savedlines;
                 hll->cmd = savedcmd;
             }
         } else {
             if (cmd == T_DOT_BREAK) {
-                DebugMsg(("ExitHllDef .BREAK\n"));
+                DebugMsg(("HllExitDef .BREAK\n"));
                 sprintf(buffer," jmp %s", hll->symexit);
             } else {
-                DebugMsg(("ExitHllDef .CONTINUE\n"));
+                DebugMsg(("HllExitDef .CONTINUE\n"));
                 sprintf(buffer," jmp %s", hll->symtest);
             }
             InputQueueLine( buffer );

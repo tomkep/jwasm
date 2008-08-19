@@ -1,17 +1,17 @@
 
-#ifndef FASTPASS
-#define FASTPASS 0
-#endif
-
-#if FASTPASS
-
-/* this is Public Domain
+/* this is Public Domain.
  fastpass.h defines structures and externals which are needed by the
  "fast pass" feature. This feature speeds JWasm's assembly significantly
  if huge header files containing declarations and definitions are used
  (as it is the case with Win32Inc and Masm32), since the header files are
  then scanned in pass one only.
  */
+
+#ifndef FASTPASS
+#define FASTPASS 0
+#endif
+
+#if FASTPASS
 
 /* equ_item: used for a linked list of assembly time variables. Any variable
  which is defined or modified after SaveState() has been called is to be stored
@@ -30,7 +30,7 @@ typedef struct equ_item {
 
 typedef struct line_item {
     struct line_item *next;
-    unsigned lineno;
+    unsigned lineno;  /* bits 0-19: line, 20-31: file index */
     char line[];
 } line_item;
 
@@ -52,6 +52,7 @@ void SegmentSaveState( void );
 void AssumeSaveState( void );
 void StoreLine( char * );
 void ResetUseSavedState( void );
+void InputQueueLineEx( char *, bool );
 
 #endif
 

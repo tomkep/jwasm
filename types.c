@@ -42,20 +42,19 @@
 #include "expreval.h"
 #include "labels.h"
 #include "symbols.h"
-#include "fatal.h"
 
 #define is_valid_id_char( ch ) \
     ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
-a_definition_struct Definition;
+struct_state StructDef;
 static dir_node * redef_struct;
-static int level;
+static int level;  /* current nesting level if a field is searched */
 
 void TypesInit()
 {
-    Definition.struct_depth = 0;
-    Definition.struct_stack = NULL;
-    Definition.curr_struct = NULL;
+    StructDef.struct_depth = 0;
+    StructDef.struct_stack = NULL;
+    StructDef.curr_struct = NULL;
     redef_struct = NULL;
     level = 0;
 }
@@ -110,34 +109,39 @@ static bool AreStructsEqual(dir_node *oldstr, dir_node *newstr)
     field_list  *fold = oldstr->e.structinfo->head;
     field_list  *fnew = newstr->e.structinfo->head;
 
-    DebugMsg(("AreStructsEqual enter\n"));
+    DebugMsg(("AreStructsEqual(%s) enter\n", oldstr->sym.name ));
+
+    /* kind of structs must be identical */
+    if (oldstr->e.structinfo->typekind != newstr->e.structinfo->typekind)
+        return( FALSE );
+
     for (;fold; fold = fold->next, fnew = fnew->next) {
         if (!fnew) {
             DebugMsg(("AreStructsEqual: fields don't match\n"));
-            return FALSE;
+            return( FALSE );
         }
         if (0 != strcmp(fold->sym->name, fnew->sym->name)) {
             DebugMsg(("AreStructsEqual: type name of field changed\n"));
-            return FALSE;
+            return( FALSE );
         }
         if (fold->sym->offset != fnew->sym->offset) {
             DebugMsg(("AreStructsEqual: offset of field %s changed: %u - %u\n", fold->sym->name, fold->sym->offset, fnew->sym->offset));
-            return FALSE;
+            return( FALSE );
         }
         if (fold->sym->total_size != fnew->sym->total_size) {
             DebugMsg(("AreStructsEqual: total_size of field changed\n"));
-            return FALSE;
+            return( FALSE );
         }
     }
     if (fnew)
-        return FALSE;
-    return TRUE;
+        return( FALSE );
+    return( TRUE );
 }
 
 // called on pass one only
 // i is the token which contains STRUCT, STRUC, UNION or ENDS
 
-int StructDef( int i )
+int StructDirective( int i )
 /********************/
 {
     char *name;
@@ -149,11 +153,11 @@ int StructDef( int i )
     dir_node *dir;
     dir_node *parent;
 
-    DebugMsg(("StructDef enter, i=%u\n", i));
+    DebugMsg(("StructDirective enter, i=%u\n", i));
 
     /* structs/unions must have a name if at level 0 */
     /* inside other structs/unions they can be anonymous */
-    if (( Definition.struct_depth == 0) && (i == 0 )) {
+    if (( StructDef.struct_depth == 0) && (i == 0 )) {
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
@@ -175,55 +179,57 @@ int StructDef( int i )
     case T_STRUCT:
     case T_UNION:
         if (Parse_Pass > PASS_1) {
-            Definition.struct_depth++;
+            StructDef.struct_depth++;
             break;
         }
 
-        if ((Definition.struct_depth > 0) && (i > 0)) {
+        if ( ( StructDef.struct_depth > 0 ) && ( i > 0 ) ) {
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
         alignment = Options.alignment_default;
-        /* get an optional alignment argument */
-        if ((Definition.struct_depth == 0) && (AsmBuffer[i+1]->token != T_FINAL)) {
+
+        /* get an optional alignment argument: 1,2,4,8,16 or 32 */
+        if ((StructDef.struct_depth == 0) && (AsmBuffer[i+1]->token != T_FINAL)) {
             int j = i+1;
             unsigned int power;
             expr_list opndx;
             /* get the optional alignment parameter */
-            if ((EvalOperand( &j, Token_Count, &opndx, TRUE ) == ERROR) ||
-                (opndx.type != EXPR_CONST || opndx.string != NULL)) {
-                AsmError( SYNTAX_ERROR );
-                return( ERROR );
-            }
-            alignment = opndx.value;
-            for( power = 1; power < alignment; power <<= 1 );
-            if( power != alignment ) {
-                AsmError( POWER_OF_2 );
-                return( ERROR );
-            }
-            DebugMsg(("StructDef(%s) alignment=%u\n", name, alignment));
-            /* there might also be the NONUNIQUE keyword */
-            if (AsmBuffer[j]->token == T_COMMA) {
-                j++;
-                if (AsmBuffer[j]->token == T_ID &&
-                    stricmp(AsmBuffer[j]->string_ptr, "NONUNIQUE") == 0) {
-                    j++;
+            if ( EvalOperand( &j, Token_Count, &opndx, TRUE ) == ERROR ) {
+                ;
+            } else if (opndx.type != EXPR_CONST || opndx.string != NULL) {
+                AsmError( CONSTANT_EXPECTED );
+            } else if( opndx.value > MAX_STRUCT_ALIGN ) {
+                AsmError( STRUCT_ALIGN_TOO_HIGH );
+            } else {
+                for( power = 1; power < opndx.value; power <<= 1 );
+                if( power != opndx.value ) {
+                    AsmError( POWER_OF_2 );
+                } else
+                    alignment = opndx.value;
+
+                DebugMsg(("StructDirective(%s) alignment=%u\n", name, alignment));
+                /* there might also be the NONUNIQUE keyword */
+                if (AsmBuffer[j]->token == T_COMMA &&
+                    AsmBuffer[j+1]->token == T_ID &&
+                    (stricmp(AsmBuffer[j+1]->string_ptr, "NONUNIQUE") == 0)) {
                     /* currently NONUNIQUE is just skipped */
+                    j += 2;
                 }
-            }
-            if (AsmBuffer[j]->token != T_FINAL) {
-                AsmError(SYNTAX_ERROR);
+                if (AsmBuffer[j]->token != T_FINAL) {
+                    AsmError(SYNTAX_ERROR);
+                }
             }
         }
         /* does struct have a name? */
         if (*name) {
-            if (Definition.struct_depth == 0) {
+            if (StructDef.struct_depth == 0) {
                 /* the "top-level" struct is part of the global namespace */
                 sym = SymSearch( name );
-                DebugMsg(("StructDef: SymSearch (%s)=%X (curr struct=%X)\n", name, sym, Definition.curr_struct));
+                DebugMsg(("StructDirective: SymSearch (%s)=%X (curr struct=%X)\n", name, sym, StructDef.curr_struct));
             } else {
-                sym = SearchNameInStruct((asm_sym *)Definition.curr_struct, name, &offset);
-                DebugMsg(("StructDef(%s): SearchNameInStruc()=%X\n", name, sym));
+                sym = SearchNameInStruct((asm_sym *)StructDef.curr_struct, name, &offset);
+                DebugMsg(("StructDirective(%s): SearchNameInStruc()=%X\n", name, sym));
             }
         } else {
             sym = NULL;   /* no, it's anonymous */
@@ -231,7 +237,7 @@ int StructDef( int i )
 
         if( sym == NULL ) {
             /* is it a global STRUCT? */
-            if (Definition.struct_depth == 0)
+            if ( StructDef.struct_depth == 0 )
                 dir = dir_insert( name, TAB_TYPE );
             else {
                 /* a nested structure is split in an anonymous STRUCT type
@@ -240,21 +246,17 @@ int StructDef( int i )
                 field_list *f;
                 dir = dir_insert_ex( "", TAB_TYPE);
                 sym = AddFieldToStruct(name_loc, -1, MT_TYPE, (asm_sym *)dir, 0);
-                alignment = Definition.curr_struct->e.structinfo->alignment;
+                alignment = StructDef.curr_struct->e.structinfo->alignment;
             }
         } else {
             /* the symbol exists already */
             dir = (dir_node *)sym;
             if( sym->state == SYM_UNDEFINED ) {
                 dir_change( dir, TAB_TYPE );
-            } else if( sym->state == SYM_TYPE && (Definition.struct_depth == 0)) {
+            } else if( sym->state == SYM_TYPE && (StructDef.struct_depth == 0)) {
                 /* structure redefinition */
-                if (SymChangeName( name, ".$$$$$$$" ) == ERROR) {
-                    AsmErr( SYMBOL_ALREADY_DEFINED, name );
-                    return( ERROR );
-                }
                 redef_struct = dir;
-                dir = dir_insert( name, TAB_TYPE );
+                dir = dir_insert_ex( name, TAB_TYPE );
             } else {
                 AsmErr( SYMBOL_ALREADY_DEFINED, sym->name );
                 return( ERROR );
@@ -264,142 +266,138 @@ int StructDef( int i )
         dir->e.structinfo->alignment = alignment;
         dir->sym.offset = 0;
         dir->e.structinfo->isOpen = TRUE;
+        if (AsmBuffer[i]->value == T_UNION)
+            dir->e.structinfo->typekind = TYPE_UNION;
+        else
+            dir->e.structinfo->typekind = TYPE_STRUCT;
 
         if (AsmFiles.file[LST]) {
             WriteLstFile(LSTTYPE_STRUCT, 0, dir->sym.name);
             directive_listed = TRUE;
         }
 
-        if (AsmBuffer[i]->value == T_UNION)
-            dir->e.structinfo->isUnion = TRUE;
-
-        if (Definition.struct_depth)
+        if (StructDef.struct_depth)
             dir->e.structinfo->isInline = TRUE;
 
         i++;
-        DebugMsg(("StructDef(%s): token following: %X\n", name, AsmBuffer[i]->token));
-        push( &( Definition.struct_stack ), Definition.curr_struct );
+        DebugMsg(("StructDirective(%s): token following: %X\n", name, AsmBuffer[i]->token));
+        push( &( StructDef.struct_stack ), StructDef.curr_struct );
 #ifdef DEBUG_OUT
         {
             int x;
             asm_sym *sym;
             for (x=0;;x++) {
-                sym = peek(Definition.struct_stack, x);
+                sym = peek(StructDef.struct_stack, x);
                 if (sym == NULL) break;
-                DebugMsg(("StructDef stack(%u): %X, name=>%s<\n", x, sym, sym->name));
+                DebugMsg(("StructDirective stack(%u): %X, name=>%s<\n", x, sym, sym->name));
             }
         }
 #endif
-        Definition.curr_struct = dir;
-        Definition.struct_depth++;
+        StructDef.curr_struct = dir;
+        StructDef.struct_depth++;
         break;
     case T_ENDS:
         if (Parse_Pass > PASS_1) {
-            Definition.struct_depth--;
+            StructDef.struct_depth--;
             break;
         }
-        if( Definition.struct_depth) {
-            /* an inline struct will end with a simple ENDS without name */
-            /* an global struct will end with a <name ENDS>  */
-#ifdef DEBUG_OUT
-            if (Definition.curr_struct == NULL) {
-                DebugMsg(("StructDef(T_ENDS), current struct is NULL, but struct depth is > 0!!!\n"));
-                AsmError( NO_SEGMENT_OPENED );
-                return( ERROR );
-            }
-#endif
-            DebugMsg(("StructDef(T_ENDS), level=%u, struct size=%u, alignmnt=%u\n",
-                      Definition.struct_depth,
-                      Definition.curr_struct->sym.total_size,
-                      Definition.curr_struct->e.structinfo->alignment));
-            dir = Definition.curr_struct;
-            /* inline "struct"/"union" must be first identifier in a line */
-            if (((dir->e.structinfo->isInline) && (i == 0)) ||
-                (name && strcmp( name, dir->sym.name ) == 0)) {
-
-                unsigned int size;
-
-                if (dir->e.structinfo->alignment) {
-                    dir->sym.total_size = (dir->sym.total_size + dir->e.structinfo->alignment - 1) & (-dir->e.structinfo->alignment);
-                    DebugMsg(("StructDef(T_ENDS):, struct size after final alignment=%u\n", dir->sym.total_size));
-                }
-                dir->e.structinfo->isOpen = FALSE;
-
-                dir->sym.defined = TRUE;
-
-                size = dir->sym.total_size;
-                Definition.curr_struct = pop( &( Definition.struct_stack ) );
-                Definition.struct_depth--;
-
-                if (AsmFiles.file[LST]) {
-                    WriteLstFile(LSTTYPE_STRUCT, size, dir->sym.name);
-                    directive_listed = TRUE;
-                }
-#if 1
-                /* to allow a direct structure access */
-                switch (dir->sym.total_size) {
-                case 1:
-                    dir->sym.mem_type = MT_BYTE;
-                    break;
-                case 2:
-                    dir->sym.mem_type = MT_WORD;
-                    break;
-                case 4:
-                    dir->sym.mem_type = MT_DWORD;
-                    break;
-                case 6:
-                    dir->sym.mem_type = MT_FWORD;
-                    break;
-                case 8:
-                    dir->sym.mem_type = MT_QWORD;
-                    break;
-                default:
-                    /* set something which cannot be accessed by a reg */
-                    /* there might exist a better solution, once the mess
-                     in the parser has been removed */
-//                    dir->sym.mem_type = MT_OWORD;
-                    dir->sym.mem_type = MT_EMPTY;
-                }
-#endif
-
-                /* reset redefine */
-                if (Definition.struct_depth == 0) {
-                    if (redef_struct) {
-                        if (AreStructsEqual(dir, redef_struct)) {
-                            ;
-                        } else
-                            AsmError( NON_BENIGN_STRUCT_REDEFINITION );
-                        /* delete the "redefinition" */
-                        DebugMsg(("delete the new definition\n"));
-                        SymTakeOut(name);
-                        DebugMsg(("rename the old definition\n"));
-                        SymChangeName( ".$$$$$$$", name );
-                        redef_struct = NULL;
-                    }
-                } else {
-
-                    if (Definition.curr_struct->e.structinfo->isUnion) {
-                        if (size > Definition.curr_struct->sym.total_size) {
-                            Definition.curr_struct->sym.total_size = size;
-                        }
-                    } else {
-                        Definition.curr_struct->sym.total_size += size;
-                    }
-                    DebugMsg(("StructDef: size of restored structure=%u\n", Definition.curr_struct->sym.total_size));
-                }
-            } else {
-                /* ENDS found, but names don't match */
-                DebugMsg(("StructDef(T_ENDS): names don't match, i=%u, name=%s\n", i, name));
-                AsmError( UNMATCHED_BLOCK_NESTING );
-                return( ERROR );
-            }
-        } else {
+        if( StructDef.struct_depth == 0) {
             /* ENDS found, but the struct stack is empty */
-            DebugMsg(("StructDef(T_ENDS): struct stack is empty, i=%u\n", i));
+            DebugMsg(("StructDirective(T_ENDS): struct stack is empty, i=%u\n", i));
             AsmError( UNMATCHED_BLOCK_NESTING );
             return( ERROR );
         }
-    }
+
+        /* an inline struct will end with a simple ENDS without name */
+        /* an global struct will end with a <name ENDS>  */
+#ifdef DEBUG_OUT
+        if (StructDef.curr_struct == NULL) {
+            DebugMsg(("StructDirective(T_ENDS), current struct is NULL, but struct depth is > 0!!!\n"));
+            AsmError( BLOCK_NESTING_ERROR );
+            return( ERROR );
+        }
+#endif
+        DebugMsg(("StructDirective(T_ENDS), level=%u, ofs=%u, struct size=%u, alignmnt=%u\n",
+                  StructDef.struct_depth,
+                  StructDef.curr_struct->sym.offset,
+                  StructDef.curr_struct->sym.total_size,
+                  StructDef.curr_struct->e.structinfo->alignment));
+        dir = StructDef.curr_struct;
+        /* inline "struct"/"union" must be first identifier in a line */
+        if (((dir->e.structinfo->isInline) && (i == 0)) ||
+            (name && strcmp( name, dir->sym.name ) == 0)) {
+
+            unsigned int size;
+
+            if (dir->e.structinfo->alignment) {
+                dir->sym.total_size = (dir->sym.total_size + dir->e.structinfo->alignment - 1) & (-dir->e.structinfo->alignment);
+                DebugMsg(("StructDirective(T_ENDS):, struct size after final alignment=%u\n", dir->sym.total_size));
+            }
+            dir->e.structinfo->isOpen = FALSE;
+
+            dir->sym.defined = TRUE;
+
+            /* if there's a negative offset, size will be wrong! */
+            size = dir->sym.total_size;
+
+            /* reset offset, it's just used during the definition */
+            dir->sym.offset = 0;
+
+            StructDef.curr_struct = pop( &( StructDef.struct_stack ) );
+            StructDef.struct_depth--;
+
+            if (AsmFiles.file[LST]) {
+                WriteLstFile(LSTTYPE_STRUCT, size, dir->sym.name);
+                directive_listed = TRUE;
+            }
+#if 1
+            /* to allow direct structure access */
+            switch (dir->sym.total_size) {
+            case 1:
+                dir->sym.mem_type = MT_BYTE;
+                break;
+            case 2:
+                dir->sym.mem_type = MT_WORD;
+                break;
+            case 4:
+                dir->sym.mem_type = MT_DWORD;
+                break;
+            case 6:
+                dir->sym.mem_type = MT_FWORD;
+                break;
+            case 8:
+                dir->sym.mem_type = MT_QWORD;
+                break;
+            default:
+                /* set something which cannot be accessed by a reg */
+                /* there might exist a better solution, once the mess
+                 in the parser has been removed */
+                // dir->sym.mem_type = MT_OWORD;
+                dir->sym.mem_type = MT_EMPTY;
+            }
+#endif
+
+            /* reset redefine */
+            if (StructDef.struct_depth == 0) {
+                if (redef_struct) {
+                    if (AreStructsEqual(dir, redef_struct) == FALSE) {
+                        AsmError( NON_BENIGN_STRUCT_REDEFINITION );
+                    }
+                    DebugMsg(("delete the redefinition of %s\n", dir->sym.name));
+                    dir_free( dir, FALSE );
+                    redef_struct = NULL;
+                }
+            } else {
+                UpdateStructSize( size );
+                DebugMsg(("StructDirective: new size of restored structure=%u\n", StructDef.curr_struct->sym.total_size));
+            }
+        } else {
+            /* ENDS found, but names don't match */
+            DebugMsg(("StructDirective(T_ENDS): names don't match, i=%u, name=%s\n", i, name));
+            AsmError( UNMATCHED_BLOCK_NESTING );
+            return( ERROR );
+        }
+    } /* end switch(AsmBuffer[i]->value */
     return( NOT_ERROR );
 }
 
@@ -420,21 +418,17 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, stru
     field_list  *f;
     asm_sym     *sym;
 
-    si = Definition.curr_struct->e.structinfo;
+    si = StructDef.curr_struct->e.structinfo;
+    offset = StructDef.curr_struct->sym.offset;
 
-    if (si->isUnion)
-        offset = 0;
-    else
-        offset = Definition.curr_struct->sym.total_size;
-
-    DebugMsg(("AddFieldToStruct: curr struct=%s, curr ofs=%u\n", Definition.curr_struct->sym.name, offset));
+    DebugMsg(("AddFieldToStruct: curr struct=%s, curr ofs=%u\n", StructDef.curr_struct->sym.name, offset));
 
     if (name_loc >= 0) {
         /* the field has a name */
         name = AsmBuffer[name_loc]->string_ptr;
         /* check if field name is already used */
         /* RECORD fields names, which are global, aren't handled here */
-        sym = SearchNameInStruct((asm_sym *)Definition.curr_struct, name, (unsigned int *)&i);
+        sym = SearchNameInStruct((asm_sym *)StructDef.curr_struct, name, (unsigned int *)&i);
         if (sym) {
             AsmErr( SYMBOL_ALREADY_DEFINED, sym->name );
             name = "";
@@ -509,8 +503,8 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, stru
     if (si->alignment) {
         DebugMsg(("AddFieldToStruct: align=%u, size=%u, ofs=%u\n", si->alignment, size, offset));
         /* if it's the first field to add, use offset of the parent's current field */
-        if (offset == 0 && Definition.struct_depth > 1) {
-            dir_node *parent = peek(Definition.struct_stack, 0 );
+        if (offset == 0 && StructDef.struct_depth > 1) {
+            dir_node *parent = peek(StructDef.struct_stack, 0 );
             if (si->alignment < size)
                 parent->e.structinfo->tail->sym->offset =
                     (parent->e.structinfo->tail->sym->offset + (si->alignment - 1)) & ( - si->alignment);
@@ -523,17 +517,35 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, stru
             else if (size)
                 offset = (offset + (size - 1)) & (-size);
         }
-        /* adjust the struct's size.
+        /* adjust the struct's current offset + size.
          The field's size is added in  UpdateStructSize()
          */
-        if (Definition.curr_struct->e.structinfo->isUnion == FALSE)
-            if (offset > Definition.curr_struct->sym.total_size)
-                Definition.curr_struct->sym.total_size = offset;
+        if (StructDef.curr_struct->e.structinfo->typekind != TYPE_UNION ) {
+            StructDef.curr_struct->sym.offset = offset;
+            if (offset > StructDef.curr_struct->sym.total_size)
+                StructDef.curr_struct->sym.total_size = offset;
+        }
     }
 
     sym->offset = offset;
 
     return( sym );
+}
+
+// called by AlignDirective() if ALIGN/EVEN has been found inside
+// a struct. It's already verified that <value> is a power of 2.
+
+int AlignInStruct( int value )
+{
+    if (Parse_Pass == PASS_1 && StructDef.curr_struct->e.structinfo->typekind != TYPE_UNION ) {
+        int offset;
+        offset = StructDef.curr_struct->sym.offset;
+        offset = (offset + (value - 1)) & (-value);
+        StructDef.curr_struct->sym.offset = offset;
+        if (offset > StructDef.curr_struct->sym.total_size)
+            StructDef.curr_struct->sym.total_size = offset;
+    }
+    return( NOT_ERROR );
 }
 
 // called by data_init() when a structure field has been created
@@ -542,13 +554,34 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, stru
 void UpdateStructSize(int no_of_bytes)
 {
     if( Parse_Pass == PASS_1 ) {
-        if (Definition.curr_struct->e.structinfo->isUnion) {
-            if (no_of_bytes > Definition.curr_struct->sym.total_size)
-                Definition.curr_struct->sym.total_size = no_of_bytes;
-        } else
-            Definition.curr_struct->sym.total_size += no_of_bytes;
+        if ( StructDef.curr_struct->e.structinfo->typekind == TYPE_UNION ) {
+            if (no_of_bytes > StructDef.curr_struct->sym.total_size)
+                StructDef.curr_struct->sym.total_size = no_of_bytes;
+        } else {
+            StructDef.curr_struct->sym.offset += no_of_bytes;
+            if (StructDef.curr_struct->sym.offset > StructDef.curr_struct->sym.total_size)
+                StructDef.curr_struct->sym.total_size = StructDef.curr_struct->sym.offset;
+        }
     }
     return;
+}
+
+/* called if ORG occurs inside STRUCT/UNION definition */
+
+int SetStructCurrentOffset(int offset)
+{
+    if ( StructDef.curr_struct->e.structinfo->typekind == TYPE_UNION ) {
+        AsmError( ORG_NOT_ALLOWED_IN_UNIONS );
+        return( ERROR );
+    }
+    if( Parse_Pass == PASS_1 ) {
+        StructDef.curr_struct->sym.offset = offset;
+        /* if an ORG is inside the struct, it cannot be instanced anymore */
+        StructDef.curr_struct->e.structinfo->OrgInside = TRUE;
+        if (offset > StructDef.curr_struct->sym.total_size)
+            StructDef.curr_struct->sym.total_size = offset;
+    }
+    return( NOT_ERROR );
 }
 
 // initialize an array inside a structure
@@ -640,7 +673,7 @@ static char * InitializeArray(field_list *f, char * ptr, char * buffer)
             asm_sym * sym = f->sym;
             while (sym->mem_type == MT_TYPE)
                 sym = sym->type;
-            if (sym->state == SYM_TYPE && ((dir_node *)sym)->e.structinfo->isTypedef == FALSE)
+            if (sym->state == SYM_TYPE && ((dir_node *)sym)->e.structinfo->typekind != TYPE_TYPEDEF )
                 sprintf(buffer, "%s %u dup (<>)", f->initializer, count);
             else {
                 if (CurrSeg && CurrSeg->seg->e.seginfo->segtype != SEGTYPE_BSS)
@@ -747,7 +780,7 @@ nodelim:
     }
 #endif
 
-    if (dir->e.structinfo->isRecord == TRUE) {
+    if ( dir->e.structinfo->typekind == TYPE_RECORD ) {
         dwRecInit = 0;
         is_record_set = FALSE;
         last_item = Tokenize(ptr, Token_Count+1);
@@ -755,7 +788,7 @@ nodelim:
 //        sprintf(buffer, "db %u dup (?)", dir->sym.total_size);
 //        InputQueueLine( buffer );
 //        return( ptr );
-    } else if (dir->e.structinfo->isTypedef == TRUE) {
+    } else if ( dir->e.structinfo->typekind == TYPE_TYPEDEF ) {
         /* there's no field list for typedefs */
         /* create a temporary one for init */
         fl.next = NULL;
@@ -882,7 +915,7 @@ nodelim:
 
             /* add padding bytes */
 
-            if (f->next == NULL || dir->e.structinfo->isUnion)
+            if ( f->next == NULL || dir->e.structinfo->typekind == TYPE_UNION )
                 nextofs = struct_symbol->total_size;
             else
                 nextofs = f->next->sym->offset;
@@ -895,7 +928,7 @@ nodelim:
 
         }
         /* for a union, just the first field is initialized */
-        if (dir->e.structinfo->isUnion)
+        if ( dir->e.structinfo->typekind == TYPE_UNION )
             break;
 
         if (f->next != NULL) {
@@ -904,7 +937,7 @@ nodelim:
         }
     }  /* end for */
 
-    if (dir->e.structinfo->isRecord == TRUE) {
+    if ( dir->e.structinfo->typekind == TYPE_RECORD ) {
         char * p;
         if (dir->sym.mem_type == MT_BYTE)
             p = "db";
@@ -962,7 +995,7 @@ asm_sym * CreateTypeDef(char * name, int * pi)
         if (sym->state == SYM_UNDEFINED) {
             dir_change( dir, TAB_TYPE );
         } else {
-            if ((sym->state != SYM_TYPE) || (dir->e.structinfo->isTypedef == FALSE)) {
+            if ((sym->state != SYM_TYPE) || (dir->e.structinfo->typekind != TYPE_TYPEDEF )) {
                 AsmErr( SYMBOL_PREVIOUSLY_DEFINED, sym->name );
                 return( NULL );
             }
@@ -978,7 +1011,7 @@ asm_sym * CreateTypeDef(char * name, int * pi)
         return( NULL );
     }
 #endif
-    dir->e.structinfo->isTypedef = TRUE;
+    dir->e.structinfo->typekind = TYPE_TYPEDEF;
     dir->sym.defined = TRUE;
 
     token = AsmBuffer[i]->string_ptr;
@@ -1188,7 +1221,7 @@ int RecordDef( int i )
 #if 0
     /* it's strange, but a record definition can be placed
      inside a STRUCT, although it will still be global */
-    if (Definition.struct_depth > 0) {
+    if (StructDef.struct_depth > 0) {
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
@@ -1199,7 +1232,7 @@ int RecordDef( int i )
         return( ERROR );
     }
     dir = dir_insert( name, TAB_TYPE );
-    dir->e.structinfo->isRecord = TRUE;
+    dir->e.structinfo->typekind = TYPE_RECORD;
     dir->sym.defined = TRUE;
     i++;
     for (num = 0;;) {

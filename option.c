@@ -231,7 +231,8 @@ static int SetNoKeyword(int *pi)
             /* it's valid to remove a reserved word twice! */
             if (AsmOpTable[j].opnd_type[0] == OP_SPECIAL) {
                 instruct = (struct asm_ins *)&AsmOpTable[j];
-                instruct->rm_byte = 0; /* instruct->rm_byte & ~(OP_RES_ID | OP_UNARY_OPERATOR); */
+                /* once the word is removed, it can't be restored! */
+                instruct->specialtype = OP_UNUSED;
             } else
                 InstrRemove(buffer);
         }

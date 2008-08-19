@@ -33,11 +33,11 @@
 #include "globals.h"
 #include "banner.h"
 
-#ifdef __WATCOMC__
-  #include <unistd.h>
-  #include <conio.h>
-  #include <process.h>
-#endif
+//#ifdef __WATCOMC__
+//  #include <unistd.h>
+//  #include <conio.h>
+//  #include <process.h>
+//#endif
 
 #define USERESOURCES 0
 

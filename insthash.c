@@ -83,15 +83,15 @@ static struct AsmCodeName *InstrAdd( struct AsmCodeName *inst )
     struct AsmCodeName  **location;
     char buffer[20];
 
-    strncpy( buffer, (char *)&(AsmChars[inst->index]), inst->len );
-    buffer[ inst->len ] = '\0';
+    memcpy( buffer, (char *)&(AsmChars[inst->index]), inst->len );
+    buffer[ inst->len ] = NULLC;
 
     location = &inst_table[ hashpjw( buffer ) ];
 
     for( ; *location; location = &((*location)->next) ) {
-        /* check if the name matches the entry for this inst in AsmChars */
-        if( strnicmp( buffer, &AsmChars[ (*location)->index ], (*location)->len ) == 0
-            && buffer[ (*location)->len ] == '\0' ) {
+        /* to be safe check if the name is already in there */
+        if( inst->len == (*location)->len &&
+            memcmp( buffer, &AsmChars[ (*location)->index ], inst->len ) == 0 ) {
             /* we already have one, shouldn't happen */
             AsmErr( SYMBOL_ALREADY_DEFINED, buffer );
             return( NULL );
@@ -105,6 +105,8 @@ static struct AsmCodeName *InstrAdd( struct AsmCodeName *inst )
 }
 
 /* entry points */
+
+/* returns index of instruction in AsmOpTable */
 
 int get_instruction_position( char *string )
 /******************************************/

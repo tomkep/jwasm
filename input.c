@@ -55,6 +55,10 @@ extern bool DefineProc;
 
 #define DETECTEOC 1
 
+#ifdef DEBUG_OUT
+int queuelevel;
+#endif
+
 #if DETECTEOC
 extern bool inside_comment;
 #endif
@@ -71,7 +75,7 @@ extern bool inside_comment;
 
 typedef struct line_list {
     struct line_list    *next;
-    char                *line;
+    char line[1];
 } line_list;
 
 /* NOTE: the line queue is now a STACK of line queues
@@ -231,8 +235,8 @@ static bool get_asmline( char *ptr, unsigned max, FILE *fp )
                 for (p = lastbs+1;p < ptr;p++)
                     if (!isspace(*p))
                         break;
-                if (p == ptr) {
-                    max += ptr - lastbs;
+                if (p == ptr || (*p == ';' && quote == '>' )) {
+                    max += p - lastbs;
                     ptr = lastbs;
                     if (!quote)
                         *ptr++ = ' ';
@@ -267,13 +271,17 @@ static bool get_asmline( char *ptr, unsigned max, FILE *fp )
     }
 }
 
+/* create a new line queue, "push" the old one */
+
 void PushLineQueue( void )
 /************************/
 {
     input_queue *new;
 
-    DebugMsg(( "PushLineQueue\n" ));
-
+    DebugMsg(( "PushLineQueue, level=%d\n", queuelevel ));
+#ifdef DEBUG_OUT
+    queuelevel++;
+#endif
     new = SrcAlloc( sizeof( input_queue ) );
     new->next = line_queue;
     new->head = new->tail = NULL;
@@ -286,13 +294,19 @@ bool PopLineQueue( void )
 {
     input_queue *tmp;
 
+    DebugMsg(( "PopLineQueue, level=%d\n", queuelevel ));
+
+    in_prologue = FALSE; /* this is a hack, must be cleaned! */
+
     /* pop the line_queue stack */
     tmp = line_queue;
-    in_prologue = FALSE;
     if( tmp == NULL )
         return( FALSE );
     line_queue = line_queue->next;
     SrcFree( tmp );
+#ifdef DEBUG_OUT
+    queuelevel--;
+#endif
     return( TRUE );
 }
 
@@ -306,15 +320,25 @@ bool GetQueueMacroHidden( void )
     }
 }
 
-static line_list *enqueue( void )
+/* create a new line item and store it in current line queue */
+
+void InputQueueLine( char *line )
 /*******************************/
 {
+    unsigned i = strlen(line);
     line_list   *new;
 
-    new = SrcAlloc( sizeof( line_list ) );
+    DebugMsg(( "InputQueueLine(%d): %s  ( line %lu ) \n", queuelevel, line, LineNumber ));
+
+    new = SrcAlloc( sizeof( line_list ) + i );
     new->next = NULL;
 
+    /* if line queue is empty, create a queue item */
     if( line_queue == NULL ) {
+        DebugMsg(( "InputQueueLine: line_queue is NULL!, might cause problems!\n" ));
+#ifdef DEBUG_OUT
+        queuelevel++;
+#endif
         line_queue = SrcAlloc( sizeof( input_queue ) );
         line_queue->next = NULL;
         line_queue->tail = NULL;
@@ -329,7 +353,8 @@ static line_list *enqueue( void )
         line_queue->tail->next = new;
         line_queue->tail = new;
     }
-    return( new );
+    memcpy( new->line, line, i+1 );
+    return;
 }
 
 static file_list *push_flist( const char *name, asm_sym *sym )
@@ -394,19 +419,6 @@ void print_include_file_nesting_structure( void )
             AsmNote( NOTE_MACRO_CALLED_FROM, ModuleInfo.srcfile->name, tmp->line_num );
         }
     }
-}
-
-void InputQueueLine( char *line )
-/*******************************/
-{
-    line_list   *new;
-    int i;
-
-    DebugMsg(( "InputQueueLine: %s  ( line %lu ) \n", line, LineNumber ));
-    new = enqueue();
-    i = strlen(line) + 1;
-    if (new->line = SrcAlloc(i))
-        memcpy( new->line, line, i );
 }
 
 // scan INCLUDE variable
@@ -516,7 +528,6 @@ static char *input_get( char *string )
             line_queue->head = inputline->next;
             if( line_queue->head == NULL )
                 line_queue->tail = NULL;
-            SrcFree( inputline->line );
             SrcFree( inputline );
             return( string );
         }
@@ -542,7 +553,7 @@ static char *input_get( char *string )
             if( inputline != NULL ) {
                 strcpy( string, inputline->line );
                 inputfile->lines->head = inputline->next;
-                SrcFree( inputline->line );
+                // SrcFree( inputline->line );
                 SrcFree( inputline );
                 return( string );
             }
@@ -600,6 +611,10 @@ void InputInit( void )
     IncludePath = NULL;
     file_stack = NULL;
     line_queue = NULL;
+#ifdef DEBUG_OUT
+    queuelevel = 0;
+    DebugMsg(( "InputInit()\n" ));
+#endif
 }
 
 void InputFini( void )
@@ -611,17 +626,22 @@ void InputFini( void )
 
 // push macro name onto the file stack so it
 // can be displayed in case of errors.
+// the top of the queue of line queues (which contains the macro lines)
+// is moved to the file stack
 
 void PushMacro( asm_sym * sym, bool hidden )
 /*********************************************/
 {
     file_list *new;
 
-    DebugMsg(( "PUSH_MACRO\n" ));
+    DebugMsg(( "PushMacro(%s, %u)\n", sym->name, hidden ));
     new = push_flist( sym->name, sym );
     new->lines = line_queue;
     new->hidden = hidden;
     line_queue = line_queue->next;
+#ifdef DEBUG_OUT
+    queuelevel--;
+#endif
 }
 
 void preprocessor_output( char *string )
@@ -710,7 +730,7 @@ int AsmLine( char *string )
         }
     }
 
-    DebugMsg(("AsmLine: >%s<\n", string));
+    DebugMsg(("AsmLine(%d): >%s<\n", queuelevel, string));
 
     /* no expansion if current macro is skipped (EXITM does this) */
     /* then all what has to run are the conditional directives */

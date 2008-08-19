@@ -116,7 +116,7 @@ extern simpletype SimpleType[] = {
 static char             *Check4Mangler( int *i );
 static void             ModelAssumeInit( void );
 
-extern char             EndDirectiveFound;
+extern bool             EndDirectiveFound;
 extern struct asm_sym   *SegOverride;
 
 obj_rec                 *ModendRec;     // Record for Modend (OMF)
@@ -364,6 +364,7 @@ static void dir_init( dir_node *dir, int tab )
         sym->state = SYM_EXTERNAL;
         sym->use32 = Use32;
         sym->comm = 1;
+        sym->weak = 0;
         sym->isfar = 0;
         tab = TAB_EXT;
         break;
@@ -408,12 +409,10 @@ static void dir_init( dir_node *dir, int tab )
         dir->e.structinfo->head = NULL;
         dir->e.structinfo->tail = NULL;
         dir->e.structinfo->alignment = 0;
+        dir->e.structinfo->typekind = TYPE_NONE;
         dir->e.structinfo->isInline = FALSE;
         dir->e.structinfo->isOpen = FALSE;
-        dir->e.structinfo->isUnion = FALSE;
-        dir->e.structinfo->isRecord = FALSE;
-        dir->e.structinfo->isTypedef = FALSE;
-        dir->e.structinfo->indirection = 0;
+        dir->e.structinfo->OrgInside = FALSE;
         return;
     case TAB_LIB:
         break;
@@ -603,8 +602,6 @@ void dir_free( dir_node *dir, bool remove_from_table )
         break;
     case SYM_MACRO:
         {
-            mparm_list      *parmcurr;
-            mparm_list      *parmnext;
             mlocal_list     *localcurr;
             mlocal_list     *localnext;
             asmlines        *datacurr;
@@ -612,14 +609,13 @@ void dir_free( dir_node *dir, bool remove_from_table )
 
             /* free the parm list */
             ;
-            for( parmcurr = dir->e.macroinfo->parmlist ;parmcurr; ) {
-                parmnext = parmcurr->next;
-                AsmFree( parmcurr->label );
-                /* AsmFree( parmcurr->replace ); */
-                AsmFree( parmcurr->def );
-                AsmFree( parmcurr );
-                parmcurr = parmnext;
+            for( i = 0 ; i < dir->e.macroinfo->parmcnt; i++ ) {
+                AsmFree( dir->e.macroinfo->parmlist[i].label );
+                AsmFree( dir->e.macroinfo->parmlist[i].def );
             }
+            if( dir->e.macroinfo->parmlist )
+                AsmFree( dir->e.macroinfo->parmlist );
+
             /* free the local list */
             ;
             for( localcurr = dir->e.macroinfo->locallist ;localcurr; ) {
@@ -652,7 +648,7 @@ void dir_free( dir_node *dir, bool remove_from_table )
 
             for( ptr = dir->e.structinfo->head; ptr != NULL; ptr = next ) {
                 /* bitfields field names are global, don't free them here! */
-                if (dir->e.structinfo->isRecord == FALSE)
+                if ( dir->e.structinfo->typekind != TYPE_RECORD )
                     SymFree( ptr->sym );
                 AsmFree( ptr->initializer );
                 AsmFree( ptr->value );
@@ -912,6 +908,8 @@ static int ExterndefDirective( int i )
             DebugMsg(("ExterndefDirective: type set for >%s<\n", sym->name));
             if (mem_type != MT_ABS)
                 SetSymSegOfs(sym);
+            else if (sym->weak == TRUE)
+                sym->equate = TRUE; /* allow redefinition by EQU, = */
             sym->offset = 0;
             sym->use32 = is32;
             sym->mem_type = mem_type;
@@ -1264,6 +1262,8 @@ static int Startup( int i )
     }
     ModuleInfo.cmdline = FALSE;
 
+    PushLineQueue();
+
     switch( AsmBuffer[i]->value ) {
     case T_DOT_STARTUP:
         count = 0;
@@ -1353,6 +1353,7 @@ static void module_prologue( int type )
     char        *textvalue;
     asm_sym     *sym;
 
+    PushLineQueue();
     SegmentModulePrologue(type);
     ModelAssumeInit();
 
@@ -1431,7 +1432,7 @@ void ModuleInit( void )
     SetMasm510(Options.masm51_compat);
     ModuleInfo.list = Options.write_listing;
     ModuleInfo.cref = TRUE;
-    ModuleInfo.dosseg = FALSE;
+    ModuleInfo.segorder = SEGORDER_SEQ;
     ModuleInfo.flat_idx = 0;
     ModuleInfo.name[0] = NULLC;
     // add source file to autodependency list
@@ -1635,10 +1636,8 @@ static void ModelAssumeInit( void )
 }
 
 // convert a standard register token to an index.
-// would be better if this info is set by the tokenizer already
-// somewhat similiar to Reg386() in asmins.c
 
-int RegisterValueToIndex(int reg, bool * is32)
+static int RegisterValueToIndex(int reg, bool * is32)
 {
     int j;
     static int std32idx[NUM_STDREGS] = {T_EAX, T_ECX, T_EDX, T_EBX, T_ESP, T_EBP, T_ESI, T_EDI};
@@ -1680,8 +1679,6 @@ static int AssumeDirective( int i )
     bool            is32;
     static int segidx[NUM_SEGREGS] = {T_DS, T_ES, T_SS, T_FS, T_GS, T_CS};
 
-
-
     for( i++; i < Token_Count; i++ ) {
         if( ( AsmBuffer[i]->token == T_ID )
             && (0 == stricmp(AsmBuffer[i]->string_ptr, "NOTHING" ))) {
@@ -1709,7 +1706,7 @@ static int AssumeDirective( int i )
         for (j = 0; j < NUM_SEGREGS; j++)
             if (segidx[j] == reg) {
                 info = &SegAssumeTable[j];
-                if( ( ( CodeInfo->info.cpu & P_CPU_MASK ) < P_386 )
+                if( ( ( curr_cpu & P_CPU_MASK ) < P_386 )
                     && ( ( reg == T_FS ) || ( reg == T_GS ) ) ) {
                     AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                     return( ERROR );
@@ -1723,7 +1720,7 @@ static int AssumeDirective( int i )
             /* convert T_xxx to an index */
             j = RegisterValueToIndex(reg, &is32);
             if (j != ERROR) {
-                if(is32 == TRUE && ( CodeInfo->info.cpu & P_CPU_MASK ) < P_386 ) {
+                if(is32 == TRUE && ( curr_cpu & P_CPU_MASK ) < P_386 ) {
                     AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                     return( ERROR );
                 }
@@ -1758,7 +1755,7 @@ static int AssumeDirective( int i )
             info->flat = FALSE;
             info->symbol = NULL;
         } else if(0 == stricmp( AsmBuffer[segloc]->string_ptr, "FLAT" )) {
-            if( ( CodeInfo->info.cpu & P_CPU_MASK ) < P_386 ) {
+            if( ( curr_cpu & P_CPU_MASK ) < P_386 ) {
                 AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                 return( ERROR );
             } else if (segtable == FALSE) {
@@ -2025,7 +2022,7 @@ static int NameDirective( int i )
      - no 'name' segments!
      - no 'name:' label!
      */
-    if (Definition.struct_depth != 0 ||
+    if (StructDef.struct_depth != 0 ||
         (AsmBuffer[i]->token == T_DIRECTIVE &&
          (AsmBuffer[i]->value == T_SEGMENT ||
           AsmBuffer[i]->value == T_STRUCT  ||
@@ -2074,6 +2071,225 @@ static int RadixDirective( int i )
         return( ERROR );
     }
     return(NOT_ERROR);
+}
+
+static int comp_opt( uint direct )
+/********************************/
+/*
+  Compare function for CPU directive
+*/
+{
+    // follow Microsoft MASM
+    switch( direct ) {
+    case T_DOT_NO87:
+        return( P_NO87 );
+    case T_DOT_8086:
+        return( P_86 );
+    case T_DOT_8087:
+        return( P_87 );
+    case T_DOT_186:
+        return( P_186 );
+    case T_DOT_286:
+        return( P_286 );
+    case T_DOT_287:
+        return( P_287 );
+    case T_DOT_286P:
+        return( P_286p );
+    case T_DOT_386:
+        return( P_386 );
+    case T_DOT_387:
+        return( P_387 );
+    case T_DOT_386P:
+        return( P_386p );
+    case T_DOT_486:
+        return( P_486 );
+    case T_DOT_486P:
+        return( P_486p );
+    case T_DOT_586:
+        return( P_586 );
+    case T_DOT_586P:
+        return( P_586p );
+    case T_DOT_686:
+        return( P_686 );
+    case T_DOT_686P:
+        return( P_686p );
+    case T_DOT_MMX:
+        return( P_MMX );
+    case T_DOT_K3D:
+        return( P_MMX | P_K3D );
+#if ONEXMM
+    case T_DOT_XMM:
+        return( P_686 | P_MMX | P_SSE | P_SSE2 | P_SSE3 );
+#else
+    case T_DOT_XMM:
+        return( P_MMX | P_SSE );
+    case T_DOT_XMM2:
+        return( P_MMX | P_SSE | P_SSE2 );
+    case T_DOT_XMM3:
+        return( P_MMX | P_SSE | P_SSE2 | P_SSE3 );
+#endif
+    default:
+        // not found
+        return( EMPTY );
+    }
+}
+
+static int def_fpu( uint direct )
+/********************************/
+/*
+  get FPU from CPU directive
+*/
+{
+    switch( direct ) {
+    case T_DOT_8086:
+    case T_DOT_186:
+        return( P_87 );
+    case T_DOT_286:
+    case T_DOT_286P:
+        return( P_287 );
+    default:
+        return( P_387 );
+    }
+}
+
+#if defined( _STANDALONE_ )
+static void MakeCPUConstant( int i )
+/**********************************/
+{
+#if 0
+    MakeConstantUnderscored( i );
+
+    switch( i ) {
+    // fall right through
+    case T_DOT_686P:
+    case T_DOT_686:
+        MakeConstantUnderscored( T_DOT_686 );
+    case T_DOT_586P:
+    case T_DOT_586:
+        MakeConstantUnderscored( T_DOT_586 );
+    case T_DOT_486P:
+    case T_DOT_486:
+        MakeConstantUnderscored( T_DOT_486 );
+    case T_DOT_386P:
+    case T_DOT_386:
+        MakeConstantUnderscored( T_DOT_386 );
+        break;
+    case T_DOT_286P:
+    case T_DOT_286:
+        MakeConstantUnderscored( T_DOT_286 );
+    }
+#endif
+    return;
+}
+#endif
+
+/* set CPU, FPU parameter in ModuleInfo + curr_cpu */
+
+int cpu_directive( int i )
+/************************/
+// handles .8086, .80386
+{
+    int                 temp;
+
+    if( i == T_DOT_NO87 ) {
+        curr_cpu &= ~P_FPU_MASK;  // turn off FPU bits
+    } else {
+        if( ( temp = comp_opt( i ) ) == EMPTY ) {
+            AsmError( SYNTAX_ERROR );
+            return( ERROR );
+        }
+        if( temp & P_FPU_MASK ) {
+            curr_cpu &= ~P_FPU_MASK;
+            curr_cpu |= temp & P_FPU_MASK;           // setup FPU bits
+        }
+
+        if (temp & P_CPU_MASK) {
+            if (temp & P_EXT_MASK)
+                curr_cpu &= ~( P_CPU_MASK );
+            else
+                curr_cpu &= ~( P_CPU_MASK | P_PM );
+
+            curr_cpu |= temp & ( P_CPU_MASK | P_PM );// setup CPU bits
+            curr_cpu &= ~P_FPU_MASK;
+            curr_cpu |= def_fpu( i ) & P_FPU_MASK;   // setup FPU bits
+        }
+
+        if( temp & P_EXT_MASK ) {
+            curr_cpu &= ~P_EXT_MASK;
+            curr_cpu |= temp & P_EXT_MASK;
+        }
+    }
+    /* set the MASM compatible @CPU value
+     0001: 86
+     0002: 186
+     0004: 286
+     0008: 386
+     0010: 486
+     0020: Pentium
+     0040: PPro
+     0080: protected instructions ok
+     0100: 87
+     0400: 287
+     0800: 387
+     */
+
+    temp = curr_cpu & P_CPU_MASK;
+    switch (temp) {
+    case P_186:
+        ModuleInfo.cpu = 0x3;
+        break;
+    case P_286:
+        ModuleInfo.cpu = 0x7;
+        break;
+    case P_386:
+        ModuleInfo.cpu = 0xF;
+        break;
+    case P_486:
+        ModuleInfo.cpu = 0x1F;
+        break;
+    case P_586:
+        ModuleInfo.cpu = 0x3F;
+        break;
+    case P_686:
+        ModuleInfo.cpu = 0x5F;
+        break;
+    default:
+        ModuleInfo.cpu = 1;
+        break;
+    }
+    if ( curr_cpu & P_PM )
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x80;
+
+    temp = curr_cpu & P_FPU_MASK;
+    switch (temp) {
+    case P_87:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x100;
+        break;
+    case P_287:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0x500;
+        break;
+    case P_387:
+        ModuleInfo.cpu = ModuleInfo.cpu | 0xD00;
+        break;
+    }
+
+#if defined( _STANDALONE_ )
+
+    MakeCPUConstant( i );
+    if (ModuleInfo.cpu & 0x78)
+        SetUse32Def( TRUE );
+    else
+        SetUse32Def( FALSE );
+
+    /* Set @Cpu */
+    /* differs from Codeinfo cpu setting */
+
+    DebugMsg(("cpu_directive: curr_cpu=%X, @Cpu=%X\n", curr_cpu, ModuleInfo.cpu));
+    sym_Cpu = CreateConstant( "@Cpu", ModuleInfo.cpu, -1, TRUE);
+
+#endif
+
+    return( NOT_ERROR );
 }
 
 static int MakeComm(
@@ -2378,31 +2594,31 @@ static int ContextDirective( int directive, int i )
                             ModuleInfo.cpu     = ccontext->cpu;
                             if (sym_Cpu)
                                 sym_Cpu->value = ccontext->cpu;
-                            CodeInfo->info.cpu = ccontext->cicpu;
+                            curr_cpu = ccontext->cicpu;
                         }
                         // remove the item
-                        MemFree(pcontext);
+                        AsmFree(pcontext);
                     } else {
                         // setup a context item
                         switch (type) {
                         case CONT_ASSUMES:
-                            pcontext = MemAlloc(sizeof(context) + sizeof(assumes_context));
+                            pcontext = AsmAlloc(sizeof(context) + sizeof(assumes_context));
                             acontext = (assumes_context *)&pcontext->data;
                             break;
                         case CONT_RADIX:
-                            pcontext = MemAlloc(sizeof(context) + sizeof(radix_context));
+                            pcontext = AsmAlloc(sizeof(context) + sizeof(radix_context));
                             rcontext = (radix_context *)&pcontext->data;
                             break;
                         case CONT_LISTING:
-                            pcontext = MemAlloc(sizeof(context) + sizeof(listing_context));
+                            pcontext = AsmAlloc(sizeof(context) + sizeof(listing_context));
                             lcontext = (listing_context *)&pcontext->data;
                             break;
                         case CONT_CPU:
-                            pcontext = MemAlloc(sizeof(context) + sizeof(cpu_context));
+                            pcontext = AsmAlloc(sizeof(context) + sizeof(cpu_context));
                             ccontext = (cpu_context *)&pcontext->data;
                             break;
                         case CONT_ALL:
-                            pcontext = MemAlloc(sizeof(context) + sizeof(all_context));
+                            pcontext = AsmAlloc(sizeof(context) + sizeof(all_context));
                             alcontext = (all_context *)pcontext->data;
                             acontext = &alcontext->ac;
                             rcontext = &alcontext->rc;
@@ -2425,7 +2641,7 @@ static int ContextDirective( int directive, int i )
                         }
                         if (ccontext) {
                             ccontext->cpu   = ModuleInfo.cpu;
-                            ccontext->cicpu = CodeInfo->info.cpu;
+                            ccontext->cicpu = curr_cpu;
                         }
                         push( &ContextStack, pcontext );
                     }
@@ -2438,12 +2654,39 @@ static int ContextDirective( int directive, int i )
     AsmError( SYNTAX_ERROR );
     return( ERROR );
 }
+static int SegOrderDirective(int directive, int i)
+{
+    if (Options.output_format != OFORMAT_OMF &&
+        Options.output_format != OFORMAT_BIN) {
+        if (Parse_Pass == PASS_1)
+            AsmWarn( 2, DIRECTIVE_IGNORED_FOR_COFF, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+
+    switch( directive ) {
+    case T_DOT_DOSSEG:
+    case T_DOSSEG:
+        ModuleInfo.segorder = SEGORDER_DOSSEG;
+        break;
+    case T_DOT_ALPHA:
+        ModuleInfo.segorder = SEGORDER_ALPHA;
+        break;
+    default:
+        ModuleInfo.segorder = SEGORDER_SEQ;
+        break;
+    }
+    if (AsmBuffer[i+1]->token != T_FINAL) {
+        AsmError( SYNTAX_ERROR );
+        return( ERROR );
+    }
+    return( NOT_ERROR );
+}
 
 // dispatcher for directives
 
 int directive( int i, long direct )
 {
-    int ret;
+//    int ret;
 
     switch( direct ) {
 #if FASTPASS
@@ -2453,16 +2696,18 @@ int directive( int i, long direct )
         return( NOT_ERROR );
     case T_SIZESTR:
         SizeStrDef( 1 );
+        directive_listed = TRUE;
         return( NOT_ERROR );
     case T_INSTR:
         InStrDef( 1, CurrString );
+        directive_listed = TRUE;
         return( NOT_ERROR );
 #endif
     case T_PUBLIC:
         return( PublicDirective(i+1) );
     case T_ENDS:
-        if( Definition.struct_depth != 0 ) {
-            return( StructDef( i ) );
+        if( StructDef.struct_depth != 0 ) {
+            return( StructDirective( i ) );
         }
         // else fall through to T_SEGMENT
     case T_SEGMENT:
@@ -2527,7 +2772,7 @@ int directive( int i, long direct )
     case T_STRUC:
     case T_STRUCT:
     case T_UNION:
-        return( StructDef( i ) );
+        return( StructDirective( i ) );
     case T_RECORD:
         return( Parse_Pass == PASS_1 ? RecordDef( i ) : NOT_ERROR );
     case T_NAME:
@@ -2546,20 +2791,15 @@ int directive( int i, long direct )
     case T_POPCONTEXT:
     case T_PUSHCONTEXT:
         return( ContextDirective(direct, i ) );
+    case T_DOT_SEQ: /* this is default */
+    case T_DOT_DOSSEG:
+    case T_DOSSEG:
     case T_DOT_ALPHA:
-        if (Parse_Pass == PASS_1)
-            AsmWarn( 1, IGNORING_DIRECTIVE, AsmBuffer[i]->string_ptr );
-        return( NOT_ERROR );
-    case T_DOT_SEQ: /* no segment ordering is default behavior */
-        return( NOT_ERROR );
+        return( SegOrderDirective(direct, i ) );
     case T_DOT_RADIX:
         return( RadixDirective(i+1));
     case T_ECHO:
         return(Parse_Pass == PASS_1 ? EchoDef(i+1) : NOT_ERROR );
-    case T_DOT_DOSSEG:
-    case T_DOSSEG:
-        ModuleInfo.dosseg = TRUE;
-        return( NOT_ERROR );
     case T_DOT_286C:
         direct = T_DOT_286;
     case T_DOT_8086:
@@ -2585,12 +2825,11 @@ int directive( int i, long direct )
     case T_DOT_XMM2:
     case T_DOT_XMM3:
 #endif
-        ret = cpu_directive(direct);
-        if( Parse_Pass != PASS_1 )
-            ret = NOT_ERROR;
-        if (AsmBuffer[i+1]->token != T_FINAL)
+        if (AsmBuffer[i+1]->token != T_FINAL) {
             AsmError(SYNTAX_ERROR);
-        return( ret );
+            return( ERROR );
+        }
+        return( cpu_directive(direct) );
     case T_DOT_LIST:
     case T_DOT_CREF:
     case T_DOT_NOLIST:

@@ -44,12 +44,62 @@
 
 #define LABELOPT 1
 
-struct asmfixup         *InsFixups[3];
+extern struct asm_sym   *SegOverride;
 
+struct asmfixup         *InsFixups[3];
+int_8                   Frame;          // Frame of current fixup
+uint_8                  Frame_Datum;    // Frame datum of current fixup
+
+#if defined( _STANDALONE_ )
+
+/* set global vars Frame and Frame_Datum */
+
+void find_frame( struct asm_sym *sym )
+/*******************************************/
+{
+    if( SegOverride != NULL ) {
+        sym = SegOverride;
+        if( sym->state == SYM_GRP ) {
+            Frame = FRAME_GRP;
+            Frame_Datum = GetGrpIdx( sym );
+        } else if( sym->segment != NULL ) {
+            Frame = FRAME_SEG;
+            Frame_Datum = GetSegIdx( sym->segment );
+        }
+    } else {
+        asm_sym *grp;
+        switch( sym->state ) {
+        case SYM_INTERNAL:
+        case SYM_PROC:
+        case SYM_EXTERNAL:
+            if( sym->segment != NULL ) {
+                if( grp = GetGrp( sym ) ) {
+                    Frame = FRAME_GRP;
+                    Frame_Datum = GetGrpIdx( grp );
+                } else {
+                    Frame = FRAME_SEG;
+                    Frame_Datum = GetSegIdx( sym->segment );
+                }
+            }
+            break;
+        case SYM_GRP:
+            Frame = FRAME_GRP;
+            Frame_Datum = GetGrpIdx( sym );
+            break;
+        case SYM_SEG:
+            Frame = FRAME_SEG;
+            Frame_Datum = GetSegIdx( sym->segment );
+            break;
+        default:
+            break;
+        }
+    }
+}
+#endif
 
 void add_frame( void )
 /********************/
-/* determine the frame and frame datum for the fixup */
+/* add frame data to current fixup */
 /* expects global variables Frame and Frame_Datum to be set */
 {
     struct asmfixup     *fixup;
@@ -91,7 +141,7 @@ struct asmfixup *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enu
     fixup->sym = sym;
     fixup->offset = 0;
     if (CurrSeg) {
-        fixup->fixup_loc = GetCurrAddr();
+        fixup->fixup_loc = GetCurrOffset();
         fixup->def_seg = CurrSeg->seg;
     } else {
         fixup->fixup_loc = 0;
@@ -99,7 +149,7 @@ struct asmfixup *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enu
     }
     fixup->frame = Frame;                   // this is just a guess
     fixup->frame_datum = Frame_Datum;
-    fixup->next = sym->fixup;
+    fixup->next1 = sym->fixup;
     sym->fixup = fixup;
     fixup->type = fixup_type;
     fixup->loader_resolved = FALSE;
@@ -109,7 +159,7 @@ struct asmfixup *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enu
 }
 
 #define SkipFixup() \
-    fixup->next = sym->fixup; \
+    fixup->next1 = sym->fixup; \
     sym->fixup = fixup
 
 static int DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
@@ -158,7 +208,7 @@ static int DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
     case FIX_RELOFF8:
         size++;
         // calculate the displacement
-        // disp = fixup->offset + GetCurrAddr() - fixup->fixup_loc - size;
+        // disp = fixup->offset + GetCurrOffset() - fixup->fixup_loc - size;
         disp = fixup->offset + fixup->sym->offset - fixup->fixup_loc - size - 1;
         max_disp = (1UL << ((size * 8)-1)) - 1;
         if( disp > max_disp || disp < (-max_disp-1) ) {
@@ -230,7 +280,7 @@ int BackPatch( struct asm_sym *sym )
     fixup = sym->fixup;
     sym->fixup = NULL;
     for( ; fixup != NULL; fixup = next ) {
-        next = fixup->next;
+        next = fixup->next1;
         if( DoPatch( sym, fixup ) == ERROR ) {
             return( ERROR );
         }
@@ -248,7 +298,7 @@ struct fixup *CreateFixupRec( int index )
 */
 {
     struct asmfixup     *fixup;         // fixup structure from JWasm
-    struct fixup        *fixnode;       // fixup structure from WOMP
+    struct fixup        *fixnode;       // fixup structure for OMF
     struct asm_sym      *sym;
     struct asm_sym      *grpsym;
 
@@ -310,7 +360,7 @@ struct fixup *CreateFixupRec( int index )
     /* set the fixup's location in current LEDATA */
     /* CurrSeg->curr_loc - CurrSeg->start_loc */
 
-    fixnode->loc_offset = GetCurrAddr() - GetCurrSegStart();
+    fixnode->loc_offset = GetCurrOffset() - GetCurrSegStart();
 
     /*------------------------------------*/
     /* Determine the Target and the Frame */
@@ -364,7 +414,7 @@ struct fixup *CreateFixupRec( int index )
             }
         } else if (( sym->state == SYM_PROC ) && (((dir_node *)sym)->e.procinfo->defined == FALSE)) {
             /* these are PROTOs without a segment reference */
-            DebugMsg(("CreateFixupRec: PROC %s\n", sym->name));
+            DebugMsg(("CreateFixupRec: PROTO %s\n", sym->name));
             fixnode->lr.target = TARGET_EXT;
             fixnode->lr.target_datum = sym->idx;
         } else {
@@ -389,12 +439,6 @@ struct fixup *CreateFixupRec( int index )
             }
             fixnode->lr.target_datum = GetSegIdx( sym->segment );
         }
-
-        /* HMMM .... what if fixup->frame is say -2 .... ie empty?
-        * what should really be going on here?
-        */
-        // fixnode->lr.frame = (uint_8)fixup->frame;
-        // fixnode->lr.frame_datum = fixup->frame_datum;
 
         if( fixup->frame != EMPTY ) {
             fixnode->lr.frame = (uint_8)fixup->frame;
@@ -476,7 +520,7 @@ int store_fixup( int index )
     if( write_to_file == FALSE || fixup == NULL)
         return( NOT_ERROR );
 
-    fixup->fixup_loc = GetCurrAddr();
+    fixup->fixup_loc = GetCurrOffset();
 
 //    CodeInfo->data[index] = CodeInfo->data[index] - fixup->sym->offset;
     fixup->offset = CodeInfo->data[index];
@@ -492,7 +536,7 @@ int store_fixup( int index )
             CodeInfo->data[index] += fixup->sym->offset;
         }
 
-        /* for OMF, convert asmfixup to womp fixup! */
+        /* convert asmfixup to OMF fixup! */
         fixnode = CreateFixupRec( index );
         if( fixnode == NULL )
             return( ERROR );
@@ -505,6 +549,19 @@ int store_fixup( int index )
         }
     } else {
         fixup->next2 = NULL;
+
+        if (Options.output_format == OFORMAT_ELF) {
+            if (fixup->type == FIX_RELOFF32)
+                CodeInfo->data[index] = -4;
+        }
+        /* special handling for assembly time variables needed */
+        if (fixup->sym->variable) {
+            /* add symbol's offset to the fixup location and fixup's offset */
+            CodeInfo->data[index] += fixup->sym->offset;
+            fixup->offset         += fixup->sym->offset;
+            /* and save symbol's segment in fixup */
+            fixup->segment = fixup->sym->segment;
+        }
 
         /* For COFF, just the difference to the target's
          symbol offset is stored an the fixup location!

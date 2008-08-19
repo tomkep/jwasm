@@ -24,7 +24,9 @@
 *
 *  ========================================================================
 *
-* Description:  data directive DB,DW,DD,... and structure processing
+* Description:  data definition directives DB,DW,DD,...
+*               directives inside a structure definition will be
+*               routed to types.c (AddFieldToStruct()).
 *
 ****************************************************************************/
 
@@ -51,13 +53,13 @@
 
 #if defined( _STANDALONE_ )
 
-extern int              ChangeCurrentLocation( bool, int_32, bool );
-
 /* static globals */
 /* is this data element a field in a structure definition? */
 static bool             struct_field;
 /* is this the first initializer for this field? */
 static bool             first;
+/* must initializer be floats? */
+static bool             float_initializer;
 /* used for structured variables */
 static bool             veryfirst;
 static bool             initwarn;
@@ -196,7 +198,7 @@ next_item:
                 update_sizes( sym, first, count );
         }
         if( !struct_field ) {
-            ChangeCurrentLocation( TRUE, count,
+            SetCurrOffset( count, TRUE,
                                    ( ( CurrSeg != NULL ) && SEGISCODE( CurrSeg ) ) );
         } else {
             UpdateStructSize(count);
@@ -272,6 +274,10 @@ next_item:
             }
             break;
         case EXPR_CONST:
+            if (float_initializer) {
+                AsmError( MUST_USE_FLOAT_INITIALIZER );
+                return( ERROR );
+            }
             if (opndx.string != NULL) {
                 DebugMsg(("array_item: string found: >%s<, struct_field=%u, no_of_bytes=%u\n", AsmBuffer[cur_pos]->string_ptr, struct_field, no_of_bytes));
                 /* check if a real data item of type STRUCT is to be initialized */
@@ -447,8 +453,12 @@ next_item:
 
                 if (opndx.indirect == TRUE || opndx.sym == NULL) {
                     DebugMsg(("array_item: EXPR_ADDR, error, indirect=%u, sym=%X\n", opndx.indirect, opndx.sym));
-                    AsmError(SYNTAX_ERROR);
-                    return(ERROR);
+                    AsmError( SYNTAX_ERROR );
+                    return( ERROR );
+                }
+                if (float_initializer) {
+                    AsmError( MUST_USE_FLOAT_INITIALIZER );
+                    return( ERROR );
                 }
 
                 if( sym && Parse_Pass == PASS_1 ) {
@@ -604,7 +614,7 @@ next_item:
 
                 CodeInfo->data[OPND1] = fixup->offset;
 
-                if( store_fixup( 0 ) == ERROR )
+                if( store_fixup( OPND1 ) == ERROR )
                     return( ERROR );
 
                 /* now actually output the data */
@@ -667,9 +677,10 @@ int data_init( int sym_loc, int initializer_loc)
     struct_field = FALSE;
     first = TRUE;
     initwarn = FALSE;
+    float_initializer = FALSE;
 
     DebugMsg(("data_init enter, sym_loc=%d, init_loc=%d\n", sym_loc, initializer_loc));
-    if( (sym_loc >= 0) && (Definition.struct_depth == 0) ) {
+    if( (sym_loc >= 0) && (StructDef.struct_depth == 0) ) {
         /* get/create the label */
         /* it might be a code label if Masm v5.1 compatibility is enabled */
         DebugMsg(("data_init: calling SymLookup(%s)\n", AsmBuffer[sym_loc]->string_ptr));
@@ -699,9 +710,10 @@ int data_init( int sym_loc, int initializer_loc)
         mem_type = MT_SWORD;
         no_of_bytes = 2;
         break;
+    case T_REAL4:
+        float_initializer = TRUE;
     case T_DD:
     case T_DWORD:
-    case T_REAL4:
         mem_type = MT_DWORD;
         no_of_bytes = 4;
         break;
@@ -714,15 +726,17 @@ int data_init( int sym_loc, int initializer_loc)
         mem_type = MT_FWORD;
         no_of_bytes = 6;
         break;
+    case T_REAL8:
+        float_initializer = TRUE;
     case T_DQ:
     case T_QWORD:
-    case T_REAL8:
         mem_type = MT_QWORD;
         no_of_bytes = 8;
         break;
+    case T_REAL10:
+        float_initializer = TRUE;
     case T_DT:
     case T_TBYTE:
-    case T_REAL10:
         mem_type = MT_TBYTE;
         no_of_bytes = 10;
         break;
@@ -739,11 +753,16 @@ int data_init( int sym_loc, int initializer_loc)
         if (sym)
             sym->type = struct_sym;
         veryfirst = TRUE;
+        if (((dir_node *)struct_sym)->e.structinfo->typekind == TYPE_STRUCT &&
+            ((dir_node *)struct_sym)->e.structinfo->OrgInside == TRUE) {
+            AsmError( STRUCT_CANNOT_BE_INSTANCED );
+            return( ERROR );
+        }
         no_of_bytes = struct_sym->total_size;
         if (no_of_bytes == 0) {
             dir_node * dir = (dir_node *)struct_sym;
             /* a void type is not valid */
-            if (dir->e.structinfo->isTypedef == TRUE) {
+            if ( dir->e.structinfo->typekind == TYPE_TYPEDEF ) {
                 AsmErr( INVALID_TYPE_FOR_DATA_DECLARATION, AsmBuffer[initializer_loc]->string_ptr );
                 return( ERROR );
             }
@@ -766,7 +785,10 @@ int data_init( int sym_loc, int initializer_loc)
         sym_loc--;
     }
     /* in a struct declaration? */
-    if( Definition.struct_depth != 0 ) {
+    if( StructDef.struct_depth != 0 ) {
+
+        /* everything will be done in the first pass */
+        /* problem: listing output! */
         if( Parse_Pass != PASS_1 )
             return( NOT_ERROR );
 
@@ -775,13 +797,13 @@ int data_init( int sym_loc, int initializer_loc)
         }
 
         if (AsmFiles.file[LST])
-            currofs = Definition.curr_struct->sym.total_size;
+            currofs = StructDef.curr_struct->sym.total_size;
 
         struct_field = TRUE;
         DebugMsg(("data_init: %s, AddFieldToStruct called, ofs=%X, struct=%s\n",
                   sym->name,
                   sym->offset,
-                  Definition.curr_struct->sym.name));
+                  StructDef.curr_struct->sym.name));
         if( array_item( sym, NULL, initializer_loc + 1, no_of_bytes, 1 ) == ERROR ) {
             DebugMsg(("data_init: exit 4, array_item returned with error\n"));
             return( ERROR );
@@ -795,7 +817,7 @@ int data_init( int sym_loc, int initializer_loc)
     }
 
     if (AsmFiles.file[LST])
-        currofs = GetCurrAddr();
+        currofs = GetCurrOffset();
 
     /* is a label declared or is it just a data definition? */
     if( sym_loc >= 0 ) {
@@ -846,7 +868,7 @@ int data_init( int sym_loc, int initializer_loc)
         while (struct_sym->mem_type == MT_TYPE)
             struct_sym = struct_sym->type;
         /* if it is just a type alias, skip the arbitrary type */
-        if (((dir_node *)struct_sym)->e.structinfo->isTypedef == TRUE)
+        if (((dir_node *)struct_sym)->e.structinfo->typekind == TYPE_TYPEDEF )
             struct_sym = NULL;
     }
 

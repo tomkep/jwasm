@@ -30,9 +30,9 @@
 ****************************************************************************/
 
 
-#ifndef NAMEMGR_H
+#ifndef OMFNAME_H
 #include <stddef.h>
-#include <watcom.h>
+#include "watcom.h"
 
 typedef uint_16     name_handle;
 #define NAME_NULL   0xffff
@@ -42,6 +42,6 @@ extern void omf_NameFini( void );
 extern name_handle omf_NameAdd( const char *name, size_t len );
 extern const char *omf_NameGet( name_handle hdl );
 
-#define NAMEMGR_H   1
+#define OMFNAME_H   1
 #endif
 

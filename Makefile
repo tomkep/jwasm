@@ -47,7 +47,7 @@ extra_c_flags += -od -d2 -DDEBUG_OUT -DTRMEM
 extra_c_flags += -od -d2 -DDEBUG_OUT
 !endif
 !else
-extra_c_flags += -obirt -s
+extra_c_flags += -obmilrt -s -DNDEBUG
 !endif
 
 #########
@@ -66,7 +66,7 @@ CC=wcc386 -q -3$(CCV) -bc -bt=nt $(inc_dirs) $(extra_c_flags) -fo$@
    $(CC) $<
 
 proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   &
-           $(OUTD)/direct.obj   $(OUTD)/posndir.obj  $(OUTD)/segment.obj &
+           $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj &
            $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  &
            $(OUTD)/msgtext.obj  $(OUTD)/macro.obj    $(OUTD)/condasm.obj &
            $(OUTD)/types.obj    $(OUTD)/fpfixup.obj  $(OUTD)/invoke.obj  &
@@ -77,8 +77,9 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   &
            $(OUTD)/insthash.obj $(OUTD)/jumps.obj    $(OUTD)/queues.obj  &
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/omf.obj     &
-           $(OUTD)/queue.obj    $(OUTD)/carve.obj    $(OUTD)/omffixup.obj&
+           $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   &
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
+           $(OUTD)/omffixup.obj &
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif

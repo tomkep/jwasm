@@ -75,7 +75,8 @@ typedef enum {
     SEGTYPE_UNDEF,
     SEGTYPE_CODE,
     SEGTYPE_DATA,
-    SEGTYPE_BSS
+    SEGTYPE_BSS,
+    SEGTYPE_ABS
 } seg_type;
 
 /*---------------------------------------------------------------------------*/
@@ -138,6 +139,7 @@ typedef struct {
     union {
         uint_32         current_loc;    // current offset in current ledata or lidata
         uint_32         reloc_offset;   // used by ELF to store reloc file offset
+        uint_32         offset;         // used by BIN to store start offset
     };
     uint_8              *CodeBuffer;
     asm_sym             *labels;        // linked list of labels in this seg
@@ -152,11 +154,17 @@ typedef struct {
         struct asmfixup     *FixupListTailElf;
     };
     void                *LinnumQueue;   // for COFF line numbers
-    uint_32             num_relocs;     // used by COFF/ELF
+    union {
+        uint_32         num_relocs;     // used by COFF/ELF
+        uint_32         fileoffset;     // used by BIN
+    };
     seg_type            segtype;        // segment is belonging to "CODE" or 'DATA' class
     direct_idx          lname_idx;
     unsigned            readonly:1;     // if the segment is readonly
     unsigned            Use32:1;
+#if BIN_SUPPORT
+    unsigned            initial:1;      // for BIN output
+#endif
 } seg_info;
 
 typedef struct regs_list {
@@ -190,11 +198,9 @@ typedef struct {
 // macro parameter
 
 typedef struct mparm_list {
-    struct mparm_list   *next;
     char                *label;         // name of parameter
-    char                *replace;       // string that replaces the label
-    char                required;       // is parm required ( T/F )
-    char                *def;           // is there a default parm?
+    char                *def;           // optional default parm
+    char                required;       // is parm required
 } mparm_list;
 
 // macro local
@@ -218,7 +224,8 @@ typedef struct  fname_list {
 } FNAME;
 
 typedef struct {
-    mparm_list          *parmlist;  // list of parameters
+    uint_32             parmcnt;    /* no of params */
+    mparm_list          *parmlist;  /* array of parameter items */
     mlocal_list         *locallist; // list of locals
     asmlines            *data;      // the guts of the macro - LL of strings
     const FNAME         *srcfile;
@@ -236,19 +243,28 @@ typedef struct field_list {
     struct asm_sym      *sym;
 } field_list;
 
+typedef enum {
+    TYPE_NONE,
+    TYPE_STRUCT,
+    TYPE_UNION,
+    TYPE_TYPEDEF,
+    TYPE_RECORD
+} type_kind;
+
 typedef struct {
     field_list          *head;
     union {
     field_list          *tail;
     struct asm_sym      *target;    // if TYPEDEF is a PTR, specifies the target TYPE
     };
-    unsigned            alignment;
+    union {
+        uint_8          alignment;   /* STRUCT: 1,2,4,8,16 or 32 */
+        uint_8          indirection; /* TYPEDEF: level of indirection for PTR */
+    };
+    type_kind           typekind;
     unsigned            isInline:1;
-    unsigned            isOpen:1; // set until the matching ENDS is found
-    unsigned            isUnion:1;
-    unsigned            isRecord:1;
-    unsigned            isTypedef:1;
-    unsigned            indirection:3; // level of indirection for PTR TYPEDEFs
+    unsigned            isOpen:1;    /* set until the matching ENDS is found */
+    unsigned            OrgInside:1; /* struct contains an ORG */
 } struct_info;
 
 union entry {
@@ -279,14 +295,17 @@ typedef struct {
 extern uint                     LnamesIdx;      // Number of LNAMES definition
 
 typedef struct {
-    unsigned            error_count;
-    unsigned            warning_count;
-    char                *proc_prologue;
-    char                *proc_epilogue;
+    unsigned            error_count;     // total of errors so far
+    unsigned            warning_count;   // total of warnings so far
+    char                *proc_prologue;  // current OPTION PROLOGUE value
+    char                *proc_epilogue;  // current OPTION EPILOGUE value
+    unsigned            anonymous_label; // "anonymous label" counter
+    unsigned            hll_label;       // hll directive label counter
     dist_type           distance;        // stack distance;
     mod_type            model;           // memory model;
     lang_type           langtype;        // language;
     os_type             ostype;          // operating system;
+    seg_order           segorder;        // .alpha, .seq, .dosseg
     short               cpu;             // cpu setting;
     unsigned            use32:1;         // If 32-bit segment is used
     unsigned            cmdline:1;       // memory model set by cmdline opt?
@@ -302,7 +321,6 @@ typedef struct {
     unsigned            emulator:1;      // option emulator
     unsigned            list:1;          // .list/.nolist
     unsigned            cref:1;          // .cref/.nocref
-    unsigned            dosseg:1;        // .dosseg occured
     unsigned            setif2:1;        // option setif2
     unsigned            flat_idx;        // index of FLAT group
     char                name[_MAX_FNAME];// name of module
@@ -332,7 +350,7 @@ extern uint             GetExtIdx( struct asm_sym * );
 
 extern int              token_cmp( char *token, int start, int end );
 extern int              FindSimpleType( int );  // find simple type
-extern int              RegisterValueToIndex( int, bool *);
+//extern int              RegisterValueToIndex( int, bool *);
 extern int              SizeFromRegister( int );
 extern struct asm_sym   *GetStdAssume( int);
 extern struct asm_sym   *MakeExtern( char *name, memtype type, struct asm_sym * vartype, struct asm_sym *, bool );
@@ -388,6 +406,7 @@ enum assume_stdreg {
 
 extern seg_item         *CurrSeg;       // points to stack of opened segments
 
+extern int              directive( int , long );
 extern uint_32          GetCurrSegStart(void);
 /* Get offset of segment at the start of current LEDATA record */
 
@@ -404,7 +423,8 @@ extern int              SimSeg( int );          // handle simplified segment
 extern direct_idx       GetLnameIdx( char * );
 
 extern direct_idx       LnameInsert( char * );  // Insert a lname
-extern uint_32          GetCurrAddr( void );    // Get offset from current segment
+extern uint_32          GetCurrOffset( void );  // Get offset from current segment
+extern int              SetCurrOffset( int_32, bool, bool );
 
 extern dir_node         *GetCurrSeg( void );
 /* Get current segment; NULL means none */

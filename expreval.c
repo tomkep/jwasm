@@ -205,7 +205,7 @@ static int get_precedence( int i )
         }
         break;
     case T_RES_ID:
-        if (AsmBuffer[i]->rm_byte & OP_PTR_MODIFIER)
+        if (AsmBuffer[i]->rm_byte == OP_TYPE)
             return( 5 );
         else if (AsmBuffer[i]->value == T_PTR)
             return( 5 );
@@ -321,7 +321,8 @@ static int get_operand( expr_list *new, int *start, int end )
             case T_DI:
             case T_SI:
                 new->indirect = TRUE;
-                if (sym = GetStdAssume(RegisterValueToIndex(AsmBuffer[i]->value, &is32))) {
+                /* opcode contains register number */
+                if ( sym = GetStdAssume( AsmBuffer[i]->opcode ) ) {
                     for (; sym->type; sym = sym->type);
                     new->assume = sym;
                 }
@@ -410,6 +411,16 @@ static int get_operand( expr_list *new, int *start, int end )
             }
             new->sym = SymSearch( AsmBuffer[i]->string_ptr );
             if( new->sym == NULL || new->sym->state == SYM_MACRO || new->sym->state == SYM_TMACRO) {
+#ifdef DEBUG_OUT
+                // macros and text macros shouldn't occur here!
+                if (new->sym) {
+                    if (new->sym->state == SYM_MACRO) {
+                        DebugMsg(("get_operand: internal error, macro >%s< found by expression evaluator\n", new->sym->name ));
+                    } else if (new->sym->state == SYM_TMACRO) {
+                        DebugMsg(("get_operand: internal error, text macro >%s< found by expression evaluator\n", new->sym->name ));
+                    }
+                }
+#endif
                 new->sym = NULL;
 #if USEDUMMY
                 if (!dummysym) {
@@ -490,7 +501,7 @@ static int get_operand( expr_list *new, int *start, int end )
                 /* this 'if' isn't a good idea. a type may be used inside
                  a struct definition (sizeof <type>). it's ways better to
                  check the state of the isOpen member */
-                // if (Definition.struct_depth == 0) {
+                // if (StructDef.struct_depth == 0) {
                 if (dir->e.structinfo->isOpen == FALSE) {
                     asm_sym *sym2;
                     new->type = EXPR_CONST;
@@ -539,13 +550,13 @@ static int get_operand( expr_list *new, int *start, int end )
                 /* not a good idea to check for the DOT */
                 /* the ID might be followed by a [..] before the DOT comes */
 //                if (AsmBuffer[i+1]->token == T_DOT) {
-                if (dir2->sym.state == SYM_TYPE && dir2->e.structinfo->isTypedef == FALSE) {
+                if (dir2->sym.state == SYM_TYPE && dir2->e.structinfo->typekind != TYPE_TYPEDEF ) {
 #if SETCURRSTR
                     curr_struct = dir2;
 #else
                     new->assume = (asm_sym *)dir2;
 #endif
-                    if (dir2->e.structinfo->isRecord == TRUE)
+                    if ( dir2->e.structinfo->typekind == TYPE_RECORD )
                         new->mem_type = dir2->sym.mem_type;
                     DebugMsg(("get_operand: namespace extended (2) by %s, mem_type=%u\n", dir2->sym.name, dir2->sym.mem_type));
                 } else {
@@ -615,7 +626,10 @@ static int get_operand( expr_list *new, int *start, int end )
     default:
         DebugMsg(("get_operand: default, i=%d, string=%s\n", i, AsmBuffer[i]->string_ptr));
         if( error_msg )
-           AsmErr( SYNTAX_ERROR, AsmBuffer[i]->string_ptr );
+            if (AsmBuffer[i]->token == T_BAD_NUM)
+                AsmErr( NONDIGIT_IN_NUMBER, AsmBuffer[i]->string_ptr );
+            else
+                AsmErr( SYNTAX_ERROR, AsmBuffer[i]->string_ptr );
         new->type = EXPR_UNDEF;
         return( ERROR );
     }
@@ -1446,7 +1460,7 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
         break;
     case T_RES_ID:
         DebugMsg(("calculate T_RES_ID (%s)\n", AsmBuffer[index]->string_ptr));
-        if (AsmBuffer[index]->rm_byte & OP_PTR_MODIFIER) {
+        if (AsmBuffer[index]->rm_byte == OP_TYPE) {
             if( ( AsmBuffer[index + 1]->token != T_RES_ID )
                 || ( AsmBuffer[index + 1]->value != T_PTR ) ) {
                 // Missing PTR operator
@@ -1493,7 +1507,7 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
                 if (sym && sym->state == SYM_TYPE) {
                     TokenAssign( token_1, token_2 );
                     /* <type> ptr ... ? */
-                    if (((dir_node *)sym)->e.structinfo->isTypedef == FALSE)
+                    if (((dir_node *)sym)->e.structinfo->typekind != TYPE_TYPEDEF )
 #if SETCURRSTR
                         curr_struct = (dir_node *)sym;
 #else
@@ -2346,7 +2360,7 @@ static bool is_expr( int i )
         if (AsmBuffer[i]->value == T_FLAT) {
             DefineFlatGroup();
             return( TRUE );
-        } else if (AsmBuffer[i]->rm_byte & OP_PTR_MODIFIER)
+        } else if (AsmBuffer[i]->rm_byte == OP_TYPE)
             return( TRUE );
         else if (AsmBuffer[i]->value == T_PTR ||
                  AsmBuffer[i]->value == T_SHORT)
@@ -2378,6 +2392,7 @@ static bool is_expr( int i )
     case '*':
     case '/':
     case T_NUM:
+    case T_BAD_NUM:
     case T_OP_BRACKET:
     case T_CL_BRACKET:
     case T_OP_SQ_BRACKET:
@@ -2385,7 +2400,7 @@ static bool is_expr( int i )
         return(  TRUE );
     case T_COLON:
 //        DebugMsg(("is_expr: T_COLON\n"));
-#if defined( _STANDALONE_ )
+#if 0 // defined( _STANDALONE_ )
         /* check if it is a ":=". Is this relevant at all? */
         if( AsmBuffer[i+1]->token == T_DIRECTIVE &&
             AsmBuffer[i+1]->value == T_EQU &&
@@ -2420,7 +2435,7 @@ extern int EvalOperand( int *start_tok, int count, expr_list *result, bool flag_
     int         rc;
     int         num;            // number of tokens in the expression
 
-    DebugMsg(("EvalOperand enter, i=%u, cnt=%u, token=%X\n", i, count, AsmBuffer[i]->token));
+    DebugMsg(("EvalOperand(i=%u [token=%X], cnt=%u, errmsg=%u) enter\n", i, AsmBuffer[i]->token, count, flag_msg ));
     init_expr( result );
     if( AsmBuffer[i]->token == T_FINAL )
         return( NOT_ERROR );

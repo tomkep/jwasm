@@ -24,8 +24,18 @@
 *
 *  ========================================================================
 *
-* Description:  JWasm conditional processing routines
-*
+* Description:  JWasm conditional processing routines. Handles directives
+*               IF[E], ELSE, ENDIF
+*               [ELSE]IFB, [ELSE]IFNB
+*               [ELSE]IFDEF, [ELSE]IFNDEF
+*               [ELSE]IFDIF[I], [ELSE]IFIDN[I]
+*               IF1, IF2
+*               .ERR, .ERRNZ, .ERRE
+*               .ERRB, .ERRNB
+*               .ERRDEF, .ERRNDEF
+*               .ERRDIF[I], .ERRIDN[I]
+*               .ERR1, .ERR2
+*               COMMENT
 ****************************************************************************/
 
 
@@ -38,6 +48,7 @@
 #include "directiv.h"
 
 extern int              get_instruction_position( char *string );
+extern bool SkipMacroMode;
 
 #define    MAX_NESTING  20
 
@@ -67,13 +78,6 @@ static char delim_char;
 
 // fixme char *IfSymbol;        /* save symbols in IFDEF's so they don't get expanded */
 
-/*
- this code runs always. it handles the following:
- COMMENT directive
- inactive -> condition check
- active -> done
-*/
-
 #define is_valid_id_char( ch ) \
     ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
@@ -101,6 +105,12 @@ static int StartComment( char * p )
     return( NOT_ERROR );
 }
 
+/*
+ this code runs always. it handles the following:
+ COMMENT directive
+ inactive -> condition check
+ active -> done
+*/
 
 void conditional_assembly_prepare( char *line )
 /***************************************************/
@@ -343,7 +353,12 @@ int conditional_assembly_directive( int i, int directive )
             if( blocknestlevel > MAX_NESTING ) {
                 blocknestlevel -= 1;
                 AsmError( NESTING_LEVEL_TOO_DEEP );
-                return(ERROR);
+                return( ERROR );
+            }
+            if (SkipMacroMode == TRUE) {
+                /* avoid expression evaluation if in "skipmacro" mode */
+                CurrIfState = BLOCK_DONE;
+                return( NOT_ERROR );
             }
         }
         break;

@@ -39,7 +39,6 @@
 #include <time.h>
 #include "watcom.h"
 #include "bool.h"
-#include "errmsg.h"
 
 /* max_ledata_threshold = 1024 - 6 for the header, -6 for space for fixups */
 
@@ -50,26 +49,32 @@
 #define MAX_LEDATA_THRESHOLD    1024 - 12
 #define MAX_PUB_SIZE            100     // max # of entries in pubdef record
 #define MAX_EXT_LENGTH          1024    // max length ( in chars ) of extdef
+#define MAX_STRUCT_ALIGN        32
 
 #define COFF_SUPPORT 1 /* support COFF output format             */
 #define ELF_SUPPORT  1 /* support ELF output format              */
-#define BIN_SUPPORT  0 /* support BIN output format              */
+#define BIN_SUPPORT  1 /* support BIN output format              */
 #define IMAGERELSUPP 1 /* support IMAGEREL operator (COFF+ELF)   */
 #define SECRELSUPP   1 /* support SECTIONREL operator (COFF+ELF) */
 #define BUILD_TARGET 0 /* support "build target" (obsolete)      */
+
+#define FASTMEM      1 /* fast memory allocation */
+#define OWREGCONV    0 /* support 'r' and 's' suffix for cpu */
+
+
+#include "errmsg.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 259
 #endif
 
+/* function return values */
+
 #define EMPTY                   -2
 #define ERROR                   -1
 #define NOT_ERROR               1
-//#define NOT_EMPTY               2
-//#define EMPTY_U_LONG            0xFFFFFFFF // U_LONG is Unsigned Long
-/* these come back from the jmp() routine */
-#define SCRAP_INSTRUCTION       3
-#define INDIRECT_JUMP           4
+#define SCRAP_INSTRUCTION       3 /* used by jmp() */
+#define INDIRECT_JUMP           4 /* used by jmp() */
 
 #define NULLC                   '\0'
 #define NULLS                   "\0"
@@ -210,6 +215,12 @@ typedef struct global_options {
     uint_8      alignment_default;       /* -Zp option  */
     lang_type   langtype;                /* -Gc|d|z option */
     mod_type    model;                   /* -mt|s|m|c|l|h|f option */
+    uint_8      cpu;                     /* -0|1|2|3|4|5|6 option */
+    uint_8      fpu;                     /* -fp{0|2|3|5|6|c} option */
+#if OWREGCONV
+    bool        register_convention;     /* open watcom reg conv  */
+#endif
+    bool        privileged_mode;         /* p suffix for cpu? */
 } global_options;
 
 extern global_options Options;
@@ -231,11 +242,15 @@ typedef enum {
     OFSSIZE_32
 } ofssize;
 
+typedef enum {
+    SEGORDER_SEQ = 0,
+    SEGORDER_DOSSEG,
+    SEGORDER_ALPHA
+} seg_order;
+
 /* global variables */
 extern struct asm_tok   *AsmBuffer[];   // token buffer
 extern struct asm_code  *CodeInfo;      // input for codegen
-extern int_8            Frame;
-extern uint_8           Frame_Datum;
 extern unsigned int     Parse_Pass;     // assembly pass
 extern unsigned char    Opnd_Count;     // operand count of current instr
 extern bool             Modend;         // end of module is reached
@@ -249,8 +264,8 @@ extern struct asm_sym LineItem;
 extern struct asm_sym WordSize;
 #define CurrWordSize WordSize.offset
 
-extern uint_8           PhaseError;
-extern uint_8           write_to_file;
+extern bool             PhaseError;
+extern bool             write_to_file;
 
 // functions in write.c
 

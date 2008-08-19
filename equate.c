@@ -58,7 +58,7 @@ int DefineConstant( bool redefine )
     asm_sym *sym;
 
     if( AsmBuffer[0]->token != T_ID) {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
         return( ERROR );
     }
     if (sym = CreateConstant( AsmBuffer[0]->string_ptr, 0, 2, redefine ) ) {
@@ -91,6 +91,13 @@ void MakeConstantUnderscored( int token )
 }
 
 #if FASTPASS
+
+/* for FASTPASS, just pass 1 is a full pass, the other passes
+ don't start from scratch and they just assemble the preprocessed
+ source. To be able to restart the assembly process from a certain
+ location within the source, it's necessary to save the value of
+ assembly time variables.
+ */
 
 void SaveEquateState(asm_sym *sym)
 {
@@ -140,7 +147,8 @@ asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
     } else if( sym->state == SYM_TMACRO && redefine == FALSE) {
         /* it's a text macro, valid for EQU only */
         return ( SetTextMacro(sym, name, AsmBuffer[1]->pos + 4));
-    } else if( sym->state != SYM_INTERNAL && sym->state != SYM_EXTERNAL) {
+//    } else if( (sym->state != SYM_INTERNAL && sym->state != SYM_EXTERNAL) ) {
+    } else if( sym->equate == FALSE ) {
         /* it is defined as something else, get out */
         DebugMsg(( "CreateConstant(%s) state=%u, mem_type=%u, value=%X, symbol redefinition\n", name, sym->state, sym->mem_type, sym->value));
         AsmErr( SYMBOL_REDEFINITION, name );

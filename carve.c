@@ -30,7 +30,7 @@
 
 
 #include <stddef.h>
-#include "memutil.h"
+#include "memalloc.h"
 #include "carve.h"
 #include "myassert.h"
 
@@ -53,7 +53,7 @@ static void newBlk( cv_t *cv ) {
 
     blk_t   *newblk;
 
-    newblk = MemAlloc( sizeof( blk_t ) - 1 + cv->blk_top );
+    newblk = AsmAlloc( sizeof( blk_t ) - 1 + cv->blk_top );
     newblk->next = cv->blk_list;
     cv->blk_list = newblk;
     cv->top_elm = newblk->data + cv->blk_top;
@@ -63,7 +63,7 @@ carve_t CarveCreate( size_t elm_size, size_t blk_size ) {
 /*****************************************************/
     cv_t    *cv;
 
-    cv = MemAlloc( sizeof( *cv ) );
+    cv = AsmAlloc( sizeof( *cv ) );
     cv->elm_size = elm_size;
     cv->blk_size = blk_size;
     cv->blk_top = blk_size * elm_size;
@@ -84,10 +84,10 @@ void CarveDestroy( carve_t caller_cv ) {
     cur = cv->blk_list;
     while( cur != NULL ) {
         next = cur->next;
-        MemFree( cur );
+        AsmFree( cur );
         cur = next;
     }
-    MemFree( cv );
+    AsmFree( cv );
 }
 
 void *CarveAlloc( carve_t caller_cv ) {

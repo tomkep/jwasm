@@ -2,15 +2,15 @@
 # this NMAKE makefile creates JWasm Windows and DOS binaries with MSVC.
 
 name = jwasm
-host_OS=nt
 
 DOS=0
 WIN=1
 
 # directory paths to adjust
-# VCDIR - the compiler, linker, include and lib files are assumed to be there
-# SDKDIR - where the Windows include and lib files are
-# HXDIR - for DOS=1 only: to search for stub LOADPE.BIN and lib DKRNL32S.LIB
+# VCDIR  - root directory for VC compiler, linker, include and lib files
+# SDKDIR - root directory for Windows include and lib files
+# HXDIR  - for DOS=1 only: root directory to search for stub LOADPEX.BIN
+#          and libs DKRNL32S.LIB + IMPHLP.LIB
 
 VCDIR  = \msvc8
 SDKDIR = \Microsoft SDK
@@ -26,7 +26,7 @@ OUTD=MSVCD
 OUTD=MSVCR
 !endif
 
-inc_dirs  = -IH -I$(VCDIR)\include -I"$(SDKDIR)\Include"
+inc_dirs  = -IH -I"$(VCDIR)\include" -I"$(SDKDIR)\Include"
 
 TRMEM=0
 
@@ -42,7 +42,7 @@ extra_c_flags = $(c_flags) -Zd -Od -DDEBUG_OUT -DTRMEM
 extra_c_flags = $(c_flags) -Zd -Od -DDEBUG_OUT
 !endif
 !else
-extra_c_flags = $(c_flags) -Ox
+extra_c_flags = $(c_flags) -Ox -DNDEBUG
 !endif
 
 #lflags stuff
@@ -61,7 +61,7 @@ CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(extra_c_flags) -Fo$@
 	 $(CC) $<
 
 proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   \
-           $(OUTD)/direct.obj   $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
+           $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
            $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  \
            $(OUTD)/msgtext.obj  $(OUTD)/macro.obj    $(OUTD)/condasm.obj \
            $(OUTD)/types.obj    $(OUTD)/fpfixup.obj  $(OUTD)/invoke.obj  \
@@ -72,8 +72,9 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   \
            $(OUTD)/insthash.obj $(OUTD)/jumps.obj    $(OUTD)/queues.obj  \
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/omf.obj     \
-           $(OUTD)/queue.obj    $(OUTD)/carve.obj    $(OUTD)/omffixup.obj\
+           $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   \
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  \
+           $(OUTD)/omffixup.obj \
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
 !endif
@@ -81,33 +82,34 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   \
 ######
 
 !if $(WIN)
-TARGET1: $(OUTD)/$(name).exe 
+TARGET1=$(OUTD)\$(name).exe 
 !endif
 !if $(DOS)
-TARGET2=$(OUTD)/$(name)d.exe
+TARGET2=$(OUTD)\$(name)d.exe
 !endif
 
 ALL: $(OUTD) $(TARGET1) $(TARGET2)
 
 $(OUTD):
-	@if not exist $(OUTD) mkdir $(OUTD)
+	@mkdir $(OUTD)
 
-$(OUTD)/$(name).exe : H/opcodes.gh $(proj_obj)
+$(OUTD)\$(name).exe : H/opcodes.gh $(proj_obj)
 	$(linker) @<<
 $(lflagsw) $(proj_obj)
 /LIBPATH:"$(VCDIR)\Lib" /LIBPATH:"$(SDKDIR)\Lib" kernel32.lib /OUT:$@
 <<
 
-$(OUTD)/$(name)d.exe : H/opcodes.gh $(proj_obj)
+$(OUTD)\$(name)d.exe : H/opcodes.gh $(proj_obj)
 	$(linker) @<<
-$(lflagsd) /NOD initw32.obj $(proj_obj)
-dkrnl32s.lib imphlp.lib libc.lib oldnames.lib /stub:LOADPEX.BIN /OUT:$@ /FIXED:NO
-<<    
+$(lflagsd) /NODEFAULTLIB initw32.obj $(proj_obj) /LIBPATH:$(VCDIR)\Lib
+libc.lib oldnames.lib dkrnl32s.lib imphlp.lib /STUB:$(HXDIR)\Bin\LOADPEX.BIN
+/OUT:$@ /FIXED:NO
+<<
 	@$(HXDIR)\bin\patchpe $@
 
 $(OUTD)/msgtext.obj: msgtext.c H/msgtext.h H/usage.h H/banner.h
 	$(CC) msgtext.c
-    
+
 ######
 
 H/opcodes.gh: opcodes.tok

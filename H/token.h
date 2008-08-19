@@ -41,10 +41,11 @@ enum state {
         T_STRING,
         T_DIRECTIVE,
         T_DIRECT_EXPR,
-        T_DEC_NUM,
-        T_OCT_NUM,
-        T_HEX_NUM_0,
-        T_HEX_NUM,
+//        T_DEC_NUM,
+//        T_OCT_NUM,
+//        T_HEX_NUM_0,
+//        T_HEX_NUM,
+//        T_BIN_NUM,
         T_NUM,
         T_FLOAT,
         T_NOOP,                 /* No operation */
@@ -52,7 +53,6 @@ enum state {
         T_POSITIVE,
         T_NEGATIVE,
         T_ID_IN_BACKQUOTES,
-        T_BIN_NUM,
         T_PATH,
         T_UNARY_OPERATOR,
         T_BAD_NUM,
@@ -80,13 +80,16 @@ struct asm_tok {
                 long      value;
                 union {
                     char  *pos;   /* ptr in src line */
-                    long  hvalue; /* for NUM only */
+                    long  hvalue; /* for T_NUM only */
                 };
-                short     xvalue; /* for NUM only */
-                char      rm_byte;/* for RES_ID only */
-                char      opcode; /* for RES_ID + UNARY_OPERATOR */
+                short     xvalue; /* for T_NUM only */
+                char      rm_byte;/* for T_RES_ID only */
+                union {
+                    char  opcode; /* for T_DIRECTIVE, T_RES_ID, T_UNARY_OPERATOR */
+                    char  string_delim; /* for T_STRING only */
+                };
             };
-            unsigned char bytes[16]; /* used by FLOATs +NUMs */
+            unsigned char bytes[16]; /* used by T_FLOAT + T_NUM */
             struct {
                 unsigned long long llvalue;
                 unsigned long long hlvalue;

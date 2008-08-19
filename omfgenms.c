@@ -32,18 +32,17 @@
 #include <string.h>
 #include "globals.h"
 #include "watcom.h"
-#include "womp.h"
+#include "memalloc.h"
+#include "omfrec.h"
 #include "omfprs.h"
 #include "omfio.h"
 #include "omfpc.h"
-#include "memutil.h"
 #include "omfgenms.h"
 #include "genutil.h"
 #include "myassert.h"
 #include "msdbg.h"
-#include "omfrec.h"
 
-STATIC int writeMisc( obj_rec *objr, pobj_state *state ) {
+static int writeMisc( obj_rec *objr, pobj_state *state ) {
 /*
     For 16-bit records which are the same under Intel and MS OMFs
 */
@@ -64,7 +63,7 @@ STATIC int writeMisc( obj_rec *objr, pobj_state *state ) {
     return( 0 );
 }
 
-STATIC int writeMisc32( obj_rec *objr, pobj_state *state ) {
+static int writeMisc32( obj_rec *objr, pobj_state *state ) {
 /*
     For 32-bit records which are the same under Intel and MS OMFs
 */
@@ -90,7 +89,7 @@ STATIC int writeMisc32( obj_rec *objr, pobj_state *state ) {
     return( 0 );
 }
 
-STATIC int writeComent( obj_rec *objr, pobj_state *state ) {
+static int writeComent( obj_rec *objr, pobj_state *state ) {
 
     uint_8  *ptr;
     uint_16 len;
@@ -114,15 +113,12 @@ STATIC int writeComent( obj_rec *objr, pobj_state *state ) {
     return( 0 );
 }
 
-STATIC int writeSegdef( obj_rec *objr, pobj_state *state ) {
+static int writeSegdef( obj_rec *objr, pobj_state *state ) {
 
     OBJ_WFILE   *out;
     int         is32;
     uint_8      acbp;
     uint_8      align;
-#if ( _WOMP_OPT & _WOMP_NASM )
-    obj_offset  patch;
-#endif
 
 /**/myassert( objr != NULL );
 /**/myassert( objr->command == CMD_SEGDEF );
@@ -142,9 +138,7 @@ STATIC int writeSegdef( obj_rec *objr, pobj_state *state ) {
     case SEGDEF_ALIGN_DWORD:    acbp |= ALIGN_DWORD << 5;   break;
     case SEGDEF_ALIGN_4KPAGE:
         acbp |= ALIGN_PAGE;
-#if _WOMP_OPT & _WOMP_EXTRAS
         PrtMsg( WRN|MSG_MS386_NO_4KPAGE );
-#endif
         break;
     default:
 /**/    never_reach();
@@ -153,7 +147,6 @@ STATIC int writeSegdef( obj_rec *objr, pobj_state *state ) {
         acbp |= 0x02;   /* BIG bit */ /* FIXME no support for 2**32 */
     }
     ObjWrite8( out, acbp );
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
     if( align == SEGDEF_ALIGN_ABS ) {
         // absolut segment has frame=word and offset=byte
         // it isn't fixupp physical reference
@@ -161,43 +154,23 @@ STATIC int writeSegdef( obj_rec *objr, pobj_state *state ) {
         ObjWrite16( out, objr->d.segdef.abs.frame );
         ObjWrite8( out, objr->d.segdef.abs.offset );
     }
-#endif
     if( is32 ) {
-        #if ( _WOMP_OPT & _WOMP_NASM )
-            patch = ObjWSkip32( out );
-        #else
-            ObjWrite32( out, objr->d.segdef.seg_length );
-        #endif
+        ObjWrite32( out, objr->d.segdef.seg_length );
     } else {
-        #if ( _WOMP_OPT & _WOMP_NASM )
-            patch = ObjWSkip16( out );
-        #else
-            ObjWrite16( out, objr->d.segdef.seg_length & 0xffff );
-        #endif
+        ObjWrite16( out, objr->d.segdef.seg_length & 0xffff );
     }
-    #if ( _WOMP_OPT & _WOMP_NASM )
-/**/    myassert( objr->data != NULL );
-        memcpy( objr->data, &patch, sizeof patch);
-    #endif
 
     ObjWriteIndex( out, objr->d.segdef.seg_name_idx );
     ObjWriteIndex( out, objr->d.segdef.class_name_idx );
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
     ObjWriteIndex( out, objr->d.segdef.ovl_name_idx );
-#if ( _WOMP_OPT & _WOMP_EXTRAS )
     if( objr->d.segdef.access_valid ) {
         PrtMsg( MSG_MS386_NO_ACCESS );
     }
-#endif
-#else
-    ObjWriteIndex( out, 1 );
-#endif
     ObjWEndRec( out );
     return( 0 );
 }
 
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
-STATIC int writeFixup( obj_rec *objr, pobj_state *state ) {
+static int writeFixup( obj_rec *objr, pobj_state *state ) {
 
     OBJ_WFILE   *out;
     int         is32;
@@ -223,21 +196,6 @@ STATIC int writeFixup( obj_rec *objr, pobj_state *state ) {
         len_written = 0;
         ObjWBegRec( out, is32 ? CMD_FIXU32 : CMD_FIXUP );
         while( walk != NULL && len_written < 1024 - FIX_GEN_MAX ) {
-#if _WOMP_OPT & _WOMP_WOMP
-            if( Can2MsOS2Flat() &&
-                ( walk->loc_method == FIX_OFFSET386
-                || walk->loc_method == FIX_POINTER386 ) ) {
-                /* zap FIXUPs for OS/2 2.0 linker 21-mar-91 AFS */
-                switch( walk->lr.frame ) {
-                case FRAME_SEG:
-                case FRAME_GRP:
-                case FRAME_TARG:
-                    walk->lr.frame = FRAME_GRP;
-                    walk->lr.frame_datum = ObjFLATIndex;
-                    break;
-                }
-            }
-#endif
             len = FixGenFix( walk, buf, is32 ? FIX_GEN_MS386 : FIX_GEN_INTEL );
             ObjWrite( out, buf, len );
             walk = walk->next;
@@ -247,9 +205,8 @@ STATIC int writeFixup( obj_rec *objr, pobj_state *state ) {
     } while( walk != NULL );
     return( 0 );
 }
-#endif
 
-STATIC int writeLedata( obj_rec *objr, pobj_state *state ) {
+static int writeLedata( obj_rec *objr, pobj_state *state ) {
 
     OBJ_WFILE   *out;
     uint_16     save;
@@ -280,9 +237,7 @@ STATIC int writeLedata( obj_rec *objr, pobj_state *state ) {
     return( 0 );
 }
 
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
-
-STATIC int writeLidata( obj_rec *objr, pobj_state *state ) {
+static int writeLidata( obj_rec *objr, pobj_state *state ) {
 
     OBJ_WFILE   *out;
     uint_16     save;
@@ -313,9 +268,7 @@ STATIC int writeLidata( obj_rec *objr, pobj_state *state ) {
     return( 0 );
 }
 
-#endif
-
-STATIC int writeTheadr( obj_rec *objr, pobj_state *state ) {
+static int writeTheadr( obj_rec *objr, pobj_state *state ) {
 
 /**/myassert( objr != NULL );
 /**/myassert( objr->command == CMD_THEADR );
@@ -325,16 +278,12 @@ STATIC int writeTheadr( obj_rec *objr, pobj_state *state ) {
     return( writeMisc( objr, state ) );
 }
 
-STATIC int writeModend( obj_rec *objr, pobj_state *state ) {
+static int writeModend( obj_rec *objr, pobj_state *state ) {
 
     size_t  len;
     char    is32;
-#if _WOMP_OPT & _WOMP_WATFOR
-    uint_8  buf[ 1 ];
-#else
     uint_8  buf[ 1 + FIX_GEN_MAX ];
     uint_8  is_log;
-#endif
 
 /**/myassert( objr != NULL );
 /**/myassert( objr->command == CMD_MODEND );
@@ -343,26 +292,12 @@ STATIC int writeModend( obj_rec *objr, pobj_state *state ) {
     is32 = objr->is_32;
     len = 1;
     buf[0]  = objr->d.modend.main_module ? 0x80 : 0;
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
     if( objr->d.modend.start_addrs ) {
         is_log = objr->d.modend.is_logical ? 1 : 0;
-#if _WOMP_OPT & _WOMP_WOMP
-        if( is_log && Can2MsOS2Flat() ) {
-            switch( objr->d.modend.ref.log.frame ) {
-            case FRAME_SEG:
-            case FRAME_GRP:
-            case FRAME_TARG:
-                objr->d.modend.ref.log.frame = FRAME_GRP;
-                objr->d.modend.ref.log.frame_datum = ObjFLATIndex;
-                break;
-            }
-        }
-#endif
         buf[0] |= 0x40 | is_log;
         len += FixGenRef( &objr->d.modend.ref, is_log, buf + 1,
             is32 ? FIX_GEN_MS386 : FIX_GEN_INTEL );
     }
-#endif
     if( buf[0] == 0 ) {
         is32 = 0;       /* no need for MODE32 in this case */
     }
@@ -372,9 +307,7 @@ STATIC int writeModend( obj_rec *objr, pobj_state *state ) {
     return( 0 );
 }
 
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
-
-STATIC void writeBase( obj_rec *objr, OBJ_WFILE *out ) {
+static void writeBase( obj_rec *objr, OBJ_WFILE *out ) {
 
     uint_16 grp_idx;
     uint_16 seg_idx;
@@ -388,7 +321,7 @@ STATIC void writeBase( obj_rec *objr, OBJ_WFILE *out ) {
     }
 }
 
-STATIC int writeComdat( obj_rec *objr, pobj_state *state ) {
+static int writeComdat( obj_rec *objr, pobj_state *state ) {
 
     OBJ_WFILE   *out;
     uint_8      *ptr;
@@ -427,7 +360,7 @@ STATIC int writeComdat( obj_rec *objr, pobj_state *state ) {
     return( 0 );
 }
 
-STATIC int writePubdef( obj_rec *objr, pobj_state *state ) {
+static int writePubdef( obj_rec *objr, pobj_state *state ) {
 
     int         is32;
     OBJ_WFILE   *out;
@@ -466,7 +399,7 @@ STATIC int writePubdef( obj_rec *objr, pobj_state *state ) {
     return( 0 );
 }
 
-STATIC void writeLinnumData( obj_rec *objr, OBJ_WFILE *out ) {
+static void writeLinnumData( obj_rec *objr, OBJ_WFILE *out ) {
 
     int is32;
 
@@ -511,7 +444,7 @@ STATIC void writeLinnumData( obj_rec *objr, OBJ_WFILE *out ) {
 #endif
 }
 
-STATIC int writeLinnum( obj_rec *objr, pobj_state *state ) {
+static int writeLinnum( obj_rec *objr, pobj_state *state ) {
 
     int         is32;
     OBJ_WFILE   *out;
@@ -529,7 +462,7 @@ STATIC int writeLinnum( obj_rec *objr, pobj_state *state ) {
     return( 0 );
 }
 
-STATIC int writeLinsym( obj_rec *objr, pobj_state *state ) {
+static int writeLinsym( obj_rec *objr, pobj_state *state ) {
 
     int         is32;
     OBJ_WFILE   *out;
@@ -548,9 +481,7 @@ STATIC int writeLinsym( obj_rec *objr, pobj_state *state ) {
     return( 0 );
 }
 
-#endif
-
-STATIC const pobj_list myFuncs[] = {
+static const pobj_list myFuncs[] = {
     { CMD_THEADR,       POBJ_WRITE_PASS, writeTheadr },
     { CMD_COMENT,       POBJ_WRITE_PASS, writeComent },
     { CMD_MODEND,       POBJ_WRITE_PASS, writeModend },

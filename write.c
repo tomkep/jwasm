@@ -42,7 +42,6 @@
 #include "directiv.h"
 #include "proc.h"
 #include "expreval.h"
-#include "fatal.h"
 #include "hll.h"
 #include "labels.h"
 #include "macro.h"
@@ -60,12 +59,16 @@
 #if ELF_SUPPORT
 #include "elf.h"
 #endif
+#if BIN_SUPPORT
+#include "bin.h"
+#endif
 
 extern int              CheckForOpenConditionals( void );
 extern void             set_cpu_parameters( void );
 extern void             set_fpu_parameters( void );
 extern void             CheckProcOpen( void );
 extern void             CmdlParamsInit( int );
+extern void             SortSegments( void );
 
 // a Win32 external (to get timer res in ms)
 
@@ -81,8 +84,9 @@ extern pobj_state       pobjState;      // object file information
 
 extern bool             in_prologue;
 
-struct asm_sym LineItem = {0,"@Line", NULL, 0};
-struct asm_sym WordSize = {0,"@WordSize", NULL, 0};
+/* fields: next, name, segment, offset/value */
+struct asm_sym LineItem = {NULL,"@Line", NULL, 0};
+struct asm_sym WordSize = {NULL,"@WordSize", NULL, 0};
 
 static uint_32          BytesTotal;     // total of ledata bytes generated
 unsigned int            Parse_Pass;     // phase of parsing
@@ -101,6 +105,7 @@ void preprocessor_output( void );
 mod_state modstate;
 line_item *LineStoreHead;
 line_item *LineStoreTail;
+line_item *LineStoreCurr;
 bool StoreState;
 bool UseSavedState;
 uint_32 list_pos;
@@ -128,7 +133,7 @@ void AddLinnumDataRef( void )
         if( lastLineNumber != line_num ) {
             curr = AsmAlloc( sizeof( struct line_num_info ) );
             curr->number = line_num;
-            curr->offset = GetCurrAddr();
+            curr->offset = GetCurrOffset();
             curr->srcfile = get_curr_srcfile();
 
             AddLinnumData( curr );
@@ -140,7 +145,6 @@ void AddLinnumDataRef( void )
 #if FASTPASS
 void SaveState( void )
 {
-    line_item *p;
     int i;
     DebugMsg(("SaveState enter\n"));
     StoreState = TRUE;
@@ -154,14 +158,14 @@ void SaveState( void )
     AssumeSaveState();
 
     i = strlen(CurrString);
-    p = AsmAlloc(i+1+sizeof(line_item));
-    p->next = NULL;
-    strcpy(p->line, CurrString);
+    LineStoreCurr = AsmAlloc(i+1+sizeof(line_item));
+    LineStoreCurr->next = NULL;
+    strcpy(LineStoreCurr->line, CurrString);
 
     if (AsmFiles.file[LST])
         list_pos = ftell(AsmFiles.file[LST]);
 
-    LineStoreHead = LineStoreTail = p;
+    LineStoreHead = LineStoreTail = LineStoreCurr;
     DebugMsg(("SaveState: curr line=>%s<\n", CurrString));
 }
 
@@ -205,16 +209,43 @@ static void RestoreState( void )
 void StoreLine( char * string )
 {
     int i;
-    line_item *p;
     i = strlen(string);
-    p = AsmAlloc(i+1+sizeof(line_item));
-    p->next = NULL;
-    p->lineno = LineNumber;
-    strcpy(p->line, string);
-    LineStoreTail->next = p;
-    LineStoreTail = p;
+    LineStoreCurr = AsmAlloc(i+1+sizeof(line_item));
+    LineStoreCurr->next = NULL;
+    LineStoreCurr->lineno = LineNumber;
+    strcpy(LineStoreCurr->line, string);
+    LineStoreTail->next = LineStoreCurr;
+    LineStoreTail = LineStoreCurr;
 }
 
+void InputQueueLineEx( char *buffer, bool index )
+{
+    int i = strlen(buffer);
+    line_item *p;
+
+    DebugMsg(( "InputQueueLineEx(%u): >%s<\n", Parse_Pass+1, buffer ));
+
+    /* special handling only if the saved state is used! */
+    if ( Parse_Pass == PASS_1 || UseSavedState == FALSE ) {
+        if (index == 0 && StoreState) {
+            *(LineStoreCurr->line) = ';';
+        }
+        InputQueueLine( buffer );
+        return;
+    }
+
+    p = AsmAlloc(i+1+sizeof(line_item));
+    p->lineno = LineNumber;
+    strcpy(p->line, buffer);
+    if (index == 0) {
+        p->next = LineStoreCurr->next;
+        LineStoreCurr->next = p;
+        *(LineStoreCurr->line) = ';';
+    } else {
+        p->next = LineStoreCurr->next->next;
+        LineStoreCurr->next->next = p;
+    }
+}
 #endif
 
 void OutputByte( unsigned char byte )
@@ -272,20 +303,31 @@ void OutputDataByte( unsigned char byte )
     OutputByte( byte );
 }
 
-// change current position in current segment without to write anything
+// set current position in current segment without to write anything
 
-int ChangeCurrentLocation( bool relative, int_32 value, bool select_data )
+int SetCurrOffset( int_32 value, bool relative, bool select_data )
 /************************************************************************/
 {
-    if( CurrSeg == NULL )
+    if( CurrSeg == NULL ) {
+        AsmError(MUST_BE_IN_SEGMENT_BLOCK);
         return( ERROR );
+    }
 
     if( relative ) {
-        value += GetCurrAddr();
+        value += GetCurrOffset();
     }
 
     if (Options.output_format == OFORMAT_OMF)
         omf_FlushCurrSeg( );
+#if BIN_SUPPORT
+    else if (Options.output_format == OFORMAT_BIN) {
+        if (CurrSeg->seg->e.seginfo->current_loc == 0 &&
+            CurrSeg->seg->e.seginfo->initial == FALSE) {
+            CurrSeg->seg->e.seginfo->start_loc = value;
+            CurrSeg->seg->e.seginfo->initial = TRUE;
+        }
+    }
+#endif
     if( select_data )
         if (Options.no_comment_data_in_code_records == FALSE)
             omf_OutSelect( TRUE );
@@ -372,8 +414,10 @@ static int WriteHeader( bool initial )
             omf_write_header();
             if( Options.no_dependencies == FALSE)
                 omf_write_autodep();
-            if( ModuleInfo.dosseg )
+            if( ModuleInfo.segorder == SEGORDER_DOSSEG )
                 omf_write_dosseg();
+            else if( ModuleInfo.segorder == SEGORDER_ALPHA )
+                SortSegments();
             omf_write_lib();
             omf_write_lnames();
             seg_pos = tell(pobjState.file_out->fh);
@@ -410,7 +454,14 @@ static int WriteHeader( bool initial )
 #endif
 #if BIN_SUPPORT
     case OFORMAT_BIN:
-        /* nothing to do */
+        /* check if PROTOs or externals are used */
+        for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next )
+            if( curr->sym.used == TRUE && curr->e.procinfo->defined == FALSE )
+                break;
+        if (curr || Tables[TAB_EXT].head) {
+            AsmError(FORMAT_DOESNT_SUPPORT_EXTERNALS);
+            return( ERROR );
+        }
         break;
 #endif
 #ifdef DEBUG_OUT
@@ -459,16 +510,15 @@ static unsigned long OnePass( char *string )
 #if FASTPASS
     StoreState = FALSE;
     if (Parse_Pass > PASS_1 && UseSavedState == TRUE) {
-        line_item *p;
         RestoreState();
-        p = LineStoreHead;
-        while (p && EndDirectiveFound == FALSE) {
-            strcpy(string, p->line);
+        LineStoreCurr = LineStoreHead;
+        while (LineStoreCurr && EndDirectiveFound == FALSE) {
+            strcpy(string, LineStoreCurr->line);
             DebugMsg(("AsmLine(%u): >%s<\n", Parse_Pass+1, string));
-            LineNumber = p->lineno;
-            p = p->next;
+            LineNumber = LineStoreCurr->lineno;
             if (Token_Count = Tokenize(string, 0))
                 ParseItems();
+            LineStoreCurr = LineStoreCurr->next;
         }
         return( BytesTotal);
     }
@@ -638,7 +688,7 @@ void WriteObjModule( void )
                     continue;
                 for (i = 0, j = 0, sym = dir->e.seginfo->labels;sym;sym = (asm_sym *)((dir_node *)sym)->next) {
                     i++;
-                    for (fix = sym->fixup;fix;fix = fix->next,j++);
+                    for ( fix = sym->fixup; fix ; fix = fix->next1, j++ );
                 }
                 DebugMsg(("WriteObjModule: segm=%s, labels=%u forward refs=%u\n", dir->sym.name, i, j));
             }

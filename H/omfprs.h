@@ -30,8 +30,9 @@
 ****************************************************************************/
 
 
-#ifndef PRSOBJ_H
-#define PRSOBJ_H    1
+#ifndef OMFPRS_H
+#define OMFPRS_H    1
+
 #include <stddef.h>
 #include "omfrec.h"
 #include "watcom.h"

@@ -31,7 +31,7 @@
 #ifndef OPERANDS_H
 #define OPERANDS_H
 
-#if defined( __WATCOMC__ )
+#if 1 // defined( __WATCOMC__ )
 
 enum operand_type {
     OP_NONE     = 0,
@@ -100,8 +100,7 @@ enum operand_type {
     OP_ST_REG   = 0x40000000,
     OP_STI      = ( OP_ST | OP_ST_REG ),
 
-    OP_SPECIAL  = 0x80000000      /* this includes the following cases, most
-                                       of which are used in asmscan */
+    OP_SPECIAL  = 0x80000000      /* rm_byte provides further info */
 };
 
 typedef enum operand_type OPNDTYPE;
@@ -174,8 +173,7 @@ typedef enum operand_type OPNDTYPE;
 #define OP_ST_REG   0x40000000
 #define OP_STI      ( OP_ST | OP_ST_REG )
 
-#define OP_SPECIAL  0x80000000      /* this includes the following cases, most
-                                       of which are used in asmscan */
+#define OP_SPECIAL  0x80000000
 
 typedef unsigned_32 OPNDTYPE;
 
@@ -190,88 +188,18 @@ enum operand3_type {
     OP3_HID  = 0x08
 };
 
-/* we need some kind of magic comparison fcn. to handle these
-   this is ok, since they are not used in the parser, and rarely at all
+/*
+ for OP_SPECIAL, the specialtype field will contain further info:
  */
 
-/* make all of these things OP_SPECIAL, and then add another value to
-   differentiate between them */
-/* store OP_SPECIAL in operand slot, this const. somewhere else - RM_BYTE slot */
-#define OP_LABEL            0x1
-#define OP_REGISTER         0x2
-#define OP_RES_ID           0x4
-#define OP_DIRECTIVE        0x8
-#define OP_DIRECT_EXPR      0x10
-#define OP_ARITHOP          0x20
-#define OP_PTR_MODIFIER     0x40
-#define OP_UNARY_OPERATOR   0x80
-
-/* fix these comments up -- they are from the old stuff */
- /*     OP_NONE         no operands */
- /*     OP_R            register 8/16/32-bit */
- /*     OP_R8           8-bit register */
- /*     OP_CL           CL register */
- /*     OP_AL           AL register ( 8-bit accumulator ) */
- /*     OP_A            accumulator ( 8/16/32-bit ) */
- /*     OP_AX           AX register ( 16-bit accumulator ) */
- /*     OP_DX           DX register ( port )*/
- /*     OP_R16          16-bit register */
- /*     OP_R1632        16/32-bit register */
- /*     OP_EAX          EAX register ( 32-bit accumulator ) */
- /*     OP_R32          32-bit register */
- /*     OP_MMX          MMX 64-bit register */
- /*     OP_XMM          XMM 128-bit register */
-
- /*     OP_M            memory, 8/16/32-bit */
- /*     OP_M8           memory, 8-bit */
- /*                     difference between this and OP_M_B is that OP_M8 */
- /*                     assume the address mode is 8-bit if the user has */
- /*                     not specified the memory mode. On the other hand, */
- /*                     OP_M_B will treat that as error. */
- /*     OP_M16          memory, 16-bit */
- /*                     difference between this and OP_M_W is that OP_M16 */
- /*                     assume the address mode is 16-bit if the user has */
- /*                     not specified the memory mode. On the other hand, */
- /*                     OP_M_W will treat that as error. */
- /*     OP_M32          memory, 32-bit */
- /*                     difference between this and OP_M_DW is that OP_M32 */
- /*                     assume the address mode is 32-bit if the user has */
- /*                     not specified the memory mode. On the other hand, */
- /*                     OP_M_DW will treat that as error. */
- /*     OP_M8_R8        8-bit memory or 8-bit register */
- /*     OP_M16_R16      16-bit memory or 16-bit register */
- /*     OP_M32_R32      32-bit memory or 32-bit register */
- /*     OP_M_B          memory ptr to byte */
- /*     OP_M_W          memory ptr to word */
- /*     OP_M_DW         memory ptr to dword */
- /*     OP_M_FW         memory ptr to fword, pword */
- /*     OP_M_QW         memory ptr to qword */
- /*     OP_M_TB         memory ptr to tbyte */
- /*     OP_M_OW         memory ptr to oword */
-
- /*     OP_I8           immediate, 8 bit */
- /*     OP_I_1          immediate, 8 bit, value = 1 */
- /*     OP_I_3          immediate, 8 bit, value = 3 */
- /*     OP_I8_U         immediate, unsigned 8 bit, value between 0 - 255 */
- /*     OP_I            immediate, 8/16/32 bit */
- /*     OP_I16          immediate, 16 bit */
- /*     OP_I32          immediate, 32 bit */
- /*     OP_J32          immediate, 32 bit (for direct far calls/jmps) */
- /*     OP_J48          immediate, 48 bit (for direct far calls/jmps) */
-
- /*     OP_CR           Control Register */
- /*     OP_DR           Debug Register */
- /*     OP_TR           Test Register */
- /*     OP_SR           segreg, 16-bit */
- /*     OP_SR3          segreg, include 16/32 bit */
- /*     OP_ST           x87 Stack Top */
- /*     OP_STI          x87 registers in stack */
-
- /*     OP_LABEL        Label for JMP, CALL, etc */
- /*     OP_REGISTER     designates a reserved register name, eg. AX */
- /*     OP_RES_ID       designates a reserved id, eg. BYTE, WORD */
- /*     OP_DIRECTIVE    designates a directive */
- /*     OP_DIRECT_EXPR  designates a directive which has an expression */
- /*     OP_ARITHOP      arithmetic operator */
+enum special_type {
+ OP_UNUSED = 0, /* word removed by OPTION NOKEYWORD */
+ OP_REGISTER,
+ OP_RES_ID,
+ OP_DIRECTIVE,
+ OP_ARITHOP,
+ OP_TYPE,
+ OP_UNARY_OPERATOR
+};
 
 #endif

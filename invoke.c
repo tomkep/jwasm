@@ -320,7 +320,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
 
             if (asize > pushsize) {
                 char dw = ' ';
-                if (( CodeInfo->info.cpu & P_CPU_MASK ) >= P_386 ) {
+                if (( curr_cpu & P_CPU_MASK ) >= P_386 ) {
                     pushsize = 4;
                     dw = 'd';
                 }
@@ -405,7 +405,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
                     sprintf(buffer, " push %s", fullparam);
                 }
             } else {
-                if ((pushsize == 2) || (( CodeInfo->info.cpu & P_CPU_MASK ) >= P_386 ))
+                if ((pushsize == 2) || (( curr_cpu & P_CPU_MASK ) >= P_386 ))
                     sprintf(buffer, " push %s", fullparam);
                 else {
                     sprintf(buffer, " push word ptr %s+2", AsmBuffer[i]->string_ptr);
@@ -432,7 +432,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool * eaxused)
                 if (asize != psize)
                     if (psize == 2)
                         qual = "word ptr ";
-                    else if (( CodeInfo->info.cpu & P_CPU_MASK ) >= P_386 )
+                    else if (( curr_cpu & P_CPU_MASK ) >= P_386 )
                         qual = "dword ptr ";
                     else {
                         sprintf(buffer, " push HIGHWORD %s", fullparam);

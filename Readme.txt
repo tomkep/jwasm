@@ -9,7 +9,7 @@
     - JWASMnnBl.zip: binary for Linux
     - JWASMnnS.zip : JWasm's source code
 
-    JWasm natively supports output formats OMF, COFF and ELF.
+    JWasm natively supports output formats BIN, OMF, COFF and ELF.
 
 
     2. Requirements
@@ -29,6 +29,11 @@
 
     Run JWasm with parameter -? or -h to make it display the options it
     will understand. Some additional explanations:
+
+    -bin: if output format BIN is selected, the extension of the output
+     module's default filename will be changed from .OBJ to .BIN. The
+     contents of the file are just the raw data bytes emitted by the
+     assembler, no header, relocations or symbol tables are generated.
 
     -FPi: "inline FP instructions with emulation". This will make JWasm
      to create fixups for floating-point instructions if code is 16bit.
@@ -72,14 +77,11 @@
 
     The binary packages contain samples in subdirectory SAMPLES.
 
-    Some of the samples for Win32 will use include files from MASM32.
-    JWasm should be compatible with WINDOWS.INC of MASM32, so there's no
-    problem. However, in case you're worried about some odd claims in
-    the MASM32 license: JWasm is also compatible with Win32Inc, a Public
-    Domain version of Win32 include files in MASM syntax.
+    As far as programming for Win32 is concerned: JWasm should be 
+    compatible with recent versions of both Win32Inc and Masm32.
 
-    To link JWasm's output to an executable binary, select one of the
-    following linkers:
+    For output formats other than BIN, JWasm's output has to be linked to
+    create an executable binary. Select one of the following linkers:
 
     Format  Linker    Comment
     -------------------------------------------------------------
@@ -134,6 +136,9 @@
     - Type "coerces" for DWORD data items defined in a 32bit segment are
       ignored by Masm, i.e., "dd far16 ptr <symbol>" will generate a
       near32 fixup instead of a far16 one.
+    - if the ALIGN directive has to add 5 bytes in 32bit code segments, 
+      Masm includes an "add eax,0" opcode, which isn't a no-op because
+      flags are modified.
 
     It's slightly dangerous to fix old MASM bugs, since some code might
     work only if the bugs exists. So no, JWasm won't achieve 100% MASM
@@ -150,6 +155,7 @@
       give the size of <type> as a constant.
     - INVOKE doesn't support the Watcom C calling convention.
     - -Zd option works with OMF output format only.
+    - for JWasm, OPATTR without an operand will give a syntax error.
 
     These Masm features aren't implemented yet:
 
@@ -162,7 +168,6 @@
       - EXPR16
       - READONLY
     - .RADIX
-    - .ALPHA
     - types SQWORD, MMWORD, XMMWORD (Masm v8+)
     - operators LOW32, HIGH32 (Masm v8+)
 

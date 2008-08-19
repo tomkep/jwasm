@@ -30,15 +30,14 @@
 
 
 #include <string.h>
-#include "womp.h"
-#include "memutil.h"
+#include "memalloc.h"
 #include "omfrec.h"
 #include "omfpc.h"
 #include "genutil.h"
 #include "myassert.h"
 #include "carve.h"
 
-STATIC carve_t myCarver;
+static carve_t myCarver;
 
 void ObjRecInit( void ) {
 /*********************/
@@ -70,7 +69,6 @@ void ObjKillRec( obj_rec *objr ) {
     if( objr->free_data && objr->data != NULL ) {
         ObjDetachData( objr );
     }
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
     switch( objr->command ) {
     case CMD_FIXUP:
         {
@@ -92,7 +90,7 @@ void ObjKillRec( obj_rec *objr ) {
 
             lines = objr->d.linnum.lines;
             if( lines != NULL ) {
-                MemFree( lines );
+                AsmFree( lines );
             }
         }
         break;
@@ -100,18 +98,17 @@ void ObjKillRec( obj_rec *objr ) {
     case CMD_STATIC_PUBDEF:
         if( objr->d.pubdef.free_pubs ) {
 /**/        myassert( objr->d.pubdef.pubs != NULL );
-            MemFree( objr->d.pubdef.pubs );
+            AsmFree( objr->d.pubdef.pubs );
         }
         break;
     }
-#endif
     CarveFree( myCarver, objr );
 }
 
 void ObjAllocData( obj_rec *objr, uint_16 len ) {
 /*********************************************/
 /**/myassert( objr->data == NULL );
-    objr->data = MemAlloc( len );
+    objr->data = AsmAlloc( len );
     objr->length = len;
     objr->free_data = 1;
 }
@@ -129,7 +126,7 @@ void ObjDetachData( obj_rec *objr ) {
 /**/myassert( objr != NULL );
 /**/myassert( objr->data != NULL );
     if( objr->free_data ) {
-        MemFree( objr->data );
+        AsmFree( objr->data );
     }
     objr->data = NULL;
     objr->length = 0;
@@ -150,8 +147,6 @@ uint_16 ObjGet16( obj_rec *objr ) {
     return( ReadU16( p ) );
 }
 
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
-
 uint_32 ObjGet32( obj_rec *objr ) {
 /*******************************/
     uint_8  *p;
@@ -162,6 +157,7 @@ uint_32 ObjGet32( obj_rec *objr ) {
     return( ReadU32( p ) );
 }
 
+#if 0
 uint_32 ObjGetEither( obj_rec *objr ) {
 /***********************************/
 /**/myassert( objr != NULL );
@@ -171,6 +167,7 @@ uint_32 ObjGetEither( obj_rec *objr ) {
         return( (uint_32)ObjGet16( objr ) );
     }
 }
+#endif
 
 uint_16 ObjGetIndex( obj_rec *objr ) {
 /**********************************/
@@ -184,8 +181,6 @@ uint_16 ObjGetIndex( obj_rec *objr ) {
     }
     return( index );
 }
-
-#endif
 
 uint_8 *ObjGet( obj_rec *objr, uint_16 len ) {
 /******************************************/

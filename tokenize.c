@@ -55,9 +55,20 @@ bool expansion;
 #define is_valid_id_char( ch ) \
     ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
+static struct asm_tok   tokens[MAX_TOKEN];
+struct asm_tok          *AsmBuffer[MAX_TOKEN];  // buffer to store tokens
+
 #if defined( _STANDALONE_ )
 
 extern global_options   Options;
+
+void InitTokenBuffer( )
+{
+    int         count;
+    for( count = 0; count < MAX_TOKEN; count ++ ) {
+        AsmBuffer[count] = &tokens[count];
+    }
+}
 
 // get instruction string
 
@@ -172,6 +183,7 @@ static int get_string( struct asm_tok *buf, char **input, char **output )
     buf->string_ptr = optr;
 
     symbol_o = *iptr;
+    buf->string_delim = symbol_o;
 
     buf->token = T_STRING;
     switch( symbol_o ) {
@@ -212,6 +224,7 @@ static int get_string( struct asm_tok *buf, char **input, char **output )
         *output = optr;
         return( NOT_ERROR );
     }
+
     if (symbol_o != '<')   /* skip '<>' delimiters, don't skip the others */
         *(optr)++ = symbol_o;
 
@@ -238,7 +251,7 @@ static int get_string( struct asm_tok *buf, char **input, char **output )
                 *(optr)++ = '\0';
                 (iptr)++; /* skip the closing delimiter */
                 buf->value = count;
-                break;
+                break; /* exit loop */
             }
         } else if( symbol_c && *iptr == symbol_c ) {
             if( level ) {
@@ -252,7 +265,7 @@ static int get_string( struct asm_tok *buf, char **input, char **output )
                 *(optr)++ = '\0';
                 (iptr)++; /* skip the closing delimiter */
                 buf->value = count;
-                break;
+                break; /* exit loop */
             }
 #if 1
             /*
@@ -299,14 +312,15 @@ static int get_string( struct asm_tok *buf, char **input, char **output )
             if ((symbol_o == '<') || (symbol_o == '{')) {
                 /* test if last nonspace character was a comma */
                 /* if yes, get next line and continue string scan */
-                if (*(optr-1) == ',') {
-                    if( ReadTextLine( buffer, MAX_LINE_LEN ) == NULL )
-                        return( ERROR );
+                if (*(optr-1) == ',' &&
+                    (ReadTextLine( buffer, MAX_LINE_LEN ) != NULL )) {
                     iptr = buffer;
                     /* skip leading spaces */
                     while (isspace(*(iptr))) (iptr)++;
                     continue;
                 }
+                AsmError( MISSING_ANGLE_BRACKET_OR_BRACE_IN_LITERAL );
+                return( ERROR );
             }
             *optr = '\0';
             *input = iptr;
@@ -523,14 +537,13 @@ static int get_id_in_backquotes( struct asm_tok *buf, char **input, char **outpu
     return( NOT_ERROR );
 }
 
-static int get_id( unsigned int *buf_index, char **input, char **output )
+// get an ID. will always return NOT_ERROR.
+
+static int get_id( struct asm_tok *buf, char **input, char **output )
 /***********************************************************************/
 {
-    struct asm_tok  *buf;
     char            cur_char;
     int             count;
-
-    buf = AsmBuffer[ *buf_index ];
 
     buf->string_ptr = *output;
     buf->pos = *input;
@@ -573,39 +586,41 @@ static int get_id( unsigned int *buf_index, char **input, char **output )
 //  DebugMsg(("found item >%s< in instruction table, rm=%X\n", buf->string_ptr, AsmOpTable[count].rm_byte));
     buf->value = AsmOpTable[count].token;
 
-    /* OP_SPECIAL might be:
-     OP_REGISTER, OP_RES_ID, OP_UNARY_OPERATOR, OP_DIRECTIVE,
-     OP_DIRECT_EXPR, OP_ARITHOP
-     OP_PTR_MODIFIER might be combined with OP_RES_ID (for DWORD, ...)
-     */
-
     if( AsmOpTable[count].opnd_type[OPND1] != OP_SPECIAL ) {
         buf->token = T_INSTRUCTION;
         return( NOT_ERROR );
     }
 
-    if( AsmOpTable[count].rm_byte & OP_REGISTER ) {
+    /* <opcode> contains further infos: register number for OP_REGISTER,
+     flags for OP_DIRECTIVE, operator precedence for OP_UNARY_OPERATOR, ...
+     */
+    buf->opcode = AsmOpTable[count].opcode;
+
+    switch (AsmOpTable[count].specialtype) {
+    case OP_REGISTER:
         buf->token = T_REG;
-    } else if( AsmOpTable[count].rm_byte & OP_RES_ID ) {
+        break;
+    case OP_RES_ID: /* DB, DD, DF, DQ, DT, DW, DUP, PTR, ADDR, FLAT, C, BASIC, PASCAL, ... */
+    case OP_TYPE:   /* BYTE, WORD, FAR, NEAR, FAR16, NEAR32,    ... */
         buf->token = T_RES_ID;
         buf->rm_byte = AsmOpTable[count].rm_byte;
-        buf->opcode = AsmOpTable[count].opcode;
-    } else if( AsmOpTable[count].rm_byte & OP_UNARY_OPERATOR ) {
+        break;
+    case OP_UNARY_OPERATOR: /* OFFSET, LOW, HIGH, LOWWORD, HIGHWORD, ... */
         buf->token  = T_UNARY_OPERATOR;
-        buf->opcode = AsmOpTable[count].opcode;
-    } else if( AsmOpTable[count].rm_byte & OP_DIRECTIVE ) {
+        break;
+    case OP_DIRECTIVE:
         buf->token = T_DIRECTIVE;
-        buf->opcode = AsmOpTable[count].opcode;
         if (g_opcode == 0) {
             g_opcode = AsmOpTable[count].opcode;
         }
-    } else if( AsmOpTable[count].rm_byte & OP_DIRECT_EXPR ) {
-        buf->token = T_DIRECT_EXPR;
-    } else if( AsmOpTable[count].rm_byte & OP_ARITHOP ) {
+        break;
+    case OP_ARITHOP: /* GE, GT, LE, LT, EQ, NE, MOD */
         buf->token = T_INSTRUCTION;
-    } else {
-        /* the keyword has been removed by OPTION NOKEYWORD */
+        break;
+    default:
+        /* OP_UNUSED, the keyword has been removed by OPTION NOKEYWORD */
         buf->token = T_ID;
+        break;
     }
     return( NOT_ERROR );
 }
@@ -724,13 +739,13 @@ static int get_inc_path( unsigned int *buf_index, char **input, char **output )
 #endif
 
 // get one token
+// return values: NOT_ERROR, ERROR, EMPTY
 
-static int GetToken(unsigned int * pi, char ** input, char ** output)
+static int GetToken(unsigned int buf_index, char ** input, char ** output)
 {
     int rc;
     char * iptr = *input;
     char * optr = *output;
-    unsigned int buf_index = *pi;
 
 //  while( isspace( *iptr ) )  iptr++;
 
@@ -739,7 +754,7 @@ static int GetToken(unsigned int * pi, char ** input, char ** output)
             return( ERROR );
         }
     } else if( is_valid_id_char( *iptr ) || *iptr == '\\') {
-        if( get_id( &buf_index, &iptr, &optr ) == ERROR ) {
+        if( get_id( AsmBuffer[buf_index], &iptr, &optr ) == ERROR ) {
             return( ERROR );
         }
         /* allow names at pos 0 beginning with '.' and also
@@ -748,7 +763,7 @@ static int GetToken(unsigned int * pi, char ** input, char ** output)
                (buf_index == 0 ||
                 (buf_index > 1 && AsmBuffer[buf_index-1]->token == T_COLON) ||
                 ((0 == memicmp(iptr+1,"type",4) && is_valid_id_char(*(iptr+5)) == FALSE)))) {
-        if( get_id( &buf_index, &iptr, &optr ) == ERROR ) {
+        if( get_id( AsmBuffer[buf_index], &iptr, &optr ) == ERROR ) {
             return( ERROR );
         }
     } else if( *iptr == '`' ) {
@@ -761,7 +776,6 @@ static int GetToken(unsigned int * pi, char ** input, char ** output)
             return( rc );
         }
     }
-    *pi = buf_index;
     *input  = iptr;
     *output = optr;
     return (NOT_ERROR);
@@ -815,10 +829,11 @@ int Tokenize( char *string, int index )
             *ptr = '\0';
             break;
         }
-        rc = GetToken(&buf_index, &ptr, &output_ptr);
+        rc = GetToken( buf_index, &ptr, &output_ptr);
         if (rc == ERROR) {
-            AsmError( SYNTAX_ERROR );
-            return (ERROR);
+            // AsmError( SYNTAX_ERROR );
+            buf_index = 0; /* skip this line */
+            break;
         } else if (rc == EMPTY)
             break;
 
@@ -840,6 +855,7 @@ int Tokenize( char *string, int index )
     }
 
     AsmBuffer[buf_index]->token = T_FINAL;
+    AsmBuffer[buf_index]->pos = ptr;
     *output_ptr='\0';
     output_ptr++;
     CurrStringEnd = output_ptr;

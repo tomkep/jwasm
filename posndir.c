@@ -38,29 +38,36 @@
 
 #include "myassert.h"
 
-typedef unsigned char   byte;
-
-extern int              ChangeCurrentLocation( bool, int_32, bool );
-
-static byte NopList16[] = {
+static uint_8 NopList16[] = {
     3,                  /* objlen of first NOP pattern */
     0x2E, 0x8b, 0xc0,   /* MOV AX,AX */
     0x89, 0xc0,         /* MOV AX,AX */
     0x90                /* NOP */
 };
 
-static byte NopList32[] = {
-    6,
-    0x8d,0x80,0x00,0x00,0x00,0x00,  // lea     eax,+00000000H[eax]
-    0x8d,0x40,0x00,                 // lea     eax,+00H[eax]
+/* 32bit alignment fillers.
+ For 5 bytes, Masm uses "add eax,dword ptr 0",
+ which modifies the flags!
+ */
+
+static uint_8 NopList32[] = {
+    7,
+    0x8d,0xa4,0x24,0,0,0,0,         // lea     esp,[esp+00000000]
+    0x8d,0x80,0,0,0,0,              // lea     eax,[eax+00000000]
+#if 0
+    0x8d,0x40,0x00,                 // lea     eax,[eax+00]
     0x8b,0xc9,                      // mov     ecx,ecx
-    0x8d,0x44,0x20,0x00,            // lea     eax,+00H[eax+no_index_reg]
-    0x8d,0x40,0x00,                 // lea     eax,+00H[eax]
-    0x8b,0xc0,                      // mov     eax,eax
+#else
+    0x2e,0x8d,0x44,0x20,0x00,       // lea     eax,cs:[eax+no_index_reg+00H]
+#endif
+    0x8d,0x44,0x20,0x00,            // lea     eax,[eax+no_index_reg+00H]
+    0x8d,0x40,0x00,                 // lea     eax,[eax+00H]
+    0x8b,0xff,                      // mov     edi,edi
     0x90                            // nop
 };
 
-static byte *NopLists[] = { NopList16, NopList32 };
+
+static uint_8 *NopLists[] = { NopList16, NopList32 };
 
 int OrgDirective( int i )
 /***********************/
@@ -80,7 +87,10 @@ int OrgDirective( int i )
             AsmError(SYNTAX_ERROR);
             return(ERROR);
         }
-        return( ChangeCurrentLocation( FALSE, opndx.value, FALSE ) );
+        if( StructDef.struct_depth != 0 )
+            return( SetStructCurrentOffset( opndx.value ) );
+
+        return( SetCurrOffset( opndx.value, FALSE, FALSE ) );
     case EXPR_ADDR:
         if (opndx.indirect || opndx.stackbased)
             break;
@@ -88,7 +98,10 @@ int OrgDirective( int i )
             AsmError(SYNTAX_ERROR);
             return(ERROR);
         }
-        return( ChangeCurrentLocation( FALSE, opndx.sym->offset + opndx.value, FALSE ) );
+        /* ORG inside a struct requires a CONST value */
+        if( StructDef.struct_depth != 0 )
+            break;
+        return( SetCurrOffset( opndx.sym->offset + opndx.value, FALSE, FALSE ) );
     default:
         break;
     }
@@ -142,8 +155,9 @@ int AlignDirective( uint_16 directive, int i )
 
     switch( directive ) {
     case T_ALIGN:
-        if ((EvalOperand( &j, Token_Count, &opndx, TRUE ) != ERROR) &&
-            (opndx.type == EXPR_CONST)) {
+        if ( EvalOperand( &j, Token_Count, &opndx, TRUE ) == ERROR )
+            return( ERROR );
+        if ( opndx.type == EXPR_CONST && opndx.string == NULL ) {
             int power;
             align_val = opndx.value;
             /* check that the parm is a power of 2 */
@@ -165,33 +179,30 @@ int AlignDirective( uint_16 directive, int i )
         align_val = 2;
         break;
     }
-    /* is a STRUCT definition open? */
-    /* then set the structure's alignment parameter */
-    if (Definition.struct_depth > 0) {
-        if (Parse_Pass == PASS_1)
-            Definition.curr_struct->e.structinfo->alignment = align_val;
-    } else {
-        seg_align = GetCurrSegAlign(); // # of bytes
-        if( seg_align <= 0 ) {
-            AsmError( NO_SEGMENT_OPENED );
-            return( ERROR );
-        }
-        if( align_val > seg_align ) {
-            AsmWarn( 1, ALIGN_TOO_HIGH );
-            return( ERROR );
-        }
-        /* find out how many bytes past alignment we are & add the remainder */
-        //store temp. value
-        CurrAddr = GetCurrAddr();
-        seg_align = CurrAddr % align_val;
-        if( seg_align ) {
-            align_val -= seg_align;
-            fill_in_objfile_space( align_val );
-        }
-        if (AsmFiles.file[LST]) {
-            WriteLstFile(LSTTYPE_LIDATA, CurrAddr, NULL );
-            directive_listed = TRUE;
-        }
+    /* ALIGN/EVEN inside a STRUCT definition? */
+    if ( StructDef.struct_depth > 0 )
+        return( AlignInStruct( align_val ));
+
+    seg_align = GetCurrSegAlign(); // # of bytes
+    if( seg_align <= 0 ) {
+        AsmError( MUST_BE_IN_SEGMENT_BLOCK );
+        return( ERROR );
+    }
+    if( align_val > seg_align ) {
+        AsmWarn( 1, ALIGN_TOO_HIGH );
+        return( ERROR );
+    }
+    /* find out how many bytes past alignment we are & add the remainder */
+    //store temp. value
+    CurrAddr = GetCurrOffset();
+    seg_align = CurrAddr % align_val;
+    if( seg_align ) {
+        align_val -= seg_align;
+        fill_in_objfile_space( align_val );
+    }
+    if (AsmFiles.file[LST]) {
+        WriteLstFile(LSTTYPE_LIDATA, CurrAddr, NULL );
+        directive_listed = TRUE;
     }
     return( NOT_ERROR );
 }

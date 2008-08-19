@@ -36,18 +36,15 @@
 #include <stdio.h>      /* for SEEK_SET, SEEK_CUR, SEEK_END */
 #include <sys/stat.h>   /* _S_IREAD ... */
 #include <string.h>
-#include "womp.h"
+#include "memalloc.h"
+#include "omfrec.h"
 #include "genutil.h"
-#include "memutil.h"
 #include "myassert.h"
 #include "omfio.h"
-#include "omfrec.h"
 
 
-#if _WOMP_OPT & _WOMP_WASM
 extern  void            WriteError( void );
 #define Fatal(__x,__y)  WriteError()
-#endif
 
 #ifdef __UNIX__
 #define OP_MODE         (O_RDWR | O_CREAT | O_TRUNC)
@@ -61,14 +58,14 @@ extern  void            WriteError( void );
 #endif
 #endif
 
-STATIC void safeSeek( int fh, long offset, int mode ) {
+static void safeSeek( int fh, long offset, int mode ) {
 
     if( lseek( fh, offset, mode ) == -1 ) {
         Fatal( MSG_DISK_ERROR, "lseek" );
     }
 }
 
-STATIC void safeWrite( int fh, const uint_8 *buf, size_t len ) {
+static void safeWrite( int fh, const uint_8 *buf, size_t len ) {
 
     if( write( fh, buf, len ) != len ) {
         Fatal( MSG_DISK_ERROR, "write" );
@@ -84,7 +81,7 @@ OBJ_WFILE *ObjWriteOpen( const char *filename ) {
     if( fh < 0 ) {
         return( NULL );
     }
-    new = MemAlloc( sizeof( *new ) + OBJ_BUFFER_SIZE );
+    new = AsmAlloc( sizeof( *new ) + OBJ_BUFFER_SIZE );
     new->fh = fh;
     new->in_buf = 0;
     new->in_rec = 0;
@@ -100,7 +97,7 @@ void ObjWriteClose( OBJ_WFILE *obj ) {
         ObjWEndRec( obj );
     }
     close( obj->fh );
-    MemFree( obj );
+    AsmFree( obj );
 }
 
 void ObjWBegRec( OBJ_WFILE *obj, uint_8 command ) {
@@ -226,7 +223,7 @@ void ObjWrite( OBJ_WFILE *obj, const uint_8 *buf, size_t length ) {
     }
 }
 
-STATIC uint_8 checkSum( const uint_8 *buf, uint_16 length ) {
+static uint_8 checkSum( const uint_8 *buf, uint_16 length ) {
 /***********************************************************/
     uint_8 checksum;
 

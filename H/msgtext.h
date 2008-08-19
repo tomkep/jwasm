@@ -304,8 +304,8 @@ pick( REPX_PREFIX_IS_NOT_ALLOWED_ON_THIS_INSTRUCTION,
 pick( SIZE_TOO_LARGE,
       "Initializer magnitude too large for specified size" ,
       "Initializer magnitude too large for specified size" )
-pick( SEGMENT_PARA_DEFINED,
-      "Segment parameter is defined already" ,
+pick( SEGMENT_ATTRIBUTE_DEFINED_ALREADY,
+      "Segment attribute is defined already: %s" ,
       "セグメントパラメータは既に定義されています" )
 pick( MODEL_PARA_DEFINED,
       "Model parameter is defined already" ,
@@ -328,14 +328,14 @@ pick( BLOCK_NESTING_ERROR,
 pick( SEGMENT_NOT_OPENED,
       "Ends a segment which is not opened" ,
       "オープンされていないセグメントのendsがあります" )
-pick( UNDEFINED_SEGMENT_OPTION,
-      "Segment option is undefined" ,
-      "セグメント・オプションが未定義です" )
+pick( UNKNOWN_SEGMENT_ATTRIBUTE,
+      "Segment attribute is unknown: %s" ,
+      "Segment attribute is unknown: %s" )
 pick( UNDEFINED_MODEL_OPTION,
       "Model option is undefined" ,
       "モデル・オプションが未定義です" )
-pick( NO_SEGMENT_OPENED,
-      "No segment is currently opened" ,
+pick( MUST_BE_IN_SEGMENT_BLOCK,
+      "Must be in segment block" ,
       "現在オープンされているセグメントはありません" )
 pick( LNAME_USED_ALREADY,
       "Lname is used already" ,
@@ -614,8 +614,8 @@ pick( MSG_CPU_OPTION_INVALID,
       "CPU option %s is not valid for selected CPU.\n" ,
       "CPU option %s is not valid for selected CPU.\n" )
 pick( SEGMENT_IN_GROUP,
-      "Segment is in another group already" ,
-      "Segment is in another group already" )
+      "Segment '%s' is in another group already" ,
+      "Segment '%s' is in another group already" )
 pick( LABEL_OUTSIDE_SEGMENT,
       "Label is defined outside segment" ,
       "Label is defined outside segment" )
@@ -665,8 +665,8 @@ pick( VARARG_PARAMETER_MUST_BE_LAST,
       "VARARG parameter must be last" ,
       "VARARG parameter must be last" )
 pick( TOO_MANY_ARGUMENTS_IN_MACRO_CALL,
-      "Too many arguments in macro call" ,
-      "Too many arguments in macro call" )
+      "Too many arguments in macro call: %s" ,
+      "Too many arguments in macro call: %s" )
 pick( MISSING_OPERATOR_IN_EXPRESSION,
       "Missing operator in expression" ,
       "Missing operator in expression" )
@@ -785,8 +785,8 @@ pick( MSG_MS386_NO_ACCESS,
       "Access classes (RW, EO, RO, ER) not supported in MS386 OMF" ,
       "MS386 OMFではアクセスクラス(RW,EO,RO,ER)はサポートされていません" )
 pick( GROUP_DIRECTIVE_INVALID_FOR_COFF,
-      "GROUP directive allowed for OMF format only" ,
-      "GROUP directive allowed for OMF format only" )
+      "GROUP directive invalid for COFF and ELF format" ,
+      "GROUP directive invalid for COFF and ELF format" )
 pick( OPERAND_MUST_BE_RELOCATABLE,
       "Operand must be relocatable" ,
       "Operand must be relocatable" )
@@ -794,14 +794,14 @@ pick( IF2_NOT_ALLOWED,
       "[ELSE]IF2/.ERR2 not allowed, single-pass assembler" ,
       "[ELSE]IF2/.ERR2 not allowed, single-pass assembler" )
 pick( EXPR_TOO_COMPLEX_FOR_UNTILCXZ,
-      "expression too complex for UNTILCXZ" ,
-      "expression too complex for UNTILCXZ" )
+      "Expression too complex for UNTILCXZ" ,
+      "Expression too complex for UNTILCXZ" )
 pick( OPERANDS_MUST_BE_IN_SAME_SEGMENT,
-      "operands must be in same segment" ,
-      "operands must be in same segment" )
+      "Operands must be in same segment" ,
+      "Operands must be in same segment" )
 pick( INVALID_USE_OF_EXTERNAL_SYMBOL,
-      "invalid use of external symbol" ,
-      "invalid use of external symbol" )
+      "Invalid use of external symbol" ,
+      "Invalid use of external symbol" )
 pick( LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL,
       "For /coff leading underscore required for start label: %s" ,
       "For /coff leading underscore required for start label: %s" )
@@ -811,12 +811,61 @@ pick( UNKNOWN_FIXUP_TYPE,
 pick( INVALID_CMDLINE_VALUE,
       "Invalid command-line value, default is used: %s" ,
       "Invalid command-line value, default is used: %s" )
+#if ELF_SUPPORT
 pick( INVALID_ELF_FIXUP_TYPE,
       "Fixup invalid for ELF format: %u" ,
       "Fixup invalid for ELF format: %u" )
+#endif
 pick( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE,
       "Syntax error in control-flow directive" ,
       "Syntax error in control-flow directive" )
 pick( INVALID_MODEL_PARAM_FOR_FLAT,
       "Invalid .model parameter for flat model" ,
       "Invalid .model parameter for flat model" )
+#if BIN_SUPPORT
+pick( FORMAT_DOESNT_SUPPORT_EXTERNALS,
+      "Output format doesn't support externals" ,
+      "Output format doesn't support externals" )
+pick( SEGMENT_FIXUPS_INVALID,
+      "Segment fixups invalid for BIN format: %u" ,
+      "Segment fixups invalid for BIN format: %u" )
+pick( START_LABEL_INVALID,
+      "Invalid start label for /bin",
+      "Invalid start label for /bin" )
+#endif
+pick( INDEX_PAST_END_OF_STRING,
+      "Index %u is past end of string",
+      "Index %u is past end of string" )
+pick( COUNT_VALUE_TOO_LARGE,
+      "Count value too large",
+      "Count value too large" )
+pick( COUNT_MUST_BE_POSITIVE_OR_ZERO,
+      "Count must be positive or zero",
+      "Count must be positive or zero" )
+pick( SYNTAX_ERROR_EX,
+      "Syntax error: %s" ,
+      "Syntax error: %s" )
+pick( DIRECTIVE_IGNORED_FOR_COFF,
+      "Directive ignored for COFF and ELF format: %s" ,
+      "Directive ignored for COFF and ELF format: %s" )
+pick( EXPRESSION_NOT_A_CONSTANT,
+      "Value of expression is not a constant" ,
+      "Value of expression is not a constant" )
+pick( MUST_USE_FLOAT_INITIALIZER,
+      "Must use floating-point initializer" ,
+      "Must use floating-point initializer" )
+pick( ORG_NOT_ALLOWED_IN_UNIONS,
+      "ORG directive not allowed in unions" ,
+      "ORG directive not allowed in unions" )
+pick( STRUCT_ALIGN_TOO_HIGH,
+      "Struct alignment must be 1, 2, 4, 8, 16 or 32" ,
+      "Struct alignment must be 1, 2, 4, 8, 16 or 32" )
+pick( STRUCT_CANNOT_BE_INSTANCED,
+      "Structure cannot be instanced" ,
+      "Structure cannot be instanced" )
+pick( MISSING_ANGLE_BRACKET_OR_BRACE_IN_LITERAL,
+      "Missing angle bracket or brace in literal" ,
+      "Missing angle bracket or brace in literal" )
+pick( NONDIGIT_IN_NUMBER,
+      "Nondigit in number: %s" ,
+      "Nondigit in number: %s" )

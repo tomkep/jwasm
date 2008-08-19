@@ -34,16 +34,17 @@
     memory usage.
 */
 
-// FAST is a simple memory alloc approach which allocates chunks of 1 MB
+#include "globals.h"
+
+// FASTMEM is a simple memory alloc approach which allocates chunks of 256 kB
 // and will release it only at MemFini()
 
-#define FAST 1
-
-#if FAST
+#if FASTMEM
 #define BLKSIZE 0x80000
+#ifndef __UNIX__
+#undef ERROR
 #define WIN32_LEAN_AND_MEAN 1
 //#define __W32API_USE_DLLIMPORT__
-#ifndef __UNIX__
 #include <windows.h>
 #endif
 #endif
@@ -55,9 +56,9 @@
 #include <stdio.h>
 #endif
 
+#include "watcom.h"
 #include "memalloc.h"
 #include "fatal.h"
-
 
 #ifdef TRMEM
 #include "trmem.h"
@@ -105,7 +106,7 @@ typedef struct mmap {
 static mmap mymmap = {0, 0, 3, 0x22, -1, 0};
 #endif
 
-#if FAST
+#if FASTMEM
 uint_8 * pBase;
 uint_8 * pCurr;
 int blocks;
@@ -126,7 +127,7 @@ void MemInit( void )
         exit( EXIT_FAILURE );
     }
 #endif
-#if FAST
+#if FASTMEM
     currfree = 0;
     blocks = 0;
     pBase = NULL;
@@ -145,7 +146,7 @@ void MemFini( void )
         memHandle = NULL;
     }
 #endif
-#if FAST
+#if FASTMEM
 #ifdef DEBUG_OUT
     printf("memory used: %u kB\n", (blocks * BLKSIZE - currfree) / 1024);
 #endif
@@ -165,7 +166,7 @@ void *AsmAlloc( size_t size )
 {
     void        *ptr;
 
-#if FAST
+#if FASTMEM
     size = (size + 3) & ~3;
     if (currfree < size) {
         if (size > BLKSIZE-4) {
@@ -212,7 +213,7 @@ void *AsmAlloc( size_t size )
 
 void AsmFree( void *ptr )
 {
-#if FAST
+#if FASTMEM
     return;
 #endif
     if( ptr != NULL ) {
@@ -241,6 +242,7 @@ void MemFree( void *ptr )
     return;
 }
 
+#if 0
 void *MemRealloc( void *ptr, size_t size ) {
 /****************************************/
     void *new;
@@ -251,3 +253,5 @@ void *MemRealloc( void *ptr, size_t size ) {
     }
     return( new );
 }
+#endif
+

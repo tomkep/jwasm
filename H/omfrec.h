@@ -29,8 +29,8 @@
 ****************************************************************************/
 
 
-#ifndef OBJREC_H
-#define OBJREC_H    1
+#ifndef OMFREC_H
+#define OMFREC_H    1
 typedef struct obj_rec      obj_rec;
 typedef struct linnum_data  linnum_data;
 typedef struct pubdef_data  pubdef_data;
@@ -39,6 +39,15 @@ typedef struct pubdef_data  pubdef_data;
 #include "omfpc.h"
 #include "omffixup.h"
 #include "omfname.h"
+
+#define ReadU16(p)      (*(uint_16*)(p))
+#define ReadU32(p)      (*(uint_32*)(p))
+#define ReadS16(p)      (*(int_16*)(p))
+#define ReadS32(p)      (*(int_16*)(p))
+#define WriteU16(p,n)   (*(uint_16*)(p) = (uint_16)(n))
+#define WriteU32(p,n)   (*(uint_32*)(p) = (uint_32)(n))
+#define WriteS16(p,n)   (*(int_16*)(p) = (int_16)(n))
+#define WriteS32(p,n)   (*(int_32*)(p) = (int_32)(n))
 
 #pragma pack( push, 1 )
 
@@ -54,11 +63,9 @@ struct coment_info {
 
 struct modend_info {
     uint_8  main_module :1; /* module is a main module                  */
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
     uint_8  start_addrs :1; /* module has start address                 */
     uint_8  is_logical  :1; /* is logical or physical reference         */
     logphys ref;            /* a logical or physical reference          */
-#endif
 };
 /*
     A MODEND is described completely by the above information; no data
@@ -99,18 +106,14 @@ struct segdef_info {
     uint_16 idx;            /* index for this segment                   */
     uint_8      align       :4; /* align field (enum segdef_align_values)   */
     uint_8      combine     :4; /* combine field (values in omfpc.h)        */
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
     uint_8      use_32      :1; /* use_32 for this segment                  */
     uint_8      access_valid:1; /* does next field have valid value         */
     uint_8      access_attr :2; /* easy omf access attributes (see omfpc.h) */
     physref abs;            /* (conditional) absolute physical reference*/
-#endif
     uint_32 seg_length;     /* length of this segment                   */
     uint_16 seg_name_idx;   /* name index of this segment               */
     uint_16 class_name_idx; /* class name index of this segment         */
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
     uint_16 ovl_name_idx;   /* overlay name index of this segment       */
-#endif
 };
 /*
     All data necessary for a SEGDEF is defined in the above structure.  No
@@ -121,10 +124,6 @@ struct segdef_info {
 struct ledata_info {
     uint_16 idx;            /* index of segment the data belongs to     */
     uint_32 offset;         /* offset into segment of start of data     */
-#if _WOMP_OPT & _WOMP_WATFOR
-    void        *fixup;         /* ptr to linked list of fixups             */
-    unsigned_8 num;             /* number of fixups                         */
-#endif
 };
 /*
     LEDATAs and LIDATAs both use this structure.  The data that comprises the
@@ -142,8 +141,6 @@ struct base_info {
     appropriate structures.
 */
 
-
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
 
 struct comdat_info {
     struct base_info base;
@@ -197,9 +194,6 @@ struct pubdef_info {
         uint_32     offset; /* public offset                            */
         union {             /* see PUBDEF.h for more information        */
             uint_16     idx;/* Intel OMF type index                     */
-#if _WOMP_OPT & _WOMP_WOMP
-            symb_handle hdl;/* internal symbol handle...                */
-#endif
         } type;
     } *pubs;                /* array of size num_pubs                   */
     uint_8 free_pubs : 1;   /* can we MemFree the pubs array?           */
@@ -210,7 +204,6 @@ struct pubdef_info {
     should be attached to this record.  Everything is described by the
     pubs array.
 */
-#endif
 
 
 union objrec_info {
@@ -226,13 +219,11 @@ union objrec_info {
     struct ledata_info  ledata;
     struct ledata_info  lidata;
     struct base_info    base;
-#if ( _WOMP_OPT & _WOMP_WATFOR ) == 0
     struct fixup_info   fixup;
     struct linnum_info  linnum;
     struct linnum_info  linsym;
     struct pubdef_info  pubdef;
     struct comdat_info  comdat;
-#endif
 };
 
 struct obj_rec {

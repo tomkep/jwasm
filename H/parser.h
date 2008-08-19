@@ -28,17 +28,13 @@
 *
 ****************************************************************************/
 
-#ifndef ASMINS_H
-#define ASMINS_H
+#ifndef PARSER_H
+#define PARSER_H
 
 #ifdef _M_I86
-
 #define ASMFAR far
-
 #else
-
 #define ASMFAR
-
 #endif
 
 #include "operands.h"
@@ -56,6 +52,8 @@ enum prefix_reg {
     PREFIX_GS = 0x65
 };
 
+// structure of an entry in the "reserved names" table
+
 struct AsmCodeName {
         unsigned short  position;       // starting position in AsmOpTable
         unsigned short  len :4,         // length of command, e.g. "AX" = 2
@@ -66,7 +64,7 @@ struct AsmCodeName {
 enum asm_cpu {
         /* bit count from left: ( need at least 7 bits )
            bit 0-2:   Math coprocessor
-           bit 3:     Protected mode
+           bit 3:     priviledged?
            bit 4-6:   cpu type
            bit 7-11;  extension set */
 
@@ -75,7 +73,7 @@ enum asm_cpu {
         P_287   = 0x0002,         /* 80287 */
         P_387   = 0x0004,         /* 80387 */
 
-        P_PM    = 0x0008,         /* protect-mode */
+        P_PM    = 0x0008,         /* privileged opcode */
 
         P_86    = 0x0000,         /* 8086, default */
         P_186   = 0x0010,         /* 80186 */
@@ -103,6 +101,7 @@ enum asm_cpu {
         P_EXT_MASK = 0x0F80
 };
 
+extern enum asm_cpu curr_cpu;
 
 #if defined( _STANDALONE_ )
     struct asm_ins {
@@ -115,7 +114,10 @@ enum asm_cpu {
         enum asm_cpu        cpu;                    /* CPU type */
         OPNDTYPE            opnd_type[2];           /* asm_opnds */
         unsigned char       opcode;                 /* opcode byte */
-        unsigned char       rm_byte;                /* mod_rm_byte */
+        union {
+            unsigned char   rm_byte;                /* mod_rm_byte */
+            enum special_type specialtype;          /* for OP_SPECIAL */
+        };
     };
 #else
     struct asm_ins {
@@ -144,7 +146,6 @@ struct asm_code {
     struct {
 #if defined( _STANDALONE_ )
         unsigned short      token;
-        enum asm_cpu        cpu;
         OPNDTYPE            opnd_type[3];
         unsigned char       opcode;
         unsigned char       rm_byte;
@@ -227,12 +228,6 @@ extern struct AsmCodeName          AsmOpcode[];
 extern char                        AsmChars[];
 extern bool directive_listed;
 
-#if defined( _STANDALONE_ )
-
-extern void     find_frame( struct asm_sym *sym );
-
-#endif
-
 extern int      check_override( int *i );
 extern int      OperandSize( OPNDTYPE opnd );
 extern int      InRange( long val, unsigned bytes );
@@ -240,8 +235,6 @@ extern int      cpu_directive( int i );
 extern int      ParseItems( void );
 extern int      NextArrayElement( void );
 extern int      data_init( int, int );
-extern void     ParseInit( int, int, int, int );
-
-
+extern void     ParseInit( void );
 
 #endif

@@ -1,23 +1,25 @@
 
 /* prototypes of TYPES.C */
 
-/* global structure */
+/* global STRUCT status */
 
-typedef struct a_definition_struct {
-    unsigned short      struct_depth;
-    stacknode           *struct_stack;      // stack of nested structs being defined
+typedef struct struct_state {
+    unsigned            struct_depth;   // nesting level
+    stacknode           *struct_stack;  // stack of nested structs
     dir_node            *curr_struct;
-} a_definition_struct;
+} struct_state;
 
-extern a_definition_struct      Definition;
+extern struct_state StructDef;
 
 extern struct asm_sym  *SearchNameInStruct(asm_sym *sym, const char *name, unsigned int *poffset );
-extern int StructDef( int );
+extern int StructDirective( int );
 extern int RecordDef( int );
 extern int TypeDef( int );         // define a simple type
 extern asm_sym * CreateTypeDef( char *, int *);
 extern char * InitializeStructure( asm_sym *, asm_sym *, char *, bool );
 extern struct asm_sym * AddFieldToStruct( int , int, memtype, struct asm_sym *, int);
 extern void  UpdateStructSize( int );
+extern int  SetStructCurrentOffset( int );
+extern int  AlignInStruct( int );
 extern void TypesInit( void );
 

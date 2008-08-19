@@ -24,23 +24,29 @@
 *
 *  ========================================================================
 *
-* Description:  Memory manipulation routine prototypes.
+* Description:  Memory allocation prototypes.
 *
 ****************************************************************************/
 
 #ifndef _MEMALLOC_H_
 #define _MEMALLOC_H_
 
-#if defined( _STANDALONE_ )
-  #include "walloca.h"
-  #include "memutil.h"
+#include "walloca.h"
+
+extern void MemInit( void );
+extern void MemFini( void );
+extern void *MemAlloc( size_t size );
+extern void *MemRealloc( void *ptr, size_t size );
+extern void MemFree( void *ptr );
 
 #ifdef __WATCOMC__
 #define AsmTmpAlloc( amount )   alloca( amount )
 #else
 #define AsmTmpAlloc( amount )   _alloca( amount )
 #endif
-#endif
+
+// AsmAlloc() and AsmFree() are fast variants, which
+// are to be used for all allocations which aren't "global"
 
 extern  void    *AsmAlloc( size_t );
 extern  void    AsmFree( void * );

@@ -30,16 +30,15 @@
 
 
 #include <stddef.h>
-#include <watcom.h>
-#include <omfpc.h>
-#include "womp.h"
-#include "memutil.h"
+#include "watcom.h"
+#include "memalloc.h"
+#include "omfpc.h"
 #include "omffixup.h"
 #include "myassert.h"
 #include "genutil.h"
 #include "carve.h"
 
-STATIC carve_t  myCarver;
+static carve_t  myCarver;
 
 void FixInit( void ) {
 /******************/
@@ -73,9 +72,7 @@ void FixKill( fixup *fix ) {
     CarveFree( myCarver, fix );
 }
 
-#if _WOMP_OPT & _WOMP_WRITE
-
-STATIC uint_8 *putIndex( uint_8 *p, uint_16 index ) {
+static uint_8 *putIndex( uint_8 *p, uint_16 index ) {
 
     if( index > 0x7f ) {
         *p++ = 0x80 | ( index >> 8 );
@@ -84,19 +81,19 @@ STATIC uint_8 *putIndex( uint_8 *p, uint_16 index ) {
     return( p );
 }
 
-STATIC uint_8 *put16( uint_8 *p, uint_16 word ) {
+static uint_8 *put16( uint_8 *p, uint_16 word ) {
 
     WriteU16( p, word );
     return( p + 2 );
 }
 
-STATIC uint_8 *put32( uint_8 *p, uint_32 dword ) {
+static uint_8 *put32( uint_8 *p, uint_32 dword ) {
 
     WriteU32( p, dword );
     return( p + 4 );
 }
 
-STATIC uint_8 *putFrameDatum( uint_8 *p, uint_8 method, uint_16 datum ) {
+static uint_8 *putFrameDatum( uint_8 *p, uint_8 method, uint_16 datum ) {
 
 /**/myassert( p != NULL );
     switch( method ) {
@@ -111,7 +108,7 @@ STATIC uint_8 *putFrameDatum( uint_8 *p, uint_8 method, uint_16 datum ) {
     return( p );
 }
 
-STATIC uint_8 *putTargetDatum( uint_8 *p, uint_8 method, uint_16 datum ) {
+static uint_8 *putTargetDatum( uint_8 *p, uint_8 method, uint_16 datum ) {
 
 /**/myassert( p != NULL );
     if( ( method & 0x03 ) == TARGET_ABSWD ) {
@@ -228,4 +225,3 @@ size_t FixGenFix( fixup *fix, uint_8 *buf, int type ) {
     return( p - buf );
 }
 
-#endif

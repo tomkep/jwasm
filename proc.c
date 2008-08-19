@@ -61,6 +61,7 @@ static proc_info        *ProcStack;
 #endif
 
 bool                    in_prologue;
+bool                    in_epilogue;
 bool                    DefineProc;     // TRUE if the definition of procedure
                                         // has not ended
 
@@ -568,7 +569,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
                 }
 #endif
             if (bDefine) {
-                SymSetName(paracurr->sym, token);
+                paracurr->sym = SymSetName(paracurr->sym, token);
             }
             /* set paracurr to next parameter */
             if (proc->sym.langtype == LANG_C ||
@@ -742,7 +743,7 @@ int ExamineProc( dir_node *proc, int i, bool bDefine )
     if (bDefine) {
         proc->e.procinfo->export = ModuleInfo.procs_export;
         proc->sym.public = ~ModuleInfo.procs_private;
-        proc->e.procinfo->pe_type = ( ( CodeInfo->info.cpu & P_CPU_MASK ) == P_286 ) || ( ( CodeInfo->info.cpu & P_CPU_MASK ) == P_386 );
+        proc->e.procinfo->pe_type = ( ( curr_cpu & P_CPU_MASK ) == P_286 ) || ( ( curr_cpu & P_CPU_MASK ) == P_386 );
     }
 
     if( AsmBuffer[i]->token == T_STRING ) {
@@ -905,7 +906,7 @@ int ProcDef( int i )
     char                *name;
     bool                oldpubstate;
 
-    if( Definition.struct_depth > 0 ) {
+    if( StructDef.struct_depth > 0 ) {
         AsmError( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION );
         return( ERROR );
     }
@@ -972,7 +973,7 @@ int ProcDef( int i )
         /* it's necessary to check for a phase error here
          as it is done in LabelCreate() and data_init()!
          */
-        addr = GetCurrAddr();
+        addr = GetCurrOffset();
 
         if (addr != sym->offset) {
             sym->offset = addr;
@@ -1071,7 +1072,7 @@ int ProtoDef( int i, char * name )
 static void ProcFini( void )
 /**************************/
 {
-    CurrProc->sym.total_size = GetCurrAddr() - CurrProc->sym.offset;
+    CurrProc->sym.total_size = GetCurrOffset() - CurrProc->sym.offset;
 #if NESTEDPROCS
     CurrProc = pop_proc();
 #else
@@ -1085,7 +1086,7 @@ static void ProcFini( void )
 int ProcEnd( int i )
 /******************/
 {
-    if( Definition.struct_depth > 0 ) {
+    if( StructDef.struct_depth > 0 ) {
         AsmError( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION );
         return( ERROR );
     } else if( i < 0 ) {
@@ -1523,6 +1524,8 @@ void ProcInit()
 #endif
     CurrProc  = NULL;
     DefineProc = FALSE;
+    in_prologue = FALSE;
+    in_epilogue = FALSE;
     ModuleInfo.proc_prologue = "";
     ModuleInfo.proc_epilogue = "";
     ModuleInfo.procs_private = FALSE;

@@ -57,20 +57,31 @@ enum fixup_options {
 };
 
 struct asmfixup {
-        struct asmfixup         *next;         /* linked list backpatch */
-        struct asmfixup         *next2;        /* linked list relocs */
-        unsigned long           offset;        /* symbol's offset */
-        unsigned                fixup_loc;     /* location of fixup */
-        enum fixup_types        type;
-        enum fixup_options      fixup_option;
-        unsigned loader_resolved:1;
+    struct asmfixup         *next1;        /* linked list backpatch */
+    struct asmfixup         *next2;        /* linked list relocs */
+    unsigned long           offset;        /* symbol's offset */
+    unsigned                fixup_loc;     /* location of fixup */
+    enum fixup_types        type;
+    enum fixup_options      fixup_option;
+    unsigned loader_resolved:1;
 
-        int_8                   frame;          // frame of the fixup
-        uint_16                 frame_datum;    // frame_datum of the fixup
-        struct dir_node         *def_seg;       // segment fixup is in
-        struct asm_sym          *sym;
+    union {
+        struct {
+            int_8           frame;          /* frame specifier (GRP,SEG,...) */
+            uint_16         frame_datum;    /* frame_datum of the fixup */
+        };
+        asm_sym             *segment;       /* symbol's segment if assembly time var */
+    };
+    struct dir_node         *def_seg;       /* segment the fixup is in */
+    struct asm_sym          *sym;
 };
 
+extern int_8            Frame;
+extern uint_8           Frame_Datum;
+
+#if defined( _STANDALONE_ )
+extern void             find_frame( struct asm_sym *sym );
+#endif
 extern struct asmfixup  *InsFixups[3];
 extern struct asmfixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
 extern void             add_frame( void );

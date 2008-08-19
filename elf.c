@@ -16,7 +16,6 @@
 
 #include "globals.h"
 #include "symbols.h"
-#include "fatal.h"
 #include "mangle.h"
 #include "memalloc.h"
 #include "fixup.h"
@@ -156,16 +155,23 @@ static void set_symtab_values()
      */
 
     /* symbol table starts with 1 NULL entry + 1 file entry */
-    symindex = 1 + 1 + total_segs;
+    symindex = 1 + 1;
+
+    for( curr = Tables[TAB_SEG].head; curr; curr = curr->next )
+        curr->sym.idx = symindex++;
 
     /* add local symbols to symbol table */
 
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
         if (curr->e.seginfo->num_relocs) {
             struct asmfixup * fix = curr->e.seginfo->FixupListHeadElf;
-            for (;fix;fix = fix->next2) {
-                /* if it's not EXTERNAL/PUBLIC, add symbol */
-                if ((fix->sym->state == SYM_INTERNAL ||
+            for ( ; fix; fix = fix->next2 ) {
+                /* if it's not EXTERNAL/PUBLIC, add symbol. */
+                /* however, if it's an assembly time variable */
+                /* use a raw section reference */
+                if (fix->sym->variable) {
+                    fix->sym = fix->segment;
+                } else if ((fix->sym->state == SYM_INTERNAL ||
                      (fix->sym->state == SYM_PROC && ((dir_node *)fix->sym)->e.procinfo->defined == TRUE)) &&
                     fix->sym->included == FALSE &&
                     fix->sym->public == FALSE) {
@@ -518,11 +524,11 @@ static int elf_write_section_table( int fh )
         p += strlen(p) + 1;
         shdr.sh_type = SHT_PROGBITS;
         if (curr->e.seginfo->segtype == SEGTYPE_BSS) {
-            shdr.sh_flags = SHF_ALLOC;
+            shdr.sh_flags = SHF_WRITE | SHF_ALLOC;
             shdr.sh_type = SHT_NOBITS;
         } else if (curr->e.seginfo->segtype == SEGTYPE_CODE) {
             shdr.sh_flags = SHF_EXECINSTR | SHF_ALLOC;
-        } else if (curr->e.seginfo->readonly == FALSE) {
+        } else if (curr->e.seginfo->readonly == TRUE) {
             shdr.sh_flags = SHF_ALLOC;
         } else {
             shdr.sh_flags = SHF_WRITE | SHF_ALLOC;
@@ -727,7 +733,7 @@ int elf_write_data(int fh)
             Elf32_Rel reloc;
             DebugMsg(("elf_write_data: relocs at ofs=%X, size=%X\n", curr->e.seginfo->reloc_offset, curr->e.seginfo->num_relocs * sizeof(Elf32_Rel)));
             lseek( fh, curr->e.seginfo->reloc_offset, SEEK_SET );
-            for (fixup = curr->e.seginfo->FixupListHeadElf;fixup;fixup = fixup->next2) {
+            for ( fixup = curr->e.seginfo->FixupListHeadElf; fixup; fixup = fixup->next2) {
                 uint_8 elftype;
                 reloc.r_offset = fixup->fixup_loc;
                 switch (fixup->type) {
