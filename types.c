@@ -42,6 +42,7 @@
 #include "expreval.h"
 #include "labels.h"
 #include "symbols.h"
+#include "listing.h"
 
 #define is_valid_id_char( ch ) \
     ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
@@ -587,84 +588,94 @@ int SetStructCurrentOffset(int offset)
 // initialize an array inside a structure
 // if there are no brackets, the next comma, '>' or '}' will terminate
 
-static char * InitializeArray(field_list *f, char * ptr, char * buffer)
+static int InitializeArray(field_list *f, char * ptr, char delim )
 {
-    char delim;
-    char *ptr2;
     int  count;
+    int  savedToken_Count = Token_Count;
+    int  i;
+    char buffer[MAX_LINE_LEN];
 
-    while (isspace(*ptr)) ptr++;
-    delim = *ptr;
-    DebugMsg(("InitializeArray enter: init=%s, items=%u, initializer=%s\n", ptr, f->sym->total_length, f->initializer));
-    if (delim == '<') {
-        delim = '>';
+    DebugMsg(("InitializeArray(%s, init=%s ) enter, items=%u, type=%s\n", f->sym->name, ptr, f->sym->total_length, f->initializer));
+
+    /* a string can be enclosed in <>, {}, "" or '' */
+    if (delim == '{' ) {
         ptr++;
-    } else if (delim == '{') {
-        delim = '}';
-        ptr++;
-    } else
-        delim = ',';
-#if 0
-        if (*ptr != 0) {
-            AsmError(INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM);
-            return (ptr);
-        }
-#endif
+        i = strlen(ptr);
+        *(ptr+i-1) = NULLC;
+    }
+
+    i = Token_Count+1;
+
+    /* if there's nothing, use the default initializer */
+    if ( *ptr == NULLC )
+        ptr = f->value;
+
+    Token_Count = Tokenize( ptr, i );
+
     strcpy( buffer, f->initializer );
     strcat( buffer, " ");
-    ptr2 = buffer + strlen(buffer);
-    for (count = f->sym->total_length; count; count--) {
-        char *ptr3 = ptr2;
-        while (isspace(*ptr)) ptr++;
-        if ((*ptr == '\0') || (*ptr == delim))
+
+    for ( count = f->sym->total_length; count ; count-- ) {
+        int lvl = 0;
+        int start = i;
+        if ( AsmBuffer[i]->token == T_FINAL ) {
             break;
-        while ((*ptr != ',') && (*ptr != '\0') && (*ptr != delim)) {
-            if (*ptr == '\'' || *ptr == '"') {
-                char c = *ptr;
-                char *ptr4;
-                *ptr2++ = *ptr++;
-                ptr4 = ptr;
-                while (*ptr != '0') {
-                    if (*ptr == c) {
-                        if (*(ptr+1) == c) {
-                            *ptr2++ = *ptr++;
-                            ptr4++;
-                        } else
-                            break;
-                    }
-                    *ptr2++ = *ptr++;
-                }
-                if (*ptr == 0) {
-                    AsmError(MISSING_QUOTE_IN_STRING);
-                    return(ptr);
-                }
-                if (f->sym->mem_type == MT_BYTE || f->sym->mem_type == MT_SBYTE) {
-                    count = count - (ptr - ptr4) + 1;
-                    DebugMsg(("InitializeArray: string init, count=%u\n", count ));
-                    if (count <= 0) {
-                        AsmError(STRING_OR_TEXT_LITERAL_TOO_LONG);
-                        return(ptr);
-                    }
+        }
+        while ( AsmBuffer[i]->token != T_FINAL ) {
+
+            if ( AsmBuffer[i]->token == T_OP_BRACKET )
+                lvl++;
+            else if ( AsmBuffer[i]->token == T_CL_BRACKET )
+                lvl--;
+            else if ( lvl == 0 && AsmBuffer[i]->token == T_COMMA )
+                break;
+            else if ( AsmBuffer[i]->token == T_RES_ID && AsmBuffer[i]->value == T_DUP ) {
+                expr_list opndx;
+                /* this is not fool-proved, but works pretty good */
+                if (EvalOperand( &start, i, &opndx, FALSE ) != ERROR)
+                    if ( opndx.type == EXPR_CONST && opndx.string == NULL )
+                        if ( opndx.value > count )
+                            AsmErr( TOO_MANY_INITIAL_VALUES_FOR_STRUCTURE, AsmBuffer[i]->string_ptr );
+                        else {
+                            count -= opndx.value;
+                            count++; /* adjust */
+                        }
+            }
+
+            if ( AsmBuffer[i]->token == T_STRING &&
+                 (f->sym->mem_type == MT_BYTE || f->sym->mem_type == MT_SBYTE) &&
+                 (AsmBuffer[i]->string_delim == '"' || AsmBuffer[i]->string_delim == '\'')) {
+                DebugMsg(("InitializeArray: string init, size=%u\n", AsmBuffer[i]->value ));
+                if ( AsmBuffer[i]->value > count ) {
+                    AsmError(STRING_OR_TEXT_LITERAL_TOO_LONG);
+                    while (AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA)
+                        i++;
+                    break;
+                } else {
+                    count -= AsmBuffer[i]->value;
+                    count++; /* adjust */
                 }
             }
-            *ptr2++ = *ptr++;
+
+            strcat( buffer, AsmBuffer[i]->string_ptr );
+            strcat( buffer, " " );
+            i++;
         }
-        if (ptr2 == ptr3) {
-            strcpy( ptr2, f->value );
-            ptr2 = ptr2+strlen(ptr2);
-        }
-        if (delim != ',' && *ptr == ',')
-            *ptr2++ = *ptr++;
-        *ptr2 = '\0';
+        if ( AsmBuffer[i]->token != T_FINAL )
+            if ( AsmBuffer[i]->token == T_COMMA ) {
+                strcat( buffer, AsmBuffer[i]->string_ptr );
+                i++;
+            } else {
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+                while (AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA)
+                    i++;
+            }
     }
-    if ((*ptr != '\0') && (*ptr != delim)) {
-        AsmError(TOO_MANY_INITIAL_VALUES_FOR_STRUCTURE);
-        *buffer = 0;
-        return(ptr);
-    }
-    if (count != f->sym->total_length) {
-        InputQueueLine( buffer );
-    }
+    InputQueueLine( buffer );
+
+    if ( AsmBuffer[i]->token != T_FINAL )
+        AsmErr( TOO_MANY_INITIAL_VALUES_FOR_STRUCTURE, AsmBuffer[i]->string_ptr );
+
     if (count) {
         DebugMsg(("InitializeArray: remaining items=%u\n", count));
         if (count == f->sym->total_length)
@@ -685,44 +696,35 @@ static char * InitializeArray(field_list *f, char * ptr, char * buffer)
         InputQueueLine( buffer );
     }
 
-    if (delim && (*ptr == delim))
-        ptr++;
-
-    return(ptr);
-
+    Token_Count = savedToken_Count;
+    DebugMsg(("InitializeArray(%s) exit\n", f->sym->name ));
+    return( NOT_ERROR );
 }
 
-// sym = symbol of variable to initialize
-// struct_symbol = structure to initialize
-// init_string = init string
-// first = first call (might be called recursively!)
+// initialize a STRUCT/UNION/RECORD data item
+// sym = label of data item (might be NULL!)
+// struct_symbol = type of data item
+// init_string = initializer string
+// delim = string start delimiter
 
 // currently this proc emits ASM lines with simple types
 // to actually "fill" the structure.
 
-char * InitializeStructure( asm_sym *sym, asm_sym *struct_symbol, char * init_string, bool first )
+int InitializeStructure( asm_sym *sym, asm_sym *struct_symbol, char *init_string, char delim )
 /********************************************************************/
 {
-    /* input: a line that looks like : sym_name struct_name { init. values }
-     * where i marks the struct_name
-     */
-
-    char            buffer[MAX_LINE_LEN];
     char            *ptr;
     dir_node        *dir;
     field_list      *f;
     int             tmpstate;
-    char            start_delim;
-    char            end_delim;
-    int             delim_lvl;
-    int             bracket_lvl;
     int             nextofs;
     int             i;
-    int             last_item;
+    int             savedToken_Count = Token_Count;
     unsigned int    dwRecInit;
     bool            is_record_set;
     field_list      fl;
     expr_list       opndx;
+    char            buffer[MAX_LINE_LEN];
 
     /* skip TYPEDEF aliases */
     while (struct_symbol->mem_type == MT_TYPE) {
@@ -730,61 +732,32 @@ char * InitializeStructure( asm_sym *sym, asm_sym *struct_symbol, char * init_st
     }
 
     dir = (dir_node *)struct_symbol;
-    DebugMsg(("InitializeStructure enter, sym=%s, total=%u/%u, init_string=>%s<\n", struct_symbol->name, struct_symbol->total_size, struct_symbol->total_length, init_string ));
-
-#if 0
-    /* the TYPE item is NOT to be used to init
-     these values. This is done in array_elem()!
-     */
-    if( sym != NULL ) {
-        sym->total_size   = struct_symbol->total_size;
-        sym->total_length = struct_symbol->total_length;
-        sym->first_size   = struct_symbol->first_size;
-        sym->first_length = struct_symbol->first_length;
-    }
+#ifdef DEBUG_OUT
+    if (sym)
+        DebugMsg(("InitializeStructure(%s:%s) enter, total=%u/%u, init_string=>%s<\n",
+                  sym->name, struct_symbol->name,
+                  struct_symbol->total_size, struct_symbol->total_length, init_string ));
+    else
+        DebugMsg(("InitializeStructure(void:%s) enter, total=%u/%u, init_string=>%s<\n",
+                  struct_symbol->name, struct_symbol->total_size, struct_symbol->total_length, init_string ));
 #endif
 
     ptr = init_string;
-    bracket_lvl = 0;
 
-    start_delim = 0;
-    end_delim = 0;
-    delim_lvl = 0;
-
-    if (*ptr == '{') {
+    if (delim != '<' ) {
+        if (delim != '{')
+            AsmError( MISSING_ANGLE_BRACKET_OR_BRACE_IN_LITERAL );
         ptr++;
-        end_delim = '}';
-        start_delim = '{';
-//        delim_lvl++;
-    } else if (*ptr == '<') {
-        if (first) {
-            /* check if a matching '>' exists */
-            /* if no, don't regard the '<' as a delim */
-#if 0
-            i = strlen(ptr);
-            if (*(ptr+i-1) != '>')
-#endif
-                goto nodelim;
-        }
-        ptr++;
-        end_delim = '>';
-        start_delim = '<';
-//        delim_lvl++;
+        i = strlen(ptr);
+        *(ptr+i-1) = NULLC;
     }
-nodelim:
 
-#if 0
-    /* that's too late, must be done in data_init() */
-    if (first) {
-        PushLineQueue();
-    }
-#endif
+    i = Token_Count+1;
+    Token_Count = Tokenize( ptr, i );
 
     if ( dir->e.structinfo->typekind == TYPE_RECORD ) {
         dwRecInit = 0;
         is_record_set = FALSE;
-        last_item = Tokenize(ptr, Token_Count+1);
-        i = Token_Count+1;
 //        sprintf(buffer, "db %u dup (?)", dir->sym.total_size);
 //        InputQueueLine( buffer );
 //        return( ptr );
@@ -819,26 +792,34 @@ nodelim:
          */
         DebugMsg(("InitializeStructure: init %s, default=>%s<\n", f->sym->name, f->value));
 
-        if (f->sym->mem_type == MT_TYPE && f->initializer == NULL)  { /* embedded struct? */
-            while (isspace(*ptr)) ptr++;
-            if (*ptr == end_delim)
-                InitializeStructure(sym, f->sym, "", FALSE);
-            else
-                ptr = InitializeStructure(sym, f->sym, ptr, FALSE);
-#if 0
-        } else if (f->sym->mem_type == MT_TYPE) {
-            /* a structured field? no need for a recursive call! */
-            if (*ptr == end_delim)
-                InitializeStructure(sym, f->sym->type, "", FALSE);
-            else
-                ptr = InitializeStructure(sym, f->sym->type, ptr, FALSE);
-#endif
+        if (f->sym->mem_type == MT_TYPE && ((dir_node *)f->sym->type)->e.structinfo->typekind != TYPE_TYPEDEF ) {
+            if ( f->initializer == NULL )  { /* embedded struct? */
+                if (AsmBuffer[i]->token == T_STRING) {
+                    InitializeStructure( sym, f->sym, AsmBuffer[i]->string_ptr, AsmBuffer[i]->string_delim );
+                    i++;
+                } else {
+                    if ( AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA ) {
+                        AsmError(INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM);
+                    }
+                    InitializeStructure( sym, f->sym, "", '<' );
+                }
+            } else { /* or a structured field? */
+                if (AsmBuffer[i]->token == T_STRING) {
+                    InitializeStructure( sym, f->sym->type, AsmBuffer[i]->string_ptr, AsmBuffer[i]->string_delim );
+                    i++;
+                } else {
+                    if ( AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA ) {
+                        AsmError(INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM);
+                    }
+                    InitializeStructure( sym, f->sym->type, "", '<' );
+                }
+            }
         } else if (f->sym->mem_type == MT_BITS) {
             opndx.type = EXPR_CONST;
             opndx.string = NULL;
             if (AsmBuffer[i]->token == T_COMMA || AsmBuffer[i]->token == T_FINAL) {
                 if (f->value) {
-                    int j = last_item+1;
+                    int j = Token_Count + 1;
                     int max_item = Tokenize(f->value, j);
                     EvalOperand(&j, max_item, &opndx, TRUE);
                     is_record_set = TRUE;
@@ -846,7 +827,7 @@ nodelim:
                     opndx.value = 0;
                 }
             } else {
-                EvalOperand(&i, last_item, &opndx, TRUE);
+                EvalOperand(&i, Token_Count, &opndx, TRUE);
                 is_record_set = TRUE;
             }
             if (opndx.type != EXPR_CONST || opndx.string != NULL)
@@ -857,6 +838,7 @@ nodelim:
                     AsmError(INITIALIZER_MAGNITUDE_TOO_LARGE);
             }
             dwRecInit |= opndx.value << f->sym->offset;
+#if 0
             if (AsmBuffer[i]->token == T_COMMA) {
                 ptr = AsmBuffer[i]->pos;
                 i++;
@@ -867,49 +849,47 @@ nodelim:
                     ptr = AsmBuffer[i]->pos;
                 break;
             }
+#endif
         } else if (f->sym->total_length > 1) {
-            if (*ptr == end_delim) {
-                InitializeArray(f, "", buffer);
-            } else
-                ptr = InitializeArray(f, ptr, buffer);
+            if (AsmBuffer[i]->token == T_STRING) {
+                InitializeArray( f, AsmBuffer[i]->string_ptr, AsmBuffer[i]->string_delim );
+                i++;
+            } else {
+                if ( AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA ) {
+                    AsmError(INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM);
+                }
+                InitializeArray( f, "", '<' );
+            }
         } else {
-            while (isspace(*ptr)) ptr++;
             strcpy( buffer, f->initializer );
             strcat( buffer, " " );
-            if((*ptr == '\0') || (*ptr == end_delim) || (*ptr == ',') ) {
+            if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_COMMA ) {
                 strcat( buffer, f->value );
             } else {
-                char *ptr1;
-                ptr1 = buffer + strlen(buffer);
-                while (*ptr != '\0') {
-                    if (*ptr == start_delim)
-                        delim_lvl++;
-                    else if (*ptr == end_delim) {
-                        delim_lvl--;
-                        if (delim_lvl < 0)
-                            break;
-                    } else if (*ptr == '<') {
-                        bracket_lvl++;
-                    } else if (*ptr == '>') {
-                        bracket_lvl--;
-                    } else if (*ptr == '"') {
-                        char startc = *ptr;
-                        *ptr1++ = *ptr++;
-                        while (*ptr) {
-                            *ptr1++ = *ptr++;
-                            if (*(ptr-1) == startc)
-                            if (*ptr == startc)
-                                *ptr1++ = *ptr++;
-                            else
-                                break;
-                        }
-                        continue;
-                    } else if (bracket_lvl == 0 && delim_lvl == 0 && (*ptr == ',' || *ptr == '}'))
+                int lvl = 0; /* ignore commas enclosed in () */
+                while ( AsmBuffer[i]->token != T_FINAL) {
+                    if ( AsmBuffer[i]->token == T_OP_BRACKET )
+                        lvl++;
+                    else if ( AsmBuffer[i]->token == T_CL_BRACKET )
+                        lvl--;
+                    else if ( lvl == 0 && AsmBuffer[i]->token == T_COMMA )
                         break;
-
-                    *ptr1++ = *ptr++;
+                    if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<') {
+                        char *src = AsmBuffer[i]->string_ptr;
+                        ptr = buffer + strlen(buffer);
+                        *ptr++ = '<';
+                        while (*src) {
+                            if (*src == '<' || *src == '>' || *src == '!')
+                                *ptr++ = '!';
+                            *ptr++ = *src++;
+                        }
+                        *ptr++ = '>';
+                        *ptr = NULLC;
+                    } else
+                        strcat( buffer, AsmBuffer[i]->string_ptr );
+                    strcat( buffer, " " );
+                    i++;
                 }
-                *ptr1 = '\0';
             }
             InputQueueLine( buffer );
 
@@ -925,15 +905,21 @@ nodelim:
                         nextofs - (f->sym->offset + f->sym->total_size));
                 InputQueueLine( buffer );
             }
-
         }
         /* for a union, just the first field is initialized */
         if ( dir->e.structinfo->typekind == TYPE_UNION )
             break;
 
         if (f->next != NULL) {
-            if (*ptr == ',')
-                ptr++;
+
+            if ( AsmBuffer[i]->token != T_FINAL )
+                if ( AsmBuffer[i]->token == T_COMMA)
+                    i++;
+                else {
+                    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+                    while (AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA)
+                        i++;
+                }
         }
     }  /* end for */
 
@@ -952,10 +938,8 @@ nodelim:
         InputQueueLine( buffer );
     }
 
-    if ((end_delim) && (*ptr == end_delim))
-        ptr++;
-    else if (*ptr != '\0') {
-        AsmError(TOO_MANY_INITIAL_VALUES_FOR_STRUCTURE);
+    if ( AsmBuffer[i]->token != T_FINAL ) {
+        AsmErr( TOO_MANY_INITIAL_VALUES_FOR_STRUCTURE, AsmBuffer[i]->string_ptr );
     }
 
     /* restore the temporarily modified TYPEDEF */
@@ -966,7 +950,9 @@ nodelim:
 
     DebugMsg(("InitializeStructure exit, ptr=>%s<\n", ptr ));
 
-    return( ptr );
+    Token_Count = savedToken_Count;
+
+    return( NOT_ERROR );
 }
 
 // TYPEDEF

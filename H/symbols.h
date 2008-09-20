@@ -32,22 +32,26 @@
 #ifndef _SYMBOLS_H_
 #define _SYMBOLS_H_
 
+// SYM_LIB has been removed since v1.92,
+// library paths are no longer added to the symbol table
+// SYM_LNAME is also removed.
+// It was used for the null-entry in the LNAME table only
+// SYM_PROC is to be removed yet!
+
 enum sym_state {
         SYM_UNDEFINED,
         SYM_INTERNAL,       /* 1 internal var   */
         SYM_EXTERNAL,       /* 2 external       */
         SYM_STACK,          /* 3 stack variable */
-        SYM_SEG,            /* 4 segment        */
-        SYM_GRP,            /* 5 group          */
-        SYM_PROC,           /* 6 procedure      */
-        SYM_LIB,            /* 7 included library */
-        SYM_LNAME,          /* 8 lname entry      */
-        SYM_CLASS_LNAME,    /* 9 lname entry for segment class ... not in symbol table */
-        SYM_STRUCT_FIELD,   /* 10 field defined in some structure   */
-        SYM_TYPE,           /* 11 structure, union, typedef, record */
-        SYM_ALIAS,          /* 12 alias name    */
-        SYM_MACRO,          /* 13 macro         */
-        SYM_TMACRO          /* 14 text macro    */
+        SYM_PROC,           /* 4 procedure      */
+        SYM_SEG,            /* 5 segment        */
+        SYM_GRP,            /* 6 group          */
+        SYM_CLASS_LNAME,    /* 7 lname entry for segment class ... not in symbol table */
+        SYM_STRUCT_FIELD,   /* 8  field defined in some structure   */
+        SYM_TYPE,           /* 9  structure, union, typedef, record */
+        SYM_ALIAS,          /* 10 alias name    */
+        SYM_MACRO,          /* 11 macro         */
+        SYM_TMACRO          /* 12 text macro    */
 };
 
 typedef enum {
@@ -67,7 +71,7 @@ typedef enum {
         MT_SWORD,           /* 13 */
         MT_SDWORD,          /* 14 */
         MT_TYPE,            /* 15 field <type> specifies type */
-        MT_PROC,            /* 16 */
+        MT_PROC,            /* 16 a PROTO type (no name) */
         MT_ABS,             /* 17 */
         MT_BITS,            /* 18 */
         MT_ERROR = -1
@@ -103,9 +107,10 @@ typedef struct asm_sym {
             /* for SYM_EXTERNAL, SYM_PROC */
             struct {
                 unsigned    use32:1;
-                unsigned    comm:1;  /* is communal */
-                unsigned    weak:1;  /* 1 if an unused "externdef" */
-                unsigned    isfar:1; /* for communal only */
+                unsigned    comm:1;    /* is communal */
+                unsigned    weak:1;    /* 1 if an unused "externdef" */
+                unsigned    isfar:1;   /* for communal only */
+                unsigned    isproc:1;  /* PROTO=0, PROC=1 */
             };
             /* for SYM_MACRO */
             struct {
@@ -121,8 +126,8 @@ typedef struct asm_sym {
         union {
             /* for SYM_INTERNAL */
             uint_32         first_length; /* size of 1st initializer--elts. dup'd */
-            /* for SYM_EXTERNAL */
-            uint            idx;      /* external definition index */
+            /* for SYM_EXTERNAL, SYM_LNAME */
+            uint            idx;      /* (external definition) index */
         };
         /* for SYM_INTERNAL, SYM_STRUCT_FIELD, SYM_TYPE */
         uint_32         total_size;   /* total number of bytes (sizeof) */
@@ -159,10 +164,10 @@ extern  void            SymTakeOut( const char *name );
 extern  void            SymFree( struct asm_sym *sym);
 //extern  int             SymChangeName( const char *old, const char *new );
 extern  struct asm_sym  *SymSetName( struct asm_sym * sym, const char *name );
-extern  void            SymWriteCRef( void );
 extern  void            SymInit( void );
 extern  void            SymFini( void );
 extern  void            SymPassInit( int pass );
+extern  struct asm_sym **SymSort( unsigned int * );
 
 #ifdef __WATCOMC__
 typedef int (__watcall * StrCmpFunc)(const char *, const char * );

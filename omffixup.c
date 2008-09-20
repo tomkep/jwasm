@@ -35,7 +35,6 @@
 #include "omfpc.h"
 #include "omffixup.h"
 #include "myassert.h"
-#include "genutil.h"
 #include "carve.h"
 
 static carve_t  myCarver;

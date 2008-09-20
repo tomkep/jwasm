@@ -32,6 +32,7 @@
 #ifndef _PROC_H_
 #define _PROC_H_
 
+extern dir_node         *CurrProc;      // current procedure
 
 /*---------------------------------------------------------------------------*/
 
@@ -42,7 +43,7 @@ extern int              ProcDef( int );         // PROC directive
 extern int              ProtoDef( int, char * );// PROTO directive
 extern int              ProcEnd( int );         // ENDP directive
 extern int              InvokeDef( int );       // INVOKE directive
-extern int              RetInstr( int, int, int );// emit return statement from procedure
+extern int              RetInstr( int, int, bool );// emit return statement from procedure
 //extern int              WritePrologue( void );  // emit prologue statement after the
                                                 // declaration of a procedure
 extern void             ProcInit( void );

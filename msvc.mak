@@ -8,13 +8,13 @@ WIN=1
 
 # directory paths to adjust
 # VCDIR  - root directory for VC compiler, linker, include and lib files
-# SDKDIR - root directory for Windows include and lib files
-# HXDIR  - for DOS=1 only: root directory to search for stub LOADPEX.BIN
-#          and libs DKRNL32S.LIB + IMPHLP.LIB
+# W32LIB - directory for Win32 import library files (kernel32.lib)
+# HXDIR  - for DOS=1 only: root directory to search for stub LOADPEX.BIN,
+#          libs DKRNL32S.LIB + IMPHLP.LIB and tool PATCHPE.EXE.
 
 VCDIR  = \msvc8
-SDKDIR = \Microsoft SDK
-HXDIR  = \asm\hx
+W32LIB = \Win32Inc\Lib
+HXDIR  = \HX
 
 !ifndef DEBUG
 DEBUG=0
@@ -26,7 +26,7 @@ OUTD=MSVCD
 OUTD=MSVCR
 !endif
 
-inc_dirs  = -IH -I"$(VCDIR)\include" -I"$(SDKDIR)\Include"
+inc_dirs  = -IH -I"$(VCDIR)\include"
 
 TRMEM=0
 
@@ -55,12 +55,12 @@ LOPTD = /debug
 lflagsd = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /Libpath:$(HXDIR)\lib /OPT:NOWIN98
 lflagsw = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /OPT:NOWIN98
 
-CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(extra_c_flags) -Fo$@
+CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(extra_c_flags) 
 
 .c{$(OUTD)}.obj:
-	 $(CC) $<
+	 $(CC) -Fo$* $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   \
+proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/assume.obj  \
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
            $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  \
            $(OUTD)/msgtext.obj  $(OUTD)/macro.obj    $(OUTD)/condasm.obj \
@@ -74,7 +74,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   \
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/omf.obj     \
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   \
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  \
-           $(OUTD)/omffixup.obj \
+           $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   \
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
 !endif
@@ -96,19 +96,19 @@ $(OUTD):
 $(OUTD)\$(name).exe : H/opcodes.gh $(proj_obj)
 	$(linker) @<<
 $(lflagsw) $(proj_obj)
-/LIBPATH:"$(VCDIR)\Lib" /LIBPATH:"$(SDKDIR)\Lib" kernel32.lib /OUT:$@
+/LIBPATH:"$(VCDIR)\Lib" /LIBPATH:"$(W32LIB)" /OUT:$@
 <<
 
 $(OUTD)\$(name)d.exe : H/opcodes.gh $(proj_obj)
 	$(linker) @<<
 $(lflagsd) /NODEFAULTLIB initw32.obj $(proj_obj) /LIBPATH:$(VCDIR)\Lib
-libc.lib oldnames.lib dkrnl32s.lib imphlp.lib /STUB:$(HXDIR)\Bin\LOADPEX.BIN
+libc.lib oldnames.lib /LIBPATH:$(HXDIR)\Lib dkrnl32s.lib imphlp.lib /STUB:$(HXDIR)\Bin\LOADPEX.BIN
 /OUT:$@ /FIXED:NO
 <<
 	@$(HXDIR)\bin\patchpe $@
 
 $(OUTD)/msgtext.obj: msgtext.c H/msgtext.h H/usage.h H/banner.h
-	$(CC) msgtext.c
+	$(CC) -Fo$* msgtext.c
 
 ######
 

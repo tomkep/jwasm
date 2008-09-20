@@ -12,7 +12,12 @@
 #include <errno.h>
 #include <ctype.h>
 #include <time.h>
+
+#ifdef __WATCOMC__
+#include <unistd.h>
+#else
 #include <io.h>
+#endif
 
 #include "globals.h"
 #include "symbols.h"
@@ -23,6 +28,7 @@
 #include "queues.h"
 #include "bin.h"
 #include "myassert.h"
+#include "fatal.h"
 
 #if BIN_SUPPORT
 
@@ -241,7 +247,8 @@ int bin_write_data(int fh)
         size = curr->e.seginfo->segrec->d.segdef.seg_length - curr->e.seginfo->start_loc;
         if (size != 0) {
             lseek( fh, curr->e.seginfo->fileoffset, SEEK_SET );
-            write( fh, curr->e.seginfo->CodeBuffer, size);
+            if (write( fh, curr->e.seginfo->CodeBuffer, size) != size)
+                WriteError();
         }
     }
 

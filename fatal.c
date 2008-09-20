@@ -41,7 +41,7 @@
 typedef void (*err_act)( void );
 
 typedef struct {
-    int       num;            // index
+    int       num;            // arguments
     int       message;        // message displayed
     err_act   action;         // function to call, if any
     int       ret;            // exit code
@@ -83,5 +83,19 @@ void Fatal( unsigned msg, ... )
     if( Fatal_Msg[msg].action != NULL ) {
         Fatal_Msg[msg].action();
     }
+    CloseFiles();
     exit( Fatal_Msg[msg].ret );
 }
+
+void SeekError( void )
+/************************/
+{
+    Fatal( FILE_LSEEK_ERROR, AsmFiles.fname[OBJ] );
+};
+
+void WriteError( void )
+/************************/
+{
+    Fatal( FILE_WRITE_ERROR, AsmFiles.fname[OBJ] );
+};
+

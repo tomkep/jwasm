@@ -35,6 +35,7 @@
 #include "directiv.h"
 #include "expreval.h"
 #include "types.h"
+#include "listing.h"
 
 #include "myassert.h"
 
@@ -144,7 +145,7 @@ static void fill_in_objfile_space( uint size )
     }
 }
 
-int AlignDirective( uint_16 directive, int i )
+int AlignDirective( int directive, int i )
 /********************************************/
 {
     int_32 align_val;
@@ -153,6 +154,7 @@ int AlignDirective( uint_16 directive, int i )
     int j = i+1;
     unsigned int CurrAddr;
 
+    DebugMsg(("AlignDirective enter\n"));
     switch( directive ) {
     case T_ALIGN:
         if ( EvalOperand( &j, Token_Count, &opndx, TRUE ) == ERROR )
@@ -204,5 +206,6 @@ int AlignDirective( uint_16 directive, int i )
         WriteLstFile(LSTTYPE_LIDATA, CurrAddr, NULL );
         directive_listed = TRUE;
     }
+    DebugMsg(("AlignDirective exit\n"));
     return( NOT_ERROR );
 }

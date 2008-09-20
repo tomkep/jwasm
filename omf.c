@@ -33,7 +33,12 @@
 #include <errno.h>
 #include <ctype.h>
 #include <time.h>
+
+#ifdef __WATCOMC__
+#include <unistd.h>
+#else
 #include <io.h>
+#endif
 
 #include "memalloc.h"
 #include "symbols.h"
@@ -52,10 +57,6 @@
 #include "myassert.h"
 
 #define SEPARATE_FIXUPP_16_32
-
-#if FASTPASS
-extern bool UseSavedState;
-#endif
 
 extern symbol_queue     Tables[];       // tables of definitions
 extern obj_rec          *ModendRec;     // Record for Modend (OMF)
@@ -110,6 +111,7 @@ void omf_FlushCurrSeg( void )
     unsigned i;
     unsigned size;
 
+    DebugMsg(( "omf_FlushCurrSeg enter\n" ));
     /* this IF is for code segments which contain entirely data up to the
      * point when they are flushed
      * outselect calls flushcurrseg right back
@@ -148,6 +150,7 @@ void omf_FlushCurrSeg( void )
                 _asm int 3;
             }
 #endif
+            DebugMsg(( "omf_FlushCurrSeg: output has to wait, curr size=%u, i=%u, loc_offset=%X\n", size, i, CurrSeg->seg->e.seginfo->FixupListTail->loc_offset ));
             return; // can't output the ledata record as is
         }
     }
@@ -315,6 +318,7 @@ void omf_write_ledata( void )
     struct fixup    *fl32 = NULL;
 #endif
 
+    DebugMsg(( "omf_write_ledata enter\n" ));
     size = CurrSeg->seg->e.seginfo->current_loc - CurrSeg->seg->e.seginfo->start_loc;
     if( size > 0 && write_to_file == TRUE) {
         LastCodeBufSize = size;
@@ -328,6 +332,7 @@ void omf_write_ledata( void )
 
         /* Process Fixup, if any */
         if( CurrSeg->seg->e.seginfo->FixupListHead != NULL ) {
+            DebugMsg(( "omf_write_ledata: write fixups\n" ));
 #ifdef SEPARATE_FIXUPP_16_32
             omf_split_fixup_list( &fl16, &fl32 );
             /* Process Fixup, if any */
@@ -392,6 +397,7 @@ void omf_write_lib( void )
     struct dir_node     *curr;
     char                *name;
 
+    DebugMsg(("omf_write_lib() enter\n"));
     for( curr = Tables[TAB_LIB].head; curr; curr = curr->next ) {
         name = curr->sym.name;
         objr = ObjNewRec( CMD_COMENT );
@@ -400,6 +406,7 @@ void omf_write_lib( void )
         ObjAttachData( objr, (uint_8 *)name, strlen( name ) );
         omf_write_record( objr, TRUE );
     }
+    DebugMsg(("omf_write_lib() exit\n"));
 }
 
 void omf_write_export( void )
@@ -461,7 +468,7 @@ void omf_write_grp( void )
             if( ( segminfo->sym.state != SYM_SEG ) || ( segminfo->sym.segment == NULL ) ) {
 #if FASTPASS
                 /* make a full second pass and report errors there */
-                ResetUseSavedState();
+                SkipSavedState();
 #endif
                 // LineNumber = curr->line_num;
                 // AsmErr( SEG_NOT_DEFINED, segminfo->sym.name );
@@ -528,16 +535,22 @@ void omf_write_lnames( void )
     uint        total_size = 0;
     char        *lname = NULL;
 
+    DebugMsg(("omf_write_lnames() enter\n"));
+    /* todo: Masm splits the LNAMES record if it exceeds 1024 bytes
+     */
+
     objr = ObjNewRec( CMD_LNAMES );
     objr->d.lnames.first_idx = 1;
     objr->d.lnames.num_names = LnamesIdx;
     total_size = GetLnameData( &lname );
     /* fixme: what if lnames are > 1024? */
+    DebugMsg(("omf_write_lnames(): total_size=%u\n", total_size));
     if( total_size > 0 ) {
         ObjAttachData( objr, (uint_8 *)lname, total_size );
     }
 //    ObjCanFree( objr ); /* tell that data attachment can be freed */
     omf_write_record( objr, TRUE );
+    DebugMsg(("omf_write_lnames() exit\n"));
 }
 
 // write EXTDEF records
@@ -595,7 +608,7 @@ void omf_write_extdef( )
 
     for(curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         /* the item must be USED and UNDEFINED */
-        if( curr->sym.used && (curr->e.procinfo->defined == 0 )) {
+        if( curr->sym.used == TRUE && curr->sym.isproc == FALSE ) {
             DebugMsg(("omf_write_extdef: %s\n", curr->sym.name));
             Mangle( &curr->sym, buffer );
             len = strlen( buffer );
@@ -780,6 +793,7 @@ void omf_write_header( void )
     unsigned    len;
     char        *name;
 
+    DebugMsg(("omf_write_header() enter\n"));
     objr = ObjNewRec( CMD_THEADR );
     if( Options.module_name != NULL ) {
         name = Options.module_name;
@@ -794,6 +808,7 @@ void omf_write_header( void )
     ObjPutName( objr, name, len );
     ObjTruncRec( objr );
     omf_write_record( objr, TRUE );
+    DebugMsg(("omf_write_header() exit\n"));
 }
 
 int omf_write_autodep( void )

@@ -41,11 +41,9 @@
 #include "input.h"
 #include "tbyte.h"
 #include "fixup.h"
-
-#if defined( _STANDALONE_ )
-  #include "directiv.h"
-  #include "types.h"
-#endif
+#include "listing.h"
+#include "directiv.h"
+#include "types.h"
 
 #ifndef min
 #define min(x,y) (((x) < (y)) ? (x) : (y))
@@ -287,8 +285,8 @@ next_item:
                         PushLineQueue();
                         veryfirst = FALSE;
                     }
-                    if (NULL == InitializeStructure( sym, struct_sym, opndx.string, TRUE ))
-                        return(ERROR);
+                    if ( InitializeStructure( sym, struct_sym, opndx.string, AsmBuffer[cur_pos-1]->string_delim ) == ERROR )
+                        return( ERROR );
                     if( sym && Parse_Pass == PASS_1 )
                         update_sizes( sym, first, no_of_bytes );
 
@@ -660,13 +658,12 @@ item_done:
  initializer_loc: type pos
 */
 
-int data_init( int sym_loc, int initializer_loc)
+int data_init( int sym_loc, int initializer_loc, asm_sym *struct_sym )
 /***********************************************/
 {
     unsigned            no_of_bytes;
     memtype             mem_type;
     struct asm_sym      *sym = NULL;
-    struct asm_sym      *struct_sym = NULL;
     dir_node            *dir;
     uint                old_offset;
     uint                currofs; /* for LST output */
@@ -691,89 +688,87 @@ int data_init( int sym_loc, int initializer_loc)
         }
     }
 
-    switch( AsmBuffer[initializer_loc]->value ) {
-    case T_DB:
-    case T_BYTE:
-        mem_type = MT_BYTE;
-        no_of_bytes = 1;
-        break;
-    case T_SBYTE:
-        mem_type = MT_SBYTE;
-        no_of_bytes = 1;
-        break;
-    case T_DW:
-    case T_WORD:
-        mem_type = MT_WORD;
-        no_of_bytes = 2;
-        break;
-    case T_SWORD:
-        mem_type = MT_SWORD;
-        no_of_bytes = 2;
-        break;
-    case T_REAL4:
-        float_initializer = TRUE;
-    case T_DD:
-    case T_DWORD:
-        mem_type = MT_DWORD;
-        no_of_bytes = 4;
-        break;
-    case T_SDWORD:
-        mem_type = MT_SDWORD;
-        no_of_bytes = 4;
-        break;
-    case T_DF:
-    case T_FWORD:
-        mem_type = MT_FWORD;
-        no_of_bytes = 6;
-        break;
-    case T_REAL8:
-        float_initializer = TRUE;
-    case T_DQ:
-    case T_QWORD:
-        mem_type = MT_QWORD;
-        no_of_bytes = 8;
-        break;
-    case T_REAL10:
-        float_initializer = TRUE;
-    case T_DT:
-    case T_TBYTE:
-        mem_type = MT_TBYTE;
-        no_of_bytes = 10;
-        break;
-    case T_OWORD:
-        mem_type = MT_OWORD;
-        no_of_bytes = 16;
-        break;
-    // case T_STRUC:
-    case T_STRUCT:
-        /* if the parser found a TYPE id, it puts T_STRUCT in AsmBuffer */
+    if (struct_sym) {
+        /* if the parser found a TYPE id, struct_sym is != NULL */
         DebugMsg(("data_init: arbitrary type, calling SymSearch\n"));
-        struct_sym = SymSearch( AsmBuffer[initializer_loc]->string_ptr );
+        //struct_sym = SymSearch( AsmBuffer[initializer_loc]->string_ptr );
         mem_type = MT_TYPE;
         if (sym)
             sym->type = struct_sym;
         veryfirst = TRUE;
-        if (((dir_node *)struct_sym)->e.structinfo->typekind == TYPE_STRUCT &&
-            ((dir_node *)struct_sym)->e.structinfo->OrgInside == TRUE) {
+        if ( ((dir_node *)struct_sym)->e.structinfo->typekind == TYPE_STRUCT &&
+             ((dir_node *)struct_sym)->e.structinfo->OrgInside == TRUE) {
             AsmError( STRUCT_CANNOT_BE_INSTANCED );
             return( ERROR );
         }
         no_of_bytes = struct_sym->total_size;
         if (no_of_bytes == 0) {
-            dir_node * dir = (dir_node *)struct_sym;
             /* a void type is not valid */
-            if ( dir->e.structinfo->typekind == TYPE_TYPEDEF ) {
-                AsmErr( INVALID_TYPE_FOR_DATA_DECLARATION, AsmBuffer[initializer_loc]->string_ptr );
+            if ( ((dir_node *)struct_sym)->e.structinfo->typekind == TYPE_TYPEDEF ) {
+                AsmErr( INVALID_TYPE_FOR_DATA_DECLARATION, sym->name );
                 return( ERROR );
             }
         }
-        break;
-    default:
-        DebugMsg(("data_init: unknown label type\n"));
-        AsmErr( INVALID_TYPE_FOR_DATA_DECLARATION, AsmBuffer[initializer_loc]->string_ptr );
-        return( ERROR );
+    } else {
+        switch( AsmBuffer[initializer_loc]->value ) {
+        case T_DB:
+        case T_BYTE:
+            mem_type = MT_BYTE;
+            no_of_bytes = 1;
+            break;
+        case T_SBYTE:
+            mem_type = MT_SBYTE;
+            no_of_bytes = 1;
+            break;
+        case T_DW:
+        case T_WORD:
+            mem_type = MT_WORD;
+            no_of_bytes = 2;
+            break;
+        case T_SWORD:
+            mem_type = MT_SWORD;
+            no_of_bytes = 2;
+            break;
+        case T_REAL4:
+            float_initializer = TRUE;
+        case T_DD:
+        case T_DWORD:
+            mem_type = MT_DWORD;
+            no_of_bytes = 4;
+            break;
+        case T_SDWORD:
+            mem_type = MT_SDWORD;
+            no_of_bytes = 4;
+            break;
+        case T_DF:
+        case T_FWORD:
+            mem_type = MT_FWORD;
+            no_of_bytes = 6;
+            break;
+        case T_REAL8:
+            float_initializer = TRUE;
+        case T_DQ:
+        case T_QWORD:
+            mem_type = MT_QWORD;
+            no_of_bytes = 8;
+            break;
+        case T_REAL10:
+            float_initializer = TRUE;
+        case T_DT:
+        case T_TBYTE:
+            mem_type = MT_TBYTE;
+            no_of_bytes = 10;
+            break;
+        case T_OWORD:
+            mem_type = MT_OWORD;
+            no_of_bytes = 16;
+            break;
+        default:
+            DebugMsg(("data_init: unknown label type\n"));
+            AsmErr( INVALID_TYPE_FOR_DATA_DECLARATION, AsmBuffer[initializer_loc]->string_ptr );
+            return( ERROR );
+        }
     }
-
     if( AsmBuffer[ initializer_loc + 1 ]->token == T_FINAL ) {
         DebugMsg(("data_init: no initializer found\n"));
         AsmError( SYNTAX_ERROR );
@@ -832,12 +827,27 @@ int data_init( int sym_loc, int initializer_loc)
             }
             /* for EXTERNDEF, check type changes */
             if (sym->mem_type != MT_EMPTY) {
-                if (sym->mem_type != mem_type) {
+                memtype type1 = mem_type;
+                memtype type2 = sym->mem_type;
+                asm_sym *tmp;
+                /* skip alias types */
+                tmp = struct_sym;
+                while ( type1 == MT_TYPE ) {
+                    type1 = tmp->mem_type;
+                    tmp = tmp->type;
+                }
+                tmp = sym;
+                while ( type2 == MT_TYPE ) {
+                    type2 = tmp->mem_type;
+                    tmp = tmp->type;
+                }
+                if ( type2 != type1 ) {
+                    DebugMsg(("data_init: memtype conflict: %u - %u\n", type2, type1 ));
                     AsmErr( SYMBOL_TYPE_CONFLICT, sym->name );
                 }
             }
             /* add the label to the linked list attached to curr segment */
-            /* this allows to reduce the number of passes (see AsmFixup.c) */
+            /* this allows to reduce the number of passes (see Fixup.c) */
             if (CurrSeg) {
                 ((dir_node *)sym)->next = (dir_node *)CurrSeg->seg->e.seginfo->labels;
                 CurrSeg->seg->e.seginfo->labels = sym;

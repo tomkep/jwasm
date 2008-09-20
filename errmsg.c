@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  Diagnostics routines (errors/warnings/notes, listings)
+* Description:  Diagnostics routines (errors/warnings/notes)
 *
 ****************************************************************************/
 
@@ -41,13 +41,15 @@
 #include "symbols.h"
 #include "queues.h"
 #include "macro.h"
+#include "fatal.h"
+
+#define MAXMSGSIZE 128
 
 extern void             MsgPrintf( int resourceid ); // don't use this
 extern char             *MsgGet( int resourceid, char *buffer );
 extern int              trademark( void );
 extern char             banner_printed;
-
-extern uint_32          LastCodeBufSize;
+extern bool             EndDirectiveFound;
 
 void                    OpenErrFile( void );
 void                    print_include_file_nesting_structure( void );
@@ -67,8 +69,8 @@ void                    print_include_file_nesting_structure( void );
 #define ErrCount ModuleInfo.error_count
 #define WngCount ModuleInfo.warning_count
 
-static int              Errfile_Written = FALSE;
 static FILE             *ErrFile;
+static bool             Errfile_Written;
 
 static void             PutMsg( FILE *fp, char *prefix, int msgnum, va_list args );
 static void             PrtMsg1( char *prefix, int msgnum, va_list args1, va_list args2 );
@@ -125,8 +127,7 @@ void AsmErr( int msgnum, ... )
     print_include_file_nesting_structure();
     if( ErrLimit != -1  &&  ErrCount >= ErrLimit ) {
         PrtMsg1( "", ERR_TOO_MANY_ERRORS, args1, args2 );
-        CloseFiles();
-        exit( 1 );
+        EndDirectiveFound = TRUE;
     }
 }
 
@@ -203,142 +204,37 @@ void OpenErrFile( void )
     }
 }
 
-void LstMsg( const char *format, ... )
-/************************************/
-{
-    va_list     args;
-
-    if( AsmFiles.file[LST] ) {
-        va_start( args, format );
-        vfprintf( AsmFiles.file[LST], format, args );
-        va_end( args );
-    }
-}
-
-void OpenLstFile( void )
-/**********************/
-{
-    if( AsmFiles.fname[LST] != NULL && Options.write_listing ) {
-        AsmFiles.file[LST] = fopen( AsmFiles.fname[LST], "w" );
-    }
-}
-
-void WriteLstFile( int type, unsigned int oldofs, void * value )
-{
-    unsigned int newofs;
-    asm_sym * sym = value;
-    int len;
-    int idx;
-    char * p;
-    char buffer[128];
-
-    if (ModuleInfo.list == FALSE || AsmFiles.file[LST] == NULL)
-        return;
-    if (type == LSTTYPE_LIDATA) {
-        newofs = GetCurrOffset();
-        len = sprintf(buffer, "%08X: ", oldofs);
-        fwrite(buffer, 1, len, AsmFiles.file[LST]);
-
-        len = 8;
-
-        if (CurrSeg == NULL)
-            return;
-
-        if (CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS) {
-            while (oldofs < newofs && len) {
-                sprintf(buffer, "%02X", 0);
-                //                    sprintf(buffer, "??");
-                fwrite(buffer, 1, 2, AsmFiles.file[LST]);
-                oldofs++;
-                len--;
-            }
-            goto nodump;
-        }
-
-        if (write_to_file == FALSE)
-            goto nodump;
-
-        /* OMF hold just a small buffer for one LEDATA record */
-        /* if it has been flushed, use LastCodeBufSize */
-        idx = (CurrSeg->seg->e.seginfo->current_loc - CurrSeg->seg->e.seginfo->start_loc)
-            - (newofs - oldofs);
-        if (Options.output_format == OFORMAT_OMF) {
-            while (idx < 0 && len) {
-                sprintf(buffer, "%02X", CurrSeg->seg->e.seginfo->CodeBuffer[idx+LastCodeBufSize]);
-                fwrite(buffer, 1, 2, AsmFiles.file[LST]);
-                idx++;
-                oldofs++;
-                len--;
-            }
-        } else if (idx < 0)
-            idx = 0;
-
-        while (oldofs < newofs && len) {
-            sprintf(buffer, "%02X", CurrSeg->seg->e.seginfo->CodeBuffer[idx]);
-            fwrite(buffer, 1, 2, AsmFiles.file[LST]);
-            idx++;
-            oldofs++;
-            len--;
-        }
-    nodump:
-        for (;len;len--)
-            fwrite("  ", 1, 2, AsmFiles.file[LST]);
-
-    } else if (type == LSTTYPE_EQUATE) {
-        if (sym->state == SYM_INTERNAL) {
-            sprintf(buffer, " = %-23X", sym->value);
-            fwrite(buffer, 1, strlen(buffer), AsmFiles.file[LST]);
-        } else if (sym->state == SYM_TMACRO) {
-            char buffer2[MAX_LINE_LEN];
-            GetTextMacroValue(sym->string_ptr, buffer2);
-            sprintf(buffer, " = %-23.80s", buffer2);
-            fwrite(buffer, 1, strlen(buffer), AsmFiles.file[LST]);
-        }
-    } else {
-        if (type != LSTTYPE_MACRO && (CurrSeg || value))
-            len = sprintf(buffer, "%08X:                 ", oldofs);
-        else
-            memset(buffer, ' ', 3*8+2);
-        fwrite(buffer, 1, 3*8+2, AsmFiles.file[LST]);
-    }
-
-    fwrite(" ", 1, 1, AsmFiles.file[LST]);
-    p = CurrString;
-    while(isspace(*p)) p++;
-    len = strlen(p);
-    fwrite(p, 1, len, AsmFiles.file[LST]);
-    fwrite("\n", 1, 1, AsmFiles.file[LST]);
-    return;
-    }
-
 static void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args )
 /********************************************************************/
 {
     const FNAME     *fname;
     int             i;
-    char            msgbuf[MAX_LINE_LEN];
+    char            msgbuf[MAXMSGSIZE];
     char            buffer[MAX_LINE_LEN];
 
     if( fp != NULL ) {
-        fname = get_curr_srcfile();
-        if( LineNumber != 0 ) {
-            if( fname != NULL ) {
-                fprintf( fp, "%s(%lu): ", fname->name, LineNumber );
-            }
-        }
+
         i = sprintf( buffer, "%s %c%03d: ", prefix, *prefix, msgnum );
         // CGetMsg( msgbuf, msgnum );
         MsgGet( msgnum, msgbuf );
-        vsprintf( buffer+i, msgbuf, args );
-        strcat(buffer, "\n");
-        fprintf( fp, buffer );
+        i += vsprintf( buffer+i, msgbuf, args );
+        buffer[i] = '\n';
+        i++;
+        buffer[i] = NULLC;
+
+        fname = get_curr_srcfile();
+        if( LineNumber != 0 && fname != NULL ) {
+            fprintf( fp, "%s(%lu): ", fname->name, LineNumber );
+        }
+        fwrite( buffer, 1, i, fp );
         if (AsmFiles.file[LST] && fp == ErrFile) {
-            fprintf( AsmFiles.file[LST], "                           ");
-            fprintf( AsmFiles.file[LST], "%s\n", CurrString);
+            fwrite( "                           ", 1, 26+1, AsmFiles.file[LST] );
+            fwrite( CurrString, 1, strlen(CurrString), AsmFiles.file[LST] );
+            fwrite( "\n", 1, 1, AsmFiles.file[LST] );
             if( LineNumber != 0 && fname != NULL ) {
                 fprintf( AsmFiles.file[LST], "%s(%lu): ", fname->name, LineNumber );
             }
-            fprintf( AsmFiles.file[LST], buffer );
+            fwrite( buffer, 1, i, AsmFiles.file[LST] );
         }
     }
 }
@@ -350,8 +246,9 @@ int InternalError( const char *file, unsigned line )
 // it's used by myassert() function in debug version
 {
 
-    char msgbuf[80];
+    char msgbuf[128];
 
+    DebugMsg(("InternalError enter\n"));
     MsgGet( MSG_INTERNAL_ERROR, msgbuf );
     fprintf( errout, msgbuf, file, line );
     fflush( errout );
@@ -360,13 +257,5 @@ int InternalError( const char *file, unsigned line )
     return( 0 );
 }
 #endif
-
-void WriteError( void )
-/************************/
-{
-    MsgPrintf( OBJECT_WRITE_ERROR );
-    CloseFiles();
-    exit( EXIT_FAILURE );
-};
 
 #endif

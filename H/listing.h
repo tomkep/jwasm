@@ -24,28 +24,24 @@
 *
 *  ========================================================================
 *
-* Description:  WHEN YOU FIGURE OUT WHAT THIS FILE DOES, PLEASE
-*               DESCRIBE IT HERE!
+* Description:  listing interface.
 *
 ****************************************************************************/
 
 
-#ifndef GENUTIL_H
-#include <stddef.h>
+#ifndef _LISTING_H_INCLUDED
+#define _LISTING_H_INCLUDED
 
-//#include "msg.gh"
+// extern void LstMsg( const char *format, ... );
+extern void OpenLstFile( void );
+extern void CloseLstFile( void );
+extern void WriteLstFile( int type, unsigned int ofs, void * sym );
+extern void WriteCRef( void );
 
-#define WRN 0x8000
-#ifdef __WATCOMC__
-#ifndef __AXP__
-#pragma aux Fatal aborts;
+#define LSTTYPE_LIDATA    0
+#define LSTTYPE_EQUATE    1
+#define LSTTYPE_DIRECTIVE 2
+#define LSTTYPE_MACRO     3
+#define LSTTYPE_STRUCT    4
+
 #endif
-#endif
-extern void Fatal( unsigned msg, ... );
-extern size_t PrtFmt( const char *fmt, ... );
-extern void PrtMsg( unsigned msg, ... );
-extern char *StrDec( char *buf, unsigned short num );
-
-#define GENUTIL_H   1
-#endif
-

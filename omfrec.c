@@ -33,18 +33,17 @@
 #include "memalloc.h"
 #include "omfrec.h"
 #include "omfpc.h"
-#include "genutil.h"
 #include "myassert.h"
 #include "carve.h"
 
 static carve_t myCarver;
 
-void ObjRecInit( void ) {
+void OmfRecInit( void ) {
 /*********************/
     myCarver = CarveCreate( sizeof( obj_rec ), 16 );
 }
 
-void ObjRecFini( void ) {
+void OmfRecFini( void ) {
 /*********************/
     CarveDestroy( myCarver );
 }

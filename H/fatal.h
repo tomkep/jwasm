@@ -24,8 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  WHEN YOU FIGURE OUT WHAT THIS FILE DOES, PLEASE
-*               DESCRIBE IT HERE!
+* Description:  define fatal error messages
 *
 ****************************************************************************/
 
@@ -41,5 +40,7 @@ enum {
 /* number = number of arguments that follow; ret = return value */
 
 extern void   Fatal( unsigned msg, ... );
+extern void   SeekError( void );
+extern void   WriteError( void );
 
 #endif

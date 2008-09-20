@@ -38,6 +38,7 @@
 #if defined( _STANDALONE_ )
 
 #include "directiv.h"
+#include "proc.h"
 
 #include "types.h"
 
@@ -85,21 +86,24 @@ int LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, b
     char                buffer[20];
 
     DebugMsg(("LabelCreate(%s, memtype=%u, %X, %u) enter\n", symbol_name, mem_type, vartype, bLocal));
-    if( CurrSeg == NULL ) 
+
+    /* LABEL directive in a STRUCT definition?  Masm doesn't allow this,
+     it might be a remnant of Wasm syntax, which doesn't know UNION.
+     */
+    if (StructDef.struct_depth) {
+        if( Parse_Pass == PASS_1 ) {
+            if (!(sym = AddFieldToStruct( 0, -1, mem_type, vartype, 0 )))
+                return( ERROR );
+        }
+        return( NOT_ERROR );
+    }
+
+    if( CurrSeg == NULL )
         AsmError( LABEL_OUTSIDE_SEGMENT );
 
     if( strcmp( symbol_name, "@@" ) == 0 ) {
         sprintf( buffer, "L&_%04u", ++ModuleInfo.anonymous_label );
         symbol_name = buffer;
-    }
-
-    /* inside a STRUCT definition? */
-    if (StructDef.struct_depth) {
-        if( Parse_Pass == PASS_1 ) {
-            if (!(sym = AddFieldToStruct( 0, -1, MT_NEAR, 0, 0 )))
-                return( ERROR );
-        }
-        return( NOT_ERROR );
     }
 
     sym = SymLookupLabel( symbol_name, bLocal );

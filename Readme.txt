@@ -67,6 +67,8 @@
     - OWORD type.
     - IMAGEREL and SECTIONREL operator.
     - WATCOM register calling convention.
+    - IDs can be enclosed in back quotes (`) and thus they can contain
+      characters not allowed in "normal" IDs.
     - a numeric constant, __JWASM__, is predefined and its value is
       the current JWasm version * 100, that is, for v1.7 the value is
       170. The predefined text equate @Version won't contain JWasm's

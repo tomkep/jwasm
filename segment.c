@@ -48,10 +48,7 @@
 
 /* prototypes */
 extern uint             checkword( char **token );
-
-#if FASTPASS
-extern bool UseSavedState;
-#endif
+extern int              SetAssumeCSCurrSeg( void );
 
 extern symbol_queue     Tables[];       // tables of definitions
 
@@ -84,11 +81,14 @@ typedef struct {
 } last_seg_info;        // information about last opened simplified segment
 
 extern struct asm_sym   *SegOverride;
-extern uint             segdefidx;      // Number of Segment definition
 extern asm_sym          *sym_CurSeg;
 
-seg_item                *CurrSeg;       // points to stack of opened segments
+uint                    segdefidx;      // Number of Segment definition
+static uint             grpdefidx;      // Number of Group definition
 uint                    LnamesIdx;      // Number of LNAMES definition
+
+
+seg_item                *CurrSeg;       // points to stack of opened segments
 bool                    Use32;          // if current segment is 32-bit
 
 char first_issued;
@@ -124,35 +124,11 @@ static char             saved_first_issued;
 static bool             saved_Use32;
 #endif
 
-static dir_node         *flat_grp; /* magic FLAT group */
+dir_node         *flat_grp; /* magic FLAT group */
 
 static uint_8           codebuf[ 1024 ];
 
 #define ROUND_UP( i, r ) (((i)+((r)-1)) & ~((r)-1))
-
-static int SetAssumeCSCurrSeg( void )
-/*************************************/
-{
-    assume_info     *info;
-
-    info = &(SegAssumeTable[ ASSUME_CS ]);
-    if( CurrSeg == NULL ) {
-        info->symbol = NULL;
-        info->flat = FALSE;
-        info->error = TRUE;
-        sym_CurSeg->string_ptr = "";
-    } else {
-        if( CurrSeg->seg->e.seginfo->group != NULL )
-            info->symbol = GetGrp( &CurrSeg->seg->sym );
-        else
-            info->symbol = &CurrSeg->seg->sym;
-        info->flat = FALSE;
-        info->error = FALSE;
-        sym_CurSeg->string_ptr = CurrSeg->seg->sym.name;
-        DebugMsg(("SetAssumeCSCurrSeg: current segment=%s\n", CurrSeg->seg->sym.name));
-    }
-    return( NOT_ERROR );
-}
 
 static int push_seg( dir_node *seg )
 /**********************************/
@@ -202,63 +178,32 @@ direct_idx GetLnameIdx( char *name )
     } else if( sym->state == SYM_SEG ) {
         return( dir->e.seginfo->lname_idx );
     } else {    /* it is an lname record */
-        return( dir->e.lnameinfo->idx );
+        return( dir->sym.idx );
     }
 }
+
+// add a class name
 
 static direct_idx InsertClassLname( char *name )
 /**********************************************/
 {
-    dir_node            *dir;
+    asm_sym *sym;
 
     if( strlen( name ) > MAX_LNAME ) {
         AsmError( LNAME_TOO_LONG );
         return( LNAME_NULL );
     }
 
-    dir = dir_insert_ex( name, TAB_CLASS_LNAME );
+    /* the classes aren't inserted into the symbol table
+     but they are in a queue */
+
+    sym = SymCreate( name, FALSE );
+    sym->state = SYM_CLASS_LNAME;
+    sym->idx = ++LnamesIdx;
 
     /* put it into the lname table */
 
-    AddLnameData( dir );
-
-    return( LnamesIdx );
-}
-
-direct_idx LnameInsert( char *name )
-/**********************************/
-{
-    struct asm_sym      *sym;
-    dir_node            *dir;
-
-    sym = SymSearch( name );
-
-    if( sym != NULL ) {
-        dir = (dir_node *)sym;
-        /* The name is already in the table*/
-        if( sym->state == SYM_GRP ) {
-            if( dir->e.grpinfo->lname_idx == 0 ) {
-                dir->e.grpinfo->lname_idx = ++LnamesIdx;
-            }
-        } else if( sym->state == SYM_SEG ) {
-            if( dir->e.seginfo->lname_idx == 0 ) {
-                dir->e.seginfo->lname_idx = ++LnamesIdx;
-            }
-        } else {
-            return( ERROR );
-        }
-    } else {
-        if( strlen( name ) > MAX_LNAME ) {
-            AsmError( LNAME_TOO_LONG );
-            return( ERROR );
-        }
-
-        dir = dir_insert( name, TAB_LNAME );
-    }
-
-    /* put it into the lname table */
-
-    AddLnameData( dir );
+    AddLnameData( (dir_node *)sym );
 
     return( LnamesIdx );
 }
@@ -323,10 +268,6 @@ uint_32 GetCurrSegStart( void )
     return( CurrSeg->seg->e.seginfo->start_loc );
 }
 
-
-
-
-
 static dir_node *CreateGroup( char *name )
 /****************************************/
 {
@@ -334,12 +275,14 @@ static dir_node *CreateGroup( char *name )
 
     grp = (dir_node *)SymSearch( name );
 
-    if( grp == NULL ) {
-        grp = dir_insert( name, TAB_GRP );
-        LnameInsert( name );
-    } else if( grp->sym.state == SYM_UNDEFINED ) {
-        dir_change( grp, TAB_GRP );
-        LnameInsert( name );
+    if( grp == NULL || grp->sym.state == SYM_UNDEFINED) {
+        if (grp == NULL)
+            grp = dir_insert( name, TAB_GRP );
+        else
+            dir_change( grp, TAB_GRP );
+        grp->e.grpinfo->idx = ++grpdefidx;
+        grp->e.grpinfo->lname_idx = ++LnamesIdx;
+        AddLnameData( grp );
     } else if( grp->sym.state != SYM_GRP ) {
         AsmErr( SYMBOL_PREVIOUSLY_DEFINED, name );
         grp = NULL;
@@ -477,6 +420,7 @@ static int CloseSeg(char * name)
 {
     struct asm_sym      *sym;
 
+    DebugMsg(("CloseSeg(%s) enter\n", name));
     if( CurrSeg == NULL ) {
         AsmError( SEGMENT_NOT_OPENED );
         return( ERROR );
@@ -857,7 +801,10 @@ int SegDef( int i )
             sym->defined = TRUE;
             SetSymSegOfs( sym );
             sym->offset = 0;
-            LnameInsert( name );
+            if( dir->e.seginfo->lname_idx == 0 ) {
+                dir->e.seginfo->lname_idx = ++LnamesIdx;
+            }
+            AddLnameData( dir );
         }
 
         if( CurrSeg != NULL ) {
@@ -1028,7 +975,13 @@ int SimSeg( int i )
     type = AsmBuffer[i]->value;
     i++; /* get past the directive token */
     if( i < Token_Count ) {
-        string = AsmBuffer[i]->string_ptr;
+        /* the segment name might begin with a dot.
+         Then use ->pos instead of ->string_ptr!
+         */
+        if ( AsmBuffer[i]->token == T_DOT )
+            string = AsmBuffer[i]->pos;
+        else
+            string = AsmBuffer[i]->string_ptr;
     } else {
         string = NULL;
     }
@@ -1043,6 +996,9 @@ int SimSeg( int i )
 
         if( ModuleInfo.model == MOD_TINY ) {
             InputQueueLine( "ASSUME CS:DGROUP" );
+        } else if( ModuleInfo.model == MOD_FLAT ) {
+            //if ( SegAssumeTable[ASSUME_CS].flat == FALSE || SegAssumeTable[ASSUME_CS].error == TRUE )
+                InputQueueLine( "ASSUME CS:FLAT" );
         } else {
             strcpy( buffer, "ASSUME CS:" );
             strcat( buffer, string );
@@ -1242,170 +1198,6 @@ int FixOverride( int index )
     return( ERROR );
 }
 
-static enum assume_segreg search_assume( struct asm_sym *sym,
-                         enum assume_segreg def, int override )
-/**********************************************************/
-{
-    asm_sym *grp;
-
-    /* first check the default segment register */
-    if( sym == NULL )
-        return( ASSUME_NOTHING );
-
-    grp = GetGrp(sym);
-
-    if( def != ASSUME_NOTHING ) {
-        if( SegAssumeTable[def].symbol != NULL ) {
-            if( SegAssumeTable[def].symbol == sym )
-                return( def );
-            if( !override && ( SegAssumeTable[def].symbol == grp ) ) {
-                return( def );
-            }
-        }
-    }
-
-    /* now check all segment registers */
-
-    for( def = 0; def < NUM_SEGREGS; def++ ) {
-        if( SegAssumeTable[def].symbol == sym ) {
-            return( def );
-        }
-    }
-    if( override )
-        return( ASSUME_NOTHING );
-
-    for( def = 0; def < NUM_SEGREGS; def++ ) {
-        if( SegAssumeTable[def].flat && grp == &flat_grp->sym )
-            return( def );
-        if( SegAssumeTable[def].symbol == NULL )
-            continue;
-        if( SegAssumeTable[def].symbol == grp ) {
-            return( def );
-        }
-    }
-
-    return( ASSUME_NOTHING );
-}
-
-int Use32Assume( enum assume_segreg prefix )
-/***************************************/
-{
-    dir_node        *dir;
-    seg_item        *seg_l;
-    struct asm_sym  *sym_assume;
-
-    if( SegAssumeTable[prefix].flat )
-        return( 1 );
-    sym_assume = SegAssumeTable[prefix].symbol;
-    if( sym_assume == NULL )
-        return( EMPTY );
-    if( sym_assume->state == SYM_SEG ) {
-        dir = (dir_node *)sym_assume;
-        if( dir->e.seginfo->segrec == NULL ) {
-            return( EMPTY );
-        } else {
-            return( dir->e.seginfo->Use32 );
-        }
-    } else if( sym_assume->state == SYM_GRP ) {
-        dir = (dir_node *)sym_assume;
-        seg_l = dir->e.grpinfo->seglist;
-        dir = seg_l->seg;
-        if( dir->e.seginfo->segrec == NULL ) {
-            return( EMPTY );
-        } else {
-            return( dir->e.seginfo->Use32 );
-        }
-    }
-    return( EMPTY );
-}
-
-/* sets Frame and Frame_Datum */
-
-enum assume_segreg GetPrefixAssume( struct asm_sym *sym, enum assume_segreg prefix )
-/****************************************************************************/
-{
-    struct asm_sym  *sym_assume;
-
-    if( Parse_Pass == PASS_1 )
-        return( prefix );
-
-    if( SegAssumeTable[prefix].flat ) {
-        Frame = FRAME_GRP;
-        Frame_Datum = MAGIC_FLAT_GROUP;
-        return( prefix );
-    }
-    sym_assume = SegAssumeTable[prefix].symbol;
-    if( sym_assume == NULL ) {
-        if( sym->state == SYM_EXTERNAL ) {
-#if 0 //NYI: Don't know what's going on here
-            type = GetCurrGrp();
-            if( type != 0 ) {
-                Frame = FRAME_GRP;
-            } else {
-                type = GetSegIdx( GetCurrSeg() );
-                /**/myassert( type != 0 );
-                Frame = FRAME_SEG;
-            }
-            Frame_Datum = type;
-#endif
-            return( prefix );
-        } else {
-            return( ASSUME_NOTHING );
-        }
-    }
-
-    if( sym_assume->state == SYM_SEG ) {
-        Frame = FRAME_SEG;
-        Frame_Datum = GetSegIdx( sym_assume->segment );
-    } else if( sym_assume->state == SYM_GRP ) {
-        Frame = FRAME_GRP;
-        Frame_Datum = GetGrpIdx( sym_assume );
-    }
-    if( ( sym->segment == sym_assume )
-        || ( GetGrp( sym ) == sym_assume )
-        || ( sym->state == SYM_EXTERNAL ) ) {
-        return( prefix );
-    } else {
-        return( ASSUME_NOTHING );
-    }
-}
-
-/* sets Frame and Frame_Datum */
-
-enum assume_segreg GetAssume( struct asm_sym *sym, enum assume_segreg def )
-/*******************************************************************/
-{
-    enum assume_segreg  reg;
-
-    if( ( def != ASSUME_NOTHING ) && SegAssumeTable[def].flat ) {
-        Frame = FRAME_GRP;
-        Frame_Datum = MAGIC_FLAT_GROUP;
-        return( def );
-    }
-    if( SegOverride != NULL ) {
-        reg = search_assume( SegOverride, def, 1 );
-    } else {
-        reg = search_assume( sym->segment, def, 0 );
-    }
-    if( reg == ASSUME_NOTHING ) {
-        if( sym->state == SYM_EXTERNAL && sym->segment == NULL ) {
-            reg = def;
-        }
-    }
-    if( reg != ASSUME_NOTHING ) {
-        if( SegAssumeTable[reg].symbol == NULL ) {
-        } else if( SegAssumeTable[reg].symbol->state == SYM_SEG ) {
-            Frame = FRAME_SEG;
-            Frame_Datum = GetSegIdx( SegAssumeTable[reg].symbol );
-        } else {
-            Frame = FRAME_GRP;
-            Frame_Datum = GetGrpIdx( SegAssumeTable[reg].symbol );
-        }
-        return( reg );
-    }
-    return( ASSUME_NOTHING );
-}
-
 void SetSymSegOfs( struct asm_sym *sym )
 /*******************************************/
 {
@@ -1413,8 +1205,9 @@ void SetSymSegOfs( struct asm_sym *sym )
     sym->offset = GetCurrOffset();
 }
 
-// called when a model is set
+// called for .MODEL directive
 // allowes to use simplified segment directives
+// PushLineQueue() has already been called
 
 int SegmentModulePrologue(int type)
 {
@@ -1470,13 +1263,19 @@ int SegmentModuleEnd(void)
 
 // init. called for each pass
 
-void SegmentInit(int pass)
+void SegmentInit( int pass )
 {
     dir_node    *curr;
     uint_32     i;
     struct asmfixup *fix;
 
     first_issued = 0;
+
+    if ( pass == PASS_1 ) {
+        segdefidx   = 0;
+        grpdefidx   = 0;
+        LnamesIdx   = 1; /* the first Lname is a null-string */
+    }
 
     /* Reset length of all segments to zero */
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
@@ -1520,7 +1319,7 @@ void SegmentInit(int pass)
     Use32 = FALSE;
 
 #if FASTPASS
-    if (pass != PASS_1 && UseSavedState == TRUE) {
+    if ( pass != PASS_1 && UseSavedState == TRUE ) {
         i = saved_NumSegs;
         while(i) {
             i--;

@@ -40,6 +40,7 @@
 #include "input.h"
 #include "labels.h"
 #include "macro.h"
+#include "listing.h"
 
 #define is_valid_id_char( ch ) \
     ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
@@ -154,7 +155,7 @@ int LoopDirective( int i, int directive )
     }
 
     /* now make a temporary macro */
-    macro = dir_insert_ex( "", TAB_MACRO );
+    macro = CreateMacro( "" );
     macro->e.macroinfo->srcfile = get_curr_srcfile();
 
     DebugMsg(("LoopDirective: calling FillMacro\n"));
@@ -205,6 +206,7 @@ int LoopDirective( int i, int directive )
         /* a FOR/IRP parameter can be a macro function call */
         /* that's why the macro calls cannot be buffered */
         for( ptr = parmstring; *ptr;) {
+            DebugMsg(("LoopDirective FOR: calling RunMacro( param=>%s<, prefix=NULL, runit=1, insert=1, addbrackets=0 )\n", ptr ));
             len = RunMacro( macro, ptr, NULL, TRUE, TRUE, FALSE);
             if (len < 1 || AsmBuffer[0]->value == T_EXITM)
                 break;
@@ -217,10 +219,11 @@ int LoopDirective( int i, int directive )
             }
             if (*ptr) ptr++;
 #endif
-            DebugMsg(("LoopDirective FOR: call RunMacro, param=>%s<\n", buffer));
         }
     }
-    /* free the temporary macro */
+    /* free the temporary macro. dir_free() doesn't really free the whole
+     thing, but with FASTMEM=1 this is pretty irrelevant.
+     */
     dir_free(macro, FALSE);
     DebugMsg(("LoopDirective exit\n"));
     return( NOT_ERROR );

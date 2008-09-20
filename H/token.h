@@ -53,7 +53,6 @@ enum state {
         T_POSITIVE,
         T_NEGATIVE,
         T_ID_IN_BACKQUOTES,
-        T_PATH,
         T_UNARY_OPERATOR,
         T_BAD_NUM,
 

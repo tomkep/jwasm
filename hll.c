@@ -54,7 +54,9 @@ typedef enum {
     COP_NEG,  // !
     COP_ZERO, // ZERO?   not really a valid C operator
     COP_CARRY,// CARRY?  not really a valid C operator
-    COP_SIGN  // SIGN?   not really a valid C operator
+    COP_SIGN, // SIGN?   not really a valid C operator
+    COP_PARITY,  // PARITY?   not really a valid C operator
+    COP_OVERFLOW // OVERFLOW? not really a valid C operator
 } c_bop;
 
 static hll_list     *HllStack; // for .WHILE, .IF, .REPEAT
@@ -72,59 +74,65 @@ static char * MakeAnonymousLabel(void)
 // which Tokenize() usually is to remove.
 // There has been a hack implemented in Tokenize() so that it won't touch the
 // '<' if .IF, .ELSEIF, .WHILE, .UNTIL, .UNTILCXZ or .BREAK/.CONTINUE has been
-// detected as first token in the line.
+// detected
 
 static c_bop GetCOp(int * i)
 {
-    int token;
+    int size = 0;
+    c_bop rc;
+    char *p = AsmBuffer[*i]->string_ptr;
 
-    token = *(AsmBuffer[*i]->string_ptr);
+    if (AsmBuffer[*i]->token == T_STRING)
+        size = AsmBuffer[*i]->value;
 
-    /* "==" is to be handled differently because it's no string */
-    if (token == '=') {
-        token = *(AsmBuffer[*i + 1]->string_ptr);
-        if (token == '=') {
-            *i = *i + 2;
-            return(COP_EQ);
-        }
-    } else if (0 == strcmp(AsmBuffer[*i]->string_ptr, "!=")) {
-        *i = *i + 1;
-        return(COP_NE);
-    } else if (0 == strcmp(AsmBuffer[*i]->string_ptr, ">")) {
-        *i = *i + 1;
-        return(COP_GT);
-    } else if (0 == strcmp(AsmBuffer[*i]->string_ptr, "<")) {
-        *i = *i + 1;
-        return(COP_LT);
-    } else if (0 == strcmp(AsmBuffer[*i]->string_ptr, ">=")) {
-        *i = *i + 1;
-        return(COP_GE);
-    } else if (0 == strcmp(AsmBuffer[*i]->string_ptr, "<=")) {
-        *i = *i + 1;
-        return(COP_LE);
-    } else if (0 == strcmp(AsmBuffer[*i]->string_ptr, "&")) {
-        *i = *i + 1;
-        return(COP_ANDB);
-    } else if (0 == strcmp(AsmBuffer[*i]->string_ptr, "!")) {
-        *i = *i + 1;
-        return(COP_NEG);
-    } else if (0 == strcmp(AsmBuffer[*i]->string_ptr, "&&")) {
-        *i = *i + 1;
-        return(COP_AND);
-    } else if (0 == strcmp(AsmBuffer[*i]->string_ptr, "||")) {
-        *i = *i + 1;
-        return(COP_OR);
-    } else if (0 == stricmp(AsmBuffer[*i]->string_ptr, "ZERO?")) {
-        *i = *i + 1;
-        return(COP_ZERO);
-    } else if (0 == stricmp(AsmBuffer[*i]->string_ptr, "CARRY?")) {
-        *i = *i + 1;
-        return(COP_CARRY);
-    } else if (0 == stricmp(AsmBuffer[*i]->string_ptr, "SIGN?")) {
-        *i = *i + 1;
-        return(COP_SIGN);
+    if ( size == 2) {
+        if (*p == '=' && *(p+1) == '=')
+            rc = COP_EQ;
+        else if (*p == '!' && *(p+1) == '=')
+            rc = COP_NE;
+        else if (*p == '>' && *(p+1) == '=')
+            rc = COP_GE;
+        else if (*p == '<' && *(p+1) == '=')
+            rc = COP_LE;
+        else if (*p == '&' && *(p+1) == '&')
+            rc = COP_AND;
+        else if (*p == '|' && *(p+1) == '|')
+            rc = COP_OR;
+        else
+            return( COP_NONE );
+    } else if ( size == 1) {
+        if (*p == '>')
+            rc = COP_GT;
+        else if (*p == '<')
+            rc = COP_LT;
+        else if (*p == '&')
+            rc = COP_ANDB;
+        else if (*p == '!')
+            rc = COP_NEG;
+        else
+            return( COP_NONE );
+    } else {
+        if ( AsmBuffer[*i]->token != T_ID)
+            return( COP_NONE );
+        /* a valid "flag" string must end with a question mark */
+        size = strlen(AsmBuffer[*i]->string_ptr);
+        if (*(p+size-1) != '?')
+            return( COP_NONE );
+        if (size == 5 && (0 == memicmp( p, "ZERO", 4 )))
+            rc = COP_ZERO;
+        else if (size == 6 && (0 == memicmp( p, "CARRY", 5 )))
+            rc = COP_CARRY;
+        else if (size == 5 && (0 == memicmp( p, "SIGN", 4 )))
+            rc = COP_SIGN;
+        else if (size == 7 && (0 == memicmp( p, "PARITY", 6 )))
+            rc = COP_PARITY;
+        else if (size == 9 && (0 == memicmp( p, "OVERFLOW", 8 )))
+            rc = COP_OVERFLOW;
+        else
+            return( COP_NONE );
     }
-    return(COP_NONE);
+    *i += 1;
+    return( rc );
 }
 
 // render an instruction operand
@@ -243,7 +251,8 @@ static int GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true,
 
     if (opndx.type == EXPR_EMPTY) {
         /* no valid ASM expression detected. check for some special ops */
-        if ((op == COP_ZERO) || (op == COP_CARRY) || (op == COP_SIGN)) {
+        /* COP_ZERO, COP_CARRY, COP_SIGN, COP_PARITY, COP_OVERFLOW */
+        if ( op >= COP_ZERO ) {
             char t;
             char * p;
             char * s;
@@ -262,6 +271,12 @@ static int GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true,
                 break;
             case COP_SIGN:
                 *p++ = 's';
+                break;
+            case COP_PARITY:
+                *p++ = 'p';
+                break;
+            case COP_OVERFLOW:
+                *p++ = 'o';
                 break;
             }
             *p++ = ' ';
@@ -289,6 +304,7 @@ static int GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true,
         }
         DebugMsg(("GetSimpleExpression: EvalOperand 2 ok, type=%X, i=%u\n", op2.type, *i));
         if ((op2.type != EXPR_CONST) && (op2.type != EXPR_ADDR) && (op2.type != EXPR_REG)) {
+            DebugMsg(("GetSimpleExpression: syntax error, op2.type=%u\n", op2.type ));
             AsmError(SYNTAX_ERROR);
             return (ERROR);
         }
@@ -466,7 +482,7 @@ done:
 
 static void InvertJmp(char * p)
 {
-    if (*p == 'e' || *p == 'z' || *p == 'c' || *p == 's') {
+    if (*p == 'e' || *p == 'z' || *p == 'c' || *p == 's' || *p == 'p' || *p == 'o') {
         *(p+1) = *p;
         *p = 'n';
         return;
@@ -748,6 +764,7 @@ int HllStartDef( int i )
     case T_DOT_REPEAT:
         DebugMsg(("HllStartDef .REPEAT\n"));
         if (AsmBuffer[i+1]->token != T_FINAL) {
+            DebugMsg(("HllStartDef: unexpected tokens behind .REPEAT\n" ));
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
@@ -842,6 +859,7 @@ int HllStartDef( int i )
         break;
     }
     if (AsmBuffer[i]->token != T_FINAL) {
+        DebugMsg(("HllStartDef: unexpected token %u [%s]\n", AsmBuffer[i]->token, AsmBuffer[i]->pos ));
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }

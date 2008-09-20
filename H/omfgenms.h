@@ -32,6 +32,7 @@
 
 #ifndef OMFGENMS_H
 #define OMFGENMS_H  1
+
 extern void omf_GenMSInit( void );
 extern void omf_GenMSFini( void );
 

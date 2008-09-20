@@ -36,6 +36,7 @@
 #include "parser.h"
 #include "symbols.h"
 #include "directiv.h"
+#include "assume.h"
 #include "queues.h"
 #include "equate.h"
 #include "fixup.h"
@@ -49,6 +50,7 @@
 #include "macro.h"
 #include "proc.h"
 #include "fastpass.h"
+#include "listing.h"
 
 #include "myassert.h"
 
@@ -56,7 +58,7 @@
 
 /* prototypes */
 extern int              OrgDirective( int );
-extern int              AlignDirective( uint_16, int );
+extern int              AlignDirective( int, int );
 extern const FNAME      *AddFlist( char const *filename );
 
 extern int              SegmentModulePrologue(int type);
@@ -114,29 +116,12 @@ extern simpletype SimpleType[] = {
 };
 
 static char             *Check4Mangler( int *i );
-static void             ModelAssumeInit( void );
 
 extern bool             EndDirectiveFound;
 extern struct asm_sym   *SegOverride;
 
 obj_rec                 *ModendRec;     // Record for Modend (OMF)
 asm_sym                 *start_label;   // for COFF
-
-// this is for the segment registers:
-// DS=0, ES=1, SS=2, FS=3, GS=4, CS=5
-
-assume_info      SegAssumeTable[NUM_SEGREGS];
-
-// this is for the standard registers:
-// (E)AX=0, (E)CX=1, (E)DX=2, (E)BX=3
-// (E)SP=4, (E)BP=5, (E)SI=6, (E)DI=7
-
-static assume_info      StdAssumeTable[NUM_STDREGS];
-
-#if FASTPASS
-static assume_info saved_SegAssumeTable[NUM_SEGREGS];
-static assume_info saved_StdAssumeTable[NUM_STDREGS];
-#endif
 
 symbol_queue            Tables[TAB_LAST];// tables of definitions
 module_info             ModuleInfo;
@@ -155,8 +140,7 @@ static char *StartupDosNear0[] = {
         " cli     ",
         " mov     ss,dx",
         " add     sp,bx",
-        " sti     ",
-        NULL
+        " sti     "
 };
 
 /* startup code for 80186+ */
@@ -168,26 +152,22 @@ static char *StartupDosNear1[] = {
         " sub     bx,ax",
         " shl     bx,4",
         " mov     ss,ax",
-        " add     sp,bx",
-        NULL
+        " add     sp,bx"
 };
 
 static char *StartupDosFar[] = {
         " mov     dx,DGROUP",
-        " mov     ds,dx",
-        NULL
+        " mov     ds,dx"
 };
 static char *ExitOS2[] = { /* mov al, retval  followed by: */
         " xor ah, ah",
         " push 01h",
         " push ax",
-        " call far DOSEXIT",
-        NULL
+        " call far DOSEXIT"
 };
 static char *ExitDos[] = {
         " mov     ah,4ch",
-        " int     21h",
-        NULL
+        " int     21h"
 };
 
 static char *StartAddr = "@Startup";
@@ -200,15 +180,12 @@ typedef struct _context {
 
 static context          *ContextStack;  // for PUSHCONTEXT/POPCONTEXT
 
-       uint             segdefidx;      // Number of Segment definition
-static uint             grpdefidx;      // Number of Group definition
-
-static asm_sym *sym_CodeSize  = { NULL }; /* numeric */
-static asm_sym *sym_DataSize  = { NULL }; /* numeric */
-static asm_sym *sym_Model     = { NULL }; /* numeric */
-       asm_sym *sym_Interface = { NULL }; /* numeric */
-       asm_sym *sym_Cpu       = { NULL }; /* numeric */
-       asm_sym *sym_CurSeg    = { NULL }; /* text    */
+static asm_sym *sym_CodeSize  ; /* numeric */
+static asm_sym *sym_DataSize  ; /* numeric */
+static asm_sym *sym_Model     ; /* numeric */
+       asm_sym *sym_Interface ; /* numeric */
+       asm_sym *sym_Cpu       ; /* numeric */
+       asm_sym *sym_CurSeg    ; /* text    */
 
 
 #define ROUND_UP( i, r ) (((i)+((r)-1)) & ~((r)-1))
@@ -233,18 +210,6 @@ void heap( char *func )
 }
 #endif
 #endif
-
-void IdxInit( void )
-/******************/
-{
-    DebugMsg(("IdxInit: lnames, segment+group idx reset to 0\n"));
-    LnamesIdx   = 0;
-    segdefidx   = 0;
-    grpdefidx   = 0;
-
-    memset(Tables, 0, sizeof(Tables));
-
-}
 
 void push( void *stk, void *elt )
 /*******************************/
@@ -342,7 +307,7 @@ static void dir_init( dir_node *dir, int tab )
     case TAB_GRP:
         sym->state = SYM_GRP;
         dir->e.grpinfo = AsmAlloc( sizeof( grp_info ) );
-        dir->e.grpinfo->idx = ++grpdefidx;
+        dir->e.grpinfo->idx = 0;
         dir->e.grpinfo->seglist = NULL;
         dir->e.grpinfo->numseg = 0;
         dir->e.grpinfo->lname_idx = 0;
@@ -379,27 +344,9 @@ static void dir_init( dir_node *dir, int tab )
         dir->e.procinfo->localsize = 0;
         dir->e.procinfo->is_vararg = FALSE;
         dir->e.procinfo->pe_type = FALSE;
-        dir->e.procinfo->defined = FALSE;
         dir->e.procinfo->export = FALSE;
         dir->e.procinfo->init = FALSE;
         break;
-    case TAB_MACRO:
-        sym->state = SYM_MACRO;
-        dir->e.macroinfo = AsmAlloc( sizeof( macro_info ) );
-        dir->e.macroinfo->parmlist = NULL;
-        dir->e.macroinfo->locallist = NULL;
-        dir->e.macroinfo->data = NULL;
-        dir->e.macroinfo->srcfile = NULL;
-        sym->vararg = FALSE;
-        sym->isfunc = FALSE;
-        return;
-    case TAB_CLASS_LNAME:
-    case TAB_LNAME:
-        sym->state = ( tab == TAB_LNAME ) ? SYM_LNAME : SYM_CLASS_LNAME;
-        dir->e.lnameinfo = AsmAlloc( sizeof( lname_info ) );
-        dir->e.lnameinfo->idx = ++LnamesIdx;
-        // fixme
-        return;
     case TAB_PUB:
         sym->public = TRUE;
         return;
@@ -415,6 +362,9 @@ static void dir_init( dir_node *dir, int tab )
         dir->e.structinfo->OrgInside = FALSE;
         return;
     case TAB_LIB:
+        /* libraries aren't part of the symbol namespace, no
+         need to set a symbol type */
+        // sym->state = SYM_LIB;
         break;
     case TAB_ALIAS:
         sym->state = SYM_ALIAS;
@@ -481,36 +431,30 @@ dir_node *dir_insert( const char *name, int tab )
 /***********************************************/
 /* Insert a node into the table specified by tab */
 {
-    dir_node            *new;
+    dir_node *dir;
 
     /**/myassert( name != NULL );
 
-    if (*name)
-        new = (dir_node *)SymCreate( name, TRUE );
-    else
-        new = (dir_node *)SymCreate( name, FALSE );
+    if (dir = (dir_node *)SymCreate( name, *name != NULLC ))
+        dir_init( dir, tab );
 
-    if( new != NULL )
-        dir_init( new, tab );
-
-    return( new );
+    return( dir );
 }
 
-// alloc a dir_node and do NOT put it into the symbol table
+// alloc a dir_node and do NOT insert it into the symbol table.
 // used for (temporary) externals created for PROTO items,
 // nested STRUCTs, class names, ...
 
 dir_node *dir_insert_ex( const char *name, int tab )
 {
-    dir_node            *new;
+    dir_node *dir;
 
     /**/myassert( name != NULL );
 
-    new = (dir_node *)SymCreate( name, FALSE );
-    if( new != NULL )
-        dir_init( new, tab );
+    if (dir = (dir_node *)SymCreate( name, FALSE ))
+        dir_init( dir, tab );
 
-    return( new );
+    return( dir );
 }
 
 // free a dir_node
@@ -547,9 +491,7 @@ void dir_free( dir_node *dir, bool remove_from_table )
     case SYM_EXTERNAL:
         dir->sym.first_size = 0;
         break;
-    case SYM_LNAME:
     case SYM_CLASS_LNAME:
-        AsmFree( dir->e.lnameinfo );
         break;
     case SYM_PROC:
         {
@@ -601,39 +543,9 @@ void dir_free( dir_node *dir, bool remove_from_table )
         }
         break;
     case SYM_MACRO:
-        {
-            mlocal_list     *localcurr;
-            mlocal_list     *localnext;
-            asmlines        *datacurr;
-            asmlines        *datanext;
-
-            /* free the parm list */
-            ;
-            for( i = 0 ; i < dir->e.macroinfo->parmcnt; i++ ) {
-                AsmFree( dir->e.macroinfo->parmlist[i].label );
-                AsmFree( dir->e.macroinfo->parmlist[i].def );
-            }
-            if( dir->e.macroinfo->parmlist )
-                AsmFree( dir->e.macroinfo->parmlist );
-
-            /* free the local list */
-            ;
-            for( localcurr = dir->e.macroinfo->locallist ;localcurr; ) {
-                localnext = localcurr->next;
-                AsmFree( localcurr->label );
-                AsmFree( localcurr );
-                localcurr = localnext;
-            }
-
-            /* free the lines list */
-            for(datacurr = dir->e.macroinfo->data ;datacurr; ) {
-                datanext = datacurr->next;
-                AsmFree( datacurr->line );
-                AsmFree( datacurr );
-                datacurr = datanext;
-            }
-            AsmFree( dir->e.macroinfo );
-        }
+        ReleaseMacroData( dir );
+        AsmFree( dir->e.macroinfo );
+        dir->e.macroinfo = NULL;
         break;
     case SYM_TMACRO:
         if (dir->sym.predefined == FALSE) {
@@ -1209,55 +1121,110 @@ int token_cmp( char *token, int start, int end )
 static int IncludeDirective( int i )
 /******************/
 {
-    switch( AsmBuffer[i]->token ) {
-    case T_ID:
-    case T_STRING:
-    case T_PATH:
-        return( InputQueueFile( AsmBuffer[i]->string_ptr ) );
-    default:
+    int size;
+
+    DebugMsg(("IncludeDirective enter\n"));
+
+    if (AsmFiles.file[LST]) {
+        directive_listed = TRUE;
+        WriteLstFile(LSTTYPE_DIRECTIVE, 0, NULL );
+    }
+
+    if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_NUM) {
         AsmError( EXPECTED_FILE_NAME );
         return( ERROR );
     }
+
+    if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<') {
+        if (AsmBuffer[i+1]->token != T_FINAL) {
+            AsmError( SYNTAX_ERROR );
+            return( ERROR );
+        }
+        return( InputQueueFile( AsmBuffer[i]->string_ptr ) );
+    } else {
+        size = strlen(AsmBuffer[i]->pos);
+        while (size && isspace(AsmBuffer[i]->pos[size-1])) {
+            size--;
+            AsmBuffer[i]->pos[size] = NULLC;
+        }
+        return( InputQueueFile( AsmBuffer[i]->pos ) );
+    }
 }
 
-// called during pass 1
+// called during pass 1 only
 
 static int IncludeLibDirective( int i )
 /*********************/
 {
     char *name;
+    dir_node *dir;
     struct asm_sym *sym;
 
-    name = AsmBuffer[i]->string_ptr;
-    if( name == NULL ) {
+    if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_NUM) {
         AsmError( LIBRARY_NAME_MISSING );
         return( ERROR );
     }
 
-    /* good idea to have the libs in the symbol namespace? Doubt it. */
+    if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<') {
+        if (AsmBuffer[i+1]->token != T_FINAL) {
+            AsmError( SYNTAX_ERROR );
+            return( ERROR );
+        }
+        name = AsmBuffer[i]->string_ptr;
+    } else {
+        int size;
+        size = strlen(AsmBuffer[i]->pos);
+        while (size && isspace(AsmBuffer[i]->pos[size-1])) {
+            size--;
+            AsmBuffer[i]->pos[size] = NULLC;
+        }
+        name = AsmBuffer[i]->pos;
+    }
 
+    /* old approach, <= 1.91: add lib name to global namespace */
+    /* new approach, >= 1.92: check lib table, if entry is missing, add it */
+
+#if 1
+    /* Masm doesn't map cases for the paths. So if there is
+     includelib <kernel32.lib>
+     includelib <KERNEL32.LIB>
+     then 2 defaultlib entries are added. If this is to be changed for
+     JWasm, activate the stricmp() below.
+     */
+    for (dir = Tables[TAB_LIB].head; dir ; dir = dir->next ) {
+        //if ( stricmp( dir->sym.name, name) == 0)
+        if ( strcmp( dir->sym.name, name) == 0)
+            return( NOT_ERROR );
+    }
+    if (dir_insert_ex( name, TAB_LIB ) == NULL)
+        return( ERROR );
+#else
+    /* add the lib name to global namespace */
     sym = SymSearch( name );
     if( sym == NULL ) {
-        // fixme
         if( dir_insert( name, TAB_LIB ) == NULL ) {
             return( ERROR );
         }
     }
+#endif
     return( NOT_ERROR );
 }
 
-// .STARTUP and .EXIT
+/* handles .STARTUP and .EXIT directives */
 
-static int Startup( int i )
+static int StartupExitDirective( int i )
 /******************/
 {
-    /* handles .STARTUP directive */
-
     int         count;
+    char        **p;
     char        buffer[ MAX_LINE_LEN ];
 
     if( ModuleInfo.model == MOD_NONE ) {
         AsmError( MODEL_IS_NOT_DECLARED );
+        return( ERROR );
+    }
+    if ( Use32) {
+        AsmErr( DOES_NOT_WORK_WITH_32BIT_SEGMENTS, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
     ModuleInfo.cmdline = FALSE;
@@ -1273,49 +1240,50 @@ static int Startup( int i )
         strcat( buffer, "::" );
         InputQueueLine( buffer );
         if( ModuleInfo.ostype == OPSYS_DOS ) {
-            char **p;
             if (ModuleInfo.model == MOD_TINY)
                 ;
-            else if( ModuleInfo.distance == STACK_NEAR ) {
-                if ( (ModuleInfo.cpu & 0x7F) <= 1)
-                    p = StartupDosNear0;
-                else
-                    p = StartupDosNear1;
-                while( *p != NULL ) {
+            else {
+                if( ModuleInfo.distance == STACK_NEAR ) {
+                    if ( (ModuleInfo.cpu & 0x7F) <= 1) {
+                        p = StartupDosNear0;
+                        count = sizeof(StartupDosNear0) / sizeof(char *);
+                    } else {
+                        p = StartupDosNear1;
+                        count = sizeof(StartupDosNear1) / sizeof(char *);
+                    }
+                } else {
+                    p = StartupDosFar;
+                    count = sizeof(StartupDosFar) / sizeof(char *);
+                }
+                for ( ; count ; count--, p++ )
                     InputQueueLine( *p );
-                    p++;
-                }
-            } else {
-                while( StartupDosFar[count] != NULL ) {
-                    InputQueueLine( StartupDosFar[count++] );
-                }
             }
         }
         StartupDirectiveFound = TRUE;
         break;
     case T_DOT_EXIT:
+        if( ModuleInfo.ostype == OPSYS_DOS ) {
+            p = ExitDos;
+            count = sizeof( ExitDos) / sizeof( char * );
+        } else {
+            p = ExitOS2;
+            count = sizeof( ExitOS2) / sizeof( char * );
+        }
         i++;
-        count = 0;
         if( ( AsmBuffer[i]->string_ptr != NULL )
             && ( *(AsmBuffer[i]->string_ptr) != '\0' ) ) {
             if( ModuleInfo.ostype == OPSYS_DOS ) {
                 sprintf( buffer, "mov ax,4C00h+(%s and 0FFh)", AsmBuffer[i]->string_ptr);
-            } else
+            } else {
                 sprintf( buffer, "mov ax, %s", AsmBuffer[i]->string_ptr);
+            }
             InputQueueLine( buffer );
-            count++;
+            p++;
+            count--;
         }
-        if( ModuleInfo.ostype == OPSYS_DOS ) {
-            while( ExitDos[count] != NULL ) {
-                InputQueueLine( ExitDos[count++] );
-            }
-        } else {
-            while( ExitOS2[count] != NULL ) {
-                InputQueueLine( ExitOS2[count++] );
-            }
+        for( ; count ; count--, p++ ) {
+            InputQueueLine( *p );
         }
-        break;
-    default:
         break;
     }
     return( NOT_ERROR );
@@ -1441,6 +1409,8 @@ void ModuleInit( void )
     StartupDirectiveFound = FALSE;
 
     ContextStack = NULL;
+
+    memset(Tables, 0, sizeof(Tables));
 
     sym_CurSeg = SymCreate("@CurSeg", TRUE );
     sym_CurSeg->state = SYM_TMACRO;
@@ -1573,272 +1543,6 @@ static int ModelDirective( int i )
     module_prologue( ModuleInfo.model );
     ModuleInfo.cmdline = (LineNumber == 0);
     return(NOT_ERROR);
-}
-
-void AssumeInit( )
-/*********************/
-{
-    int reg;
-
-    for( reg = 0; reg < NUM_SEGREGS; reg++ ) {
-        SegAssumeTable[reg].symbol = NULL;
-        SegAssumeTable[reg].error = FALSE;
-        SegAssumeTable[reg].flat = FALSE;
-    }
-    for( reg = 0; reg < NUM_STDREGS; reg++ ) {
-        StdAssumeTable[reg].symbol = NULL;
-        StdAssumeTable[reg].error = FALSE;
-    }
-#if FASTPASS
-    if (Parse_Pass != PASS_1) {
-        memcpy(&SegAssumeTable, &saved_SegAssumeTable, sizeof(SegAssumeTable));
-        memcpy(&StdAssumeTable, &saved_StdAssumeTable, sizeof(StdAssumeTable));
-    }
-#endif
-}
-#if FASTPASS
-void AssumeSaveState( )
-{
-    memcpy(&saved_SegAssumeTable, &SegAssumeTable, sizeof(SegAssumeTable));
-    memcpy(&saved_StdAssumeTable, &StdAssumeTable, sizeof(StdAssumeTable));
-}
-#endif
-static void ModelAssumeInit( void )
-/**********************************/
-{
-    char *pCS;
-    char buffer[ MAX_LINE_LEN ];
-
-    /* Generates codes for assume */
-    switch( ModuleInfo.model ) {
-    case MOD_FLAT:
-        InputQueueLine( "ASSUME CS:FLAT,DS:FLAT,SS:FLAT,ES:FLAT,FS:ERROR,GS:ERROR");
-        break;
-    case MOD_TINY:
-    case MOD_SMALL:
-    case MOD_COMPACT:
-    case MOD_MEDIUM:
-    case MOD_LARGE:
-    case MOD_HUGE:
-        if (ModuleInfo.model == MOD_TINY)
-            pCS = "DGROUP";
-        else
-            pCS = Options.text_seg;
-
-        strcpy( buffer, "ASSUME CS:" );
-        strcat( buffer, pCS);
-        strcat( buffer, ", DS:DGROUP" );
-        if (ModuleInfo.distance != STACK_FAR)
-            strcat( buffer, ", SS:DGROUP" );
-        InputQueueLine( buffer );
-        break;
-    }
-}
-
-// convert a standard register token to an index.
-
-static int RegisterValueToIndex(int reg, bool * is32)
-{
-    int j;
-    static int std32idx[NUM_STDREGS] = {T_EAX, T_ECX, T_EDX, T_EBX, T_ESP, T_EBP, T_ESI, T_EDI};
-    static int std16idx[NUM_STDREGS] = {T_AX, T_CX, T_DX, T_BX, T_SP, T_BP, T_SI, T_DI};
-
-    for (j = 0; j < NUM_STDREGS; j++)
-        if (std32idx[j] == reg) {
-            *is32 = TRUE;
-            return(j);
-        } else if (std16idx[j] == reg) {
-            *is32 = FALSE;
-            return(j);
-        }
-    return(ERROR);
-}
-
-struct asm_sym * GetStdAssume(int reg)
-{
-    return (StdAssumeTable[reg].symbol);
-}
-
-static int AssumeDirective( int i )
-/********************/
-/* Handles ASSUME statement
- syntax is :
- assume segregister : seglocation [, segregister : seglocation ]
- assume dataregister : qualified type [, dataregister : qualified type ]
- assume register : ERROR | NOTHING | FLAT
- assume NOTHING
- */
-{
-    int             segloc; /* lcoation of segment/type info */
-    int             reg;
-    int             j;
-    int             type;
-    assume_info     *info;
-    struct asm_sym  *sym;
-    bool            segtable;
-    bool            is32;
-    static int segidx[NUM_SEGREGS] = {T_DS, T_ES, T_SS, T_FS, T_GS, T_CS};
-
-    for( i++; i < Token_Count; i++ ) {
-        if( ( AsmBuffer[i]->token == T_ID )
-            && (0 == stricmp(AsmBuffer[i]->string_ptr, "NOTHING" ))) {
-            AssumeInit();
-            continue;
-        }
-
-        if (AsmBuffer[i]->token != T_REG) {
-            AsmError( SYNTAX_ERROR );
-            return( ERROR );
-        }
-        reg = AsmBuffer[i]->value;
-
-        i++;
-
-        if( AsmBuffer[i]->token != T_COLON ) {
-            AsmError( COLON_EXPECTED );
-            return( ERROR );
-        }
-        i++;
-
-        /*---- get the info ptr for the register ----*/
-
-        info = NULL;
-        for (j = 0; j < NUM_SEGREGS; j++)
-            if (segidx[j] == reg) {
-                info = &SegAssumeTable[j];
-                if( ( ( curr_cpu & P_CPU_MASK ) < P_386 )
-                    && ( ( reg == T_FS ) || ( reg == T_GS ) ) ) {
-                    AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
-                    return( ERROR );
-                }
-                segtable = TRUE;
-                break;
-            }
-
-        if (info == NULL) {
-            segtable = FALSE;
-            /* convert T_xxx to an index */
-            j = RegisterValueToIndex(reg, &is32);
-            if (j != ERROR) {
-                if(is32 == TRUE && ( curr_cpu & P_CPU_MASK ) < P_386 ) {
-                    AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
-                    return( ERROR );
-                }
-                info = &StdAssumeTable[j];
-            }
-        }
-        if (info == NULL) {
-            AsmError( SYNTAX_ERROR );
-            return( ERROR );
-        }
-
-        if (segtable == TRUE) {
-            if( ( AsmBuffer[i]->token == T_UNARY_OPERATOR )
-                && ( AsmBuffer[i]->value == T_SEG ) ) {
-                i++;
-            }
-        } else if( ( AsmBuffer[i]->token == T_RES_ID )
-                   && ( AsmBuffer[i]->value == T_PTR ) )
-            i++;
-
-        segloc = i;
-        i++;
-        if( AsmBuffer[segloc]->string_ptr == '\0' ) {
-            AsmError( SEGLOCATION_EXPECTED );
-            return( ERROR );
-        }
-
-        /*---- Now store the information ----*/
-
-        if( 0 == stricmp( AsmBuffer[segloc]->string_ptr, "ERROR" )) {
-            info->error = TRUE;
-            info->flat = FALSE;
-            info->symbol = NULL;
-        } else if(0 == stricmp( AsmBuffer[segloc]->string_ptr, "FLAT" )) {
-            if( ( curr_cpu & P_CPU_MASK ) < P_386 ) {
-                AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
-                return( ERROR );
-            } else if (segtable == FALSE) {
-                AsmError( SYNTAX_ERROR );
-                return( ERROR );
-            };
-            DefineFlatGroup();
-            info->flat = TRUE;
-            info->error = FALSE;
-            info->symbol = NULL;
-        } else if( 0 == stricmp( AsmBuffer[segloc]->string_ptr, "NOTHING" )) {
-            info->flat = FALSE;
-            info->error = FALSE;
-            info->symbol = NULL;
-        } else {
-            if (segtable == FALSE) {
-                type = ERROR;
-                sym = NULL;
-                if (AsmBuffer[segloc]->token == T_RES_ID) {
-                    type = FindSimpleType(AsmBuffer[segloc]->value);
-                }
-                if (type == ERROR) {
-                    sym = IsLabelType(AsmBuffer[segloc]->string_ptr);
-                    if (sym == NULL) {
-                        AsmErr( QUALIFIED_TYPE_EXPECTED, segloc );
-                        return( ERROR );
-                    }
-                }
-            } else {
-                sym = SymLookup( AsmBuffer[segloc]->string_ptr );
-                if( sym == NULL)
-                    return( ERROR );
-                if ( ( Parse_Pass != PASS_1 ) && ( sym->state == SYM_UNDEFINED ) ) {
-                    AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[segloc]->string_ptr );
-                    return( ERROR );
-                }
-            }
-            info->symbol = sym;
-            info->flat = FALSE;
-            info->error = FALSE;
-        }
-
-        /* go past comma */
-        if( ( i < Token_Count ) && ( AsmBuffer[i]->token != T_COMMA ) ) {
-            AsmError( EXPECTING_COMMA );
-            return( ERROR );
-        }
-    }
-    return( NOT_ERROR );
-}
-
-static enum assume_segreg search_assume( struct asm_sym *sym,
-                         enum assume_segreg def, int override )
-/**********************************************************/
-{
-    if( sym == NULL )
-        return( ASSUME_NOTHING );
-    if( def != ASSUME_NOTHING ) {
-        if( SegAssumeTable[def].symbol != NULL ) {
-            if( SegAssumeTable[def].symbol == sym )
-                return( def );
-            if( !override && ( SegAssumeTable[def].symbol == GetGrp( sym ) ) ) {
-                return( def );
-            }
-        }
-    }
-    for( def = 0; def < NUM_SEGREGS; def++ ) {
-        if( SegAssumeTable[def].symbol == sym ) {
-            return( def );
-        }
-    }
-    if( override )
-        return( ASSUME_NOTHING );
-
-    for( def = 0; def < NUM_SEGREGS; def++ ) {
-        if( SegAssumeTable[def].symbol == NULL )
-            continue;
-        if( SegAssumeTable[def].symbol == GetGrp( sym ) ) {
-            return( def );
-        }
-    }
-
-    return( ASSUME_NOTHING );
 }
 
 // if count == 1, there's NO start address
@@ -2581,8 +2285,8 @@ static int ContextDirective( int directive, int i )
                             ccontext = &alcontext->cc;
                         }
                         if (acontext) {
-                            memcpy(SegAssumeTable, acontext->SegAssumeTable, sizeof(SegAssumeTable));
-                            memcpy(StdAssumeTable, acontext->StdAssumeTable, sizeof(StdAssumeTable));
+                            SetSegAssumeTable( acontext->SegAssumeTable );
+                            SetStdAssumeTable( acontext->StdAssumeTable );
                         }
                         if (rcontext) {
                         }
@@ -2630,8 +2334,8 @@ static int ContextDirective( int directive, int i )
                         pcontext->type = type;
 
                         if (acontext) {
-                            memcpy(acontext->SegAssumeTable, SegAssumeTable, sizeof(SegAssumeTable));
-                            memcpy(acontext->StdAssumeTable, StdAssumeTable, sizeof(StdAssumeTable));
+                            GetSegAssumeTable( acontext->SegAssumeTable );
+                            GetStdAssumeTable( acontext->StdAssumeTable );
                         }
                         if (rcontext) {
                         }
@@ -2760,11 +2464,11 @@ int directive( int i, long direct )
     case T_EXTERNDEF:
         return( Parse_Pass == PASS_1 ? ExterndefDirective(i+1) : NOT_ERROR );
     case T_INCLUDE:
-        return( IncludeDirective(i+1) );
+        return( IncludeDirective( i+1 ) );
     case T_INCLUDELIB:
         return( Parse_Pass == PASS_1 ? IncludeLibDirective(i+1) : NOT_ERROR );
     case T_ASSUME:
-        return( AssumeDirective(i) );
+        return( AssumeDirective( i ) );
     case T_LOCAL:
         return( Parse_Pass == PASS_1 ? LocalDef(i) : NOT_ERROR );
 //    case T_COMMENT:
@@ -2855,7 +2559,7 @@ int directive( int i, long direct )
         return( ListingDirective( direct, i ) );
     case T_DOT_STARTUP:
     case T_DOT_EXIT:
-        return( Startup ( i ) );
+        return( StartupExitDirective( i ) );
     case T_ENDM:
     case T_EXITM:
         /* these directives should never be seen here */

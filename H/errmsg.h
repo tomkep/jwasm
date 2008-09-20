@@ -79,14 +79,5 @@ enum msgno {
 extern int  MsgInit( void );
 extern void MsgFini( void );
 extern char * MsgGet( int, char * );
-extern void LstMsg( const char *format, ... );
-extern void OpenLstFile( void );
-extern void WriteLstFile( int type, unsigned int ofs, void * sym );
-
-#define LSTTYPE_LIDATA    0
-#define LSTTYPE_EQUATE    1
-#define LSTTYPE_DIRECTIVE 2
-#define LSTTYPE_MACRO     3
-#define LSTTYPE_STRUCT    4
 
 #endif

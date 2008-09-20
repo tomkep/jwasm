@@ -412,7 +412,7 @@ struct fixup *CreateFixupRec( int index )
                 /* set the frame to the frame of the corresponding segment */
                 fixup->frame_datum = GetGrpIdx( sym );
             }
-        } else if (( sym->state == SYM_PROC ) && (((dir_node *)sym)->e.procinfo->defined == FALSE)) {
+        } else if ( sym->state == SYM_PROC && sym->isproc == FALSE ) {
             /* these are PROTOs without a segment reference */
             DebugMsg(("CreateFixupRec: PROTO %s\n", sym->name));
             fixnode->lr.target = TARGET_EXT;

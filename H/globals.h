@@ -99,9 +99,6 @@ enum naming_conventions {
                              */
 };
 
-#define DELIM                   " ,\t\0"
-#define T_UNDEFINED             -1
-
 enum {
     PASS_1 = 0,
     PASS_2
@@ -273,7 +270,8 @@ extern void             OutputCodeByte( unsigned char );
 extern void             OutputDataByte( unsigned char );
 extern void             OutputByte( unsigned char );
 extern void             OutSelect( bool );
-extern void             WriteObjModule( void );
+extern void             AssembleModule( void );
+extern void             AddLinnumDataRef( void );
 
 // main.c
 

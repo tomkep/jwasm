@@ -365,7 +365,7 @@ pick( NO_MEMORY_MODEL_FOUND,
       "Memory model is not found in .MODEL" ,
       ".MODELの中にメモリモデルがありません" )
 pick( CANNOT_OPEN_INCLUDE_FILE,
-      "Cannot open include file %s" ,
+      "Cannot open include file '%s'" ,
       "インクルード・ファイルをオープンできません %s" )
 pick( NAME_USED_ALREADY,
       "Name is used already" ,
@@ -487,6 +487,12 @@ pick( CANNOT_GET_FILE,
 pick( CANNOT_SET_FILE,
       "Cannot Set to Start of Source File - " ,
       "ソースファイルのスタートに設定できません - " )
+pick( FILE_WRITE_ERROR,
+      "File write error: %s",
+      "File write error: %s" )
+pick( FILE_LSEEK_ERROR,
+      "File lseek error: %s" ,
+      "File lseek error: %s" )
 pick( MSG_INCLUDE_PATH,
       "include path %s." ,
       "パス %s をインクルードします\n" )
@@ -572,8 +578,8 @@ pick( NOTE_INCLUDED_BY,
       "included by file %s(%lu)" ,
       "ファイル %s(%lu) に含まれます" )
 pick( NOTE_MACRO_CALLED_FROM,
-      "macro called from file %s(%lu)" ,
-      "ファイル %s(%lu) から呼ばれるマクロです" )
+      "macro %s called from file %s(%lu)" ,
+      "macro %s called from file %s(%lu)" )
 pick( SYMBOL_S_NOT_DEFINED,
       "Symbol %s is not defined" ,
       "シンボルが定義されていません ( %s )" ) /* fixme */
@@ -677,8 +683,8 @@ pick( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM,
       "Initializer must be a string or single item" ,
       "Initializer must be a string or single item" )
 pick( TOO_MANY_INITIAL_VALUES_FOR_STRUCTURE,
-      "Too many initial values for structure" ,
-      "Too many initial values for structure" )
+      "Too many initial values for structure: %s" ,
+      "Too many initial values for structure: %s" )
 pick( STRING_OR_TEXT_LITERAL_TOO_LONG,
       "String or text literal too long" ,
       "String or text literal too long" )
@@ -869,3 +875,15 @@ pick( MISSING_ANGLE_BRACKET_OR_BRACE_IN_LITERAL,
 pick( NONDIGIT_IN_NUMBER,
       "Nondigit in number: %s" ,
       "Nondigit in number: %s" )
+pick( WORD_FIXUP_FOR_32BIT_LABEL,
+      "16bit fixup for 32bit label: %s" ,
+      "16bit fixup for 32bit label: %s" )
+pick( TOO_MANY_MACRO_PLACEHOLDERS,
+      "Too many macro placeholders" ,
+      "Too many macro placeholders" )
+pick( REQUIRED_PARAMETER_MISSING,
+      "%s - parameter %s is missing" ,
+      "%s - parameter %s is missing" )
+pick( DOES_NOT_WORK_WITH_32BIT_SEGMENTS,
+      "%s does not work with 32-bit segments" ,
+      "%s does not work with 32-bit segments" )

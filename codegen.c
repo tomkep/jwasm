@@ -39,7 +39,6 @@
 
 #include "directiv.h"
 
-extern void AddLinnumDataRef( void );
 extern int  AddFloatingPointEmulationFixup( const struct asm_ins ASMFAR *, bool );
 
 #endif
@@ -82,7 +81,7 @@ static int output( int i )
     /*
      * Output debug info - line numbers
      */
-    if( Options.line_numbers && !PhaseError && (Parse_Pass != PASS_1) ) {
+    if( Options.line_numbers && write_to_file == TRUE ) {
         AddLinnumDataRef();
     }
 
@@ -491,7 +490,7 @@ int match_phase_1( struct asm_code *CodeInfo )
         }
     }
 
-    // make sure the user want 80x86 protected mode ins
+    // make sure the user want 80x86 privileged mode ins
     if( ( AsmOpTable[i].cpu & P_PM ) != 0 ) {
         if( ( curr_cpu & P_PM ) == 0 ) {
             AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
@@ -537,7 +536,6 @@ int match_phase_1( struct asm_code *CodeInfo )
             pre_opnd = ( CodeInfo->use32 ) ? OP_M_DW : OP_M_W ;
             break;
         default:
-#if 1
             /* if there's just one variation of the instruction
              and no size has been specified, use it */
             if (CodeInfo->mem_type == MT_EMPTY &&
@@ -545,10 +543,13 @@ int match_phase_1( struct asm_code *CodeInfo )
                 (AsmOpTable[i].opnd_type[OPND1] & OP_M_ANY) &&
                 AsmOpTable[i].opnd_type[OPND1] != OP_M )
                 pre_opnd = AsmOpTable[i].opnd_type[OPND1];
-            else
-#endif
-            if ((Parse_Pass == PASS_1) && (cur_opnd == OP_M))
-                pre_opnd = OP_M_B;
+            else if ((Parse_Pass == PASS_1) && (cur_opnd == OP_M))
+                /* if no size has been specified (forward reference?) and
+                 first instruction has mem_operand, use this size */
+                if (CodeInfo->mem_type == MT_EMPTY && AsmOpTable[i].opnd_type[OPND1] & OP_M_ANY)
+                    pre_opnd = AsmOpTable[i].opnd_type[OPND1];
+                else
+                    pre_opnd = OP_M_B;
         }
     } else if( cur_opnd & OP_I ) {
 #if 0

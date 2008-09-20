@@ -34,6 +34,8 @@
 #include "expreval.h"
 #include "myassert.h"
 #include "directiv.h"
+#include "proc.h"
+#include "assume.h"
 #include "input.h"
 #include "types.h"
 #include "stddef.h"
@@ -223,6 +225,7 @@ static int get_precedence( int i )
         return( 9 );
     case T_DOT:
         return( 2 );
+    case T_OP_BRACKET:
     case T_OP_SQ_BRACKET:
         return( 1 );
     default:
@@ -650,7 +653,6 @@ static bool is_optr( int i )
     case T_NUM:
     case T_ID:
     case T_STRING:
-    case T_PATH:
     case T_OP_BRACKET:
 //    case T_CL_BRACKET:
         return( FALSE );
@@ -821,9 +823,25 @@ static int check_direct_reg( expr_list *token_1, expr_list *token_2 )
     }
 }
 
-static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
+static int calculate( expr_list *token_1, expr_list *token_2, int index )
 /**************************************************************************/
-/* Perform the operation between token_1 and token_2 */
+/* Perform the operation between token_1 and token_2
+ <index> is the index of the operator token.
+ possible operators:
+  T_POSITIVE
+  T_NEGATIVE
+  T_OP_BRACKET       is an alias for '+'
+  T_OP_SQ_BRACKET    is an alias for '+'
+  '+'
+  T_DOT
+  '-'
+  '*'
+  '/'
+  T_COLON
+  T_RES_ID
+  T_INSTRUCTION ( NOT, AND, OR, XOR, SHL, SHR, MOD, also GE, GT, LE, GT, EQ, NE )
+  T_UNARY_OPERATOR
+ */
 {
     struct asm_sym      *sym;
     long                value;
@@ -868,6 +886,7 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
         token_1->type = EXPR_CONST;
         token_1->llvalue = -token_2->llvalue;
         break;
+    case T_OP_BRACKET:
     case T_OP_SQ_BRACKET:
     case '+':
         DebugMsg(("calculate: '+' or '[' operator\n"));
@@ -1535,9 +1554,9 @@ static int calculate( expr_list *token_1, expr_list *token_2, uint_8 index )
         }
         break;
     case T_INSTRUCTION:
-        DebugMsg(("calculate T_INSTRUCTION\n"));
         MakeConst( token_1 );
         MakeConst( token_2 );
+        DebugMsg(("calculate T_INSTRUCTION: %s, types tok1=%u, tok2=%u\n", AsmBuffer[index]->string_ptr, token_1->type, token_2->type ));
         if( AsmBuffer[index]->value == T_NOT ) {
             if( token_2->type != EXPR_CONST ) {
                 if( error_msg )
@@ -2124,6 +2143,13 @@ static int evaluate(
             op_sq_bracket_level++;
 #endif
         } else if( !is_optr(*i) ) {
+#if 1
+            /* accept mov eax,4(5) syntax - '()' is an operator */
+            if( cmp_token( *i, T_OP_BRACKET) == TRUE ) {
+                curr_operator = *i;
+                goto bracket_optr;
+            }
+#endif
             if( error_msg ) {
                 AsmError( OPERATOR_EXPECTED );
             }
@@ -2137,7 +2163,7 @@ static int evaluate(
         curr_operator = *i;
         DebugMsg(("evaluate loop enter, operator index=%u, token=%X, operand1->sym=%X\n", curr_operator, AsmBuffer[curr_operator]->token, operand1->sym));
         (*i)++;
-
+    bracket_optr:
         /* read the next operand */
 
         if( *i > end ) {
@@ -2213,9 +2239,14 @@ static int evaluate(
 
         next_operator = FALSE;
         if( *i <= end ) {
-            if( !is_optr( *i )
-                || is_unary( *i, FALSE )
-                || cmp_token( *i, T_OP_BRACKET ) ) {
+            //if( !is_optr( *i ) || is_unary( *i, FALSE ) || cmp_token( *i, T_OP_BRACKET ) ) {
+            if( !is_optr( *i ) || is_unary( *i, FALSE ) ) {
+#if 1
+                /* treat '()' as an alias for '+' */
+                if (cmp_token( *i, T_OP_BRACKET ) ) {
+                    goto next_op;
+                }
+#endif
                 if( error_msg )
                     AsmError( OPERATOR_EXPECTED );
                 operand1->type = EXPR_UNDEF;
@@ -2416,7 +2447,6 @@ static bool is_expr( int i )
         return( TRUE );
     case T_DOT:
         return( TRUE );
-    case T_PATH:
     default:
 //        DebugMsg(("is_expr: default\n"));
         break;

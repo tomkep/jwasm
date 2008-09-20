@@ -33,13 +33,18 @@
 #include <errno.h>
 #include <ctype.h>
 #include <time.h>
+#ifdef __WATCOMC__
+#include <unistd.h>
+#else
 #include <io.h>
+#endif
 
 #include "symbols.h"
 #include "memalloc.h"
 #include "input.h"
 #include "condasm.h"
 #include "directiv.h"
+#include "assume.h"
 #include "proc.h"
 #include "expreval.h"
 #include "hll.h"
@@ -52,6 +57,7 @@
 #include "omfprs.h"
 #include "omf.h"
 #include "fastpass.h"
+#include "listing.h"
 
 #if COFF_SUPPORT
 #include "coff.h"
@@ -70,10 +76,8 @@ extern void             CheckProcOpen( void );
 extern void             CmdlParamsInit( int );
 extern void             SortSegments( void );
 
-// a Win32 external (to get timer res in ms)
-
 #ifndef __UNIX__
-extern unsigned int _stdcall GetTickCount(void);
+#include "win32.h"
 #endif
 
 extern symbol_queue     Tables[];       // tables of definitions
@@ -81,8 +85,6 @@ extern obj_rec          *ModendRec;     // Record for Modend (OMF)
 extern asm_sym          *start_label;   // symbol for Modend (COFF)
 extern uint_8           CheckSeg;
 extern pobj_state       pobjState;      // object file information
-
-extern bool             in_prologue;
 
 /* fields: next, name, segment, offset/value */
 struct asm_sym LineItem = {NULL,"@Line", NULL, 0};
@@ -124,11 +126,7 @@ void AddLinnumDataRef( void )
     struct line_num_info    *curr;
     unsigned long           line_num;
 
-    if( in_prologue && CurrProc ) {
-        line_num = CurrProc->line_num;
-    } else {
-        line_num = LineNumber;
-    }
+    line_num = LineNumber;
     if( line_num < 0x8000 )  {
         if( lastLineNumber != line_num ) {
             curr = AsmAlloc( sizeof( struct line_num_info ) );
@@ -169,9 +167,13 @@ void SaveState( void )
     DebugMsg(("SaveState: curr line=>%s<\n", CurrString));
 }
 
-void ResetUseSavedState( void )
+/* an error has been detected in pass one. it should be
+ reported in pass 2, so ensure that a full source scan is done then
+ */
+
+void SkipSavedState( void )
 {
-    if (UseSavedState == TRUE) {
+    if ( UseSavedState == TRUE ) {
         UseSavedState = FALSE;
         if (AsmFiles.file[LST]) {
             rewind( AsmFiles.file[LST] );
@@ -456,7 +458,7 @@ static int WriteHeader( bool initial )
     case OFORMAT_BIN:
         /* check if PROTOs or externals are used */
         for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next )
-            if( curr->sym.used == TRUE && curr->e.procinfo->defined == FALSE )
+            if( curr->sym.used == TRUE && curr->sym.isproc == FALSE )
                 break;
         if (curr || Tables[TAB_EXT].head) {
             AsmError(FORMAT_DOESNT_SUPPORT_EXTERNALS);
@@ -490,14 +492,14 @@ static unsigned long OnePass( char *string )
 {
     int i;
 
-    SymPassInit(Parse_Pass);
+    SymPassInit( Parse_Pass );
     LabelsInit();
-    SegmentInit(Parse_Pass);
+    SegmentInit( Parse_Pass );
     ProcInit();
     HllInit();
-    MacroInit(Parse_Pass); /* insert predefined macros */
+    MacroInit( Parse_Pass ); /* insert predefined macros */
     AssumeInit();
-    CmdlParamsInit(Parse_Pass);
+    CmdlParamsInit( Parse_Pass );
 
     EndDirectiveFound = FALSE;
     PhaseError = FALSE;
@@ -566,8 +568,8 @@ static void set_ext_idx( )
     // now scan the PROTO items
 
     for(curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
-        /* the item must be USED and UNDEFINED */
-        if( curr->sym.used && (curr->e.procinfo->defined == 0 )) {
+        /* the item must be USED and PROTO */
+        if( curr->sym.used && (curr->sym.isproc == FALSE )) {
             index++;
             curr->sym.idx = index;
         }
@@ -584,9 +586,9 @@ static void set_ext_idx( )
     return;
 }
 
-// called once per module
+// init assembler. called once per module
 
-static void write_init( void )
+static void AssembleInit( void )
 /****************************/
 {
     ModendRec     = NULL; /* OMF */
@@ -604,27 +606,24 @@ static void write_init( void )
 
     SymInit();
     QueueInit();
+    ModuleInit();
     CondInit();
-    IdxInit();
-    LnameInsert( "" );
     ExprEvalInit();
     TypesInit();
-    ModuleInit();
     FixInit();
 }
 
-// called once per module. WriteObjModule cleanup
+// called once per module. AssembleModule() cleanup
 
-static void write_fini( void )
+static void AssembleFini( void )
 /****************************/
 {
     FixFini();
 }
 
-// unlike the name suggests this proc does not just write the object module
-// but does the assembler main loop (pass 1, pass 2, ...)
+// AssembleModule() assembles the source and writes the object module
 
-void WriteObjModule( void )
+void AssembleModule( void )
 /**************************/
 {
     char                string[ MAX_LINE_LEN ];
@@ -636,10 +635,10 @@ void WriteObjModule( void )
     int starttime;
     int endtime;
 
-    DebugMsg(("WriteObjModule enter\n"));
+    DebugMsg(("AssembleModule enter\n"));
 //    CodeBuffer = codebuf;
 
-    write_init();
+    AssembleInit();
 
     OpenLstFile();
 
@@ -660,12 +659,12 @@ void WriteObjModule( void )
         }
         while( PopLineQueue() ) {};
 
-        DebugMsg(("WriteObjModule(%u): errorcnt=%u\n", Parse_Pass + 1, ModuleInfo.error_count));
+        DebugMsg(("AssembleModule(%u): errorcnt=%u\n", Parse_Pass + 1, ModuleInfo.error_count));
         if( ModuleInfo.error_count > 0 )
             break;
 
         if (Parse_Pass == PASS_1) {
-            DebugMsg(("WriteObjModule(%u): pass 1 actions\n", Parse_Pass + 1));
+            DebugMsg(("AssembleModule(%u): pass 1 actions\n", Parse_Pass + 1));
             if (ERROR == CheckForOpenConditionals())
                 break;
             write_to_file = TRUE;
@@ -678,7 +677,7 @@ void WriteObjModule( void )
                 end_of_header = tell(pobjState.file_out->fh);
             }
 #ifdef DEBUG_OUT
-            DebugMsg(("WriteObjModule forward references:\n"));
+            DebugMsg(("AssembleModule forward references:\n"));
             for( dir = Tables[TAB_SEG].head; dir; dir = dir->next ) {
                 int i;
                 int j;
@@ -690,12 +689,12 @@ void WriteObjModule( void )
                     i++;
                     for ( fix = sym->fixup; fix ; fix = fix->next1, j++ );
                 }
-                DebugMsg(("WriteObjModule: segm=%s, labels=%u forward refs=%u\n", dir->sym.name, i, j));
+                DebugMsg(("AssembleModule: segm=%s, labels=%u forward refs=%u\n", dir->sym.name, i, j));
             }
 #endif
         }
 
-        DebugMsg(("WriteObjModule(%u): PhaseError=%u, prev_total=%X, curr_total=%X\n", Parse_Pass + 1, PhaseError, prev_total, curr_total));
+        DebugMsg(("AssembleModule(%u): PhaseError=%u, prev_total=%X, curr_total=%X\n", Parse_Pass + 1, PhaseError, prev_total, curr_total));
         if( !PhaseError && prev_total == curr_total ) {
             if (Options.output_format == OFORMAT_OMF) {
                 WriteContent();
@@ -707,14 +706,14 @@ void WriteObjModule( void )
             break;
         }
 #ifdef DEBUG_OUT
-        DebugMsg(("WriteObjModule(%u) segment sizes:\n", Parse_Pass + 1));
+        DebugMsg(("AssembleModule(%u) segment sizes:\n", Parse_Pass + 1));
         for( dir = Tables[TAB_SEG].head; dir; dir = dir->next ) {
             if( ( dir->sym.state != SYM_SEG ) || ( dir->sym.segment == NULL ) )
                 continue;
-            DebugMsg(("WriteObjModule(%u): segm=%s size=%8X:\n", Parse_Pass + 1, dir->sym.name, dir->e.seginfo->segrec->d.segdef.seg_length));
+            DebugMsg(("AssembleModule(%u): segm=%s size=%8X:\n", Parse_Pass + 1, dir->sym.name, dir->e.seginfo->segrec->d.segdef.seg_length));
         }
 #endif
-        DebugMsg(("WriteObjModule(%u): prepare for next pass\n", Parse_Pass + 1));
+        DebugMsg(("AssembleModule(%u): prepare for next pass\n", Parse_Pass + 1));
 
         prev_total = curr_total;
 
@@ -730,10 +729,10 @@ void WriteObjModule( void )
 #endif
     }
 
-    DebugMsg(("WriteObjModule: finished, cleanup\n"));
+    DebugMsg(("AssembleModule: finished, cleanup\n"));
 
     /* Write a symbol listing file (if requested) */
-    SymWriteCRef();
+    WriteCRef();
 
 #ifndef __UNIX__
     endtime = GetTickCount();
@@ -756,11 +755,13 @@ void WriteObjModule( void )
                  ModuleInfo.error_count);
         printf(string);
     }
-    if (AsmFiles.file[LST])
+    if (AsmFiles.file[LST]) {
         fwrite(string, 1, strlen(string), AsmFiles.file[LST]);
+        CloseLstFile();
+    }
 
     SymFini();
     QueueFini();
     InputFini();
-    write_fini();
+    AssembleFini();
 }

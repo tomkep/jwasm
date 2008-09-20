@@ -41,9 +41,16 @@
 
 #define USERESOURCES 0
 
+#define MAXMSGSIZE 128
+
 #if USERESOURCES
-#undef ERROR
-#include "windows.h"
+#include "win32.h"
+typedef void * HRSRC;
+typedef void * HGLOBAL;
+WINBASEAPI HRSRC   WINAPI FindResource( void *, char *, uint_32 );
+WINBASEAPI HGLOBAL WINAPI LoadResource( void *, HRSRC );
+WINBASEAPI void *  WINAPI LockResource( HGLOBAL );
+WINBASEAPI void    WINAPI WideCharToMultiByte( uint_32, uint_32, uint_16 *, uint_32, uint_16 *, uint_32, uint_32, uint_32 );
 
 #else
 
@@ -82,7 +89,7 @@ extern char             *_Copyright;
 
 #endif
 
-#ifndef __UNIX__
+#if 0 // ndef __UNIX__
 
 static void con_output( const unsigned char *text )
 {
@@ -109,23 +116,23 @@ void MsgFini( void )
 char * MsgGet( int resourceid, char *buffer )
 {
 #if USERESOURCES
-    static char sbuffer[128];
+    static char sbuffer[MAXMSGSIZE];
     HRSRC hRsrc;
     HGLOBAL hRes;
     WORD * pId;
     int i;
-    hRsrc = FindResource(NULL, MAKEINTRESOURCE(1 + (resourceid >> 4)), RT_STRING);
+    hRsrc = FindResource( NULL, MAKEINTRESOURCE(1 + (resourceid >> 4)), RT_STRING );
     if (hRsrc) {
-        hRes = LoadResource(NULL, hRsrc);
+        hRes = LoadResource( NULL, hRsrc );
         if (hRes) {
-            pId = LockResource(hRes);
+            pId = LockResource( hRes );
             for (i = resourceid % 16;i;i--)
                 pId += *pId + 1;
             i = *pId++;
             if (buffer == NULL)
                 buffer = sbuffer;
-            WideCharToMultiByte(CP_ACP, 0, pId, i, buffer, 128, 0, 0);
-            if (i < 128)
+            WideCharToMultiByte( CP_ACP, 0, pId, i, buffer, MAXMSGSIZE, 0, 0 );
+            if (i < MAXMSGSIZE)
                 buffer[i] = 0;
             return( buffer );
         }
@@ -133,7 +140,7 @@ char * MsgGet( int resourceid, char *buffer )
 #else
     if (resourceid < MSG_LAST) {
         if (buffer) {
-            strncpy(buffer, msgtexts[resourceid], 128);
+            strncpy( buffer, msgtexts[resourceid], MAXMSGSIZE );
             return( buffer );
         } else
             return( (char *)msgtexts[resourceid] );

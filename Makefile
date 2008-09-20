@@ -1,19 +1,18 @@
 
-# the makefile creates JWASM.EXE (JWASM)
-# Open Watcom v1.7 is needed for the build process.
-# Optionally - if DOS=1 is set below - the DOS version of JWasm, JWASMD.EXE,
-# can be created.
+# the makefile creates JWASM.EXE (Win32) and optionally JWASMD.EXE (DOS).
+# tools used:
+# - Open Watcom v1.7
+# - HXDEV (optionally, only if DOS=1 is set below to create JWASMD.EXE)
 
 name = JWasm
 
 DOS=1
 WIN=1
 
-# if DOS=1 is set, then HXDEV is required and the HXDIR path below has to be
-# adjusted before running WMAKE. Additionally, HX's Open Watcom support must
-# be installed ("system hxnts").
+# if DOS=1, the Open Watcom and HX directories must be set below.
 
-HXDIR = \asm\hx
+WATCOM = \Watcom
+HXDIR = \HX
 
 !ifndef DEBUG
 DEBUG=0
@@ -57,7 +56,7 @@ LOPT = op quiet
 LOPTD = debug dwarf op symfile 
 !endif
 
-lflagsd = $(LOPTD) system hxnts $(LOPT) op map=$^* Libpath $(HXDIR)\lib op stub=$(HXDIR)\bin\loadpex.bin
+lflagsd = $(LOPTD) format windows nt runtime console Libpath $(HXDIR)\Lib Libpath $(WATCOM)\lib386 Libpath $(WATCOM)\lib386\nt library dkrnl32s.lib libfile cstrtwhx.obj $(LOPT) op map=$^* op stub=$(HXDIR)\Bin\loadpex.bin, stack=0x40000
 lflagsw = $(LOPTD) system nt $(LOPT) op map=$^*
 
 CC=wcc386 -q -3$(CCV) -bc -bt=nt $(inc_dirs) $(extra_c_flags) -fo$@
@@ -65,7 +64,7 @@ CC=wcc386 -q -3$(CCV) -bc -bt=nt $(inc_dirs) $(extra_c_flags) -fo$@
 .c{$(OUTD)}.obj:
    $(CC) $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   &
+proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/assume.obj  &
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj &
            $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  &
            $(OUTD)/msgtext.obj  $(OUTD)/macro.obj    $(OUTD)/condasm.obj &
@@ -79,7 +78,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   &
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/omf.obj     &
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   &
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
-           $(OUTD)/omffixup.obj &
+           $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   &
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif
@@ -111,7 +110,7 @@ $(OUTD)/$(name)d.exe: H/opcodes.gh $(proj_obj)
 	$(linker) @<<
 $(lflagsd) file { $(proj_obj) } name $@
 <<
-	@$(HXDIR)\bin\patchpe $@
+	@$(HXDIR)\Bin\patchpe.exe $@
 
 $(OUTD)/msgtext.obj: msgtext.c H/msgtext.h H/usage.h H/banner.h
 	$(CC) msgtext.c

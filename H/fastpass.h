@@ -46,12 +46,13 @@ typedef struct mod_state {
 
 extern mod_state modstate;
 extern bool StoreState; /* is 1 if states are to be stored in pass one */
+extern bool UseSavedState; /* is 1 if preprocessed lines are to be used */
 
 void SaveState( void );
 void SegmentSaveState( void );
 void AssumeSaveState( void );
 void StoreLine( char * );
-void ResetUseSavedState( void );
+void SkipSavedState( void );
 void InputQueueLineEx( char *, bool );
 
 #endif

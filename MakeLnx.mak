@@ -1,5 +1,5 @@
 
-# the makefile creates the Linux binary of JWasm
+# the makefile creates the Linux binary of JWasm.
 # Open Watcom v1.7 is needed for the build process.
 
 name = JWasm
@@ -17,7 +17,7 @@ OUTD=RelLnx
 # calling convention for compiler: s=Stack, r=Register
 CCV=r
 
-inc_dirs  = -IH
+inc_dirs  = -IH -I\Watcom\LH
 
 # to track memory leaks, the Open Watcom TRMEM module can be included
 TRMEM=0
@@ -47,7 +47,7 @@ CC = wcc386 -q -3$(CCV) -bc -bt=linux $(inc_dirs) $(extra_c_flags) -fo$@
 .c{$(OUTD)}.obj:
      $(CC) $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   &
+proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/assume.obj  &
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj &
            $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  &
            $(OUTD)/msgtext.obj  $(OUTD)/macro.obj    $(OUTD)/condasm.obj &
@@ -61,7 +61,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/fatal.obj   &
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/omf.obj     &
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   &
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
-           $(OUTD)/omffixup.obj &
+           $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   &
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif

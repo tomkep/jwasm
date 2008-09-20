@@ -28,32 +28,27 @@
 *
 ****************************************************************************/
 
-
 /*
     if TRMEM is defined, trmem functions are used which will help tracking
     memory usage.
 */
-
-#include "globals.h"
-
-// FASTMEM is a simple memory alloc approach which allocates chunks of 256 kB
-// and will release it only at MemFini()
-
-#if FASTMEM
-#define BLKSIZE 0x80000
-#ifndef __UNIX__
-#undef ERROR
-#define WIN32_LEAN_AND_MEAN 1
-//#define __W32API_USE_DLLIMPORT__
-#include <windows.h>
-#endif
-#endif
 
 #include <stdlib.h>
 #include <fcntl.h>
 //#include <unistd.h>
 #ifdef DEBUG_OUT
 #include <stdio.h>
+#endif
+
+#include "globals.h"
+
+// FASTMEM is a simple memory alloc approach which allocates chunks of 256 kB
+// and will release it only at MemFini()
+#if FASTMEM
+#define BLKSIZE 0x80000
+#ifndef __UNIX__
+#include "win32.h"
+#endif
 #endif
 
 #include "watcom.h"
@@ -171,7 +166,7 @@ void *AsmAlloc( size_t size )
     if (currfree < size) {
         if (size > BLKSIZE-4) {
 #ifndef __UNIX__
-            pCurr = VirtualAlloc(0, size+4, MEM_COMMIT, PAGE_READWRITE);
+            pCurr = (uint_8 *)VirtualAlloc(NULL, size+4, MEM_COMMIT, PAGE_READWRITE);
 #else
             mymmap.size = size+4;
             pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
@@ -179,7 +174,7 @@ void *AsmAlloc( size_t size )
             currfree = size;
         } else {
 #ifndef __UNIX__
-            pCurr = VirtualAlloc(0, BLKSIZE, MEM_COMMIT, PAGE_READWRITE);
+            pCurr = (uint_8 *)VirtualAlloc(NULL, BLKSIZE, MEM_COMMIT, PAGE_READWRITE);
 #else
             mymmap.size = BLKSIZE;
             pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);

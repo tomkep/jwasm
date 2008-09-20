@@ -49,12 +49,12 @@
 #include "input.h"
 #include "errmsg.h"
 #include "macro.h"
+#include "listing.h"
 
 #ifdef __OSI__
   #include "ostype.h"
 #endif
 
-extern void             ObjRecInit( void );
 extern void             InitErrFile( void );
 //extern void             PrintfUsage( int first_ln );
 extern void             MsgPrintf( int resourceid );
@@ -897,7 +897,7 @@ static void main_init( void )
         AsmFiles.file[i] = NULL;
         AsmFiles.fname[i] = NULL;
     }
-    ObjRecInit();
+    OmfRecInit();
     omf_GenMSInit();
 }
 
@@ -907,14 +907,17 @@ void CloseFiles( void )
     /* close ASM file */
     if( AsmFiles.file[ASM] != NULL ) {
         if( fclose( AsmFiles.file[ASM] ) != 0 ) {
+            AsmFiles.file[ASM] = NULL;
             Fatal( MSG_CANNOT_CLOSE_FILE, AsmFiles.fname[ASM] );
         }
     }
+    CloseLstFile();
 
     /* close OBJ file */
-    ObjWriteClose( pobjState.file_out );
+    if ( pobjState.file_out != NULL )
+        ObjWriteClose( pobjState.file_out );
 
-    ObjRecFini();
+    OmfRecFini();
     if( ModuleInfo.error_count > 0 ) {
         remove( AsmFiles.fname[OBJ] );
     }
@@ -1336,13 +1339,17 @@ static int do_init_stuff( char **cmdline, bool first )
         AddStringToIncludePath( env );
 
     open_files();
-//    PushLineQueue();
+
     return( TRUE );
 }
 
 void genfailure(int signo)
 {
+#ifdef __UNIX__
+    if (signo != SIGTERM)
+#else
     if (signo != SIGBREAK)
+#endif
         AsmError( GENERAL_FAILURE );
     CloseFiles();
     exit ( EXIT_FAILURE );
@@ -1356,7 +1363,7 @@ int main( int argc, char **argv )
 
 #else
 
-char * _stdcall GetCommandLineA(void);
+#include "win32.h"
 
 int main( void )
 /**************/
@@ -1397,8 +1404,11 @@ int main( void )
 #ifndef DEBUG_OUT
     signal(SIGSEGV, genfailure);
 #endif
+#ifndef __UNIX__
     signal(SIGBREAK, genfailure);
-
+#else
+    signal(SIGTERM, genfailure);
+#endif
     while (1) {
         ModuleInfo.srcfile = NULL; /* remove any old value, to be sure */
         main_init();
@@ -1414,7 +1424,7 @@ int main( void )
             break;
         }
         SetMemoryModel();
-        WriteObjModule();           // main body: parse the source file
+        AssembleModule();     // main body: parse the source file
         main_fini();
 #ifndef __UNIX__
         pCmd = argv[0];

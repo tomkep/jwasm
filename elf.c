@@ -12,7 +12,12 @@
 #include <errno.h>
 #include <ctype.h>
 #include <time.h>
+
+#ifdef __WATCOMC__
+#include <unistd.h>
+#else
 #include <io.h>
+#endif
 
 #include "globals.h"
 #include "symbols.h"
@@ -23,6 +28,7 @@
 #include "queues.h"
 #include "elf.h"
 #include "myassert.h"
+#include "fatal.h"
 
 #if ELF_SUPPORT
 
@@ -172,7 +178,7 @@ static void set_symtab_values()
                 if (fix->sym->variable) {
                     fix->sym = fix->segment;
                 } else if ((fix->sym->state == SYM_INTERNAL ||
-                     (fix->sym->state == SYM_PROC && ((dir_node *)fix->sym)->e.procinfo->defined == TRUE)) &&
+                     ( fix->sym->state == SYM_PROC && fix->sym->isproc == TRUE )) &&
                     fix->sym->included == FALSE &&
                     fix->sym->public == FALSE) {
                     fix->sym->included = TRUE;
@@ -202,7 +208,7 @@ static void set_symtab_values()
 
     /* count PROTOs which are used and external */
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
-        if( curr->sym.used == FALSE || curr->e.procinfo->defined == TRUE )
+        if( curr->sym.used == FALSE || curr->sym.isproc == TRUE )
             continue;
         curr->sym.idx = symindex++;
     }
@@ -213,7 +219,7 @@ static void set_symtab_values()
     while( curr = GetPublicData2(&vp)) {
         if( curr->sym.state == SYM_UNDEFINED ) {
             continue;
-        } else if( curr->sym.state == SYM_PROC && curr->e.procinfo->defined == FALSE) {
+        } else if( curr->sym.state == SYM_PROC && curr->sym.isproc == FALSE) {
             continue;
         } else if (curr->sym.state == SYM_EXTERNAL && curr->sym.weak == TRUE) {
             continue;
@@ -307,7 +313,7 @@ static void set_symtab_values()
     // externals.
 
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
-        if( curr->sym.used == FALSE || curr->e.procinfo->defined == TRUE )
+        if( curr->sym.used == FALSE || curr->sym.isproc == TRUE )
             continue;
         Mangle( &curr->sym, buffer );
         len = strlen( buffer );
@@ -386,7 +392,7 @@ static void set_symtab_values()
         p2 += strlen(p2) + 1;
     }
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
-        if( curr->sym.used == FALSE || curr->e.procinfo->defined == TRUE )
+        if( curr->sym.used == FALSE || curr->sym.isproc == TRUE )
             continue;
         Mangle( &curr->sym, p2 );
         p2 += strlen(p2) + 1;
@@ -506,7 +512,8 @@ static int elf_write_section_table( int fh )
     set_shstrtab_values();
 
     memset(&shdr, 0, sizeof(shdr));
-    write(fh, &shdr, sizeof(shdr)); /* write the empty NULL entry */
+    if (write(fh, &shdr, sizeof(shdr)) != sizeof(shdr)) /* write the empty NULL entry */
+        WriteError();
 
     p = internal_segs[SHSTRTAB_IDX].data;
     p++;
@@ -544,7 +551,8 @@ static int elf_write_section_table( int fh )
         shdr.sh_addralign = Get_Alignment( curr );
         shdr.sh_entsize = 0;
 
-        write(fh, &shdr, sizeof(shdr));
+        if (write(fh, &shdr, sizeof(shdr)) != sizeof(shdr))
+            WriteError();
 
         /* save the file offset in the segment item */
         curr->e.seginfo->start_loc = offset;
@@ -580,7 +588,8 @@ static int elf_write_section_table( int fh )
             shdr.sh_addralign = 1;
             shdr.sh_entsize = 0;
         }
-        write(fh, &shdr, sizeof(shdr));
+        if (write(fh, &shdr, sizeof(shdr)) != sizeof(shdr))
+            WriteError();
 
         offset += shdr.sh_size;
         offset = (offset + 0xF) & ~0xF;
@@ -608,7 +617,8 @@ static int elf_write_section_table( int fh )
         shdr.sh_addralign = 4;
         shdr.sh_entsize = sizeof(Elf32_Rel);
 
-        write(fh, &shdr, sizeof(shdr));
+        if (write(fh, &shdr, sizeof(shdr)) != sizeof(shdr))
+            WriteError();
 
         offset += shdr.sh_size;
         offset = (offset + 0xF) & ~0xF;
@@ -667,7 +677,8 @@ int elf_write_header( int fh )
     ehdr.e_shstrndx = 1 + total_segs + SHSTRTAB_IDX;
 
     lseek(fh, 0, SEEK_SET);
-    write(fh, &ehdr, sizeof(ehdr));
+    if (write(fh, &ehdr, sizeof(ehdr)) != sizeof(ehdr))
+        WriteError();
 
     elf_write_section_table( fh );
 
@@ -712,8 +723,9 @@ int elf_write_data(int fh)
         DebugMsg(("elf_write_data: program data at ofs=%X, size=%X\n", curr->e.seginfo->start_loc, curr->e.seginfo->segrec->d.segdef.seg_length));
         if (curr->e.seginfo->segtype != SEGTYPE_BSS && curr->e.seginfo->segrec->d.segdef.seg_length != 0) {
             lseek(fh, curr->e.seginfo->start_loc, SEEK_SET);
-            write(fh, curr->e.seginfo->CodeBuffer,
-                  curr->e.seginfo->segrec->d.segdef.seg_length);
+            if (write(fh, curr->e.seginfo->CodeBuffer,
+                      curr->e.seginfo->segrec->d.segdef.seg_length) != curr->e.seginfo->segrec->d.segdef.seg_length)
+                WriteError();
         }
     }
 
@@ -722,7 +734,8 @@ int elf_write_data(int fh)
         if (seg->data) {
             DebugMsg(("elf_write_data: internal at ofs=%X, size=%X\n", seg->offset, seg->size));
             lseek( fh, seg->offset, SEEK_SET );
-            write( fh, seg->data, seg->size );
+            if (write( fh, seg->data, seg->size ) != seg->size)
+                WriteError();
         }
     }
 
@@ -766,7 +779,8 @@ int elf_write_data(int fh)
                 /* the low 8 bits of info are type */
                 /* the high 24 bits are symbol table index */
                 reloc.r_info = ELF32_R_INFO(fixup->sym->idx, elftype);
-                write( fh, &reloc, sizeof(reloc) );
+                if (write( fh, &reloc, sizeof(reloc) ) != sizeof(reloc))
+                    WriteError();
             }
         }
     }

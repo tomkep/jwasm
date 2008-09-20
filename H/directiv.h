@@ -55,18 +55,15 @@ typedef enum {
 
 enum {
     TAB_FIRST = 0,
-    TAB_SEG = TAB_FIRST,  // order seg, grp, lname is important
+    TAB_SEG = TAB_FIRST,  // order seg, grp is important
     TAB_GRP,
     TAB_PUB,
     TAB_LIB,
     TAB_EXT,
     TAB_PROC,
-    TAB_LNAME,
-    TAB_CLASS_LNAME,
     TAB_ALIAS,
     TAB_LAST,
     TAB_TYPE,
-    TAB_MACRO,   // TAB_MACRO is a preprocessor item
     TAB_GLOBAL,  // TAB_GLOBAL and TAB_COMM are in fact TAB_EXT items
     TAB_COMM
 };           
@@ -85,15 +82,6 @@ typedef struct stacknode {
     void    *next;
     void    *elt;
 } stacknode;
-
-typedef struct {
-    asm_sym             *symbol;        /* segment or group that is to
-                                           be associated with the register */
-    unsigned            error:1;        // the register is assumed to ERROR
-    unsigned            flat:1;         // the register is assumed to FLAT
-} assume_info;
-
-extern assume_info SegAssumeTable[];
 
 typedef struct {
     int token;
@@ -126,7 +114,7 @@ typedef struct {
     direct_idx          idx;            // its group index
     seg_item            *seglist;       // list of segments in the group
     uint                numseg;         // number of segments in the group
-    direct_idx          lname_idx;
+    direct_idx          lname_idx;      // LNAME index (OMF only)
 } grp_info;
 
 /* todo: remove the OMF segment record and store the info directly
@@ -159,7 +147,7 @@ typedef struct {
         uint_32         fileoffset;     // used by BIN
     };
     seg_type            segtype;        // segment is belonging to "CODE" or 'DATA' class
-    direct_idx          lname_idx;
+    direct_idx          lname_idx;      // LNAME index (OMF only)
     unsigned            readonly:1;     // if the segment is readonly
     unsigned            Use32:1;
 #if BIN_SUPPORT
@@ -191,8 +179,7 @@ typedef struct {
     unsigned            is_vararg:1;    // if it has a vararg
     unsigned            pe_type:1;      // prolog/epilog code type 0:8086/186 1:286 and above
     unsigned            export:1;       // EXPORT procedure
-    unsigned            defined:1;      // does a PROC exist?
-    unsigned            init:1;         // has PROTO/PROC been called?
+    unsigned            init:1;         // has ExamineProc() been called?
 } proc_info;
 
 // macro parameter
@@ -200,7 +187,7 @@ typedef struct {
 typedef struct mparm_list {
     char                *label;         // name of parameter
     char                *def;           // optional default parm
-    char                required;       // is parm required
+    unsigned int        required:1;     // is parm required (REQ)
 } mparm_list;
 
 // macro local
@@ -232,10 +219,6 @@ typedef struct {
 } macro_info;
 
 
-typedef struct {
-    direct_idx          idx;                // lname index
-} lname_info;
-
 typedef struct field_list {
     struct field_list   *next;
     char                *initializer;
@@ -252,10 +235,10 @@ typedef enum {
 } type_kind;
 
 typedef struct {
-    field_list          *head;
+    field_list          *head;       /* is NULL for TYPEDEF */
     union {
-    field_list          *tail;
-    struct asm_sym      *target;    // if TYPEDEF is a PTR, specifies the target TYPE
+        field_list          *tail;   /* for STRUCT, UNION, RECORD */
+        struct asm_sym      *target; /* if TYPEDEF is a PTR, specifies the target TYPE */
     };
     union {
         uint_8          alignment;   /* STRUCT: 1,2,4,8,16 or 32 */
@@ -268,12 +251,11 @@ typedef struct {
 } struct_info;
 
 union entry {
-    seg_info            *seginfo;       // info about segment definition
-    grp_info            *grpinfo;       // info about group definition
-    proc_info           *procinfo;
-    lname_info          *lnameinfo;
-    struct_info         *structinfo;
-    macro_info          *macroinfo;
+    seg_info            *seginfo;       // SEGMENT definition
+    grp_info            *grpinfo;       // GROUP definition
+    proc_info           *procinfo;      // PROC definition
+    struct_info         *structinfo;    // STRUCT, UNION, TYPEDEF, RECORD def
+    macro_info          *macroinfo;     // MACRO definition
 };
 
 typedef struct dir_node {
@@ -342,9 +324,6 @@ extern void             dir_free( dir_node *, bool );
 
 extern int              SizeFromMemtype(memtype, bool );
 
-extern void             IdxInit( void );
-/* Initialize all the index variables */
-
 extern uint             GetExtIdx( struct asm_sym * );
 /* Get the index of an extrn defn */
 
@@ -352,7 +331,6 @@ extern int              token_cmp( char *token, int start, int end );
 extern int              FindSimpleType( int );  // find simple type
 //extern int              RegisterValueToIndex( int, bool *);
 extern int              SizeFromRegister( int );
-extern struct asm_sym   *GetStdAssume( int);
 extern struct asm_sym   *MakeExtern( char *name, memtype type, struct asm_sym * vartype, struct asm_sym *, bool );
 extern int              EchoDef( int );         // handle ECHO directive
 extern int              OptionDirective( int ); // handle OPTION directive
@@ -364,7 +342,6 @@ extern void             ModuleInit( void );
    ModuleInfo */
 
 extern int              ModuleEnd( int );       // handle END statement
-extern void             AssumeInit( void );     // init all assumed-register table
 extern int              FixOverride( int );
 /* Get the correct frame and frame_datum for a label when there is a segment
    or group override. */
@@ -377,32 +354,6 @@ extern void             SetMasm510( bool );
 /*---------------------------------------------------------------------------
  *   included from segment.c
  *---------------------------------------------------------------------------*/
-
-#define NUM_SEGREGS 6
-#define NUM_STDREGS 8
-
-enum assume_segreg {
-    ASSUME_DS=0,
-    ASSUME_ES,
-    ASSUME_SS,
-    ASSUME_FS,
-    ASSUME_GS,
-    ASSUME_CS
-};
-
-enum assume_stdreg {
-    ASSUME_EAX=0,
-    ASSUME_ECX,
-    ASSUME_EDX,
-    ASSUME_EBX,
-    ASSUME_ESP,
-    ASSUME_EBP,
-    ASSUME_ESI,
-    ASSUME_EDI
-};
-
-#define ASSUME_NOTHING -2
-#define ASSUME_ERROR   -1
 
 extern seg_item         *CurrSeg;       // points to stack of opened segments
 
@@ -422,7 +373,6 @@ extern int              SimSeg( int );          // handle simplified segment
 
 extern direct_idx       GetLnameIdx( char * );
 
-extern direct_idx       LnameInsert( char * );  // Insert a lname
 extern uint_32          GetCurrOffset( void );  // Get offset from current segment
 extern int              SetCurrOffset( int_32, bool, bool );
 
@@ -445,20 +395,8 @@ extern int              SetCurrSeg( int );      // open or close a segment in
 extern void             SegmentInit( int );     // init segments
 extern struct asm_sym   *GetGrp( struct asm_sym * );
 
-extern enum assume_segreg  GetAssume( struct asm_sym*, enum assume_segreg );
-/* Return the assumed register of the symbol, and determine the frame and
-   frame_datum of its fixup */
-
-extern enum assume_segreg  GetPrefixAssume( struct asm_sym*, enum assume_segreg );
-/* Determine the frame and frame_datum of a symbol with a register prefix */
-
-
 extern uint_32          GetCurrSegAlign( void );
 extern int              SetUse32Def( bool );
-
-// write.c
-
-extern dir_node         *CurrProc;      // current procedure
 
 // input.c
 

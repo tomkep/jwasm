@@ -34,18 +34,18 @@
 #include "operands.h"
 
 enum fixup_types {
-        FIX_SEG,
-        FIX_LOBYTE,
-        FIX_HIBYTE,
-        FIX_RELOFF8,
-        FIX_RELOFF16,
-        FIX_RELOFF32,
-        FIX_OFF16,
-        FIX_OFF32,
-        FIX_PTR16,
-        FIX_PTR32,
-        FIX_OFF32_IMGREL,
-        FIX_OFF32_SECREL
+        FIX_SEG,       /* 0 */
+        FIX_LOBYTE,    /* 1, OMF only */
+        FIX_HIBYTE,    /* 2, OMF only */
+        FIX_RELOFF8,   /* 3 */
+        FIX_RELOFF16,  /* 4 */
+        FIX_RELOFF32,  /* 5 */
+        FIX_OFF16,     /* 6 */
+        FIX_OFF32,     /* 7 */
+        FIX_PTR16,     /* 8, OMF only */
+        FIX_PTR32,     /* 9, OMF only */
+        FIX_OFF32_IMGREL, /* 10, COFF+ELF only */
+        FIX_OFF32_SECREL  /* 11, COFF+ELF only */
 };
 
 enum fixup_options {

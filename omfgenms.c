@@ -30,6 +30,8 @@
 
 
 #include <string.h>
+#include <stddef.h>
+
 #include "globals.h"
 #include "watcom.h"
 #include "memalloc.h"
@@ -38,9 +40,12 @@
 #include "omfio.h"
 #include "omfpc.h"
 #include "omfgenms.h"
-#include "genutil.h"
 #include "myassert.h"
 #include "msdbg.h"
+
+#define WRN 0x8000
+
+extern void PrtMsg( unsigned msg, ... );
 
 static int writeMisc( obj_rec *objr, pobj_state *state ) {
 /*
@@ -138,7 +143,7 @@ static int writeSegdef( obj_rec *objr, pobj_state *state ) {
     case SEGDEF_ALIGN_DWORD:    acbp |= ALIGN_DWORD << 5;   break;
     case SEGDEF_ALIGN_4KPAGE:
         acbp |= ALIGN_PAGE;
-        PrtMsg( WRN|MSG_MS386_NO_4KPAGE );
+        PrtMsg( WRN | MSG_MS386_NO_4KPAGE );
         break;
     default:
 /**/    never_reach();

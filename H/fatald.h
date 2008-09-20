@@ -28,8 +28,10 @@
 *
 ****************************************************************************/
 
-fix( MSG_OUT_OF_MEMORY, 0, OUT_OF_MEMORY, CloseFiles, 0 ),
+fix( MSG_OUT_OF_MEMORY, 0, OUT_OF_MEMORY, CloseFiles, 1 ),
 fix( MSG_CANNOT_OPEN_FILE, 1, CANNOT_OPEN_FILE, NULL, 1 ),
 fix( MSG_CANNOT_CLOSE_FILE, 1, CANNOT_CLOSE_FILE, NULL, 1 ),
 fix( MSG_CANNOT_GET_START_OF_SOURCE_FILE, 0, CANNOT_GET_FILE, CloseFiles, 1 ),
 fix( MSG_CANNOT_SET_TO_START_OF_SOURCE_FILE, 0, CANNOT_SET_FILE, CloseFiles, 1 ),
+fix( MSG_FILE_WRITE_ERROR, 1, FILE_WRITE_ERROR, CloseFiles, 1 ),
+fix( MSG_FILE_LSEEK_ERROR, 1, FILE_LSEEK_ERROR, CloseFiles, 1 ),

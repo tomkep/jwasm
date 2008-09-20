@@ -234,7 +234,7 @@ extern int      InRange( long val, unsigned bytes );
 extern int      cpu_directive( int i );
 extern int      ParseItems( void );
 extern int      NextArrayElement( void );
-extern int      data_init( int, int );
+extern int      data_init( int, int, asm_sym * );
 extern void     ParseInit( void );
 
 #endif

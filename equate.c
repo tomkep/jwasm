@@ -43,6 +43,7 @@
 #include "input.h"
 #include "macro.h"
 #include "fastpass.h"
+#include "listing.h"
 
 #include "myassert.h"
 
@@ -128,6 +129,8 @@ void SaveEquateState(asm_sym *sym)
 // for EQU, the pos in the original source line is then
 // AsmBuffer[1]->pos + 4
 
+int ExpandToken(int count, char * string, bool addbrackets, bool Equ_Mode);
+
 asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
 /**********************************************************************************************/
 {
@@ -136,6 +139,8 @@ asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
     int                 j;
     bool                cmpvalue = FALSE;
     expr_list           opndx;
+    char buffer[MAX_LINE_LEN];
+    char nameb[MAX_LINE_LEN];
 
     DebugMsg(( "CreateConstant(%s, value=%u, redef=%u) enter\n", name, value, redefine));
 
@@ -146,6 +151,7 @@ asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
         /* wait with definition until TYPE is clear */
     } else if( sym->state == SYM_TMACRO && redefine == FALSE) {
         /* it's a text macro, valid for EQU only */
+        DebugMsg(( "CreateConstant: %s is a text macro, calling SetTextMacro(%s)\n", name, AsmBuffer[1]->pos + 4 ));
         return ( SetTextMacro(sym, name, AsmBuffer[1]->pos + 4));
 //    } else if( (sym->state != SYM_INTERNAL && sym->state != SYM_EXTERNAL) ) {
     } else if( sym->equate == FALSE ) {
@@ -194,7 +200,6 @@ asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
     // try to evalate the expression for EQU and '='
 
     i = start;
-#if 1 // a tiny optimization to avoid calling the evaluator for simple numbers
     if (AsmBuffer[i]->token == T_NUM && AsmBuffer[i+1]->token == T_FINAL) {
         opndx.llvalue = AsmBuffer[i]->llvalue;
         opndx.hlvalue = AsmBuffer[i]->hlvalue;
@@ -205,9 +210,43 @@ asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
         opndx.indirect = FALSE;
         j = NOT_ERROR;
         i++;
-    } else
-#endif
-    j = EvalOperand( &i, Token_Count, &opndx, FALSE );
+    } else {
+        if ( redefine == FALSE ) {
+            /* handle the special EQU case: if the expression can be evaluated
+             to a numeric value, it's a numeric equate. If no, the EQU is to
+             become a text macro, but the value of this macro is the ORIGINAL,
+             unexpanded line!!! Also important is that macro function calls
+             are NEVER resolved, the equate will always become a text.
+             */
+            int k;
+            char *p;
+            p = AsmBuffer[1]->pos+4;
+            strcpy( buffer, p ); /* save original line */
+            /* the name string might get destroyed if a macro is executed */
+            strcpy( nameb, name );
+            name = nameb;
+
+            /* expand the line */
+            while ( 1 ) {
+                j = NOT_ERROR;
+                for( k = 2; k < Token_Count; k++ ) {
+                    if (ExpandToken( k, p, FALSE, TRUE ) == STRING_EXPANDED)
+                        j = STRING_EXPANDED;
+                }
+                /* if there was an expansion, the tokenizer must be called. */
+                /* if Token_Count is 0, there was a macro function call and
+                 the loop must continue. this should never happen, however! */
+                if ( j == STRING_EXPANDED ) {
+                    k = Token_Count;
+                    Token_Count = Tokenize( p, 2 );
+                    if (k)
+                        break;
+                } else
+                    break;
+            }
+        }
+        j = EvalOperand( &i, Token_Count, &opndx, FALSE );
+    }
     /* for EQU, don't allow value to change */
     if (cmpvalue) {
         if (j != ERROR &&
@@ -220,6 +259,13 @@ asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
             }
             // if ((opndx.type == EXPR_ADDR) && (dir->e.constinfo->sym->offset == opndx.sym->offset))
             if (opndx.type == EXPR_ADDR) {
+#if 1
+                /* this needs some more testing */
+                if ( Parse_Pass > PASS_1 )
+                    return( sym );
+#endif
+                /* if the previous value was calculated with a forward reference,
+                 don't compare! */
                 if ((sym->offset == (opndx.sym->offset + opndx.value)) && (sym->segment == opndx.sym->segment)) {
                     return( sym );
                 }
@@ -257,12 +303,14 @@ noerr:
         AsmBuffer[i]->token == T_FINAL &&
         opndx.string == NULL &&
         opndx.indirect == FALSE &&
-        /* the CONST's magnitude must be <= 32 */
+        
         ((opndx.type == EXPR_CONST &&
-          ((opndx.hvalue == 0 && opndx.hlvalue == 0) ||
+          ((redefine == TRUE) ||
+           /* the CONST's magnitude must be <= 32 for EQU */
+           (opndx.hvalue == 0 && opndx.hlvalue == 0) || 
            (opndx.value < 0 && opndx.hvalue == -1))) ||
          (opndx.type == EXPR_ADDR && opndx.sym != NULL && opndx.sym->state != SYM_EXTERNAL)) &&
-        opndx.instr == EMPTY) {
+        (opndx.instr == EMPTY || redefine == TRUE)) {
         if (!sym) {
             sym = SymCreate( name, TRUE );
 #if FASTPASS
@@ -302,6 +350,7 @@ noerr:
             return( sym );
         } else {
             // AsmErr( UNDEFINED_SYMBOL, name );
+            DebugMsg(("CreateConstant(%s): error, no constant value\n", name ));
             AsmError( CONSTANT_EXPECTED );
             return( NULL );
         }
@@ -309,6 +358,6 @@ noerr:
 
     DebugMsg(("CreateConstant(%s): value is NOT numeric, opndx.string=%X, calling SetTextMacro()\n", name, opndx.string));
 
-    return ( SetTextMacro(sym, name, AsmBuffer[1]->pos + 4));
+    return ( SetTextMacro(sym, name, buffer ));
 }
 

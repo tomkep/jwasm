@@ -47,10 +47,6 @@ typedef struct queuenode {
     void *data;
 } queuenode;
 
-#if FASTPASS
-extern bool UseSavedState;
-#endif
-
 static qdesc   *LnameQueue;  // queue of LNAME structs
 static qdesc   *PubQueue;    // queue of pubdefs
 static qdesc   *GlobalQueue; // queue of global / externdefs
@@ -125,13 +121,13 @@ dir_node * GetPublicData2( queuenode * *curr)
         if( sym->state == SYM_UNDEFINED ) {
 #if FASTPASS
             /* do not use saved state, scan full source in second pass */
-            ResetUseSavedState();
+            SkipSavedState();
 #endif
             // AsmErr( SYMBOL_NOT_DEFINED, sym->name );
             continue;
         } else if( sym->state == SYM_PROC ) {
             /* skip PROTOs without matching PROC */
-            if(((dir_node *)sym)->e.procinfo->defined == FALSE) {
+            if( sym->isproc == FALSE ) {
                 continue;
             }
         } else if (sym->state == SYM_EXTERNAL) {
@@ -191,13 +187,13 @@ uint GetPublicData(
             // AsmErr( SYMBOL_NOT_DEFINED, sym->name );
 #if FASTPASS
             /* do not use saved state, scan full source in second pass */
-            ResetUseSavedState();
+            SkipSavedState();
 #endif
             continue;
         }
         if( sym->state == SYM_PROC ) {
             /* skip PROTOs without matching PROC */
-            if(((dir_node *)sym)->e.procinfo->defined == FALSE) {
+            if( sym->isproc == FALSE ) {
                 DebugMsg(("GetPublicData: %s skipped\n", sym->name));
                 continue;
             }
@@ -265,7 +261,7 @@ uint GetPublicData(
             continue;
         else if( sym->state == SYM_PROC ) {
             /* skip PROTOs without matching PROC */
-            if(((dir_node *)sym)->e.procinfo->defined == FALSE)
+            if( sym->isproc == FALSE )
                 continue;
         } else if ( sym->state == SYM_EXTERNAL )
             /* skip EXTERNDEFs which aren't used */
@@ -309,6 +305,8 @@ void AddLnameData( dir_node *dir )
     QAddItem( &LnameQueue, dir );
 }
 
+// find a class index
+
 direct_idx FindLnameIdx( char *name )
 /***********************************/
 {
@@ -323,7 +321,7 @@ direct_idx FindLnameIdx( char *name )
         if( dir->sym.state != SYM_CLASS_LNAME )
             continue;
         if( stricmp( dir->sym.name, name ) == 0 ) {
-            return( dir->e.lnameinfo->idx );
+            return( dir->sym.idx );
         }
     }
     return( LNAME_NULL );
@@ -342,35 +340,39 @@ char *GetLname( direct_idx idx )
         dir = (dir_node *)node->data;
         if( dir->sym.state != SYM_CLASS_LNAME )
             continue;
-        if( dir->e.lnameinfo->idx == idx ) {
+        if( dir->sym.idx == idx ) {
             return( dir->sym.name );
         }
     }
     return( NULL );
 }
 
+// called by OMF output format
+// the first Lname entry is a null string!
+
 unsigned GetLnameData( char **data )
 /**********************************/
 {
     char            *lname = NULL;
-    unsigned        total_size = 0;
+    unsigned        total_size;
     queuenode       *curr;
     dir_node        *dir;
     int             len;
 
-    if( LnameQueue == NULL )
-        return( 0 );
+    total_size = 1;
+    if( LnameQueue )
+        for( curr = LnameQueue->head; curr != NULL ; curr = curr->next ) {
+            dir = (dir_node *)(curr->data);
+            myassert( dir != NULL );
+            total_size += 1 + strlen( dir->sym.name );
+        }
 
-    for( curr = LnameQueue->head; curr != NULL ; curr = curr->next ) {
-        dir = (dir_node *)(curr->data);
-        myassert( dir != NULL );
-        total_size += 1 + strlen( dir->sym.name );
-    }
+    lname = AsmAlloc( total_size * sizeof( char ) + 1 );
+    /* add the NULL entry */
+    *lname = NULLC;
 
-    if( total_size > 0 ) {
-        int     i = 0;
-
-        lname = AsmAlloc( total_size * sizeof( char ) + 1 );
+    if( LnameQueue ) {
+        int     i = 1;
         for( curr = LnameQueue->head; curr != NULL ; curr = curr->next ) {
             dir = (dir_node *)(curr->data);
 
@@ -389,17 +391,15 @@ unsigned GetLnameData( char **data )
 static void FreeLnameQueue( void )
 /********************************/
 {
-    dir_node *dir;
+    struct asm_sym *sym;
     queuenode *node;
 
     if( LnameQueue != NULL ) {
         while( LnameQueue->head != NULL ) {
             node = QDequeue( LnameQueue );
-            dir = (dir_node *)node->data;
-            if( dir->sym.state == SYM_CLASS_LNAME ) {
-                AsmFree( dir->e.lnameinfo );
-                AsmFree( dir->sym.name );
-                AsmFree( dir );
+            sym = (asm_sym *)node->data;
+            if( sym->state == SYM_CLASS_LNAME ) {
+                SymFree( sym );
             }
             AsmFree( node );
         }

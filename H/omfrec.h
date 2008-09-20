@@ -250,8 +250,8 @@ struct obj_rec {
 */
 
 
-extern void         ObjRecInit( void );
-extern void         ObjRecFini( void );
+extern void         OmfRecInit( void );
+extern void         OmfRecFini( void );
 /*
     ObjRecInit must be called before any of the other routines in this
     module.  ObjRecFini free's all existing object records, and any

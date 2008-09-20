@@ -1,4 +1,8 @@
 
+/* COFF structures and definitions
+ Public Domain.
+ */
+
 #define IMAGE_FILE_MACHINE_I386		0x014c /* Intel 386 or later processors */
 
 typedef struct _IMAGE_FILE_HEADER {

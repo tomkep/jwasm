@@ -32,13 +32,15 @@
 #define _MACRO_H_
 
 extern void    AddTokens( int start, int count );
-extern int     MacroDef( int );  // define a macro
+extern dir_node *CreateMacro( char * );     // create a macro symbol
+extern void    ReleaseMacroData( dir_node * );
+extern int     MacroDef( int );             // define a macro
 extern int     FillMacro( dir_node *, int, bool );  // set macro content
-extern int     PurgeMacro( int );      // remove a macro
+extern int     PurgeMacro( int );           // remove a macro
 extern int     ExpandMacro( char * );
 extern int     RunMacro( dir_node *, char *, char *, bool, bool, bool );
 extern int     EndMacro( int, int );
-extern asm_sym *SetTextMacro( asm_sym*, char *, char *);
+extern asm_sym *SetTextMacro( asm_sym*, char *, char * );
 extern int     GetTextMacroValue( char *, char *);
 extern int     CatStrDef( int, asm_sym** ); // CatStr + TEXTEQU directive
 extern int     SubStrDef( int, char *);     // SubStr directive

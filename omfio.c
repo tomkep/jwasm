@@ -38,13 +38,9 @@
 #include <string.h>
 #include "memalloc.h"
 #include "omfrec.h"
-#include "genutil.h"
 #include "myassert.h"
 #include "omfio.h"
-
-
-extern  void            WriteError( void );
-#define Fatal(__x,__y)  WriteError()
+#include "fatal.h"
 
 #ifdef __UNIX__
 #define OP_MODE         (O_RDWR | O_CREAT | O_TRUNC)
@@ -61,16 +57,21 @@ extern  void            WriteError( void );
 static void safeSeek( int fh, long offset, int mode ) {
 
     if( lseek( fh, offset, mode ) == -1 ) {
-        Fatal( MSG_DISK_ERROR, "lseek" );
+        SeekError();
     }
 }
 
 static void safeWrite( int fh, const uint_8 *buf, size_t len ) {
 
     if( write( fh, buf, len ) != len ) {
-        Fatal( MSG_DISK_ERROR, "write" );
+        WriteError();
     }
 }
+
+/*
+ ObjWriteOpen() and ObjWriteClose() are generally used,
+ not just if OMF output format is selected!
+ */
 
 OBJ_WFILE *ObjWriteOpen( const char *filename ) {
 /*********************************************/
