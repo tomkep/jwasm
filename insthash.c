@@ -41,8 +41,8 @@
 //#define HASH_TABLE_SIZE 811
 //#define HASH_TABLE_SIZE 2003
 
-//static struct AsmCodeName *inst_table[ HASH_TABLE_SIZE ] = { NULL };
-static struct AsmCodeName *inst_table[ HASH_TABLE_SIZE ];
+//static struct ReservedWord *inst_table[ HASH_TABLE_SIZE ] = { NULL };
+static struct ReservedWord *inst_table[ HASH_TABLE_SIZE ];
 
 static unsigned int hashpjw( const char *s )
 /******************************************/
@@ -60,30 +60,30 @@ static unsigned int hashpjw( const char *s )
     return( h % HASH_TABLE_SIZE );
 }
 
-static struct AsmCodeName *InstrFind( char *name )
+static struct ReservedWord *InstrFind( char *name )
 /********************************************/
 /* find an instruction in the hash table */
 {
-    struct AsmCodeName *inst;
+    struct ReservedWord *inst;
 
     inst = inst_table[ hashpjw( name ) ];
 
     for( ; inst; inst = inst->next ) {
         /* check if the name matches the entry for this inst in AsmChars */
-        if( name[ inst->len ] == NULLC && strnicmp( name, &AsmChars[ inst->index ], inst->len ) == 0) {
+        if( name[ inst->len ] == NULLC && strnicmp( name, inst->name, inst->len ) == 0) {
             return( inst );
         }
     }
     return( NULL );
 }
 
-static struct AsmCodeName *InstrAdd( struct AsmCodeName *inst )
+static struct ReservedWord *InstrAdd( struct ReservedWord *inst )
 /********************************************************/
 {
-    struct AsmCodeName  **location;
+    struct ReservedWord  **location;
     char buffer[20];
 
-    memcpy( buffer, (char *)&(AsmChars[inst->index]), inst->len );
+    memcpy( buffer, inst->name, inst->len );
     buffer[ inst->len ] = NULLC;
 
     location = &inst_table[ hashpjw( buffer ) ];
@@ -91,7 +91,7 @@ static struct AsmCodeName *InstrAdd( struct AsmCodeName *inst )
     for( ; *location; location = &((*location)->next) ) {
         /* to be safe check if the name is already in there */
         if( inst->len == (*location)->len &&
-            memcmp( buffer, &AsmChars[ (*location)->index ], inst->len ) == 0 ) {
+            memcmp( buffer, (*location)->name, inst->len ) == 0 ) {
             /* we already have one, shouldn't happen */
             AsmErr( SYMBOL_ALREADY_DEFINED, buffer );
             return( NULL );
@@ -111,7 +111,7 @@ static struct AsmCodeName *InstrAdd( struct AsmCodeName *inst )
 int get_instruction_position( char *string )
 /******************************************/
 {
-    struct AsmCodeName *inst;
+    struct ReservedWord *inst;
 
     inst = InstrFind( string );
     if( inst ) return( inst->position );
@@ -125,25 +125,25 @@ void make_inst_hash_table( void )
 {
     unsigned i;
 
-    for( i=0; i != T_NULL; i++ ) {
-        InstrAdd( &AsmOpcode[i] );
+    for( i = 0; i != T_NULL; i++ ) {
+        InstrAdd( &AsmResWord[i] );
     }
     return;
 }
 
 // remove a reserved word.
 
-struct AsmCodeName *InstrRemove( char *string )
+struct ReservedWord *InstrRemove( char *string )
 {
-    struct AsmCodeName  *prev = NULL;
-    struct AsmCodeName  *curr;
+    struct ReservedWord  *prev = NULL;
+    struct ReservedWord  *curr;
     int i;
 
     i = hashpjw( string );
     curr = inst_table[i];
 
     for( ; curr ; prev = curr, curr = curr->next)  {
-        if( strnicmp( string, &AsmChars[ curr->index ], curr->len ) == 0 && *(string + curr->len) == '\0' ) {
+        if( strnicmp( string, curr->name, curr->len ) == 0 && *(string + curr->len) == '\0' ) {
             if (prev)
                 prev->next = curr->next;
             else

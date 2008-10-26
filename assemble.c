@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  Write translated object module.
+* Description:  assemble a module.
 *
 ****************************************************************************/
 
@@ -42,12 +42,14 @@
 #include "symbols.h"
 #include "memalloc.h"
 #include "input.h"
+#include "tokenize.h"
 #include "condasm.h"
 #include "directiv.h"
 #include "assume.h"
 #include "proc.h"
 #include "expreval.h"
 #include "hll.h"
+#include "context.h"
 #include "labels.h"
 #include "macro.h"
 #include "parser.h"
@@ -126,6 +128,7 @@ void AddLinnumDataRef( void )
     struct line_num_info    *curr;
     unsigned long           line_num;
 
+    DebugMsg(("AddLinnumDataRef enter, LineNumber=%u\n", LineNumber));
     line_num = LineNumber;
     if( line_num < 0x8000 )  {
         if( lastLineNumber != line_num ) {
@@ -154,17 +157,19 @@ void SaveState( void )
 
     SegmentSaveState();
     AssumeSaveState();
+    ContextSaveState(); /* save pushcontext/popcontext stack */
 
-    i = strlen(CurrString);
+    i = strlen( CurrSource );
     LineStoreCurr = AsmAlloc(i+1+sizeof(line_item));
     LineStoreCurr->next = NULL;
-    strcpy(LineStoreCurr->line, CurrString);
+    LineStoreCurr->lineno = LineNumber;
+    strcpy( LineStoreCurr->line, CurrSource );
 
     if (AsmFiles.file[LST])
         list_pos = ftell(AsmFiles.file[LST]);
 
     LineStoreHead = LineStoreTail = LineStoreCurr;
-    DebugMsg(("SaveState: curr line=>%s<\n", CurrString));
+    DebugMsg(( "SaveState: curr line=>%s<\n", CurrSource ));
 }
 
 /* an error has been detected in pass one. it should be
@@ -307,7 +312,7 @@ void OutputDataByte( unsigned char byte )
 
 // set current position in current segment without to write anything
 
-int SetCurrOffset( int_32 value, bool relative, bool select_data )
+ret_code SetCurrOffset( int_32 value, bool relative, bool select_data )
 /************************************************************************/
 {
     if( CurrSeg == NULL ) {
@@ -355,7 +360,7 @@ int SetCurrOffset( int_32 value, bool relative, bool select_data )
 // for OMF, just write the MODEND record
 // for COFF,ELF and BIN, write the section data and symbol table
 
-static int WriteContent( void )
+static ret_code WriteContent( void )
 /*****************************/
 {
     DebugMsg(("WriteContent enter\n"));
@@ -389,12 +394,12 @@ static int WriteContent( void )
 }
 
 /*
- write the OMF/COFF header
+ write the OMF/COFF/ELF header
  for OMF, this is called twice, once after Pass 1 is done
  and then again after assembly has finished without errors.
  for COFF/ELF/BIN, it's just called once.
 */
-static int WriteHeader( bool initial )
+static ret_code WriteHeader( bool initial )
 /*********************************/
 {
     dir_node    *curr;
@@ -492,9 +497,12 @@ static unsigned long OnePass( char *string )
 {
     int i;
 
+    ModuleInfo.radix = 10;
+
     SymPassInit( Parse_Pass );
     LabelsInit();
     SegmentInit( Parse_Pass );
+    ContextInit( Parse_Pass );
     ProcInit();
     HllInit();
     MacroInit( Parse_Pass ); /* insert predefined macros */
@@ -514,18 +522,18 @@ static unsigned long OnePass( char *string )
     if (Parse_Pass > PASS_1 && UseSavedState == TRUE) {
         RestoreState();
         LineStoreCurr = LineStoreHead;
-        while (LineStoreCurr && EndDirectiveFound == FALSE) {
-            strcpy(string, LineStoreCurr->line);
-            DebugMsg(("AsmLine(%u): >%s<\n", Parse_Pass+1, string));
+        while ( LineStoreCurr && EndDirectiveFound == FALSE ) {
+            strcpy( string, LineStoreCurr->line );
             LineNumber = LineStoreCurr->lineno;
-            if (Token_Count = Tokenize(string, 0))
+            DebugMsg(("AsmLine(%u:%u): >%s<\n", Parse_Pass+1, LineNumber, string));
+            if ( Token_Count = Tokenize( string, 0 ) )
                 ParseItems();
             LineStoreCurr = LineStoreCurr->next;
         }
         return( BytesTotal);
     }
 #endif
-    while (EndDirectiveFound == FALSE) {
+    while ( EndDirectiveFound == FALSE ) {
         while (0 == (i = AsmLine( string )));
         if (i < 0)
             break;
@@ -536,6 +544,11 @@ static unsigned long OnePass( char *string )
         ParseItems();
     }
     CheckProcOpen();
+    if( EndDirectiveFound == FALSE ) {
+        AsmError( END_DIRECTIVE_REQUIRED );
+    }
+    while( PopLineQueue() ) {};
+
     return( BytesTotal );
 }
 
@@ -618,6 +631,9 @@ static void AssembleInit( void )
 static void AssembleFini( void )
 /****************************/
 {
+    SymFini();
+    QueueFini();
+    InputFini();
     FixFini();
 }
 
@@ -640,7 +656,7 @@ void AssembleModule( void )
 
     AssembleInit();
 
-    OpenLstFile();
+    LstOpenFile();
 
 #ifndef __UNIX__
     starttime = GetTickCount();
@@ -648,22 +664,12 @@ void AssembleModule( void )
     starttime = clock();
 #endif
 
-    for(Parse_Pass = PASS_1;;Parse_Pass++) {
+    for( Parse_Pass = PASS_1; ; Parse_Pass++ ) {
 
         DebugMsg(( "*************\npass %u\n*************\n", Parse_Pass + 1 ));
         curr_total = OnePass( string );
 
-        if( !EndDirectiveFound ) {
-            AsmError( END_DIRECTIVE_REQUIRED );
-            break;
-        }
-        while( PopLineQueue() ) {};
-
-        DebugMsg(("AssembleModule(%u): errorcnt=%u\n", Parse_Pass + 1, ModuleInfo.error_count));
-        if( ModuleInfo.error_count > 0 )
-            break;
-
-        if (Parse_Pass == PASS_1) {
+        if ( Parse_Pass == PASS_1 && ModuleInfo.error_count == 0 ) {
             DebugMsg(("AssembleModule(%u): pass 1 actions\n", Parse_Pass + 1));
             if (ERROR == CheckForOpenConditionals())
                 break;
@@ -693,6 +699,10 @@ void AssembleModule( void )
             }
 #endif
         }
+
+        DebugMsg(("AssembleModule(%u): errorcnt=%u\n", Parse_Pass + 1, ModuleInfo.error_count ));
+        if( ModuleInfo.error_count > 0 )
+            break;
 
         DebugMsg(("AssembleModule(%u): PhaseError=%u, prev_total=%X, curr_total=%X\n", Parse_Pass + 1, PhaseError, prev_total, curr_total));
         if( !PhaseError && prev_total == curr_total ) {
@@ -732,7 +742,7 @@ void AssembleModule( void )
     DebugMsg(("AssembleModule: finished, cleanup\n"));
 
     /* Write a symbol listing file (if requested) */
-    WriteCRef();
+    LstWriteCRef();
 
 #ifndef __UNIX__
     endtime = GetTickCount();
@@ -757,11 +767,8 @@ void AssembleModule( void )
     }
     if (AsmFiles.file[LST]) {
         fwrite(string, 1, strlen(string), AsmFiles.file[LST]);
-        CloseLstFile();
+        LstCloseFile();
     }
 
-    SymFini();
-    QueueFini();
-    InputFini();
     AssembleFini();
 }

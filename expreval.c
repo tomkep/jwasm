@@ -37,27 +37,18 @@
 #include "proc.h"
 #include "assume.h"
 #include "input.h"
+#include "tokenize.h"
 #include "types.h"
 #include "stddef.h"
 #include "labels.h"
 
-// USEDUMMY=1 uses a dummy symbol for unknown symbols.
-// however, it's faster to create a true - undefined - symbol
-// for forward references. This makes the assembler need less passes.
-#define USEDUMMY 0
-
 #define SETCURRSTR 0
-
-extern void             DefineFlatGroup( void );
 
 static int              op_sq_bracket_level;
 static bool             error_msg;
 static bool             is_opattr; /* accepts undefined symbols */
 #if SETCURRSTR
 static dir_node *       curr_struct;
-#endif
-#if USEDUMMY
-static asm_sym *dummysym;
 #endif
 static asm_sym *thissym;
 
@@ -71,7 +62,7 @@ static int evaluate( expr_list *, int *, int, enum process_flag );
 static void init_expr( expr_list *new )
 /*************************************/
 {
-    new->type     = EMPTY;
+    new->type     = EXPR_EMPTY;
     new->value    = 0;
     new->hvalue   = 0;
     new->hlvalue  = 0;
@@ -83,7 +74,6 @@ static void init_expr( expr_list *new )
     new->instr    = EMPTY;
     new->indirect = FALSE;
     new->explicit = FALSE;
-    new->empty    = TRUE;
     new->abs      = FALSE;
     new->stackbased = FALSE;
 #if FLAG_LABELDIFF
@@ -120,7 +110,6 @@ static void TokenAssign( expr_list *t1, expr_list *t2 )
     t1->instr    = t2->instr;
     t1->indirect = t2->indirect;
     t1->explicit = t2->explicit;
-    t1->empty    = t2->empty;
     t1->abs      = t2->abs;
     t1->stackbased = t2->stackbased;
 #if FLAG_LABELDIFF
@@ -188,7 +177,6 @@ static int get_precedence( int i )
         case T_SHL:
         case T_SHR:
             return( 8 );
-#if defined( _STANDALONE_ )
         case T_EQ:
         case T_NE:
         case T_LT:
@@ -196,7 +184,6 @@ static int get_precedence( int i )
         case T_GT:
         case T_GE:
             return( 10 );
-#endif
         case T_NOT:
             return( 11 );
         case T_AND:
@@ -248,7 +235,6 @@ static int getresidvalue(int value)
     case T_OWORD: return 16;
     case T_NEAR: return (Use32 ? 4 : 2);
     case T_FAR: return (Use32 ? 6 : 4);
-#if defined( _STANDALONE_ )
     case T_SBYTE: return 1;
     case T_SWORD: return 2;
     case T_REAL4:
@@ -259,7 +245,6 @@ static int getresidvalue(int value)
     case T_NEAR32: return 4;
     case T_FAR16: return 4;
     case T_FAR32: return 6;
-#endif
     case T_PTR: ; return (Use32 ? 4 : 2);
     }
     return 0;
@@ -278,14 +263,12 @@ static int get_operand( expr_list *new, int *start, int end )
     switch( AsmBuffer[i]->token ) {
     case T_NUM:
         DebugMsg(("get_operand: T_NUM\n"));
-        new->empty = FALSE;
         new->type = EXPR_CONST;
         new->llvalue = AsmBuffer[i]->llvalue;
         new->hlvalue = AsmBuffer[i]->hlvalue;
         break;
     case T_STRING:
         DebugMsg(("get_operand: T_STRING string=%s, value=%X\n", AsmBuffer[i]->string_ptr, AsmBuffer[i]->value));
-        new->empty = FALSE;
         new->type = EXPR_CONST;
         new->string = AsmBuffer[i]->string_ptr;
         new->value = 0;
@@ -305,7 +288,6 @@ static int get_operand( expr_list *new, int *start, int end )
         break;
     case T_REG:
         DebugMsg(("get_operand: T_REG\n"));
-        new->empty = FALSE;
         new->type = EXPR_REG;
         new->base_reg = i;
         if( op_sq_bracket_level > 0 ) {
@@ -381,7 +363,6 @@ static int get_operand( expr_list *new, int *start, int end )
         }
         break;
     case T_ID:
-#if defined( _STANDALONE_ )
 #if SETCURRSTR
         if (curr_struct && i > 0 && (AsmBuffer[i-1]->token == T_DOT || AsmBuffer[i-1]->value == T_PTR)) {
             DebugMsg(("get_operand: T_ID %s curr_struct=%s\n", AsmBuffer[i]->string_ptr, curr_struct->sym.name));
@@ -425,27 +406,12 @@ static int get_operand( expr_list *new, int *start, int end )
                 }
 #endif
                 new->sym = NULL;
-#if USEDUMMY
-                if (!dummysym) {
-                    dummysym = SymCreate("", FALSE);
-#if 0
-                    dummysym->state = SYM_INTERNAL;
-                    dummysym->mem_type = MT_ABS;
-#endif
-                }
-                dummysym->state = SYM_UNDEFINED;
-                dummysym->mem_type = MT_EMPTY;
-                dummysym->defined = FALSE;
-#endif
             }
         }
         if (new->sym == NULL || new->sym->state == SYM_UNDEFINED) {
             /* for OPATTR, an undefined symbol is ok */
             if (is_opattr) {
                 new->type = EXPR_UNDEF;
-#if USEDUMMY
-                new->sym = dummysym;
-#endif
                 break;
             }
             if( Parse_Pass == PASS_1 ) {
@@ -456,12 +422,8 @@ static int get_operand( expr_list *new, int *start, int end )
                     return( ERROR );
                 }
                 if (new->sym == NULL) {
-#if USEDUMMY
-                    new->sym = dummysym;
-#else
-                    new->sym = SymLookup(AsmBuffer[i]->string_ptr);
+                    new->sym = SymLookup( AsmBuffer[i]->string_ptr );
                     new->sym->state = SYM_UNDEFINED;
-#endif
                 }
                 DebugMsg(("get_operand: %s not (yet) defined\n", AsmBuffer[i]->string_ptr));
             } else {
@@ -474,12 +436,12 @@ static int get_operand( expr_list *new, int *start, int end )
                 if( error_msg)
 #if SETCURRSTR
                     if (curr_struct) {
-                        sprintf(CurrStringEnd, "%s.%s", curr_struct->sym.name, AsmBuffer[i]->string_ptr);
-                        AsmErr( SYMBOL_NOT_DEFINED, CurrStringEnd );
+                        sprintf( StringBufferEnd, "%s.%s", curr_struct->sym.name, AsmBuffer[i]->string_ptr );
+                        AsmErr( SYMBOL_NOT_DEFINED, StringBufferEnd );
 #else
                     if (new->assume) {
-                        sprintf(CurrStringEnd, "%s.%s", new->assume->name, AsmBuffer[i]->string_ptr);
-                        AsmErr( SYMBOL_NOT_DEFINED, CurrStringEnd );
+                        sprintf( StringBufferEnd, "%s.%s", new->assume->name, AsmBuffer[i]->string_ptr);
+                        AsmErr( SYMBOL_NOT_DEFINED, StringBufferEnd );
 #endif
                     } else {
                         AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
@@ -540,7 +502,6 @@ static int get_operand( expr_list *new, int *start, int end )
                 new->mbr = new->sym; /* save symbol here */
 #endif
                 new->sym = NULL;  /* sym must be NULL, it's not a label */
-                new->empty = FALSE;
                 break;
             } else if( new->sym->state == SYM_STRUCT_FIELD ) {
                 dir_node *dir2;
@@ -568,7 +529,6 @@ static int get_operand( expr_list *new, int *start, int end )
                 }
                 new->mbr = new->sym;
                 new->sym = NULL;
-                new->empty = FALSE;
                 break;
             } else if(new->sym->type) { /* a structured variable? */
                 dir_node *dir2;
@@ -601,17 +561,9 @@ static int get_operand( expr_list *new, int *start, int end )
                 }
             }
         }
-#else
-        new->label = i;
-        new->type = EXPR_ADDR;
-        new->sym = SymLookup( AsmBuffer[i]->string_ptr );
-        new->mem_type = new->sym->mem_type;
-#endif
-        new->empty = FALSE;
         break;
     case T_RES_ID:
         DebugMsg(("get_operand: T_RES_ID, %s, value=%X\n", AsmBuffer[i]->string_ptr, AsmBuffer[i]->value));
-        new->empty = FALSE;
         /* for types, return the size as numeric constant */
         if (new->value = getresidvalue(AsmBuffer[i]->value)) {
             new->mem_type = MT_ABS;
@@ -631,8 +583,10 @@ static int get_operand( expr_list *new, int *start, int end )
         if( error_msg )
             if (AsmBuffer[i]->token == T_BAD_NUM)
                 AsmErr( NONDIGIT_IN_NUMBER, AsmBuffer[i]->string_ptr );
+            else if ( AsmBuffer[i]->token == T_COLON )
+                AsmError( SYNTAX_ERROR_UNEXPECTED_COLON );
             else
-                AsmErr( SYNTAX_ERROR, AsmBuffer[i]->string_ptr );
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         new->type = EXPR_UNDEF;
         return( ERROR );
     }
@@ -774,7 +728,6 @@ static void MakeConst( expr_list *token )
         return;
     token->label = EMPTY;
     if( token->mbr != NULL ) {
-#if defined( _STANDALONE_ )
         if( token->mbr->state == SYM_STRUCT_FIELD ) {
         } else if( token->mbr->state == SYM_TYPE ) {
             token->value += token->mbr->total_size;
@@ -782,9 +735,6 @@ static void MakeConst( expr_list *token )
         } else {
             return;
         }
-#else
-        return;
-#endif
     }
     if( token->base_reg != EMPTY )
         return;
@@ -802,14 +752,12 @@ static void MakeConst( expr_list *token )
 static void fix_struct_value( expr_list *token )
 /**********************************************/
 {
-#if defined( _STANDALONE_ )
     if( token->mbr != NULL ) {
         if( token->mbr->state == SYM_TYPE ) {
             token->value += token->mbr->total_size;
             token->mbr = NULL;
         }
     }
-#endif
 }
 
 static int check_direct_reg( expr_list *token_1, expr_list *token_2 )
@@ -1243,7 +1191,6 @@ static int calculate( expr_list *token_1, expr_list *token_2, int index )
                     DebugMsg(("calculate exit 13a, error\n"));
                     return( ERROR );
                 }
-#if defined( _STANDALONE_ )
 //                if( Parse_Pass > PASS_1 && sym->defined == FALSE ) {
                 if( Parse_Pass > PASS_1 && sym->state == SYM_UNDEFINED ) {
                     if( error_msg )
@@ -1253,16 +1200,12 @@ static int calculate( expr_list *token_1, expr_list *token_2, int index )
                     return( ERROR );
                 }
                 token_1->value += sym->offset;
-#else
-                token_1->value += sym->addr;
-#endif
                 /* handle second operand */
                 sym = token_2->sym;
                 if( sym == NULL ) {
                     DebugMsg(("calculate exit 14a, error\n"));
                     return( ERROR );
                 }
-#if defined( _STANDALONE_ )
                 if( Parse_Pass > PASS_1) {
                     if( sym->state == SYM_UNDEFINED ) {
                         if( error_msg )
@@ -1289,9 +1232,6 @@ static int calculate( expr_list *token_1, expr_list *token_2, int index )
                     }
                 }
                 token_1->value -= sym->offset;
-#else
-                token_1->value -= sym->addr;
-#endif
                 token_1->value -= token_2->value;
                 token_1->label = EMPTY;
                 token_1->sym = NULL;
@@ -1442,7 +1382,6 @@ static int calculate( expr_list *token_1, expr_list *token_2, int index )
                 DebugMsg(("calculate exit 21, error\n"));
                 return( ERROR );
             }
-#if defined( _STANDALONE_ )
             if( AsmBuffer[token_1->label]->token == T_RES_ID ) {
                 /* Kludge for "FLAT" */
                 AsmBuffer[token_1->label]->token = T_ID;
@@ -1462,13 +1401,6 @@ static int calculate( expr_list *token_1, expr_list *token_2, int index )
                 DebugMsg(("calculate exit 22, error\n"));
                 return( ERROR );
             }
-#else
-            if( error_msg )
-                AsmError( ONLY_SEG_OR_GROUP_ALLOWED );
-            token_1->type = EXPR_UNDEF;
-            DebugMsg(("calculate exit 23, error\n"));
-            return( ERROR );
-#endif
         } else {
             if( error_msg )
                 AsmError( REG_OR_LABEL_EXPECTED_IN_OVERRIDE );
@@ -1600,7 +1532,6 @@ static int calculate( expr_list *token_1, expr_list *token_2, int index )
             }
         }
         switch( AsmBuffer[index]->value ) {
-#if defined( _STANDALONE_ )
         case T_EQ:
             token_1->value = ( token_1->value == token_2->value ? -1:0 );
             break;
@@ -1619,7 +1550,6 @@ static int calculate( expr_list *token_1, expr_list *token_2, int index )
         case T_GE:
             token_1->value = ( token_1->value >= token_2->value ? -1:0 );
             break;
-#endif
         case T_MOD:
             token_1->value %= token_2->value;
             break;
@@ -1706,7 +1636,6 @@ static int calculate( expr_list *token_1, expr_list *token_2, int index )
             }
         }
         switch( AsmBuffer[index]->value ) {
-#if defined( _STANDALONE_ )
         case T_LENGTH:   /* number of items of first initializer */
         case T_SIZE:     /* size in bytes of first initializer */
         case T_TYPE:     /* size of one/longest item (array/struct) */
@@ -1978,7 +1907,6 @@ static int calculate( expr_list *token_1, expr_list *token_2, int index )
             }
             token_1->type = EXPR_CONST;
             break;
-#endif
         default:
             TokenAssign( token_1, token_2 );
             token_1->instr = AsmBuffer[index]->value;
@@ -1986,7 +1914,6 @@ static int calculate( expr_list *token_1, expr_list *token_2, int index )
         }
         break;
     }
-    token_1->empty = FALSE;
     DebugMsg(("calculate exit, ok, token1->type=%X,value=%d,memtype=%u,assume=%X\n", token_1->type, token_1->value, token_1->mem_type, token_1->assume));
     return( NOT_ERROR );
 }
@@ -2028,7 +1955,7 @@ static int evaluate(
     int                 next_operator;
     int                 op_sq_bracket;
 
-    DebugMsg(("evaluate(i=%d, end=%d, operand.empty=%u, sym=%X) enter\n", *i, end, operand1->empty, operand1->sym));
+    DebugMsg(("evaluate(i=%d, end=%d, operand.type=%d, sym=%X) enter\n", *i, end, operand1->type, operand1->sym));
     token_needed = FALSE;
     curr_operator = EMPTY;
     op_sq_bracket = op_sq_bracket_level;
@@ -2037,7 +1964,7 @@ static int evaluate(
     /* Look at first token, which may be an unary operator or an operand */
     /*:::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::*/
 
-    if( operand1->empty ) {
+    if( operand1->type == EXPR_EMPTY ) {
         if( cmp_token( *i, T_OP_BRACKET ) ) {
             DebugMsg(("evaluate: OP_BRACKET \n"));
             (*i)++;
@@ -2350,14 +2277,12 @@ static bool is_expr( int i )
     case T_INSTRUCTION:
 //        DebugMsg(("is_expr: T_INSTRUCTION\n"));
         switch( AsmBuffer[i]->value ) {
-#if defined( _STANDALONE_ )
         case T_EQ:
         case T_NE:
         case T_LT:
         case T_LE:
         case T_GT:
         case T_GE:
-#endif
         case T_MOD:
             return( TRUE );
         case T_SHL:
@@ -2431,7 +2356,7 @@ static bool is_expr( int i )
         return(  TRUE );
     case T_COLON:
 //        DebugMsg(("is_expr: T_COLON\n"));
-#if 0 // defined( _STANDALONE_ )
+#if 0
         /* check if it is a ":=". Is this relevant at all? */
         if( AsmBuffer[i+1]->token == T_DIRECTIVE &&
             AsmBuffer[i+1]->value == T_EQU &&
@@ -2499,8 +2424,5 @@ extern int EvalOperand( int *start_tok, int count, expr_list *result, bool flag_
 
 void ExprEvalInit()
 {
-#if USEDUMMY
-    dummysym = NULL;
-#endif
     thissym = NULL;
 }

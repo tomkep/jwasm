@@ -29,8 +29,6 @@
 ****************************************************************************/
 
 
-#if defined( _STANDALONE_ )
-
 #include <stdarg.h>
 #include <ctype.h>
 
@@ -38,7 +36,7 @@
 #include "symbols.h"
 #include "memalloc.h"
 #include "directiv.h"
-#include "input.h"
+#include "tokenize.h"
 #include "symbols.h"
 #include "macro.h"
 #include "queues.h"
@@ -57,7 +55,7 @@ static unsigned         SymCount;
 
 static char             dots[] = " . . . . . . . . . . . . . . . .";
 
-void OpenLstFile( void )
+void LstOpenFile( void )
 /**********************/
 {
     if( AsmFiles.fname[LST] != NULL && Options.write_listing ) {
@@ -67,7 +65,7 @@ void OpenLstFile( void )
     }
 }
 
-void CloseLstFile( void )
+void LstCloseFile( void )
 /**********************/
 {
     if( AsmFiles.file[LST] != NULL ) {
@@ -76,7 +74,7 @@ void CloseLstFile( void )
     }
 }
 
-void WriteLstFile( int type, unsigned int oldofs, void * value )
+void LstWriteFile( int type, unsigned int oldofs, void * value )
 {
     unsigned int newofs;
     asm_sym * sym = value;
@@ -158,7 +156,7 @@ void WriteLstFile( int type, unsigned int oldofs, void * value )
     }
 
     fwrite( " ", 1, 1, AsmFiles.file[LST] );
-    p = CurrString;
+    p = CurrSource;
     while( isspace( *p ) ) p++;
     fwrite( p, 1, strlen(p), AsmFiles.file[LST] );
     fwrite( "\n", 1, 1, AsmFiles.file[LST] );
@@ -226,9 +224,11 @@ static void log_segment( struct asm_sym *sym, struct asm_sym *group )
             pdots = "";
         LstMsg( "%s %s        ", sym->name, pdots );
         if( seg->Use32 ) {
-            LstMsg( "32 Bit   %08lX ", seg->current_loc );
+            //LstMsg( "32 Bit   %08lX ", seg->current_loc );
+            LstMsg( "32 Bit   %08lX ", seg->segrec->d.segdef.seg_length );
         } else {
-            LstMsg( "16 Bit   %04lX     ", seg->current_loc );
+            //LstMsg( "16 Bit   %04lX     ", seg->current_loc );
+            LstMsg( "16 Bit   %04lX     ", seg->segrec->d.segdef.seg_length );
         }
         LstMsg( "%s   %s", get_seg_align( seg ), get_seg_combine( seg ) );
         LstMsg( "'%s'", GetLname( seg->segrec->d.segdef.class_name_idx ) );
@@ -646,7 +646,7 @@ static void log_proc( struct asm_sym *sym )
 
 /* output the symbol table listing */
 
-void WriteCRef( void )
+void LstWriteCRef( void )
 /***********************/
 {
     struct asm_sym  **syms;
@@ -662,7 +662,7 @@ void WriteCRef( void )
         return; // no point going through the motions if lst file isn't open
     }
 
-    DebugMsg(("WriteCRef: calling SymSort\n"));
+    DebugMsg(("LstWriteCRef: calling SymSort\n"));
 
     syms = SymSort( &SymCount );
     if( syms ) {
@@ -760,11 +760,10 @@ void WriteCRef( void )
         }
         LstMsg( "\n" );
 
-        DebugMsg(("WriteCRef: free sorted symbols\n"));
+        DebugMsg(("LstWriteCRef: free sorted symbols\n"));
 
         /* free the sorted symbols */
         MemFree( syms );
     }
 }
 
-#endif

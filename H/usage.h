@@ -34,7 +34,9 @@
 "-m{t,s,m,c,l,h,f}   set memory model:\n"
 "                    (Tiny, Small, Medium, Compact, Large, Huge, Flat)\n"
 "-n{d,m,t}=<name>    set name of {data segment, module, text segment}\n"
+#if COCTALS
 "-o                  allow C form of octal constants\n"
+#endif
 "-omf                generate OMF format object file (default)\n"
 "-q, -nologo         don't display version and copyright information\n"
 "-Sg                 display generated code in listing (always set)\n"

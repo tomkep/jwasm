@@ -35,8 +35,6 @@
 
 #include "parser.h"
 
-#if defined( _STANDALONE_ )
-
 #include "directiv.h"
 #include "memalloc.h"
 #include "condasm.h"
@@ -44,6 +42,7 @@
 #include "macro.h"
 #include "labels.h"
 #include "input.h"
+#include "tokenize.h"
 #include "proc.h"
 #include "fastpass.h"
 
@@ -63,11 +62,15 @@ extern bool inside_comment;
 // MemAlloc() uses the normal C heap functions
 // AsmAlloc() uses the "fast" replacement if FASTMEM=1
 #if 1
+
 #define SrcAlloc(x) MemAlloc(x)
 #define SrcFree(x)  MemFree(x)
+
 #else
+
 #define SrcAlloc(x) AsmAlloc(x)
 #define SrcFree(x)  AsmFree(x)
+
 #endif
 
 typedef struct line_list {
@@ -103,14 +106,16 @@ static file_list        *file_stack;    // top of included file stack
 static char             *IncludePath;
 
 #if defined(__UNIX__)
+
 #define                 INCLUDE_PATH_DELIM  ":"
 #define                 DIR_SEPARATOR       '/'
 #define                 DIR_SEP_STRING      "/"
+
 #else
+
 #define                 INCLUDE_PATH_DELIM  ";"
 #define                 DIR_SEPARATOR       '\\'
 #define                 DIR_SEP_STRING      "\\"
-#endif
 
 #endif
 
@@ -168,8 +173,6 @@ static void FreeFlist( void )
     FNames = NULL;
     return;
 }
-
-#if defined( _STANDALONE_ )
 
 static bool get_asmline( char *ptr, unsigned max, FILE *fp )
 /**********************************************************/
@@ -658,8 +661,6 @@ void preprocessor_output( char *string )
     }
 }
 
-#endif
-
 // multi lines must be concatenated BEFORE the macro expansion step is done
 
 bool IsMultiLine(void)
@@ -695,7 +696,6 @@ bool IsMultiLine(void)
 int AsmLine( char *string )
 /**************************/
 {
-#if defined( _STANDALONE_ )
     int i;
 
     if( ReadTextLine( string, MAX_LINE_LEN ) == NULL )
@@ -821,12 +821,4 @@ int AsmLine( char *string )
     }
 
     return (Token_Count);
-
-#else
-    // Token_Count is the number of tokens scanned
-    Token_Count = Tokenize( string );
-    if( Token_Count > 0 ) {
-        ParseItems();
-    }
-#endif
 }

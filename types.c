@@ -38,6 +38,7 @@
 #include "directiv.h"
 #include "proc.h"
 #include "input.h"
+#include "tokenize.h"
 #include "types.h"
 #include "expreval.h"
 #include "labels.h"
@@ -142,7 +143,7 @@ static bool AreStructsEqual(dir_node *oldstr, dir_node *newstr)
 // called on pass one only
 // i is the token which contains STRUCT, STRUC, UNION or ENDS
 
-int StructDirective( int i )
+ret_code StructDirective( int i )
 /********************/
 {
     char *name;
@@ -273,7 +274,7 @@ int StructDirective( int i )
             dir->e.structinfo->typekind = TYPE_STRUCT;
 
         if (AsmFiles.file[LST]) {
-            WriteLstFile(LSTTYPE_STRUCT, 0, dir->sym.name);
+            LstWriteFile(LSTTYPE_STRUCT, 0, dir->sym.name);
             directive_listed = TRUE;
         }
 
@@ -348,7 +349,7 @@ int StructDirective( int i )
             StructDef.struct_depth--;
 
             if (AsmFiles.file[LST]) {
-                WriteLstFile(LSTTYPE_STRUCT, size, dir->sym.name);
+                LstWriteFile(LSTTYPE_STRUCT, size, dir->sym.name);
                 directive_listed = TRUE;
             }
 #if 1
@@ -536,7 +537,7 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, stru
 // called by AlignDirective() if ALIGN/EVEN has been found inside
 // a struct. It's already verified that <value> is a power of 2.
 
-int AlignInStruct( int value )
+ret_code AlignInStruct( int value )
 {
     if (Parse_Pass == PASS_1 && StructDef.curr_struct->e.structinfo->typekind != TYPE_UNION ) {
         int offset;
@@ -569,7 +570,7 @@ void UpdateStructSize(int no_of_bytes)
 
 /* called if ORG occurs inside STRUCT/UNION definition */
 
-int SetStructCurrentOffset(int offset)
+ret_code SetStructCurrentOffset(int offset)
 {
     if ( StructDef.curr_struct->e.structinfo->typekind == TYPE_UNION ) {
         AsmError( ORG_NOT_ALLOWED_IN_UNIONS );
@@ -710,7 +711,7 @@ static int InitializeArray(field_list *f, char * ptr, char delim )
 // currently this proc emits ASM lines with simple types
 // to actually "fill" the structure.
 
-int InitializeStructure( asm_sym *sym, asm_sym *struct_symbol, char *init_string, char delim )
+ret_code InitializeStructure( asm_sym *sym, asm_sym *struct_symbol, char *init_string, char delim )
 /********************************************************************/
 {
     char            *ptr;
@@ -955,9 +956,9 @@ int InitializeStructure( asm_sym *sym, asm_sym *struct_symbol, char *init_string
     return( NOT_ERROR );
 }
 
-// TYPEDEF
+// TYPEDEF worker
 
-asm_sym * CreateTypeDef(char * name, int * pi)
+asm_sym *CreateTypeDef(char * name, int * pi)
 {
     char        *token;
     int         i = *pi;
@@ -1161,7 +1162,7 @@ asm_sym * CreateTypeDef(char * name, int * pi)
 // and create a pointer type then:
 // EXTERNDEF: ptr <type>
 
-int TypeDef( int i )
+ret_code TypeDef( int i )
 {
     char *name;
 
@@ -1187,7 +1188,7 @@ int TypeDef( int i )
 
 // generate a RECORD. Called on pass 1 only
 
-int RecordDef( int i )
+ret_code RecordDef( int i )
 /********************/
 {
     char *name;

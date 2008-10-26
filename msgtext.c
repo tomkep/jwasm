@@ -32,6 +32,7 @@
 
 #include "globals.h"
 #include "banner.h"
+#include "tokenize.h"
 
 //#ifdef __WATCOMC__
 //  #include <unistd.h>
@@ -147,6 +148,8 @@ char * MsgGet( int resourceid, char *buffer )
     }
 #endif
     DebugMsg(("MsgGet(%u): Msg not found!!!\n", resourceid));
+    if ( buffer == NULL )
+        buffer = StringBufferEnd;
     sprintf(buffer, "Msg %u", resourceid);
     return( buffer );
 }

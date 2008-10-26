@@ -104,7 +104,7 @@ void AddPublicData( dir_node *dir )
 }
 
 // gather names for publics
-// they are written by the caller (write.c)
+// they are written by the caller (assemble.c)
 // PUBDEF are true publics, LPUBDEF (CMD_STATIC_PUBLIC) are "static"
 
 dir_node * GetPublicData2( queuenode * *curr)

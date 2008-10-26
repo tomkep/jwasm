@@ -34,7 +34,7 @@ linker = $(VCDIR)\Bin\link.exe
 
 #cflags stuff
 #########
-c_flags =-D_STANDALONE_ -D__NT__ -DFASTPASS=1
+c_flags =-D__NT__
 !if $(DEBUG)
 !if $(TRMEM)
 extra_c_flags = $(c_flags) -Zd -Od -DDEBUG_OUT -DTRMEM
@@ -60,7 +60,7 @@ CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(extra_c_flags)
 .c{$(OUTD)}.obj:
 	 $(CC) -Fo$* $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/assume.obj  \
+proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
            $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  \
            $(OUTD)/msgtext.obj  $(OUTD)/macro.obj    $(OUTD)/condasm.obj \
@@ -78,7 +78,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/assume.obj  \
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
 !endif
-           $(OUTD)/autodept.obj
+           $(OUTD)/autodept.obj $(OUTD)/context.obj
 ######
 
 !if $(WIN)
@@ -93,13 +93,13 @@ ALL: $(OUTD) $(TARGET1) $(TARGET2)
 $(OUTD):
 	@mkdir $(OUTD)
 
-$(OUTD)\$(name).exe : H/opcodes.gh $(proj_obj)
+$(OUTD)\$(name).exe : $(proj_obj)
 	$(linker) @<<
 $(lflagsw) $(proj_obj)
 /LIBPATH:"$(VCDIR)\Lib" /LIBPATH:"$(W32LIB)" /OUT:$@
 <<
 
-$(OUTD)\$(name)d.exe : H/opcodes.gh $(proj_obj)
+$(OUTD)\$(name)d.exe : $(proj_obj)
 	$(linker) @<<
 $(lflagsd) /NODEFAULTLIB initw32.obj $(proj_obj) /LIBPATH:$(VCDIR)\Lib
 libc.lib oldnames.lib /LIBPATH:$(HXDIR)\Lib dkrnl32s.lib imphlp.lib /STUB:$(HXDIR)\Bin\LOADPEX.BIN
@@ -110,10 +110,10 @@ libc.lib oldnames.lib /LIBPATH:$(HXDIR)\Lib dkrnl32s.lib imphlp.lib /STUB:$(HXDI
 $(OUTD)/msgtext.obj: msgtext.c H/msgtext.h H/usage.h H/banner.h
 	$(CC) -Fo$* msgtext.c
 
-######
+$(OUTD)/parser.obj: parser.c H/instruct.h H/reswords.h
+	$(CC) -Fo$* parser.c
 
-H/opcodes.gh: opcodes.tok
-	Bin\mkopcode.exe opcodes.tok H/opcodes.gh
+######
 
 clean:
 	@erase $(OUTD)\*.exe

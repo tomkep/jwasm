@@ -77,7 +77,7 @@ extern enum assume_segreg  GetPrefixAssume( struct asm_sym*, enum assume_segreg 
 
 extern struct asm_sym   *GetStdAssume( int );
 
-extern int              AssumeDirective( int );
+extern ret_code         AssumeDirective( int );
 extern void             ModelAssumeInit( void );
 extern void             SetSegAssumeTable( void * );
 extern void             SetStdAssumeTable( void * );

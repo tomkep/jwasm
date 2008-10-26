@@ -1,6 +1,49 @@
 
    Changelog
 
+   __/__/2008, v1.93:
+
+   Bugfixes:
+   -  possible buffer overflow wasn't detected during macro expansion.
+   -  on fatal errors there was a try to close a file twice, resulting
+      in an access violation.
+   -  if there were multiple ".stack <size>" lines, the last one determined
+      the stack size. However, the highest <size> is to be the stack size.
+   -  in the listing, the "current location" was displayed as segment size,
+      which isn't necessarily the same.
+   -  if an 'EXTERN:varname' line occurs AFTER <varname> has been defined,
+      the EXTERN directive is ignored by Masm (a Masm bug?). Now JWasm 
+      behaves similar.
+   -  JWasm did expand macro function calls within string function parameters
+      later than Masm. Sometimes this was incompatible.
+   -  some invalid numbers weren't detected.
+   -  there was a risk that POPCONTEXT caused a nesting error if the 
+      matching PUSHCONTEXT was done before any code bytes were emitted.
+   -  for SHLD & SHRD, acccepted format of 3. operand was restricted.
+   -  there was no error displayed when a 16bit segment's size exceeded
+      the 64k limit.
+   -  in medium, large and huge memory models the module name, which is 
+      used as name prefix for the default code segment, wasn't transformed
+      to upper case.
+   -  in v1.90-1.92, if /Zd was set, there was a risk that the first line
+      number stored was 0.
+   -  SSE3 instructions ADDSUBPD/ADDSUBPS were silently skipped if second
+      operand was a memory reference.
+   -  for ELF format, type of externals was 0x0B, should be 0x0 (STT_NOTYPE).
+   -  OPTION directive allowed one argument only. Now multiple arguments, 
+      separated by commas, are accepted.
+
+   Other changes:
+   -  option '-o' removed. Optionally it can be activated in the source.
+   -  C style hex numbers with "0x" prefix no longer accepted (was an 
+      undocumented "feature"). Optionally it can be activated in the source.
+   -  .RADIX supported.
+   -  for OMF, 32bit segment definition records are now used only if
+      necessary (segment size >= 64 kB), similar to Masm.
+   -  Supplemental SSE3 (SSSE3) instruction set supported.
+   -  files opcodes.tok and Bin\mkopcode.exe became obsolete and have been
+      removed from the source package.
+
    09/20/2008, v1.92:
 
    Bugfixes:
@@ -71,8 +114,8 @@
       was too rigid and often failed for arbitrary types.
    -  for INVOKE, if an address was to be pushed (ADDR operator) and the
       parameter wasn't declared FAR, just the offset was pushed. Now the
-      segment part is also pushed if the parameter's size is > @wordsize
-      (which is 4 in 32bit and 2 in 16bit).
+      segment part is also pushed if the parameter's size is @wordsize+2
+      (which is 4+2 in 32bit and 2+2 in 16bit).
    -  for INVOKE, if cpu was < 80386 and a dword-sized constant value had 
       to be pushed, there was a risk that the value was calculated wrong.
    -  simplified segment directives didn't accept segment names beginning
@@ -400,7 +443,7 @@
 
    05/20/2008, v1.7 (initial):
 
-    Changes in JWasm compared to Open Watcom's WASM.
+    Changes in JWasm compared to Open Watcom's WASM v1.7.
 
     Bugfixes:
     - string equates now handled the way MASM does.

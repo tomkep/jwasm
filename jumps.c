@@ -42,17 +42,12 @@
 #include "expreval.h"
 #include "directiv.h"
 #include "fastpass.h"
-
-#if defined( _STANDALONE_ )
-  #include "directiv.h"
-  #include "input.h"
-#endif
+#include "directiv.h"
+#include "input.h"
 
 /* prototypes */
 int ptr_operator( memtype mem_type, uint_8 fix_mem_type );
 int jmp( expr_list *opndx );
-
-#if defined( _STANDALONE_ )
 
 extern void             GetInsString( enum asm_token, char *, int );
 extern void             check_assume( struct asm_sym *sym, enum prefix_reg default_reg );
@@ -228,7 +223,6 @@ static void FarCallToNear( void )
 #endif
     return;
 }
-#endif
 
 int jmp( expr_list *opndx )
 /*
@@ -242,9 +236,7 @@ int jmp( expr_list *opndx )
     enum fixup_options  fixup_option;
     enum sym_state      state;
     struct asm_sym      *sym;
-#if defined( _STANDALONE_ )
     dir_node            *seg;
-#endif
 
     DebugMsg(("Jmp(sym=%X) enter\n", opndx->sym));
     CodeInfo->data[Opnd_Count] = opndx->value;
@@ -260,7 +252,7 @@ int jmp( expr_list *opndx )
     }
     DebugMsg(("Jmp: sym=>%s<, state=%u, mem_type=%u, ofs=%X\n", sym->name, sym->state, sym->mem_type, sym->offset));
 
-#if 0 // defined( _STANDALONE_ )
+#if 0
     /* MT_ERROR will never be set in a symbol! */
     /* undefined labels are detected in the expression evaluator */
     if( sym->mem_type == MT_ERROR ) {
@@ -269,12 +261,11 @@ int jmp( expr_list *opndx )
     }
 #endif
     state = sym->state;
-#if defined( _STANDALONE_ )
     seg = GetSeg( sym );
     if( seg == NULL || CurrSeg == NULL || CurrSeg->seg != seg ) {
         /* if label has a different segment and jump/call is near,
          report an error */
-        if (MAGIC_FLAT_GROUP != 0)
+        if ( ModuleInfo.flatgrp_idx != 0 )
             ;
         else if (seg != NULL && CurrSeg != NULL)
             /* if the segments belong to the same group, it's ok */
@@ -289,7 +280,6 @@ int jmp( expr_list *opndx )
         /* jumps to another segment are just like to another file */
         state = SYM_EXTERNAL;
     }
-#endif
 
     if( !CodeInfo->mem_type_fixed ) {
         CodeInfo->mem_type = MT_EMPTY;
@@ -301,16 +291,13 @@ int jmp( expr_list *opndx )
         SetSymSegOfs(sym);
         /* fall through */
     case SYM_INTERNAL:
-#if defined( _STANDALONE_ )
     case SYM_PROC:
-#endif
         if(  ( CodeInfo->mem_type == MT_EMPTY || CodeInfo->mem_type == MT_SHORT
                 || CodeInfo->mem_type == MT_NEAR )
             && sym->mem_type != MT_WORD     /* the symbol's memtype shouldn't */
             && sym->mem_type != MT_DWORD    /* be used (type casts!) */
             && sym->mem_type != MT_FWORD
             && CodeInfo->isfar == FALSE ) {
-#if defined( _STANDALONE_ )
             if( ( CodeInfo->info.token == T_CALL )
                 && ( CodeInfo->mem_type == MT_EMPTY )
                 && ( sym->mem_type == MT_FAR ) ) {
@@ -318,9 +305,6 @@ int jmp( expr_list *opndx )
                 return( SCRAP_INSTRUCTION );
             }
             addr = sym->offset;
-#else
-            addr = sym->addr;
-#endif
             addr -= ( GetCurrOffset() + 2 );  // calculate the displacement
             addr += CodeInfo->data[Opnd_Count];
             switch( CodeInfo->info.token ) {
@@ -379,11 +363,8 @@ int jmp( expr_list *opndx )
             /* store the displacement */
             CodeInfo->data[Opnd_Count] = addr;
 
-#if defined( _STANDALONE_ )
 #define GOOD_PHASE  !PhaseError &&
-#else
-#define GOOD_PHASE
-#endif
+
             if ( CodeInfo->info.token == T_JCXZ ||
                  CodeInfo->info.token == T_JECXZ ||
                  (CodeInfo->info.token >= T_LOOP &&
@@ -400,12 +381,11 @@ int jmp( expr_list *opndx )
             /* automatic (conditional) jump expansion */
             /* for 386 and above this is not needed, since there exists
              an extended version of Jxx */
-            if( (curr_cpu & P_CPU_MASK) < P_386 &&
+            if( ( ModuleInfo.curr_cpu & P_CPU_MASK) < P_386 &&
                 CodeInfo->info.token != T_CALL &&
                 CodeInfo->info.token != T_JMP) {
                 /* look into jump extension */
                 if( CodeInfo->info.opnd_type[Opnd_Count] != OP_I8 ) {
-#if defined( _STANDALONE_ )
                     if( CodeInfo->mem_type == MT_EMPTY && ModuleInfo.ljmp == TRUE) {
                         jumpExtend( FALSE );
                         return( SCRAP_INSTRUCTION );
@@ -413,10 +393,6 @@ int jmp( expr_list *opndx )
                         AsmError( JUMP_OUT_OF_RANGE );
                         return( ERROR );
                     }
-#else
-                    AsmError( JUMP_OUT_OF_RANGE );
-                    return( ERROR );
-#endif
                 }
             }
             break;
@@ -437,7 +413,6 @@ int jmp( expr_list *opndx )
             case MT_NEAR:
                 CodeInfo->mem_type = sym->mem_type;
                 break;
-#if defined( _STANDALONE_ )
             case MT_PROC:
                 CodeInfo->mem_type = IS_PROC_FAR() ? MT_FAR : MT_NEAR;
                 if( IS_JMPCALL( CodeInfo->info.token )
@@ -445,7 +420,6 @@ int jmp( expr_list *opndx )
                     CodeInfo->isfar = TRUE;
                 }
                 break;
-#endif
             case MT_FWORD:
                 if( ptr_operator( MT_FWORD, TRUE ) == ERROR )
                     return( ERROR );
@@ -469,10 +443,8 @@ int jmp( expr_list *opndx )
                 /* fall through */
             case MT_FAR:
             case MT_EMPTY:
-#if defined( _STANDALONE_ )
                 SET_OPSIZ( CodeInfo, SymIs32( sym ));
                 find_frame( sym );
-#endif
                 if( Opnd_Count == OPND2 ) {
                     if( oper_32( CodeInfo ) ) {
                         fixup_type = FIX_OFF32;
@@ -493,17 +465,13 @@ int jmp( expr_list *opndx )
                 break;
             case MT_BYTE:
             case MT_WORD:
-#if defined( _STANDALONE_ )
             case MT_SBYTE:
             case MT_SWORD:
-#endif
                 AsmError( INVALID_SIZE );
                 return( ERROR );
             case MT_DWORD:
             case MT_FWORD:
-#if defined( _STANDALONE_ )
             case MT_SDWORD:
-#endif
                 return( INDIRECT_JUMP );
             case MT_QWORD:
             case MT_TBYTE:
@@ -521,11 +489,7 @@ int jmp( expr_list *opndx )
                 AsmError( CANNOT_USE_SHORT_WITH_CALL );
                 return( ERROR );
             } else if( CodeInfo->mem_type == MT_EMPTY ) {
-#if defined( _STANDALONE_ )
                 fixup_option = OPTJ_CALL;
-#else
-                fixup_option = OPTJ_NONE;
-#endif
                 if( CodeInfo->use32 ) {
                     fixup_type = FIX_RELOFF32;
                     CodeInfo->info.opnd_type[Opnd_Count] = OP_I32;
@@ -551,19 +515,9 @@ int jmp( expr_list *opndx )
                 // inline assembler jmp default distance is near
                 // stand-alone assembler jmp default distance is short
                 fixup_option = OPTJ_NONE;
-#if defined( _STANDALONE_ )
                 /* guess short if JMP, we will expand later if needed */
                 fixup_type = FIX_RELOFF8;
                 CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
-#else
-                if( CodeInfo->use32 ) {
-                    fixup_type = FIX_RELOFF32;
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I32;
-                } else {
-                    fixup_type = FIX_RELOFF16;
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I16;
-                }
-#endif
                 break;
             case MT_NEAR:
                 fixup_option = OPTJ_EXPLICIT;
@@ -577,14 +531,10 @@ int jmp( expr_list *opndx )
                 break;
             case MT_DWORD:
             case MT_WORD:
-#if defined( _STANDALONE_ )
             case MT_SDWORD:
             case MT_SWORD:
-#endif
                 return( INDIRECT_JUMP );
-#if defined( _STANDALONE_ )
             case MT_SBYTE:
-#endif
             case MT_BYTE:
             case MT_FWORD:
             case MT_QWORD:
@@ -611,7 +561,7 @@ int jmp( expr_list *opndx )
                 break;
             }
             /* just Jxx remaining */
-            if( (curr_cpu & P_CPU_MASK) >= P_386 ) {
+            if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ) {
                 switch( CodeInfo->mem_type ) {
                 case MT_SHORT:
                     fixup_option = OPTJ_EXPLICIT;
@@ -622,12 +572,10 @@ int jmp( expr_list *opndx )
                     // forward reference
                     // inline assembler default distance is near
                     // stand-alone assembler default distance is short
-#if defined( _STANDALONE_ )
                     fixup_option = OPTJ_JXX;
                     fixup_type = FIX_RELOFF8;
                     CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
                     break;
-#endif
                 case MT_NEAR:
                     fixup_option = OPTJ_EXPLICIT;
                     if( CodeInfo->use32 ) {
@@ -652,12 +600,10 @@ int jmp( expr_list *opndx )
                 // Jxx SHORT
                 switch( CodeInfo->mem_type ) {
                 case MT_EMPTY:
-#if defined( _STANDALONE_ )
                     fixup_option = OPTJ_EXTEND;
                     fixup_type = FIX_RELOFF8;
                     CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
                     break;
-#endif
                 case MT_SHORT:
                     fixup_option = OPTJ_EXPLICIT;
                     fixup_type = FIX_RELOFF8;
@@ -765,9 +711,7 @@ int ptr_operator( memtype mem_type, uint_8 fix_mem_type )
         }
     } else {
         if( ( mem_type != MT_EMPTY ) && ( CodeInfo->mem_type_fixed == FALSE ) ) {
-#if defined( _STANDALONE_ )
             if( mem_type != MT_TYPE ) {
-#endif
                 CodeInfo->mem_type = mem_type;
                 if( fix_mem_type ) {
                     CodeInfo->mem_type_fixed = TRUE;
@@ -775,10 +719,7 @@ int ptr_operator( memtype mem_type, uint_8 fix_mem_type )
                         CodeInfo->isfar = TRUE;
                     }
                 }
-
-#if defined( _STANDALONE_ )
             }
-#endif
         }
     }
     return( NOT_ERROR );

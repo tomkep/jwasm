@@ -332,7 +332,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool procuse32, bool
 
             if (asize > pushsize) {
                 char dw = ' ';
-                if (( curr_cpu & P_CPU_MASK ) >= P_386 ) {
+                if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ) {
                     pushsize = 4;
                     dw = 'd';
                 }
@@ -417,7 +417,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool procuse32, bool
                     sprintf(buffer, " push %s", fullparam);
                 }
             } else {
-                if ((pushsize == 2) || (( curr_cpu & P_CPU_MASK ) >= P_386 ))
+                if ((pushsize == 2) || (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ))
                     sprintf(buffer, " push %s", fullparam);
                 else {
                     sprintf(buffer, " push word ptr %s+2", AsmBuffer[i]->string_ptr);
@@ -438,7 +438,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool procuse32, bool
                         /* else add a movzx */
                         if (psize == 2 && pushsize == 2) {
                             if (*(fullparam+1) == 'h' || *(fullparam+1) == 'H') {
-                                if (( curr_cpu & P_CPU_MASK ) >= P_386) {
+                                if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386) {
                                     sprintf( buffer, " movzx %cx, %ch", *fullparam, *fullparam );
                                 } else {
                                     sprintf( buffer, " mov %cl, %ch", *fullparam, *fullparam );
@@ -470,7 +470,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool procuse32, bool
                 if (asize != psize)
                     if (psize == 2)
                         qual = "word ptr ";
-                    else if (( curr_cpu & P_CPU_MASK ) >= P_386 )
+                    else if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 )
                         qual = "dword ptr ";
                     else {
                         sprintf(buffer, " push HIGHWORD (%s)", fullparam);
@@ -490,7 +490,7 @@ int PushInvokeParam(label_list * curr, int i, int reqParam, bool procuse32, bool
 
 // generate a call for a prototyped procedure
 
-int InvokeDef( int i )
+ret_code InvokeDirective( int i )
 /******************/
 {
     struct asm_sym      *sym;

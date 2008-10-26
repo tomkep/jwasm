@@ -158,8 +158,6 @@ extern  struct asm_sym  *SymLookupLabel( const char *name, int bDefine );
 extern  struct asm_sym  *SymSearch( const char *name );
 extern  void            SymSetCmpFunc( bool nocasemap );
 
-#if defined( _STANDALONE_ )
-
 extern  void            SymTakeOut( const char *name );
 extern  void            SymFree( struct asm_sym *sym);
 //extern  int             SymChangeName( const char *old, const char *new );
@@ -177,7 +175,5 @@ typedef int (* StrCmpFunc)(const char *, const char * );
 extern StrCmpFunc SymCmpFunc;
 
 extern  struct asm_sym  *SymCreate( const char *, bool );
-
-#endif
 
 #endif

@@ -126,7 +126,7 @@ static uint_32 Coff_AllocString(char * string, int len)
 
 /* write COFF section table */
 
-int coff_write_section_table( int fh )
+ret_code coff_write_section_table( int fh )
 {
     dir_node    *curr;
     obj_rec     *objr;
@@ -248,7 +248,7 @@ int coff_write_section_table( int fh )
             ish.NumberOfLinenumbers = 0;
         }
 
-        DebugMsg(("coff_write_section_table: %s\n", curr->sym.name));
+        DebugMsg(( "coff_write_section_table: %s, Fixups=%u, Linnums=%u\n", curr->sym.name, ish.NumberOfRelocations, ish.NumberOfLinenumbers ));
         if (write(fh, &ish, sizeof(ish)) != sizeof(ish))
             WriteError();
     }
@@ -256,7 +256,7 @@ int coff_write_section_table( int fh )
     data_pos = tell(fh);
 #endif
     DebugMsg(("coff_write_section_table: exit\n"));
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 
@@ -315,7 +315,7 @@ static void update_header(int fh)
 // m-n: entries for relocations (internal)
 // n-o: aliases (weak externals)
 
-int coff_write_symbols(int fh )
+ret_code coff_write_symbols(int fh )
 /**********************************************/
 {
     dir_node    *curr;
@@ -575,7 +575,7 @@ static int GetStartLabel(char * buffer, bool msg)
 // total_segs has been set by the caller
 // however, it might be necessary to add a .drectve section
 
-int coff_write_header( int fh )
+ret_code coff_write_header( int fh )
 {
     dir_node *dir;
     char buffer[MAX_LINE_LEN];
@@ -742,7 +742,7 @@ static uint_32 CoffGetSymIndex(void)
 // write section contents and fixups
 // this is done after the last step only!
 
-int coff_write_data(int fh)
+ret_code coff_write_data(int fh)
 {
     dir_node *section;
     struct asmfixup *fix;

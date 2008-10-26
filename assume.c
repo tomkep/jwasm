@@ -47,8 +47,6 @@
 
 /* prototypes */
 
-extern void             DefineFlatGroup( void );
-
 extern asm_sym          *sym_CurSeg;
 extern dir_node         *flat_grp;
 extern struct asm_sym   *SegOverride;
@@ -175,7 +173,7 @@ struct asm_sym * GetStdAssume(int reg)
     return (StdAssumeTable[reg].symbol);
 }
 
-int AssumeDirective( int i )
+ret_code AssumeDirective( int i )
 /********************/
 /* Handles ASSUME statement
  syntax is :
@@ -224,7 +222,7 @@ int AssumeDirective( int i )
         for (j = 0; j < NUM_SEGREGS; j++)
             if (segidx[j] == reg) {
                 info = &SegAssumeTable[j];
-                if( ( ( curr_cpu & P_CPU_MASK ) < P_386 )
+                if( ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 )
                     && ( ( reg == T_FS ) || ( reg == T_GS ) ) ) {
                     AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                     return( ERROR );
@@ -238,7 +236,7 @@ int AssumeDirective( int i )
             /* convert T_xxx to an index */
             j = RegisterValueToIndex(reg, &is32);
             if (j != ERROR) {
-                if(is32 == TRUE && ( curr_cpu & P_CPU_MASK ) < P_386 ) {
+                if(is32 == TRUE && ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
                     AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                     return( ERROR );
                 }
@@ -273,7 +271,7 @@ int AssumeDirective( int i )
             info->flat = FALSE;
             info->symbol = NULL;
         } else if(0 == stricmp( AsmBuffer[segloc]->string_ptr, "FLAT" )) {
-            if( ( curr_cpu & P_CPU_MASK ) < P_386 ) {
+            if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
                 AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                 return( ERROR );
             } else if (segtable == FALSE) {
@@ -446,7 +444,7 @@ enum assume_segreg GetPrefixAssume( struct asm_sym *sym, enum assume_segreg pref
 
     if( SegAssumeTable[prefix].flat ) {
         Frame = FRAME_GRP;
-        Frame_Datum = MAGIC_FLAT_GROUP;
+        Frame_Datum = ModuleInfo.flatgrp_idx;
         return( prefix );
     }
     sym_assume = SegAssumeTable[prefix].symbol;
@@ -494,7 +492,7 @@ enum assume_segreg GetAssume( struct asm_sym *sym, enum assume_segreg def )
 
     if( ( def != ASSUME_NOTHING ) && SegAssumeTable[def].flat ) {
         Frame = FRAME_GRP;
-        Frame_Datum = MAGIC_FLAT_GROUP;
+        Frame_Datum = ModuleInfo.flatgrp_idx;
         return( def );
     }
     if( SegOverride != NULL ) {

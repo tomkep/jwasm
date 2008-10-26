@@ -3,6 +3,9 @@
  Public Domain.
  */
 
+#ifndef _COFF_H_INCLUDED
+#define _COFF_H_INCLUDED
+
 #define IMAGE_FILE_MACHINE_I386		0x014c /* Intel 386 or later processors */
 
 typedef struct _IMAGE_FILE_HEADER {
@@ -241,9 +244,9 @@ typedef struct _IMAGE_LINENUMBER {
 } IMAGE_LINENUMBER;
 #pragma pack(pop)
 
-int coff_write_header( int fh );
-int coff_write_section_table( int fh );
-int coff_write_data(int fh);
-int coff_write_symbols(int fh );
+ret_code coff_write_header( int fh );
+ret_code coff_write_section_table( int fh );
+ret_code coff_write_data(int fh);
+ret_code coff_write_symbols(int fh );
 
-
+#endif

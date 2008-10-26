@@ -31,16 +31,9 @@
 #ifndef PARSER_H
 #define PARSER_H
 
-#ifdef _M_I86
-#define ASMFAR far
-#else
-#define ASMFAR
-#endif
-
 #include "operands.h"
 #include "symbols.h"
 #include "token.h"
-#include "opcodes.h"
 
 enum prefix_reg {
     PREFIX_EMPTY = EMPTY,
@@ -52,63 +45,30 @@ enum prefix_reg {
     PREFIX_GS = 0x65
 };
 
+enum asm_token {
+#define resword( token, string, len) token ,
+#include "reswords.h"
+#undef resword
+    T_NULL
+};
+
 // structure of an entry in the "reserved names" table
 
-struct AsmCodeName {
-        unsigned short  position;       // starting position in AsmOpTable
-        unsigned short  len :4,         // length of command, e.g. "AX" = 2
-                        index :12;      // index into AsmChars[] in opcode.h
-        struct AsmCodeName *next;
+struct ReservedWord {
+    struct ReservedWord *next;
+    const char *name;        // reserved word (char[])
+    unsigned short len;      // length of reserved word, e.g. "AX" = 2
+    unsigned short position; // starting position in AsmOpTable
 };
 
-enum asm_cpu {
-        /* bit count from left: ( need at least 7 bits )
-           bit 0-2:   Math coprocessor
-           bit 3:     priviledged?
-           bit 4-6:   cpu type
-           bit 7-11;  extension set */
+// asm_ins is the structure used to store instructions, directives and
+// other reserved words
 
-        P_NO87  = 0x0000,         /* no FPU */
-        P_87    = 0x0001,         /* 8087 */
-        P_287   = 0x0002,         /* 80287 */
-        P_387   = 0x0004,         /* 80387 */
-
-        P_PM    = 0x0008,         /* privileged opcode */
-
-        P_86    = 0x0000,         /* 8086, default */
-        P_186   = 0x0010,         /* 80186 */
-        P_286   = 0x0020,         /* 80286 */
-        P_286p  = P_286 | P_PM,   /* 80286, protected mode */
-        P_386   = 0x0030,         /* 80386 */
-        P_386p  = P_386 | P_PM,   /* 80386, protected mode */
-        P_486   = 0x0040,         /* 80486 */
-        P_486p  = P_486 | P_PM,   /* 80486, protected mode */
-        P_586   = 0x0050,         /* pentium */
-        P_586p  = P_586 | P_PM,   /* pentium, protected mode */
-        P_686   = 0x0060,         /* pentium */
-        P_686p  = P_686 | P_PM,   /* pentium, protected mode */
-
-        P_MMX   = 0x0080,         /* MMX extension instructions */
-        P_K3D   = 0x0100,         /* 3DNow extension instructions */
-        P_SSE   = 0x0200,         /* SSE extension instructions */
-        P_SSE2  = 0x0400,         /* SSE extension instructions */
-        P_SSE3  = 0x0800,         /* SSE extension instructions */
-
-        NO_OPPRFX  = P_MMX | P_SSE | P_SSE2 | P_SSE3,
-
-        P_FPU_MASK = 0x0007,
-        P_CPU_MASK = 0x0070,
-        P_EXT_MASK = 0x0F80
-};
-
-extern enum asm_cpu curr_cpu;
-
-#if defined( _STANDALONE_ )
     struct asm_ins {
         unsigned short      token;                  /* T_ADD, etc */
-        unsigned            allowed_prefix  : 4;    /* allowed prefix */
+        unsigned            allowed_prefix  : 3;    /* allowed prefix */
         unsigned            byte1_info      : 4;    /* flags for 1st byte */
-        unsigned            rm_info         : 2;    /* info on r/m byte */
+        unsigned            rm_info         : 3;    /* info on r/m byte */
         unsigned            opnd_type_3rd   : 4;    /* info on 3rd operand */
         unsigned            opnd_dir        : 1;    /* operand direction */
         enum asm_cpu        cpu;                    /* CPU type */
@@ -119,20 +79,6 @@ extern enum asm_cpu curr_cpu;
             enum special_type specialtype;          /* for OP_SPECIAL */
         };
     };
-#else
-    struct asm_ins {
-        unsigned            token           : 10;   /* T_ADD, etc */
-        unsigned            allowed_prefix  : 4;    /* allowed prefix */
-        unsigned            byte1_info      : 4;    /* flags for 1st byte */
-        unsigned            rm_info         : 2;    /* info on r/m byte */
-        unsigned            opnd_type_3rd   : 4;    /* info on 3rd operand */
-        unsigned            opnd_dir        : 1;    /* operand direction */
-        enum asm_cpu        cpu;                    /* CPU type */
-        OPNDTYPE            opnd_type[2];           /* asm_opnds */
-        unsigned char       opcode;                 /* opcode byte */
-        unsigned char       rm_byte;                /* mod_rm_byte */
-    };
-#endif
 
 struct asm_code {
     struct {
@@ -144,18 +90,10 @@ struct asm_code {
     memtype         mem_type;       // byte / word / etc. NOT near/far
     long            data[3];
     struct {
-#if defined( _STANDALONE_ )
         unsigned short      token;
         OPNDTYPE            opnd_type[3];
         unsigned char       opcode;
         unsigned char       rm_byte;
-#else
-        unsigned            token           : 10;
-        enum asm_cpu        cpu;
-        OPNDTYPE            opnd_type[3];
-        unsigned char       opcode;
-        unsigned char       rm_byte;
-#endif
     } info;
     signed char     extended_ins;
     unsigned char   sib;
@@ -165,19 +103,25 @@ struct asm_code {
     unsigned        isfar:1;        // CALL/JMP far
 };
 
+// values for <allowed_prefix> if item is an instruction
 #define NO_PREFIX   0x00
 #define LOCK        0x01
 #define REP         0x02
 #define REPxx       0x03
 #define FWAIT       0x04
 #define NO_FWAIT    0x05
-#define K3D_SET     0x06   // AMD 3DNow instruction set
-#define MMX_SET     0x07   // MMX instruction set
-#define SSE_SET     0x08   // XMM instruction set
-#define SSE2_SET    0x09   // XMM instruction set
-#define SSE3_SET    0x0A   // XMM instruction set
+//#define K3D_SET     0x06   // AMD 3DNow instruction set
+//#define MMX_SET     0x07   // MMX instruction set
+//#define SSE_SET     0x08   // XMM instruction set
+//#define SSE2_SET    0x09   // XMM instruction set
+//#define SSE3_SET    0x0A   // XMM instruction set
 
-// values for opcode flags (OP_DIRECTIVE)
+// values for <allowed_prefix> if item is a register
+#define IREG    1       /* indicates INDEX register */
+
+
+// values for <opcode> flags (OP_DIRECTIVE)
+// don't change these values, they are hard-coded in instruct.h!
 #define OPCF_CEXPR    0x01 /* avoid '<' being used as string delimiter (.IF, ...) */
 #define OPCF_CONDDIR  0x02 /* conditional assembly directive (IF, ELSE, ...) */
 #define OPCF_ERRDIR   0x04 /* error directive (.ERR, .ERRNZ, ...) */
@@ -186,8 +130,7 @@ struct asm_code {
                            /* enclose strings in <> in macro expansion step */
 #define OPCF_NOEXPAND 0x20 /* don't expand params for directive (PURGE, FOR, IFDEF, ...) */
 
-// values for byte1_info
-
+// values for <byte1_info>
 #define F_16        0x1
 #define F_32        0x2
 #define F_0F        0x3
@@ -197,11 +140,13 @@ struct asm_code {
 #define F_F20F      0x7    // SSEx prefix 2
 #define F_F30F      0x8    // SSEx prefix 3
 
-#define no_RM       0x1
-#define no_WDS      0x2
-#define R_in_OP     0x3
-
-#define IREG    1       /* indicates INDEX register for an OP_REGISTER entry*/
+// values for <rm_info>
+enum RM_INFO {
+    no_RM = 0x1,
+    no_WDS = 0x2,
+    R_in_OP = 0x3,
+    no_WDSx = 0x4
+};
 
 /* Note on the byte_1_info
    10 ( + F_0F ) -> the first byte is 0x0F, follow by opcode and rm_byte
@@ -210,9 +155,10 @@ struct asm_code {
    00            -> the first byte is opcode, follow by rm_byte      */
 
 /* Note on the rm_info:
-   01 ( + no_RM   ) -> no rm_byte
-   10 ( + no_WDS  ) -> has rm_byte, but w-bit, d-bit, s-bit of opcode are absent
-   11 ( + R_in_OP ) -> no rm_byte, reg field is included in opcode
+   001( + no_RM   ) -> no rm_byte
+   010( + no_WDS  ) -> has rm_byte, but w-bit, d-bit, s-bit of opcode are absent
+   011( + R_in_OP ) -> no rm_byte, reg field is included in opcode
+   100( + no_WDSx ) -> similar to no_WDS, + "instruction rm_byte" is additional opcode byte
    00               -> has rm_byte with w-, d- and/or s-bit in opcode  */
 
 /* NOTE: The order of table is IMPORTANT !! */
@@ -223,18 +169,17 @@ struct asm_code {
    OP_R ( without extension ) should follow OP_Rx
    OP_I ( without extension ) should follow OP_Ix  */
 
-extern const struct asm_ins ASMFAR AsmOpTable[];
-extern struct AsmCodeName          AsmOpcode[];
-extern char                        AsmChars[];
+extern const struct asm_ins   AsmOpTable[];
+extern struct ReservedWord    AsmResWord[];
 extern bool directive_listed;
 
 extern int      check_override( int *i );
 extern int      OperandSize( OPNDTYPE opnd );
 extern int      InRange( long val, unsigned bytes );
-extern int      cpu_directive( int i );
-extern int      ParseItems( void );
+extern ret_code cpu_directive( int i );
+extern ret_code ParseItems( void );
 extern int      NextArrayElement( void );
-extern int      data_init( int, int, asm_sym * );
+extern ret_code data_init( int, int, asm_sym * );
 extern void     ParseInit( void );
 
 #endif

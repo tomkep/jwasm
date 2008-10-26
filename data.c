@@ -24,9 +24,10 @@
 *
 *  ========================================================================
 *
-* Description:  data definition directives DB,DW,DD,...
-*               directives inside a structure definition will be
-*               routed to types.c (AddFieldToStruct()).
+* Description:  handles
+*               - data definition directives DB,DW,DD,...
+*               - predefined types (BYTE, WORD, DWORD, ...)
+*               - arbitrary types
 *
 ****************************************************************************/
 
@@ -49,9 +50,6 @@
 #define min(x,y) (((x) < (y)) ? (x) : (y))
 #endif
 
-#if defined( _STANDALONE_ )
-
-/* static globals */
 /* is this data element a field in a structure definition? */
 static bool             struct_field;
 /* is this the first initializer for this field? */
@@ -61,8 +59,6 @@ static bool             float_initializer;
 /* used for structured variables */
 static bool             veryfirst;
 static bool             initwarn;
-
-#endif
 
 /* data initialization stuff */
 
@@ -114,9 +110,7 @@ static void output_float( unsigned char index, unsigned no_of_bytes, char negati
         switch( no_of_bytes ) {
         case 1:
         case 2:
-#if defined( _STANDALONE_ )
             AsmWarn( 4, FLOAT_OPERAND );
-#endif
             char_ptr = (char *)&AsmBuffer[index]->value;
             break;
         case 4:
@@ -138,7 +132,6 @@ static void output_float( unsigned char index, unsigned no_of_bytes, char negati
     return;
 }
 
-#if defined( _STANDALONE_ )
 static void update_sizes( asm_sym *sym, bool first, unsigned no_of_bytes )
 /************************************************************************/
 {
@@ -149,7 +142,6 @@ static void update_sizes( asm_sym *sym, bool first, unsigned no_of_bytes )
         sym->first_size += no_of_bytes;
     }
 }
-#endif
 
 /*
  initialize one item of an array;
@@ -159,7 +151,7 @@ static void update_sizes( asm_sym *sym, bool first, unsigned no_of_bytes )
  no_of_bytes: size of type
 */
 
-static int array_item( asm_sym *sym, asm_sym *struct_sym, int start_pos, unsigned no_of_bytes, unsigned int dup )
+static ret_code array_item( asm_sym *sym, asm_sym *struct_sym, int start_pos, unsigned no_of_bytes, unsigned int dup )
 /************************************************************************************************/
 {
     int                 cur_pos;
@@ -658,7 +650,7 @@ item_done:
  initializer_loc: type pos
 */
 
-int data_init( int sym_loc, int initializer_loc, asm_sym *struct_sym )
+ret_code data_init( int sym_loc, int initializer_loc, asm_sym *struct_sym )
 /***********************************************/
 {
     unsigned            no_of_bytes;
@@ -805,7 +797,7 @@ int data_init( int sym_loc, int initializer_loc, asm_sym *struct_sym )
         }
 
         if (AsmFiles.file[LST])
-            WriteLstFile(LSTTYPE_STRUCT, currofs, sym->name);
+            LstWriteFile(LSTTYPE_STRUCT, currofs, sym->name);
 
         DebugMsg(("data_init: exit without error\n"));
         return( NOT_ERROR );
@@ -895,7 +887,7 @@ int data_init( int sym_loc, int initializer_loc, asm_sym *struct_sym )
     }
 
     if (AsmFiles.file[LST])
-        WriteLstFile(LSTTYPE_LIDATA, currofs, NULL);
+        LstWriteFile(LSTTYPE_LIDATA, currofs, NULL);
 
     DebugMsg(("data_init: exit without error\n"));
     return( NOT_ERROR );

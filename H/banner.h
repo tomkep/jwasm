@@ -28,7 +28,7 @@
 *
 ****************************************************************************/
 
-#define _BETA_
+#define _BETA_ "pre"
 
 #define banner1p1(p)  p
 #define banner1p2(v)  "Version " v
@@ -44,8 +44,8 @@
 #define banner3       "Source code is available under the Sybase Open Watcom Public License."
 #define banner3a      ""
 
-#define BAN_VER_STR "1.92" _BETA_
+#define BAN_VER_STR "1.93" _BETA_
 
 #define _JWASM_VERSION_ BAN_VER_STR
-#define _JWASM_VERSION_INT_ 192
+#define _JWASM_VERSION_INT_ 193
 

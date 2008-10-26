@@ -34,14 +34,9 @@
 #include "codegen.h"
 #include "memalloc.h"
 #include "fixup.h"
-
-#if defined( _STANDALONE_ )
-
 #include "directiv.h"
 
-extern int  AddFloatingPointEmulationFixup( const struct asm_ins ASMFAR *, bool );
-
-#endif
+extern int  AddFloatingPointEmulationFixup( const struct asm_ins *, bool );
 
 // for FAR calls/jmps there was a non-compatible solution
 // implemented which required two additional opcodes, CALLF and JMPF.
@@ -52,12 +47,12 @@ extern int  AddFloatingPointEmulationFixup( const struct asm_ins ASMFAR *, bool 
 #define NUMCALLN 8  /* no of entries for CALLN in INSTRUCT.H */
 #define NUMJMPN  9  /* no of entries for JMPN in INSTRUCT.H */
 
-static int match_phase_3( int *i, OPNDTYPE determinant );
+static ret_code match_phase_3( int *i, OPNDTYPE determinant );
 
-static int output_3DNow( int i )
+static ret_code output_3DNow( int i )
 /******************************/
 {
-    const struct asm_ins ASMFAR *ins = &AsmOpTable[i];
+    const struct asm_ins *ins = &AsmOpTable[i];
 
     if( ins->byte1_info == F_0F0F ) {
         OutputCodeByte( ins->opcode | CodeInfo->info.opcode );
@@ -65,19 +60,19 @@ static int output_3DNow( int i )
     return( NOT_ERROR );
 }
 
-static int output( int i )
+static ret_code output( int i )
 /************************/
 /*
 - determine what code should be output and their order;
 - output prefix bytes ( ADRSIZ, OPSIZ, LOCK, REPxx, segment override prefix, etc )
   , opcode, "mod r/m" byte and "s-i-b" byte;
+- possible return codes: ERROR, NOT_ERROR
 */
 {
-    const struct asm_ins ASMFAR *ins = &AsmOpTable[i];
-    struct asm_code             *rCode = CodeInfo;
-    unsigned_8                  tmp;
+    const struct asm_ins *ins = &AsmOpTable[i];
+    struct asm_code      *rCode = CodeInfo;
+    unsigned_8           tmp;
 
-#if defined( _STANDALONE_ )
     /*
      * Output debug info - line numbers
      */
@@ -103,14 +98,13 @@ static int output( int i )
                 return( ERROR );
             }
     }
-#endif
 
     /*
      * Check if CPU and FPU is valid for output code
      */
-    if( ( ins->cpu & P_CPU_MASK ) > ( curr_cpu & P_CPU_MASK )
-        || ( ins->cpu & P_FPU_MASK ) > ( curr_cpu & P_FPU_MASK )
-        || ( ins->cpu & P_EXT_MASK ) > ( ins->cpu & curr_cpu & P_EXT_MASK ) ) {
+    if( ( ins->cpu & P_CPU_MASK ) > ( ModuleInfo.curr_cpu & P_CPU_MASK )
+        || ( ins->cpu & P_FPU_MASK ) > ( ModuleInfo.curr_cpu & P_FPU_MASK )
+        || ( ins->cpu & P_EXT_MASK ) > ( ins->cpu & ModuleInfo.curr_cpu & P_EXT_MASK ) ) {
         DebugMsg(("output: wrong cpu setting\n"));
         AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
         return( ERROR );
@@ -147,7 +141,7 @@ static int output( int i )
         default:
             break;
         }
-        OutputCodeByte( AsmOpTable[AsmOpcode[rCode->prefix.ins].position].opcode );
+        OutputCodeByte( AsmOpTable[AsmResWord[rCode->prefix.ins].position].opcode );
     }
     /*
      * Output instruction prefix REP or REPNE for SSEx instructions
@@ -173,33 +167,26 @@ static int output( int i )
      * Output FP FWAIT if required
      */
     if( ins->token == T_FWAIT ) {
-        if(( curr_cpu & P_CPU_MASK ) < P_386 ) {
-#if defined( _STANDALONE_ )
+        if(( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
             if(( ModuleInfo.emulator == TRUE ) && ( !rCode->use32 )) {
                 OutputCodeByte( OP_NOP );
             }
-#else
-            OutputCodeByte( OP_NOP );
-#endif
         }
     } else if( ins->allowed_prefix == FWAIT ) {
         OutputCodeByte( OP_WAIT );
-#if defined( _STANDALONE_ )
     } else if(( ModuleInfo.emulator == TRUE )
         && ( !rCode->use32 )
         && ( ins->allowed_prefix != NO_FWAIT )
         && (( ins->allowed_prefix == FWAIT ) || (( ins->cpu & P_FPU_MASK ) != P_NO87 ))) {
         OutputCodeByte( OP_WAIT );
-#endif
     } else if( ins->allowed_prefix != NO_FWAIT ) {
         // implicit FWAIT synchronization for 8087 (CPU 8086/80186)
-        if((( curr_cpu & P_CPU_MASK ) < P_286 )
+        if((( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_286 )
             && (( ins->cpu & P_FPU_MASK ) == P_87 )) {
             OutputCodeByte( OP_WAIT );
         }
     }
 
-#if defined( _STANDALONE_ )
     /*
      * Output FP fixup if required
      */
@@ -211,7 +198,6 @@ static int output( int i )
             return( ERROR );
         }
     }
-#endif
     /*
      * Output address size prefix
      */
@@ -241,11 +227,13 @@ static int output( int i )
         break;
     }
     if( rCode->prefix.opsiz == TRUE ) {
-        if(( curr_cpu & P_CPU_MASK ) < P_386 ) {
+#if 1 /* not really needed if all instructions have correct cpu flags */
+        if(( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
             DebugMsg(("output: wrong cpu setting\n"));
             AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
             return( ERROR );
         }
+#endif
         /*
             Certain instructions use the ADDRSIZE prefix when they really
             should use OPERSIZE prefix (well, I think so!). Stupid Intel.
@@ -307,6 +295,12 @@ static int output( int i )
     case no_RM:
         OutputCodeByte( ins->opcode | rCode->info.opcode );
         break;
+    case no_WDSx:
+        /* for SSSE3, instruction rm_byte is additional opcode byte */
+        OutputCodeByte( ins->opcode );
+        OutputCodeByte( ins->rm_byte );
+        OutputCodeByte( rCode->info.rm_byte );
+        goto common_wds;
     case no_WDS:
         rCode->info.opcode = 0;
         // no break
@@ -317,6 +311,7 @@ static int output( int i )
         }
         tmp = ins->rm_byte | rCode->info.rm_byte;
         OutputCodeByte( tmp );
+    common_wds:
         if( addr_32( rCode ) ) {
             switch ( tmp & NOT_BIT_345 ) {
             case 0x04:
@@ -336,10 +331,11 @@ static int output( int i )
     return( NOT_ERROR );
 }
 
-static int output_data( OPNDTYPE determinant, int index )
+static ret_code output_data( OPNDTYPE determinant, int index )
 /*******************************************************/
 /*
-  output address displacement and immediate data;
+ output address displacement and immediate data;
+ possible return codes: NOT_ERROR
 */
 {
     int                 out = 0;
@@ -411,11 +407,12 @@ static int output_data( OPNDTYPE determinant, int index )
     return( NOT_ERROR );
 }
 
-static int match_phase_2( int *i )
+static ret_code match_phase_2( int *i )
 /*********************************
 - a routine used by match_phase_1() to determine whether both operands match
   with that in the assembly instructions table;
 - call by match_phase_1() only;
+- possible return codes: EMPTY, ERROR, NOT_ERROR
 */
 {
 //    DebugMsg(("match_phase_2(%u) enter\n", *i));
@@ -439,7 +436,7 @@ static int match_phase_2( int *i )
     }
 }
 
-int match_phase_1( struct asm_code *CodeInfo )
+ret_code match_phase_1( struct asm_code *CodeInfo )
 /************************
 - this routine will look up the assembler opcode table and try to match
   the first operand in table with what we get;
@@ -448,7 +445,7 @@ int match_phase_1( struct asm_code *CodeInfo )
 */
 {
     int             i;
-    int             retcode;
+    ret_code        retcode;
     signed char     temp_opsiz = 0;
     OPNDTYPE        cur_opnd;
     OPNDTYPE        pre_opnd;
@@ -468,7 +465,7 @@ int match_phase_1( struct asm_code *CodeInfo )
         }
     }
     // look up the hash table to get the real position of instruction
-    i = AsmOpcode[CodeInfo->info.token].position;
+    i = AsmResWord[CodeInfo->info.token].position;
 
     // this "hack" makes the CALLF/JMPF hack obsolete. Just skip the
     // "near" entries for CALL/JMP if the transition is FAR.
@@ -481,8 +478,8 @@ int match_phase_1( struct asm_code *CodeInfo )
 
     // make sure the user want 80x87 ins
     if( ( AsmOpTable[i].cpu & P_FPU_MASK ) != P_NO87 ) {
-        if( ( curr_cpu & P_FPU_MASK ) == P_NO87 ) {
-            DebugMsg(("match_phase_1: wrong cpu setting: curr=%X - table=%X\n", curr_cpu, AsmOpTable[i].cpu));
+        if( ( ModuleInfo.curr_cpu & P_FPU_MASK ) == P_NO87 ) {
+            DebugMsg(("match_phase_1: wrong cpu setting: curr=%X - table=%X\n", ModuleInfo.curr_cpu, AsmOpTable[i].cpu));
             AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
             return( ERROR );
         } else {
@@ -492,7 +489,7 @@ int match_phase_1( struct asm_code *CodeInfo )
 
     // make sure the user want 80x86 privileged mode ins
     if( ( AsmOpTable[i].cpu & P_PM ) != 0 ) {
-        if( ( curr_cpu & P_PM ) == 0 ) {
+        if( ( ModuleInfo.curr_cpu & P_PM ) == 0 ) {
             AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
             return( ERROR );
         }
@@ -586,55 +583,44 @@ int match_phase_1( struct asm_code *CodeInfo )
         switch( asm_op1 ) {
         case OP_MMX:
              if( cur_opnd & OP_MMX ) {
-                 return( match_phase_2( &i ) );
+                 retcode = match_phase_2( &i );
+                 if ( retcode != EMPTY )
+                     return( retcode );
              }
              break;
         case OP_XMM:
              if( cur_opnd & OP_XMM ) {
-                 return( match_phase_2( &i ) );
+                 retcode = match_phase_2( &i );
+                 if ( retcode != EMPTY )
+                     return( retcode );
              }
              break;
         case OP_R16:
             if( cur_opnd & asm_op1 ) {
                 temp_opsiz = CodeInfo->prefix.opsiz;
                 CodeInfo->prefix.opsiz = FALSE;
-                switch( match_phase_2( &i ) ) {
-                case EMPTY:
-                    CodeInfo->prefix.opsiz = temp_opsiz;
-                    break;
-                case ERROR:
-                    return( ERROR );
-                case NOT_ERROR:
-                    return( NOT_ERROR );
-                }
+                retcode = match_phase_2( &i );
+                if( retcode != EMPTY )
+                    return( retcode );
+                CodeInfo->prefix.opsiz = temp_opsiz;
             }
             break;
         case OP_M16:
             if( cur_opnd & asm_op1 ) {
                 temp_opsiz = CodeInfo->prefix.opsiz;
-                switch( match_phase_2( &i ) ) {
-                case EMPTY:
-                    CodeInfo->prefix.opsiz = temp_opsiz;
-                    break;
-                case ERROR:
-                    return( ERROR );
-                case NOT_ERROR:
-                    return( NOT_ERROR );
-                }
+                retcode = match_phase_2( &i );
+                if( retcode != EMPTY )
+                    return( retcode );
+                CodeInfo->prefix.opsiz = temp_opsiz;
             }
             break;
         case OP_I32:
         case OP_I16:
             if( cur_opnd & asm_op1 ) {
                 CodeInfo->info.opnd_type[OPND1] = asm_op1;
-                switch( match_phase_2( &i ) ) {
-                case EMPTY:
-                    break;
-                case ERROR:
-                    return( ERROR );
-                case NOT_ERROR:
-                    return( NOT_ERROR );
-                }
+                retcode = match_phase_2( &i );
+                if( retcode != EMPTY )
+                    return( retcode );
             }
             break;
         case OP_I8_U:
@@ -642,15 +628,10 @@ int match_phase_1( struct asm_code *CodeInfo )
                 if( CodeInfo->data[OPND1] <= UCHAR_MAX ) {
                     temp_opsiz = CodeInfo->prefix.opsiz;
                     CodeInfo->info.opnd_type[OPND1] = OP_I8;
-                    switch( match_phase_2( &i ) ) {
-                    case EMPTY:
-                        CodeInfo->prefix.opsiz = temp_opsiz;
-                        break;
-                    case ERROR:
-                        return( ERROR );
-                    case NOT_ERROR:
-                        return( NOT_ERROR );
-                    }
+                    retcode = match_phase_2( &i );
+                    if( retcode != EMPTY )
+                        return( retcode );
+                    CodeInfo->prefix.opsiz = temp_opsiz;
                 }
             }
             break;
@@ -687,7 +668,7 @@ int match_phase_1( struct asm_code *CodeInfo )
     return( ERROR );
 }
 
-static int check_3rd_operand( int i )
+static ret_code check_3rd_operand( int i )
 /***********************************/
 {
     OPNDTYPE    cur_opnd;
@@ -707,7 +688,7 @@ static int check_3rd_operand( int i )
     }
 }
 
-static int output_3rd_operand( int i )
+static ret_code output_3rd_operand( int i )
 /************************************/
 {
     if( AsmOpTable[i].opnd_type_3rd == OP3_NONE ) {
@@ -726,13 +707,14 @@ static int output_3rd_operand( int i )
     }
 }
 
-static int match_phase_3( int *i, OPNDTYPE determinant )
+static ret_code match_phase_3( int *i, OPNDTYPE determinant )
 /*******************************************************
 - this routine will look up the assembler opcode table and try to match
   the second operand with what we get;
 - if second operand match then it will output code; if not, pass back to
   match_phase_1() and try again;
 - call by match_phase_2() only;
+- possible return codes: EMPTY, NOT_ERROR, ERROR
 */
 {
     OPNDTYPE    cur_opnd;
@@ -801,17 +783,13 @@ static int match_phase_3( int *i, OPNDTYPE determinant )
         case OP_I:
             DebugMsg(("match_phase_3: OP_I\n"));
             if( cur_opnd & asm_op2 ) {
-#if defined(_STANDALONE_)
                 long operand = CodeInfo->data[OPND2];
-#endif
                 if( last_opnd & OP_R8 ) {
                     // 8-bit register, so output 8-bit data
-#if defined(_STANDALONE_)
                     if( Parse_Pass == PASS_1 && !InRange( operand, 1 ) ) {
                         DebugMsg(("imm const too large (08): %X\n", operand));
                         AsmWarn( 1, IMMEDIATE_CONSTANT_TOO_LARGE );
                     }
-#endif
                     CodeInfo->prefix.opsiz = FALSE;
                     cur_opnd = OP_I8;
                     if( InsFixups[OPND2] != NULL ) {
@@ -819,12 +797,10 @@ static int match_phase_3( int *i, OPNDTYPE determinant )
                     }
                 } else if( last_opnd & OP_R16 ) {
                     // 16-bit register, so output 16-bit data
-#if defined(_STANDALONE_)
                     if( Parse_Pass == PASS_1 && !InRange( operand, 2 ) ) {
                         DebugMsg(("imm const too large (16): %X\n", operand));
                         AsmWarn( 1, IMMEDIATE_CONSTANT_TOO_LARGE );
                     }
-#endif
                     cur_opnd = OP_I16;
                 } else if( last_opnd & OP_R32 ) {
                     // 32-bit register, so output 32-bit data
@@ -976,5 +952,6 @@ static int match_phase_3( int *i, OPNDTYPE determinant )
         (*i)++;
     }
     (*i)--;
+    DebugMsg(("match_phase_3: returns EMPTY!\n"));
     return( EMPTY );
 }

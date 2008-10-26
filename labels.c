@@ -35,8 +35,6 @@
 #include "fixup.h"
 #include "labels.h"
 
-#if defined( _STANDALONE_ )
-
 #include "directiv.h"
 #include "proc.h"
 
@@ -70,7 +68,6 @@ struct asm_sym * IsLabelType( char *name )
         return(sym);
     return(NULL);
 }
-#endif
 
 // define a label
 // symbol_name: name of the label
@@ -156,8 +153,7 @@ int LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, b
     return( NOT_ERROR );
 }
 
-#if defined( _STANDALONE_ )
-int LabelDirective( int i )
+ret_code LabelDirective( int i )
 /*************************/
 {
     struct asm_sym *vartype;
@@ -182,4 +178,3 @@ int LabelDirective( int i )
     AsmError( INVALID_LABEL_DEFINITION );
     return( ERROR );
 }
-#endif

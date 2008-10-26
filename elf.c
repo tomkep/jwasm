@@ -35,6 +35,9 @@
 // start label is always public for COFF/ELF, no need to add it
 #define ADDSTARTLABEL 0
 
+// there's no STT_IMPORT type for ELF, it's OW specific
+#define OWELFIMPORT 0
+
 extern dir_node * GetPublicData2( void ** );
 extern line_num_info * GetLinnumData2( void ** );
 
@@ -299,7 +302,11 @@ static void set_symtab_values()
             p->st_value = curr->sym.total_size;
             p->st_shndx = SHN_COMMON;
         } else {
+#if OWELFIMPORT
             p->st_info = ELF32_ST_INFO(STB_GLOBAL, STT_IMPORT);
+#else
+            p->st_info = ELF32_ST_INFO(STB_GLOBAL, STT_NOTYPE);
+#endif
             p->st_value = curr->sym.offset; /* is always 0 */
             p->st_shndx = SHN_UNDEF;
         }
@@ -319,7 +326,11 @@ static void set_symtab_values()
         len = strlen( buffer );
 
         p->st_name = strsize;
+#if OWELFIMPORT
         p->st_info = ELF32_ST_INFO(STB_GLOBAL, STT_IMPORT);
+#else
+        p->st_info = ELF32_ST_INFO(STB_GLOBAL, STT_NOTYPE);
+#endif
         p->st_value = 0;
         p->st_shndx = SHN_UNDEF;
 
@@ -631,7 +642,7 @@ static int elf_write_section_table( int fh )
 // write ELF header
 // total_segs has been set by the caller
 
-int elf_write_header( int fh )
+ret_code elf_write_header( int fh )
 {
     dir_node   *dir;
     char       buffer[MAX_LINE_LEN];
@@ -688,8 +699,8 @@ int elf_write_header( int fh )
 
 // write ELF symbol table
 // contents of the table:
-
-int elf_write_symbols(int fh )
+#if 0
+ret_code elf_write_symbols( int fh )
 /**********************************************/
 {
     dir_node    *curr;
@@ -704,12 +715,12 @@ int elf_write_symbols(int fh )
     DebugMsg(("elf_write_symbols: exit\n"));
     return(NOT_ERROR);
 }
-
+#endif
 
 // write section contents and fixups
 // this is done after the last step only!
 
-int elf_write_data(int fh)
+ret_code elf_write_data( int fh )
 {
     dir_node *curr;
     int seg_index;

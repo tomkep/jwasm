@@ -76,7 +76,7 @@ static char *FPPatchAltName[] = {
     "FJGRQQ"
 };
 
-int AddFloatingPointEmulationFixup( const struct asm_ins ASMFAR *ins, bool secondary )
+int AddFloatingPointEmulationFixup( const struct asm_ins *ins, bool secondary )
 /************************************************************************************/
 {
     fp_patches patch;

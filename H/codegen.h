@@ -24,8 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  WHEN YOU FIGURE OUT WHAT THIS FILE DOES, PLEASE
-*               DESCRIBE IT HERE!
+* Description:  definitions for code generator interface
 *
 ****************************************************************************/
 
@@ -91,5 +90,7 @@
 #define oper_32( s )     ( s->use32 ? ( s->prefix.opsiz == FALSE ) : ( s->prefix.opsiz == TRUE ))
 
 #define MEM_TYPE( op, typ ) ( (op) == MT_##typ || (op) == MT_S##typ )
+
+extern ret_code         match_phase_1( struct asm_code * );
 
 #endif

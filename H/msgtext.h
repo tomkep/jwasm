@@ -331,9 +331,9 @@ pick( SEGMENT_NOT_OPENED,
 pick( UNKNOWN_SEGMENT_ATTRIBUTE,
       "Segment attribute is unknown: %s" ,
       "Segment attribute is unknown: %s" )
-pick( UNDEFINED_MODEL_OPTION,
-      "Model option is undefined" ,
-      "モデル・オプションが未定義です" )
+pick( UNKNOWN_MODEL_OPTION,
+      "Unknown .model option: %s" ,
+      "Unknown .model option: %s" )
 pick( MUST_BE_IN_SEGMENT_BLOCK,
       "Must be in segment block" ,
       "現在オープンされているセグメントはありません" )
@@ -398,7 +398,7 @@ pick( TOKEN_TOO_LONG,
       "Token is too long" ,
       "トークンが長すぎます" )
 pick( EXPANDED_LINE_TOO_LONG,
-      "The line is too long after expansion" ,
+      "Line too long after expansion: " ,
       "エクスパンジョンの後の行が長すぎます" )
 pick( LABEL_EXPECTED_AFTER_COLON,
       "A label is expected after colon" ,
@@ -427,9 +427,6 @@ pick( CANNOT_NEST_PROCEDURES,
 pick( NO_PROC_IS_CURRENTLY_DEFINED,
       "No procedure is currently defined" ,
       "プロシージャが定義されていません" )
-pick( PROC_NAME_DOES_NOT_MATCH,
-      "Procedure name does not match" ,
-      "プロシージャ名が一致しません" )
 pick( VARARG_REQUIRES_C_CALLING_CONVENTION,
       "Vararg requires C calling convention" ,
       "varargにはCの呼出し規約が必要です" )
@@ -464,8 +461,8 @@ pick( SPACES_NOT_ALLOWED_IN_COMMAND_LINE_OPTIONS,
       "Spaces not allowed in command line options" ,
       "コマンドラインオプションで空白は使用できません" )
 pick( MSG_ERROR,
-      "Error: " ,
-      "エラー: " )
+      "Error" ,
+      "エラー" )
 pick( SOURCE_FILE,
       "Source File" ,
       "ソースファイル" )
@@ -578,8 +575,8 @@ pick( NOTE_INCLUDED_BY,
       "included by file %s(%lu)" ,
       "ファイル %s(%lu) に含まれます" )
 pick( NOTE_MACRO_CALLED_FROM,
-      "macro %s called from file %s(%lu)" ,
-      "macro %s called from file %s(%lu)" )
+      "macro '%s' called from file %s(%lu)" ,
+      "macro '%s' called from file %s(%lu)" )
 pick( SYMBOL_S_NOT_DEFINED,
       "Symbol %s is not defined" ,
       "シンボルが定義されていません ( %s )" ) /* fixme */
@@ -887,3 +884,6 @@ pick( REQUIRED_PARAMETER_MISSING,
 pick( DOES_NOT_WORK_WITH_32BIT_SEGMENTS,
       "%s does not work with 32-bit segments" ,
       "%s does not work with 32-bit segments" )
+pick( SEGMENT_EXCEEDS_64K_LIMIT,
+      "Segment exceeds 64k limit: %s" ,
+      "Segment exceeds 64k limit: %s" )

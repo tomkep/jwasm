@@ -43,10 +43,12 @@
 #include "mangle.h"
 #include "labels.h"
 #include "input.h"
+#include "tokenize.h"
 #include "expreval.h"
 #include "types.h"
 #include "condasm.h"
 #include "hll.h"
+#include "context.h"
 #include "macro.h"
 #include "proc.h"
 #include "fastpass.h"
@@ -63,7 +65,6 @@ extern const FNAME      *AddFlist( char const *filename );
 
 extern int              SegmentModulePrologue(int type);
 extern int              SegmentModuleEnd(void);
-extern void             DefineFlatGroup( void );
 extern void             set_def_seg_name( void );
 
 #define INIT_ALIGN      0x1
@@ -173,19 +174,11 @@ static char *ExitDos[] = {
 static char *StartAddr = "@Startup";
 static char StartupDirectiveFound;
 
-typedef struct _context {
-    uint_32 type;
-    char data[];
-} context;
-
-static context          *ContextStack;  // for PUSHCONTEXT/POPCONTEXT
-
 static asm_sym *sym_CodeSize  ; /* numeric */
 static asm_sym *sym_DataSize  ; /* numeric */
 static asm_sym *sym_Model     ; /* numeric */
        asm_sym *sym_Interface ; /* numeric */
        asm_sym *sym_Cpu       ; /* numeric */
-       asm_sym *sym_CurSeg    ; /* text    */
 
 
 #define ROUND_UP( i, r ) (((i)+((r)-1)) & ~((r)-1))
@@ -283,7 +276,7 @@ static void dir_init( dir_node *dir, int tab )
     case TAB_SEG:
         sym->state = SYM_SEG;
         dir->e.seginfo = AsmAlloc( sizeof( seg_info ) );
-        dir->e.seginfo->segrec = ObjNewRec( CMD_SEGDEF );
+        dir->e.seginfo->segrec = OmfNewRec( CMD_SEGDEF );
         dir->e.seginfo->group = NULL;
         dir->e.seginfo->num_relocs = 0;
         dir->e.seginfo->lname_idx = 0;
@@ -485,7 +478,7 @@ void dir_free( dir_node *dir, bool remove_from_table )
         break;
     case SYM_SEG:
         if( dir->e.seginfo->segrec != NULL )
-            ObjKillRec( dir->e.seginfo->segrec );
+            OmfKillRec( dir->e.seginfo->segrec );
         AsmFree( dir->e.seginfo );
         break;
     case SYM_EXTERNAL:
@@ -600,7 +593,7 @@ void wipe_space( char *token )
     memmove( token, start, strlen( start ) + 1 );
 }
 
-uint checkword( char **token )
+ret_code checkword( char **token )
 /***********************************/
 /* wipes out prceding and tailing spaces, and make sure token contains only
    one word */
@@ -640,7 +633,7 @@ uint checkword( char **token )
     return( NOT_ERROR );
 }
 
-static int GetLangType( int *i )
+static lang_type GetLangType( int *i )
 /******************************/
 {
     if( AsmBuffer[*i]->token == T_RES_ID) {
@@ -676,7 +669,7 @@ int FindSimpleType(int token)
         if( token == SimpleType[i].token )
             return( i );
     }
-    return(ERROR);
+    return( ERROR );
 }
 
 // get size from memory type
@@ -728,7 +721,7 @@ int SizeFromMemtype( memtype type, bool is32 )
 // externdef [ attr ] symbol:type
 // called during Pass 1 only
 
-static int ExterndefDirective( int i )
+static ret_code ExterndefDirective( int i )
 /********************/
 {
     char                *token;
@@ -878,7 +871,7 @@ static int ExterndefDirective( int i )
 // handle ECHO
 // displays text on the console
 
-int EchoDef( int i )
+ret_code EchoDef( int i )
 {
 #if 0
     for (;i < Token_Count;i++)
@@ -935,7 +928,9 @@ asm_sym *MakeExtern( char *name, memtype mem_type, struct asm_sym * vartype, asm
     return( sym );
 }
 
-static int ExternDef( int i )
+// EXTERN xxx:yyy directive
+
+static ret_code ExternDirective( int i )
 /*****************/
 {
     char                *token;
@@ -1000,15 +995,19 @@ static int ExternDef( int i )
             }
             if(( sym = MakeExtern( token, mem_type, symtype, sym, is32 )) == NULL )
                 return( ERROR );
-        } else if (sym->state != SYM_EXTERNAL) {
-            DebugMsg(("ExternDef: symbol redefinition\n"));
-            AsmErr( SYMBOL_REDEFINITION, token );
-            return( ERROR );
-        } else if( sym->mem_type != mem_type ) {
-            AsmError( EXT_DEF_DIFF );
-            return( ERROR );
+        } else {
+            if( sym->mem_type != mem_type ||
+                ( lang_type != LANG_NONE && sym->langtype != LANG_NONE && sym->langtype != lang_type )) {
+                AsmError( EXT_DEF_DIFF );
+                return( ERROR );
+            }
+            /* if EXTERN is placed BEHIND the symbol definition, it's
+             ignored by Masm! */
+            if (sym->state != SYM_EXTERNAL) {
+                DebugMsg(("ExternDirective: symbol %s redefinition\n", token ));
+                AsmWarn( 3, SYMBOL_REDEFINITION, token );
+            }
         }
-
         SetMangler( sym, mangle_type, lang_type );
     }
     return( NOT_ERROR );
@@ -1031,7 +1030,7 @@ static char *Check4Mangler( int *i )
     return( mangle_type );
 }
 
-static int PublicDirective( int i )
+static ret_code PublicDirective( int i )
 /*****************/
 {
     char                *mangle_type = NULL;
@@ -1118,7 +1117,7 @@ int token_cmp( char *token, int start, int end )
 // is located becomes the "source" directory, that is, it is searched
 // FIRST if further INCLUDE directives are found inside the included file.
 
-static int IncludeDirective( int i )
+static ret_code IncludeDirective( int i )
 /******************/
 {
     int size;
@@ -1127,7 +1126,7 @@ static int IncludeDirective( int i )
 
     if (AsmFiles.file[LST]) {
         directive_listed = TRUE;
-        WriteLstFile(LSTTYPE_DIRECTIVE, 0, NULL );
+        LstWriteFile(LSTTYPE_DIRECTIVE, 0, NULL );
     }
 
     if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_NUM) {
@@ -1153,7 +1152,7 @@ static int IncludeDirective( int i )
 
 // called during pass 1 only
 
-static int IncludeLibDirective( int i )
+static ret_code IncludeLibDirective( int i )
 /*********************/
 {
     char *name;
@@ -1212,7 +1211,7 @@ static int IncludeLibDirective( int i )
 
 /* handles .STARTUP and .EXIT directives */
 
-static int StartupExitDirective( int i )
+static ret_code StartupExitDirective( int i )
 /******************/
 {
     int         count;
@@ -1374,7 +1373,7 @@ static void module_prologue( int type )
     sym_Interface = AddPredefinedConstant( "@Interface", ModuleInfo.langtype );
 }
 
-// called by write_init(), once per source module
+// called by AssembleInit(), once per source module
 // symbol table has been initialized
 
 void ModuleInit( void )
@@ -1390,32 +1389,23 @@ void ModuleInit( void )
     ModuleInfo.defUse32 = FALSE;
     ModuleInfo.cmdline = FALSE;
     ModuleInfo.mseg = FALSE;
-    // these values are initialized for each pass in ProcInit()
-    // ModuleInfo.procs_private = FALSE;
-    // ModuleInfo.procs_export = FALSE;
     ModuleInfo.nocasemap = Options.nocasemap;
     ModuleInfo.ljmp = TRUE;
     ModuleInfo.emulator = (Options.floating_point == DO_FP_EMULATION);
-    SymSetCmpFunc(ModuleInfo.nocasemap);
-    SetMasm510(Options.masm51_compat);
+    SymSetCmpFunc( ModuleInfo.nocasemap );
+    SetMasm510( Options.masm51_compat );
     ModuleInfo.list = Options.write_listing;
     ModuleInfo.cref = TRUE;
     ModuleInfo.segorder = SEGORDER_SEQ;
-    ModuleInfo.flat_idx = 0;
+    ModuleInfo.flatgrp_idx = 0;
     ModuleInfo.name[0] = NULLC;
     // add source file to autodependency list
     ModuleInfo.srcfile = AddFlist( AsmFiles.fname[ASM] );
 
     StartupDirectiveFound = FALSE;
 
-    ContextStack = NULL;
-
     memset(Tables, 0, sizeof(Tables));
 
-    sym_CurSeg = SymCreate("@CurSeg", TRUE );
-    sym_CurSeg->state = SYM_TMACRO;
-    sym_CurSeg->defined = TRUE;
-    sym_CurSeg->predefined = TRUE;
 }
 
 static void get_module_name( void )
@@ -1426,6 +1416,7 @@ static void get_module_name( void )
 
     /**/myassert( AsmFiles.fname[ASM] != NULL );
     _splitpath( AsmFiles.fname[ASM], NULL, NULL, ModuleInfo.name, dummy );
+    strupr( ModuleInfo.name );
     for( p = ModuleInfo.name; *p != '\0'; ++p ) {
         if( !( isalnum( *p ) || ( *p == '_' ) || ( *p == '$' )
             || ( *p == '@' ) || ( *p == '?') ) ) {
@@ -1441,7 +1432,7 @@ static void get_module_name( void )
 
 // handle .model directive
 
-static int ModelDirective( int i )
+static ret_code ModelDirective( int i )
 /****************/
 {
     char        *token;
@@ -1474,7 +1465,7 @@ static int ModelDirective( int i )
             if( type == ERROR ) {
                 type = token_cmp( token, TOK_OS_OS2, TOK_OS_DOS );
                 if( type == ERROR ) {
-                    AsmError( UNDEFINED_MODEL_OPTION );
+                    AsmErr( UNKNOWN_MODEL_OPTION, token );
                     return( ERROR );
                 }
             }
@@ -1542,7 +1533,7 @@ static int ModelDirective( int i )
 
     module_prologue( ModuleInfo.model );
     ModuleInfo.cmdline = (LineNumber == 0);
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 // if count == 1, there's NO start address
@@ -1550,7 +1541,7 @@ static int ModelDirective( int i )
 
 int process_address(expr_list *);
 
-static int EndDirective( int i )
+static ret_code EndDirective( int i )
 /************************/
 {
     struct fixup        *fixup;
@@ -1566,9 +1557,9 @@ static int EndDirective( int i )
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
-        strcat( CurrString, " " );
-        strcat( CurrString, StartAddr );
-        InputQueueLine( CurrString );
+        strcat( CurrSource, " " );
+        strcat( CurrSource, StartAddr );
+        InputQueueLine( CurrSource );
         StartupDirectiveFound = FALSE;
         return( NOT_ERROR );
     }
@@ -1583,7 +1574,7 @@ static int EndDirective( int i )
         return( ERROR );
     }
 
-    if( opndx.empty)
+    if( opndx.type == EXPR_EMPTY )
         ;
     else if ( opndx.type == EXPR_ADDR ) {
         Modend = TRUE;
@@ -1611,10 +1602,10 @@ static int EndDirective( int i )
     }
 
     if (Options.output_format == OFORMAT_OMF) {
-        ModendRec = ObjNewRec( CMD_MODEND );
+        ModendRec = OmfNewRec( CMD_MODEND );
         ModendRec->d.modend.main_module = FALSE;
 
-        if( opndx.empty == TRUE ) {
+        if( opndx.type == EXPR_EMPTY ) {
             ModendRec->d.modend.start_addrs = FALSE;
             return( NOT_ERROR );
         }
@@ -1634,7 +1625,7 @@ static int EndDirective( int i )
         ModendRec->d.modend.ref.log = fixup->lr;
     } else {
 
-        if (opndx.empty == TRUE )
+        if (opndx.type == EXPR_EMPTY )
             return( NOT_ERROR );
 
         if (sym->state != SYM_EXTERNAL && sym->public == FALSE) {
@@ -1655,7 +1646,7 @@ static int EndDirective( int i )
  <alias_name> must NOT be defined elsewhere in the source!
 */
 
-static int AliasDirective( int i )
+static ret_code AliasDirective( int i )
 /*******************/
 {
     char *tmp;
@@ -1712,7 +1703,7 @@ static int AliasDirective( int i )
 
 // the NAME directive is ignored in Masm v6
 
-static int NameDirective( int i )
+static ret_code NameDirective( int i )
 /************************/
 {
     if( Options.module_name != NULL )
@@ -1748,11 +1739,9 @@ static int NameDirective( int i )
 }
 
 // .RADIX directive
-// currently only 10 is accepted
 
-static int RadixDirective( int i )
+static ret_code RadixDirective( int i )
 {
-    int start = i;
     expr_list       opndx;
 
     if (EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR)
@@ -1761,19 +1750,23 @@ static int RadixDirective( int i )
         AsmError(CONSTANT_EXPECTED);
         return( ERROR );
     }
-    if (opndx.value > 16 || opndx.value < 2) {
+    if ( opndx.value > 16 || opndx.value < 2 ) {
         AsmError( INVALID_RADIX_TAG );
         return( ERROR );
     }
-    /* todo: accept radix other than 10 */
-    if (opndx.value != 10) {
+#if 0
+    if ( opndx.value != 10 && opndx.value != 16 ) {
         AsmErr( NOT_SUPPORTED, AsmBuffer[start-1]->pos);
         return( ERROR );
     }
+#endif
     if (AsmBuffer[i]->token != T_FINAL) {
         AsmError(SYNTAX_ERROR);
         return( ERROR );
     }
+
+    ModuleInfo.radix = opndx.value;
+
     return(NOT_ERROR);
 }
 
@@ -1785,8 +1778,8 @@ static int comp_opt( uint direct )
 {
     // follow Microsoft MASM
     switch( direct ) {
-    case T_DOT_NO87:
-        return( P_NO87 );
+//    case T_DOT_NO87:
+//        return( P_NO87 );
     case T_DOT_8086:
         return( P_86 );
     case T_DOT_8087:
@@ -1823,14 +1816,14 @@ static int comp_opt( uint direct )
         return( P_MMX | P_K3D );
 #if ONEXMM
     case T_DOT_XMM:
-        return( P_686 | P_MMX | P_SSE | P_SSE2 | P_SSE3 );
+        return( P_MMX | P_SSEALL );
 #else
     case T_DOT_XMM:
-        return( P_MMX | P_SSE );
+        return( P_MMX | P_SSE1 );
     case T_DOT_XMM2:
-        return( P_MMX | P_SSE | P_SSE2 );
+        return( P_MMX | P_SSE1 | P_SSE2 );
     case T_DOT_XMM3:
-        return( P_MMX | P_SSE | P_SSE2 | P_SSE3 );
+        return( P_MMX | P_SSE1 | P_SSE2 | P_SSE3 | P_SSSE3 );
 #endif
     default:
         // not found
@@ -1856,7 +1849,6 @@ static int def_fpu( uint direct )
     }
 }
 
-#if defined( _STANDALONE_ )
 static void MakeCPUConstant( int i )
 /**********************************/
 {
@@ -1885,102 +1877,100 @@ static void MakeCPUConstant( int i )
 #endif
     return;
 }
-#endif
 
-/* set CPU, FPU parameter in ModuleInfo + curr_cpu */
+/* handles
+ .8086,
+ .[1|2|3|4|5|6]86[p],
+ .8087,
+ .[2|3]87,
+ .NO87, .MMX, .K3D, .XMM directives.
+ set CPU and FPU parameter in ModuleInfo.cpu + ModuleInfo.curr_cpu.
+ ModuleInfo.cpu is the value of Masm's @CPU symbol.
+ ModuleInfo.curr_cpu is the old OW Wasm value.
+ additional notes:
+ .[1|2|3|4|5|6]86 will reset .MMX, .K3D and .XMM,
+ OTOH, .MMX/.XMM won't automatically enable .586/.686
+*/
 
-int cpu_directive( int i )
-/************************/
-// handles .8086, .80386
+ret_code cpu_directive( int i )
 {
-    int                 temp;
+    int temp;
 
     if( i == T_DOT_NO87 ) {
-        curr_cpu &= ~P_FPU_MASK;  // turn off FPU bits
+        ModuleInfo.curr_cpu &= ~P_FPU_MASK;  // turn off FPU bits
     } else {
         if( ( temp = comp_opt( i ) ) == EMPTY ) {
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
-        if( temp & P_FPU_MASK ) {
-            curr_cpu &= ~P_FPU_MASK;
-            curr_cpu |= temp & P_FPU_MASK;           // setup FPU bits
+        if (temp & P_CPU_MASK) {
+            /* reset CPU, FPU and EXT bits */
+            ModuleInfo.curr_cpu &= ~( P_CPU_MASK | P_FPU_MASK | P_EXT_MASK | P_PM );
+
+            /* set CPU bits */
+            ModuleInfo.curr_cpu |= temp & ( P_CPU_MASK | P_PM );
+
+            /* set default FPU bits */
+            ModuleInfo.curr_cpu |= def_fpu( i ) & P_FPU_MASK;
         }
 
-        if (temp & P_CPU_MASK) {
-            if (temp & P_EXT_MASK)
-                curr_cpu &= ~( P_CPU_MASK );
-            else
-                curr_cpu &= ~( P_CPU_MASK | P_PM );
-
-            curr_cpu |= temp & ( P_CPU_MASK | P_PM );// setup CPU bits
-            curr_cpu &= ~P_FPU_MASK;
-            curr_cpu |= def_fpu( i ) & P_FPU_MASK;   // setup FPU bits
+        if( temp & P_FPU_MASK ) {
+            ModuleInfo.curr_cpu &= ~P_FPU_MASK;
+            ModuleInfo.curr_cpu |= temp & P_FPU_MASK;
         }
 
         if( temp & P_EXT_MASK ) {
-            curr_cpu &= ~P_EXT_MASK;
-            curr_cpu |= temp & P_EXT_MASK;
+            ModuleInfo.curr_cpu &= ~P_EXT_MASK;
+            ModuleInfo.curr_cpu |= temp & P_EXT_MASK;
         }
     }
-    /* set the MASM compatible @CPU value
-     0001: 86
-     0002: 186
-     0004: 286
-     0008: 386
-     0010: 486
-     0020: Pentium
-     0040: PPro
-     0080: protected instructions ok
-     0100: 87
-     0400: 287
-     0800: 387
-     */
 
-    temp = curr_cpu & P_CPU_MASK;
-    switch (temp) {
+    temp = ModuleInfo.curr_cpu & P_CPU_MASK;
+    switch ( temp ) {
     case P_186:
-        ModuleInfo.cpu = 0x3;
+        ModuleInfo.cpu = M_8086 | M_186;
         break;
     case P_286:
-        ModuleInfo.cpu = 0x7;
+        ModuleInfo.cpu = M_8086 | M_186 | M_286;
         break;
     case P_386:
-        ModuleInfo.cpu = 0xF;
+        ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386;
         break;
     case P_486:
-        ModuleInfo.cpu = 0x1F;
+        ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486;
         break;
     case P_586:
-        ModuleInfo.cpu = 0x3F;
+        ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486 | M_586;
         break;
     case P_686:
-        ModuleInfo.cpu = 0x5F;
+        // ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486 | M_586 | M_686;
+        /* Masm's .686 directive doesn't set the Pentium flag! A bug? */
+        ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486 | M_686;
         break;
     default:
-        ModuleInfo.cpu = 1;
+        ModuleInfo.cpu = M_8086;
         break;
     }
-    if ( curr_cpu & P_PM )
-        ModuleInfo.cpu = ModuleInfo.cpu | 0x80;
+    if ( ModuleInfo.curr_cpu & P_PM )
+        ModuleInfo.cpu = ModuleInfo.cpu | M_PROT;
 
-    temp = curr_cpu & P_FPU_MASK;
+    temp = ModuleInfo.curr_cpu & P_FPU_MASK;
     switch (temp) {
     case P_87:
-        ModuleInfo.cpu = ModuleInfo.cpu | 0x100;
+        ModuleInfo.cpu = ModuleInfo.cpu | M_8087;
         break;
     case P_287:
-        ModuleInfo.cpu = ModuleInfo.cpu | 0x500;
+        ModuleInfo.cpu = ModuleInfo.cpu | M_8087 | M_287;
         break;
     case P_387:
-        ModuleInfo.cpu = ModuleInfo.cpu | 0xD00;
+        ModuleInfo.cpu = ModuleInfo.cpu | M_8087 | M_287 | M_387;
         break;
     }
 
-#if defined( _STANDALONE_ )
+    DebugMsg(("cpu_directive: curr_cpu=%X, @Cpu=%X\n", ModuleInfo.curr_cpu, ModuleInfo.cpu ));
 
     MakeCPUConstant( i );
-    if (ModuleInfo.cpu & 0x78)
+    if (ModuleInfo.cpu & ( M_386 | M_486 | M_586 | M_686 ) )
         SetUse32Def( TRUE );
     else
         SetUse32Def( FALSE );
@@ -1988,15 +1978,12 @@ int cpu_directive( int i )
     /* Set @Cpu */
     /* differs from Codeinfo cpu setting */
 
-    DebugMsg(("cpu_directive: curr_cpu=%X, @Cpu=%X\n", curr_cpu, ModuleInfo.cpu));
     sym_Cpu = CreateConstant( "@Cpu", ModuleInfo.cpu, -1, TRUE);
-
-#endif
 
     return( NOT_ERROR );
 }
 
-static int MakeComm(
+static ret_code MakeComm(
     char *name,
     bool already_defd,
     int size,
@@ -2037,7 +2024,7 @@ static int MakeComm(
  COMM [langtype] [NEAR|FAR] label:type[:count]
  */
 
-static int CommDirective( int i )
+static ret_code CommDirective( int i )
 /******************/
 {
     char            *token;
@@ -2146,7 +2133,11 @@ static int CommDirective( int i )
     return( NOT_ERROR );
 }
 
-int ListingDirective( int directive, int i)
+// .[NO|X]LIST, .[NO|X]CREF, .[NO]LISTIF, .[NO]LISTMACRO
+// .LISTALL, .LISTMACROALL, .[LF|SF|TF]COND, .[X|L|S]ALL
+// PAGE, TITLE, SUBTITLE, SUBTTL directives
+
+static ret_code ListingDirective( int directive, int i)
 {
     i++;
     switch ( directive ) {
@@ -2199,166 +2190,9 @@ int ListingDirective( int directive, int i)
     return( NOT_ERROR );
 }
 
-// PUSHCONTEXT and POPCONTEXT directives
-// RADIX context is dummy
+// DOSSEG, .DOSSEG, .ALPHA, .SEQ directives
 
-#define CONT_ASSUMES 0
-#define CONT_RADIX   1
-#define CONT_LISTING 2
-#define CONT_CPU     3
-#define CONT_ALL     4
-
-typedef struct _assumes_context {
-    assume_info SegAssumeTable[NUM_SEGREGS];
-    assume_info StdAssumeTable[NUM_STDREGS];
-} assumes_context;
-
-typedef struct _listing_context {
-    unsigned list:1;
-    unsigned cref:1;
-} listing_context;
-
-typedef struct _cpu_context {
-    short cpu;          /* saved ModuleInfo.cpu */
-    enum asm_cpu cicpu; /* saved CodeInfo.cpu   */
-} cpu_context;
-
-typedef struct _radix_context {
-    uint_8 radix; /* there's no radix to save/restore yet */
-} radix_context;
-
-typedef struct _all_context {
-    assumes_context ac;
-    radix_context   rc;
-    listing_context lc;
-    cpu_context     cc;
-} all_context;
-
-static int ContextDirective( int directive, int i )
-{
-    int type;
-    context *pcontext;
-    assumes_context *acontext = NULL;
-    listing_context *lcontext = NULL;
-    cpu_context     *ccontext = NULL;
-    radix_context   *rcontext = NULL;
-    all_context     *alcontext;
-
-    static char *context[] = { "ASSUMES", "RADIX", "LISTING", "CPU", "ALL", NULL };
-
-    i++;
-    if (AsmBuffer[i]->token == T_ID) {
-        char **p;
-        for (p = context, type = CONT_ASSUMES; *p ; p++, type++) {
-            if (stricmp(*p, AsmBuffer[i]->string_ptr) == 0) {
-                i++;
-                if (AsmBuffer[i]->token == T_FINAL) {
-                    if (directive == T_POPCONTEXT) {
-                        /* for POPCONTEXT, check if the proper item is pushed */
-                        pcontext = peek( ContextStack, 0 );
-                        if (pcontext == NULL || pcontext->type != type) {
-                            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i-2]->pos);
-                            return( ERROR );
-                        }
-                        // get the item
-                        pcontext = pop( &ContextStack );
-
-                        // restore the values
-                        switch (type) {
-                        case CONT_ASSUMES:
-                            acontext = (assumes_context *)&pcontext->data;
-                            break;
-                        case CONT_RADIX:
-                            rcontext = (radix_context *)&pcontext->data;
-                            break;
-                        case CONT_LISTING:
-                            lcontext = (listing_context *)&pcontext->data;
-                            break;
-                        case CONT_CPU:
-                            ccontext = (cpu_context *)&pcontext->data;
-                            break;
-                        case CONT_ALL:
-                            alcontext = (all_context *)&pcontext->data;
-                            acontext = &alcontext->ac;
-                            rcontext = &alcontext->rc;
-                            lcontext = &alcontext->lc;
-                            ccontext = &alcontext->cc;
-                        }
-                        if (acontext) {
-                            SetSegAssumeTable( acontext->SegAssumeTable );
-                            SetStdAssumeTable( acontext->StdAssumeTable );
-                        }
-                        if (rcontext) {
-                        }
-                        if (lcontext) {
-                            ModuleInfo.list = lcontext->list;
-                            ModuleInfo.cref = lcontext->cref;
-                        }
-                        if (ccontext) {
-                            ModuleInfo.cpu     = ccontext->cpu;
-                            if (sym_Cpu)
-                                sym_Cpu->value = ccontext->cpu;
-                            curr_cpu = ccontext->cicpu;
-                        }
-                        // remove the item
-                        AsmFree(pcontext);
-                    } else {
-                        // setup a context item
-                        switch (type) {
-                        case CONT_ASSUMES:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(assumes_context));
-                            acontext = (assumes_context *)&pcontext->data;
-                            break;
-                        case CONT_RADIX:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(radix_context));
-                            rcontext = (radix_context *)&pcontext->data;
-                            break;
-                        case CONT_LISTING:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(listing_context));
-                            lcontext = (listing_context *)&pcontext->data;
-                            break;
-                        case CONT_CPU:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(cpu_context));
-                            ccontext = (cpu_context *)&pcontext->data;
-                            break;
-                        case CONT_ALL:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(all_context));
-                            alcontext = (all_context *)pcontext->data;
-                            acontext = &alcontext->ac;
-                            rcontext = &alcontext->rc;
-                            lcontext = &alcontext->lc;
-                            ccontext = &alcontext->cc;
-                            break;
-                        }
-
-                        pcontext->type = type;
-
-                        if (acontext) {
-                            GetSegAssumeTable( acontext->SegAssumeTable );
-                            GetStdAssumeTable( acontext->StdAssumeTable );
-                        }
-                        if (rcontext) {
-                        }
-                        if (lcontext) {
-                            lcontext->list = ModuleInfo.list;
-                            lcontext->cref = ModuleInfo.cref;
-                        }
-                        if (ccontext) {
-                            ccontext->cpu   = ModuleInfo.cpu;
-                            ccontext->cicpu = curr_cpu;
-                        }
-                        push( &ContextStack, pcontext );
-                    }
-                    return( NOT_ERROR );
-                }
-                break;
-            }
-        }
-    }
-    AsmError( SYNTAX_ERROR );
-    return( ERROR );
-}
-static int SegOrderDirective(int directive, int i)
+static ret_code SegOrderDirective(int directive, int i)
 {
     if (Options.output_format != OFORMAT_OMF &&
         Options.output_format != OFORMAT_BIN) {
@@ -2388,7 +2222,7 @@ static int SegOrderDirective(int directive, int i)
 
 // dispatcher for directives
 
-int directive( int i, long direct )
+ret_code directive( int i, long direct )
 {
 //    int ret;
 
@@ -2403,7 +2237,7 @@ int directive( int i, long direct )
         directive_listed = TRUE;
         return( NOT_ERROR );
     case T_INSTR:
-        InStrDef( 1, CurrString );
+        InStrDef( 1, CurrSource );
         directive_listed = TRUE;
         return( NOT_ERROR );
 #endif
@@ -2423,7 +2257,7 @@ int directive( int i, long direct )
     case T_PROC:
         return( ProcDef(i-1) );
     case T_ENDP:
-        return( ProcEnd(i-1) );
+        return( EndpDef(i-1) );
     case T_DOT_CODE:
     case T_DOT_STACK:
     case T_DOT_DATA:
@@ -2431,34 +2265,34 @@ int directive( int i, long direct )
     case T_DOT_FARDATA:
     case T_DOT_FARDATA_UN:
     case T_DOT_CONST:
-        return( SimSeg(i) );
+        return( SimplifiedSegDir( i ) );
     case T_OPTION:
-        return( OptionDirective(i+1) );
+        return( OptionDirective( i+1 ) );
     case T_TYPEDEF:
         return( Parse_Pass == PASS_1 ? TypeDef(i-1) : NOT_ERROR );
     case T_INVOKE:
-        return( InvokeDef(i+1) );
+        return( InvokeDirective( i+1 ) );
     case T_DOT_IF:
     case T_DOT_WHILE:
     case T_DOT_REPEAT:
-        return( HllStartDef(i) );
+        return( HllStartDef( i ) );
     case T_DOT_BREAK:
     case T_DOT_CONTINUE:
     case T_DOT_ELSEIF:
     case T_DOT_ELSE:
-        return( HllExitDef(i) );
+        return( HllExitDef( i ) );
     case T_DOT_ENDIF:
     case T_DOT_ENDW:
     case T_DOT_UNTIL:
     case T_DOT_UNTILCXZ:
-        return( HllEndDef(i) );
+        return( HllEndDef( i ) );
     case T_PURGE:
-        return( PurgeMacro(i+1) );
+        return( PurgeMacro( i+1 ) );
     case T_ALIAS:
         return( AliasDirective( i ) );
     case T_EXTERN:
     case T_EXTRN:
-        return( Parse_Pass == PASS_1 ? ExternDef(i+1) : NOT_ERROR );
+        return( Parse_Pass == PASS_1 ? ExternDirective(i+1) : NOT_ERROR );
     case T_COMM:
         return( Parse_Pass == PASS_1 ? CommDirective(i+1) : NOT_ERROR );
     case T_EXTERNDEF:
@@ -2494,14 +2328,14 @@ int directive( int i, long direct )
         return( ModelDirective(i) );
     case T_POPCONTEXT:
     case T_PUSHCONTEXT:
-        return( ContextDirective(direct, i ) );
+        return( ContextDirective( direct, i ) );
     case T_DOT_SEQ: /* this is default */
     case T_DOT_DOSSEG:
     case T_DOSSEG:
     case T_DOT_ALPHA:
         return( SegOrderDirective(direct, i ) );
     case T_DOT_RADIX:
-        return( RadixDirective(i+1));
+        return( RadixDirective( i+1 ) );
     case T_ECHO:
         return(Parse_Pass == PASS_1 ? EchoDef(i+1) : NOT_ERROR );
     case T_DOT_286C:

@@ -26,7 +26,7 @@ linker = wlink.exe
 
 #cflags stuff
 #########
-extra_c_flags =-D_STANDALONE_ -DFASTPASS=1
+extra_c_flags =
 !if $(DEBUG)
 extra_c_flags += -od -d2 -DDEBUG_OUT
 !else
@@ -47,7 +47,7 @@ CC = wcc386 -q -3$(CCV) -bc -bt=linux $(inc_dirs) $(extra_c_flags) -fo$@
 .c{$(OUTD)}.obj:
      $(CC) $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/assume.obj  &
+proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj &
            $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  &
            $(OUTD)/msgtext.obj  $(OUTD)/macro.obj    $(OUTD)/condasm.obj &
@@ -65,7 +65,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/write.obj    $(OUTD)/assume.obj  &
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif
-           $(OUTD)/autodept.obj
+           $(OUTD)/autodept.obj $(OUTD)/context.obj
 ######
 
 ALL: $(OUTD) $(OUTD)/$(name)
@@ -73,7 +73,7 @@ ALL: $(OUTD) $(OUTD)/$(name)
 $(OUTD):
 	@if not exist $(OUTD) mkdir $(OUTD)
 
-$(OUTD)/$(name) : H/opcodes.gh $(proj_obj)
+$(OUTD)/$(name) : $(proj_obj)
 	@%write  $^*.lnk $(lflagsl)
 	@%append $^*.lnk file { $(proj_obj) }
 	@%append $^*.lnk name $@.
@@ -82,13 +82,10 @@ $(OUTD)/$(name) : H/opcodes.gh $(proj_obj)
 $(OUTD)/msgtext.obj: msgtext.c H/msgtext.h H/usage.h H/banner.h
 	$(CC) msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/opcodes.gh
+$(OUTD)/parser.obj: parser.c H/instruct.h H/reswords.h
 	$(CC) parser.c
     
 ######
-
-H/opcodes.gh: opcodes.tok
-	Bin\mkopcode.exe opcodes.tok $^@
 
 clean:
 	@erase $(OUTD)\*.

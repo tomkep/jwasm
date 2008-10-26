@@ -33,10 +33,10 @@
 #define _LISTING_H_INCLUDED
 
 // extern void LstMsg( const char *format, ... );
-extern void OpenLstFile( void );
-extern void CloseLstFile( void );
-extern void WriteLstFile( int type, unsigned int ofs, void * sym );
-extern void WriteCRef( void );
+extern void LstOpenFile( void );
+extern void LstCloseFile( void );
+extern void LstWriteFile( int type, unsigned int ofs, void * sym );
+extern void LstWriteCRef( void );
 
 #define LSTTYPE_LIDATA    0
 #define LSTTYPE_EQUATE    1

@@ -8,7 +8,7 @@
  */
 
 #ifndef FASTPASS
-#define FASTPASS 0
+#define FASTPASS 1
 #endif
 
 #if FASTPASS
@@ -51,6 +51,7 @@ extern bool UseSavedState; /* is 1 if preprocessed lines are to be used */
 void SaveState( void );
 void SegmentSaveState( void );
 void AssumeSaveState( void );
+void ContextSaveState( void );
 void StoreLine( char * );
 void SkipSavedState( void );
 void InputQueueLineEx( char *, bool );

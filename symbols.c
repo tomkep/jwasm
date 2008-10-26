@@ -65,6 +65,7 @@ static unsigned         SymCount;    /* Number of symbols in table */
 static char             szDate[12];
 static char             szTime[12];
 
+struct asm_sym *sym_CurSeg;
 struct asm_sym symPC;
 
 StrCmpFunc SymCmpFunc = stricmp;
@@ -185,12 +186,9 @@ static struct asm_sym **SymFind( const char *name )
             }
     }
 
-#if defined( _STANDALONE_ )
     i =hashpjw( name );
     sym = &sym_table[ i ];
-#else
-    sym = &AsmSymHead;
-#endif
+
     for( ; *sym; sym = &((*sym)->next) ) {
         if (len == (*sym)->name_size && SymCmpFunc( name, (*sym)->name ) == 0 ) {
 #if DYNREO
@@ -301,7 +299,6 @@ struct asm_sym *SymLookupLabel( const char *name, int bLocal)
 static void FreeASym( struct asm_sym *sym )
 /*****************************************/
 {
-#if defined( _STANDALONE_ )
     struct asmfixup     *curr;
     struct asmfixup     *next;
 
@@ -311,12 +308,9 @@ static void FreeASym( struct asm_sym *sym )
         AsmFree( curr );
         curr = next;
     }
-#endif
     AsmFree( sym->name );
     AsmFree( sym );
 }
-
-#if defined( _STANDALONE_ )
 
 #if 0
 
@@ -437,8 +431,6 @@ struct asm_sym *SymSearch( const char *name )
     return( *sym_ptr );
 }
 
-#endif
-
 void DumpSymbols( void );
 
 void SymFini( void )
@@ -557,6 +549,11 @@ void SymInit( )
     WordSize.name_size = strlen(WordSize.name);
     SymAddToTable(&WordSize);
 
+    sym_CurSeg = SymCreate("@CurSeg", TRUE );
+    sym_CurSeg->state = SYM_TMACRO;
+    sym_CurSeg->defined = TRUE;
+    sym_CurSeg->predefined = TRUE;
+
     return;
 
 }
@@ -591,8 +588,6 @@ void SymPassInit( int pass )
     }
 #endif
 }
-
-#if defined( _STANDALONE_ )
 
 static int compare_fn( const void *p1, const void *p2 )
 /*****************************************************/
@@ -751,4 +746,3 @@ void DumpSymbols( void )
 }
 #endif
 
-#endif

@@ -28,7 +28,7 @@
 *
 ****************************************************************************/
 
-
+#include <ctype.h>
 #include "globals.h"
 
 #include "symbols.h"
@@ -187,19 +187,18 @@ static char *CMangler( struct asm_sym *sym, char *buffer )
 static mangle_func GetMangler( char *mangle_type )
 /************************************************/
 {
-    mangle_func         mangler;
-
-    mangler = NULL;
-    if( mangle_type != NULL ) {
-        if( stricmp( mangle_type, "C" ) == 0 ) {
-            mangler = CMangler;
-        } else if( stricmp( mangle_type, "N" ) == 0 ) {
-            mangler = AsmMangler;
-        } else {
-            AsmErr( UNKNOWN_MANGLER, mangle_type );
+    if( mangle_type != NULL && mangle_type[1] == NULLC ) {
+        switch ( tolower( *mangle_type ) ) {
+        case 'c':
+            return( CMangler );
+        case 'n':
+            return( AsmMangler );
         }
     }
-    return( mangler );
+    if ( mangle_type )
+        AsmErr( UNKNOWN_MANGLER, mangle_type );
+
+    return( NULL );
 }
 
 char *Mangle( struct asm_sym *sym, char *buffer )

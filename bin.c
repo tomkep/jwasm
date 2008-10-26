@@ -127,7 +127,7 @@ static void CalcOffset( dir_node *curr )
 // write section contents
 // this is done after the last step only!
 
-int bin_write_data(int fh)
+ret_code bin_write_data(int fh)
 {
     dir_node *curr;
     dir_node *seg;

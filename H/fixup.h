@@ -79,9 +79,7 @@ struct asmfixup {
 extern int_8            Frame;
 extern uint_8           Frame_Datum;
 
-#if defined( _STANDALONE_ )
 extern void             find_frame( struct asm_sym *sym );
-#endif
 extern struct asmfixup  *InsFixups[3];
 extern struct asmfixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
 extern void             add_frame( void );

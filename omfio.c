@@ -95,13 +95,13 @@ void ObjWriteClose( OBJ_WFILE *obj ) {
 /**/myassert( obj != NULL );
 
     if( obj->in_rec ) {
-        ObjWEndRec( obj );
+        OmfWEndRec( obj );
     }
     close( obj->fh );
     AsmFree( obj );
 }
 
-void ObjWBegRec( OBJ_WFILE *obj, uint_8 command ) {
+void OmfWBegRec( OBJ_WFILE *obj, uint_8 command ) {
 /***********************************************/
     uint_8  buf[3];
 
@@ -117,7 +117,7 @@ void ObjWBegRec( OBJ_WFILE *obj, uint_8 command ) {
     obj->length = 0;
 }
 
-void ObjWFlushBuffer( OBJ_WFILE *obj ) {
+void OmfWFlushBuffer( OBJ_WFILE *obj ) {
 /*******************************************/
     size_t  len_to_write;
     uint_8  checksum;
@@ -137,7 +137,7 @@ void ObjWFlushBuffer( OBJ_WFILE *obj ) {
     obj->in_buf = 0;
 }
 
-void ObjWEndRec( OBJ_WFILE *obj ) {
+void OmfWEndRec( OBJ_WFILE *obj ) {
 /*******************************/
     uint_8  buf[2];
     uint_8  checksum;
@@ -145,7 +145,7 @@ void ObjWEndRec( OBJ_WFILE *obj ) {
 /**/myassert( obj != NULL && obj->in_rec );
 
     if( obj->in_buf > 0 ) {
-        ObjWFlushBuffer( obj );
+        OmfWFlushBuffer( obj );
     }
     ++obj->length;                  /* add 1 for checksum byte */
     WriteU16( buf, obj->length );
@@ -160,47 +160,47 @@ void ObjWEndRec( OBJ_WFILE *obj ) {
     obj->in_rec = 0;
 }
 
-void ObjWrite8( OBJ_WFILE *obj, uint_8 byte ) {
+void OmfWrite8( OBJ_WFILE *obj, uint_8 byte ) {
 /*******************************************/
 /**/myassert( obj != NULL && obj->in_rec );
 
     if( obj->in_buf == OBJ_BUFFER_SIZE ) {
-        ObjWFlushBuffer( obj );
+        OmfWFlushBuffer( obj );
     }
     obj->buffer[ obj->in_buf++ ] = byte;
 }
 
-void ObjWrite16( OBJ_WFILE *obj, uint_16 word ) {
+void OmfWrite16( OBJ_WFILE *obj, uint_16 word ) {
 /*********************************************/
 /**/myassert( obj != NULL && obj->in_rec );
 
     if( obj->in_buf >= OBJ_BUFFER_SIZE - 1 ) {
-        ObjWFlushBuffer( obj );
+        OmfWFlushBuffer( obj );
     }
     WriteU16( obj->buffer + obj->in_buf, word );
-    obj->in_buf += 2;
+    obj->in_buf += sizeof(uint_16);
 }
 
-void ObjWrite32( OBJ_WFILE *obj, uint_32 dword ) {
+void OmfWrite32( OBJ_WFILE *obj, uint_32 dword ) {
 /**********************************************/
 /**/myassert( obj != NULL && obj->in_rec );
 
     if( obj->in_buf >= OBJ_BUFFER_SIZE - 3 ) {
-        ObjWFlushBuffer( obj );
+        OmfWFlushBuffer( obj );
     }
     WriteU32( obj->buffer + obj->in_buf, dword );
-    obj->in_buf += 4;
+    obj->in_buf += sizeof( uint_32);
 }
 
-void ObjWriteIndex( OBJ_WFILE *obj, uint_16 index ) {
+void OmfWriteIndex( OBJ_WFILE *obj, uint_16 index ) {
 /*************************************************/
     if( index > 0x7f ) {
-        ObjWrite8( obj, 0x80 | ( index >> 8 ) );
+        OmfWrite8( obj, 0x80 | ( index >> 8 ) );
     }
-    ObjWrite8( obj, index & 0xff );
+    OmfWrite8( obj, index & 0xff );
 }
 
-void ObjWrite( OBJ_WFILE *obj, const uint_8 *buf, size_t length ) {
+void OmfWrite( OBJ_WFILE *obj, const uint_8 *buf, size_t length ) {
 /***************************************************************/
     const uint_8    *write;
     size_t          amt;
@@ -220,7 +220,7 @@ void ObjWrite( OBJ_WFILE *obj, const uint_8 *buf, size_t length ) {
             write += amt;
             length -= amt;
         }
-        ObjWFlushBuffer( obj );
+        OmfWFlushBuffer( obj );
     }
 }
 
@@ -237,7 +237,7 @@ static uint_8 checkSum( const uint_8 *buf, uint_16 length ) {
     return( checksum );
 }
 
-void ObjWriteRec( OBJ_WFILE *obj, uint_8 command, uint_16 length,
+void OmfWriteRec( OBJ_WFILE *obj, uint_8 command, uint_16 length,
     const uint_8 *contents ) {
 /***************************************************************/
 /*

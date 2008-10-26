@@ -45,10 +45,16 @@
 
 #define BACKQUOTES 1  /* allow IDs enclosed in ` */
 
-char                    *CurrString;    // Current Input Line
-char                    *CurrStringEnd; // free space in current line
-
 extern int              get_instruction_position( char *string );
+
+char                    *CurrSource;      // Current Input Line
+char                    *StringBufferEnd; // start free space in string buffer
+
+// token_stringbuf - buffer in which to store token strings
+// must be larger than a line since it is used for string expansion
+
+static char             token_stringbuf[8192];
+
 
 static uint_8 g_opcode; /* directive flags for current line */
 
@@ -65,10 +71,6 @@ typedef struct {
     char *output;
 } ioptrs;
 
-#if defined( _STANDALONE_ )
-
-extern global_options   Options;
-
 void InitTokenBuffer( )
 {
     int         count;
@@ -82,30 +84,29 @@ void InitTokenBuffer( )
 void GetInsString( enum asm_token token, char *string, int len )
 /**************************************************************/
 {
-    int index;
+    const char *name;
 
-    if( len > AsmOpcode[ token ].len ) {
-        len = AsmOpcode[ token ].len;
-        index = AsmOpcode[ token ].index;
-        if( AsmChars[index]== '.' ) {
-            index++;
+    if( len > AsmResWord[ token ].len ) {
+        len = AsmResWord[ token ].len;
+        name = AsmResWord[ token ].name;
+        if( *name == '.' ) {
+            name++;
             len--;
         }
-        strncpy( string, &(AsmChars[ index ]), len );
+        strncpy( string, name, len );
         string[ len ] = '\0';
     } else {
         *string='\0';
     }
     return;
 }
-#endif
 
 typedef union {
         float   f;
         long    l;
 } NUMBERFL;
 
-static int get_float( struct asm_tok *buf, ioptrs *p )
+static ret_code get_float( struct asm_tok *buf, ioptrs *p )
 /**********************************************************************/
 {
     /* valid floats look like:  (int)[.(int)][e(int)] */
@@ -171,7 +172,7 @@ static void array_mul_add( unsigned char *buf, unsigned base, unsigned long num,
     }
 }
 
-static int get_string( struct asm_tok *buf, ioptrs *p )
+static ret_code get_string( struct asm_tok *buf, ioptrs *p )
 /***********************************************************************/
 {
     char    symbol_o;
@@ -384,17 +385,17 @@ static int get_string( struct asm_tok *buf, ioptrs *p )
 // h: base 16
 // o or q: base 8
 
-static int get_number( struct asm_tok *buf, ioptrs *p )
+static ret_code get_number( struct asm_tok *buf, ioptrs *p )
 /***********************************************************************/
 {
     char                *ptr = p->input;
     char                *dig_start;
-    char                first_char_0 = FALSE;
-    unsigned            extra;
+    char                *dig_end;
     unsigned            len;
     unsigned            base = 0;
     unsigned            digits_seen;
     unsigned long       val;
+    char                last_char;
 
 #define VALID_BINARY    0x0003
 #define VALID_OCTAL     0x00ff
@@ -402,155 +403,123 @@ static int get_number( struct asm_tok *buf, ioptrs *p )
 #define OK_NUM( t )     ((digits_seen & ~VALID_##t) == 0)
 
     digits_seen = 0;
-
-    extra = 0;
-    if( *ptr == '0' ) {
-        if( tolower( *(ptr+1) ) == 'x' ) {
-            ptr+=2;
-            base = 16;
-        } else {
-            ptr += 1;
-            first_char_0 = TRUE;
-        }
+#if CHEXPREFIX
+    if( *ptr == '0' && (tolower( *(ptr+1) ) == 'x' ) ) {
+        ptr += 2;
+        base = 16;
     }
+#endif
     dig_start = ptr;
-    for( ;; ) {
+    for( ;; ptr++ ) {
         if (*ptr >= '0' && *ptr <= '9')
             digits_seen |= 1 << (*ptr - '0');
         else {
-            switch( tolower( *ptr ) ) {
-            case 'a':
-                digits_seen |= 1 << 10;
+            last_char = tolower( *ptr );
+            if ( last_char >= 'a' && last_char <= 'f' && isalnum( *(ptr+1) ) )
+                digits_seen |= 1 << (last_char + 10 - 'a');
+            else
                 break;
-            case 'b':
-                if( base == 0
-                    && OK_NUM( BINARY )
-                    && !isxdigit( ptr[1] )
-                    && tolower( ptr[1] ) != 'h' ) {
-                    base = 2;
-                    extra = 1;
-                    goto done_scan;
-                }
-                digits_seen |= 1 << 11;
-                break;
-            case 'c':
-                digits_seen |= 1 << 12;
-                break;
-            case 'd':
-                if( base == 0
-                    && OK_NUM( DECIMAL )
-                    && !isxdigit( ptr[1] )
-                    && tolower( ptr[1] ) != 'h' ) {
-                    if( !isalnum( ptr[1] ) && ptr[1] != '_' ) {
-                        base = 10;
-                        extra = 1;
-                    }
-                    goto done_scan;
-                }
-                digits_seen |= 1 << 13;
-                break;
-            case 'e': /* note that this could NOT be part of a float */
-                digits_seen |= 1 << 14;
-                break;
-            case 'f':
-                digits_seen |= 1U << 15;
-                break;
-            case 'y':
-                base = 2;
-                extra = 1;
-                goto done_scan;
-            case 'h':
-                base = 16;
-                extra = 1;
-                goto done_scan;
-            case 'q':
-            case 'o':
+        }
+    }
+#if CHEXPREFIX
+    if ( base != 0 ) {
+        dig_end = ptr;
+        if ( digits_seen == 0 )
+            base = 0;
+    } else
+#endif
+    switch( last_char ) {
+    case 'h':
+        base = 16;
+        dig_end = ptr;
+        ptr++;
+        break;
+    case 'b':
+    case 'y':
+        if( OK_NUM( BINARY ) ) {
+            base = 2;
+            dig_end = ptr;
+            ptr++;
+        }
+        break;
+    case 'd':
+    case 't':
+        if( OK_NUM( DECIMAL ) ) {
+            base = 10;
+            dig_end = ptr;
+            ptr++;
+        }
+        break;
+    case 'q':
+    case 'o':
+        if( OK_NUM( OCTAL ) ) {
+            base = 8;
+            dig_end = ptr;
+            ptr++;
+        }
+        break;
+    case '.':
+    //case 'r': 
+        /* note that a float MUST contain a dot
+         * OR be ended with an "r" ('r' is not Masm compatible!)
+         * 1234e78 is NOT a valid float
+         */
+        return( get_float( buf, p ) );
+    default:
+        dig_end = ptr;
+#if COCTALS
+        if( Options.allow_c_octals && *dig_start == '0' ) {
+            if( OK_NUM( OCTAL ) ) {
                 base = 8;
-                extra = 1;
-                goto done_scan;
-            case '.':
-            case 'r':
-            /* note that a float MUST contain a dot
-             * OR be ended with an "r"
-             * 1234e78 is NOT a valid float */
-
-                return( get_float( buf, p ) );
-            case 't':
-                base = 10;
-                extra = 1;
-                goto done_scan;
-            default:
-                goto done_scan;
+                break;
             }
         }
-        ++ptr;
-    }
-done_scan:
-    if( digits_seen == 0 ) {
-        if( !first_char_0 ) {
-            return( get_string( buf, p ) );
-        }
-        digits_seen |= 1;
-        first_char_0 = FALSE;
-        dig_start = p->input;
-    }
-#if defined( _STANDALONE_ )
-    if( !Options.allow_c_octals ) {
-        first_char_0 = FALSE;
-    }
 #endif
-    buf->token = T_NUM;
-    if( base == 0 ) {
-        base = first_char_0 ? 8 : 10;
-    }
-    switch( base ) {
-    case 10:
-        if( OK_NUM( DECIMAL ) )
-            break;
-        /* fall through */
-    case 8:
-        if( OK_NUM( OCTAL ) )
-            break;
-        /* fall through */
-    case 2:
-        if( OK_NUM( BINARY ) )
-            break;
-        /* fall through */
-        //AsmError( INVALID_NUMBER_DIGIT );
-        /* swallow remainder of token */
-        while( isalnum( *ptr )
-            || *ptr == '_'
-            || *ptr == '$'
-            || *ptr == '@'
-            || *ptr == '?' ) {
-            ++ptr;
-        }
-        buf->token = T_BAD_NUM;
+        /* radix      max. digits_seen
+         -----------------------------------------------------------
+         2            3      2^2-1  (0,1)
+         8            255    2^8-1  (0,1,2,3,4,5,6,7)
+         10           1023   2^10-1 (0,1,2,3,4,5,6,7,8,9)
+         16           65535  2^16-1 (0,1,2,3,4,5,6,7,8,9,a,b,c,d,e,f)
+         */
+        if ( digits_seen < (1U << ModuleInfo.radix) )
+            base = ModuleInfo.radix;
         break;
     }
-    /* copy the string, fix input & output pointers */
-    len = ptr - p->input + extra;
-    strncpy( p->output, p->input, len );
+
     buf->string_ptr = p->output;
-    p->output += len;
-    *p->output = '\0';
-    p->output++;
-    p->input = ptr + extra;
-    memset(buf->bytes, 0, sizeof(buf->bytes));
-    while( dig_start < ptr ) {
-        if( isdigit( *dig_start ) ) {
-            val = *dig_start - '0';
-        } else {
-            val = tolower( *dig_start ) - 'a' + 10;
+    memset( buf->bytes, 0, sizeof( buf->bytes ) );
+
+    if ( base != 0 && is_valid_id_char( *ptr ) == FALSE ) {
+        buf->token = T_NUM;
+        while( dig_start < dig_end ) {
+            if( *dig_start <= '9' ) {
+                val = *dig_start - '0';
+            } else {
+                val = tolower( *dig_start ) - 'a' + 10;
+            }
+            array_mul_add( buf->bytes, base, val, sizeof( buf->bytes ) );
+            ++dig_start;
         }
-        array_mul_add( buf->bytes, base, val, sizeof( buf->bytes ) );
-        ++dig_start;
+    } else {
+        buf->token = T_BAD_NUM;
+        /* swallow remainder of token */
+        while( is_valid_id_char( *ptr ) ) ++ptr;
+        //AsmError( INVALID_NUMBER_DIGIT );
     }
+
+    len = ptr - p->input;
+    memcpy( p->output, p->input, len );
+
+    p->output += len;
+    *p->output++ = NULLC;
+    p->input = ptr;
+
     return( NOT_ERROR );
 } /* get_number */
 
 #if BACKQUOTES
-static int get_id_in_backquotes( struct asm_tok *buf, ioptrs *p )
+static ret_code get_id_in_backquotes( struct asm_tok *buf, ioptrs *p )
 /*********************************************************************************/
 {
     buf->string_ptr = p->output;
@@ -574,7 +543,7 @@ static int get_id_in_backquotes( struct asm_tok *buf, ioptrs *p )
 
 // get an ID. will always return NOT_ERROR.
 
-static int get_id( struct asm_tok *buf, ioptrs *p )
+static ret_code get_id( struct asm_tok *buf, ioptrs *p )
 /***********************************************************************/
 {
     int  count;
@@ -604,13 +573,20 @@ static int get_id( struct asm_tok *buf, ioptrs *p )
 //  DebugMsg(("found item >%s< in instruction table, rm=%X\n", buf->string_ptr, AsmOpTable[count].rm_byte));
     buf->value = AsmOpTable[count].token;
 
+    /* to do: if ID is an instruction, test whether the instruction is active
+     with current cpu settings (example: MONITOR is an instruction if .XMM is
+     set, else it is an ID)
+     */
     if( AsmOpTable[count].opnd_type[OPND1] != OP_SPECIAL ) {
         buf->token = T_INSTRUCTION;
         return( NOT_ERROR );
     }
 
-    /* <opcode> contains further infos: register number for OP_REGISTER,
-     flags for OP_DIRECTIVE, operator precedence for OP_UNARY_OPERATOR, ...
+    /* for OP_SPECIAL, field <opcode> contains further infos:
+     - OP_REGISTER:       register number
+     - OP_DIRECTIVE:      OPCF_xxx flags
+     - OP_UNARY_OPERATOR: operator precedence
+     ...
      */
     buf->opcode = AsmOpTable[count].opcode;
 
@@ -643,7 +619,7 @@ static int get_id( struct asm_tok *buf, ioptrs *p )
     return( NOT_ERROR );
 }
 
-static int get_special_symbol( struct asm_tok *buf, ioptrs *p )
+static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
 /***********************************************************/
 {
     char    symbol;
@@ -672,7 +648,6 @@ static int get_special_symbol( struct asm_tok *buf, ioptrs *p )
         *(p->output)++ = *(p->input)++;
         *(p->output)++ = '\0';
         break;
-#if defined( _STANDALONE_ )
     case '=' :
         if (*(p->input+1) != '=') {
             buf->token = T_DIRECTIVE;
@@ -682,7 +657,6 @@ static int get_special_symbol( struct asm_tok *buf, ioptrs *p )
             *(p->output)++ = '\0';
             break;
         }
-#endif
     case '!' :
     case '<' :
         /* a hack to make C style expressions possible */
@@ -725,7 +699,7 @@ static int get_special_symbol( struct asm_tok *buf, ioptrs *p )
 // get one token
 // return values: NOT_ERROR, ERROR, EMPTY
 
-static int GetToken(unsigned int buf_index, ioptrs *p )
+static ret_code GetToken(unsigned int buf_index, ioptrs *p )
 {
     int rc;
 
@@ -775,13 +749,10 @@ int Tokenize( char *string, int index )
     int                         rc;
     ioptrs                      p;
     unsigned int                buf_index;
-    // stringbuf - buffer in which to store strings
-    // must be larger than a line since it is used for string expansion
-    static char                 stringbuf[8192];
 
     if (index == 0) {
-        CurrString = string;
-        p.output = stringbuf;
+        CurrSource = string;
+        p.output = token_stringbuf;
         g_opcode = 0;
         expansion = FALSE;
         p.input = string;
@@ -792,7 +763,7 @@ int Tokenize( char *string, int index )
             expansion = TRUE;
         }
     } else {
-        p.output = CurrStringEnd;
+        p.output = StringBufferEnd;
         p.input = string;
     }
 
@@ -827,6 +798,58 @@ int Tokenize( char *string, int index )
     AsmBuffer[buf_index]->token = T_FINAL;
     AsmBuffer[buf_index]->pos = p.input;
     *p.output++ = NULLC;
-    CurrStringEnd = p.output;
+    StringBufferEnd = p.output;
     return( buf_index );
+}
+
+/* get size of token buffer status */
+
+int GetTokenStateSize( void )
+{
+    return( sizeof( int ) +
+            (Token_Count+1) * sizeof( struct asm_tok ) +
+            sizeof( char * ) +
+            sizeof( int ) +
+            ( StringBufferEnd - token_stringbuf ) );
+}
+
+/* save the token buffer status.
+ This is
+ - variable Token_Count
+ - variable AsmBuffer[0..Token_Count]
+ - variable CurrSource
+ - variable token_stringbuf (StringBufferEnd points to end of buffer)
+ */
+
+void SaveTokenState( unsigned char * pSave )
+{
+    int i;
+    *(int *)pSave = Token_Count;
+    pSave += sizeof( int );
+    for (i = 0; i <= Token_Count; i++, pSave += sizeof( struct asm_tok ) )
+        memcpy( pSave, AsmBuffer[i], sizeof( struct asm_tok ) );
+    *(char * *)pSave = CurrSource;
+    pSave += sizeof( char * );
+    *(int *)pSave = StringBufferEnd - token_stringbuf;
+    pSave += sizeof( int );
+    memcpy( pSave, token_stringbuf, StringBufferEnd - token_stringbuf );
+    return;
+}
+
+/* restore token state previously saved with SaveTokenState() */
+
+void RestoreTokenState( unsigned char * pSave )
+{
+    int i;
+    Token_Count = *(int *)pSave;
+    pSave += sizeof( int );
+    for (i = 0; i <= Token_Count; i++, pSave += sizeof( struct asm_tok ) )
+        memcpy( AsmBuffer[i], pSave, sizeof( struct asm_tok ) );
+    CurrSource = *(char * *)pSave;
+    pSave += sizeof( char * );
+    i = *(int *)pSave;
+    pSave += sizeof( int );
+    memcpy( token_stringbuf, pSave, i );
+    StringBufferEnd = token_stringbuf + i;
+    return;
 }

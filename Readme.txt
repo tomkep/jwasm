@@ -63,7 +63,7 @@
 
     4. JWasm Features
 
-    - SSE1, SSE2 and SSE3 are supported.
+    - SSE1, SSE2, SSE3 and SSSE3 are supported.
     - OWORD type.
     - IMAGEREL and SECTIONREL operator.
     - WATCOM register calling convention.
@@ -79,7 +79,7 @@
 
     The binary packages contain samples in subdirectory SAMPLES.
 
-    As far as programming for Win32 is concerned: JWasm should be 
+    As far as programming for Win32 is concerned: JWasm should be
     compatible with recent versions of both Win32Inc and Masm32.
 
     For output formats other than BIN, JWasm's output has to be linked to
@@ -138,7 +138,7 @@
     - Type "coerces" for DWORD data items defined in a 32bit segment are
       ignored by Masm, i.e., "dd far16 ptr <symbol>" will generate a
       near32 fixup instead of a far16 one.
-    - if the ALIGN directive has to add 5 bytes in 32bit code segments, 
+    - if the ALIGN directive has to add 5 bytes in 32bit code segments,
       Masm includes an "add eax,0" opcode, which isn't a no-op because
       flags are modified.
 
@@ -169,7 +169,6 @@
       - OLDMACROS
       - EXPR16
       - READONLY
-    - .RADIX
     - types SQWORD, MMWORD, XMMWORD (Masm v8+)
     - operators LOW32, HIGH32 (Masm v8+)
 
@@ -183,7 +182,7 @@
     9. How to Create the JWasm Binaries
 
      To create the JWasm binaries JWASMnnS is needed. The assembler is
-    written in C, as default Open Watcom is used for compilation, but a
+    written in C, as default Open Watcom is used to compile it, but a
     makefile for MS VC (MSVC.MAK, tested with MS VC Toolkit 2003) is also
     supplied.
      The default Makefile is for Windows and DOS. It is intended to be run

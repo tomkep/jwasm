@@ -56,25 +56,20 @@
 #define BIN_SUPPORT  1 /* support BIN output format              */
 #define IMAGERELSUPP 1 /* support IMAGEREL operator (COFF+ELF)   */
 #define SECRELSUPP   1 /* support SECTIONREL operator (COFF+ELF) */
+#define SSSE3SUPP    1 /* support SSSE3 instruction set          */
 #define BUILD_TARGET 0 /* support "build target" (obsolete)      */
+
 
 #define FASTMEM      1 /* fast memory allocation */
 #define OWREGCONV    0 /* support 'r' and 's' suffix for cpu */
-
+#define COCTALS      0 /* allow C form of octals */
+#define CHEXPREFIX   0 /* accept "0x" as hex number prefix */
 
 #include "errmsg.h"
 
 #ifndef PATH_MAX
 #define PATH_MAX 259
 #endif
-
-/* function return values */
-
-#define EMPTY                   -2
-#define ERROR                   -1
-#define NOT_ERROR               1
-#define SCRAP_INSTRUCTION       3 /* used by jmp() */
-#define INDIRECT_JUMP           4 /* used by jmp() */
 
 #define NULLC                   '\0'
 #define NULLS                   "\0"
@@ -86,11 +81,22 @@
 #define NOT_BIT_345             0xC7
 #define NOT_BIT_67              0x3F
 
+/* function return values */
+
+typedef enum {
+ EMPTY = -2,
+ ERROR = -1,
+ NOT_ERROR = 0,
+ STRING_EXPANDED = 1,
+ SCRAP_INSTRUCTION = 2, /* used by jmp() */
+ INDIRECT_JUMP = 3      /* used by jmp() */
+} ret_code;
+
 enum naming_conventions {
     DO_NOTHING,
     ADD_USCORES,            /*  put uscores on the front of labels
                              *  & the back of procedures
-                             *  this is what the compiler does with /3r
+                             *  this is what the OW compiler does with /3r
                              */
     REMOVE_USCORES,         /*
                              * assume that the user manually put uscores
@@ -111,11 +117,11 @@ enum {
     LST
 };
 
-#define FILE_TYPES      4
+#define NUM_FILE_TYPES 4
 
 typedef struct {
-    FILE        *file[FILE_TYPES];      // ASM, ERR, OBJ and LST
-    char        *fname[FILE_TYPES];
+    FILE        *file[NUM_FILE_TYPES];      // ASM, ERR, OBJ and LST
+    char        *fname[NUM_FILE_TYPES];
 } File_Info;    // Information about the source and object files
 
 extern File_Info        AsmFiles;   // files information
@@ -170,6 +176,69 @@ typedef enum {
     MOD_FLAT    = 7,
 } mod_type;             // Memory model type
 
+enum asm_cpu {
+        /* bit count from left:
+           bit 0-2:   Math coprocessor
+           bit 3:     priviledged?
+           bit 4-6:   cpu type
+           bit 7-11;  extension set */
+
+        P_NO87  = 0x0000,         /* no FPU */
+        P_87    = 0x0001,         /* 8087 */
+        P_287   = 0x0002,         /* 80287 */
+        P_387   = 0x0004,         /* 80387 */
+
+        P_PM    = 0x0008,         /* privileged opcode */
+
+        P_86    = 0x0000,         /* 8086, default */
+        P_186   = 0x0010,         /* 80186 */
+        P_286   = 0x0020,         /* 80286 */
+        P_286p  = P_286 | P_PM,   /* 80286, protected mode */
+        P_386   = 0x0030,         /* 80386 */
+        P_386p  = P_386 | P_PM,   /* 80386, protected mode */
+        P_486   = 0x0040,         /* 80486 */
+        P_486p  = P_486 | P_PM,   /* 80486, protected mode */
+        P_586   = 0x0050,         /* pentium */
+        P_586p  = P_586 | P_PM,   /* pentium, protected mode */
+        P_686   = 0x0060,         /* pentium */
+        P_686p  = P_686 | P_PM,   /* pentium, protected mode */
+
+        P_MMX   = 0x0080,         /* MMX extension instructions */
+        P_K3D   = 0x0100,         /* 3DNow extension instructions */
+        P_SSE1  = 0x0200,         /* SSE1 extension instructions */
+        P_SSE2  = 0x0400,         /* SSE2 extension instructions */
+        P_SSE3  = 0x0800,         /* SSE3 extension instructions */
+#if SSSE3SUPP
+        P_SSSE3 = 0x1000,         /* SSSE3 extension instructions */
+#endif
+        /* all SSE extension instructions */
+#if SSSE3SUPP
+        P_SSEALL = P_SSE1 | P_SSE2 | P_SSE3 | P_SSSE3,
+#else
+        P_SSEALL = P_SSE1 | P_SSE2 | P_SSE3,
+#endif
+        NO_OPPRFX  = P_MMX | P_SSEALL,
+
+        P_FPU_MASK = P_87 | P_287 | P_387,
+        P_CPU_MASK = 0x0070,
+        P_EXT_MASK = P_MMX | P_K3D | P_SSEALL
+};
+
+/* the MASM compatible @CPU value flags: */
+enum M_CPU {
+    M_8086 = 0x0001, /* 8086 */
+    M_186  = 0x0002, /* 186 */
+    M_286  = 0x0004, /* 286 */
+    M_386  = 0x0008, /* 386 */
+    M_486  = 0x0010, /* 486 */
+    M_586  = 0x0020, /* Pentium */
+    M_686  = 0x0040, /* PPro */
+    M_PROT = 0x0080, /* protected instructions ok */
+    M_8087 = 0x0100, /* 8087 */
+    M_287  = 0x0400, /* 287 */
+    M_387  = 0x0800  /* 387 */
+};
+
 typedef struct global_options {
     bool        sign_value;            /* -j, -s options */
     bool        quiet;                 /* -q option */
@@ -193,7 +262,9 @@ typedef struct global_options {
     char        *module_name;            /* -nm option */
 
     char        *default_name_mangler;   /* obsolete */
+#if COCTALS
     bool        allow_c_octals;          /* -o option */
+#endif
     bool        no_comment_data_in_code_records; /* -zlc option */
     bool        no_dependencies;         /* -zld option */
     bool        no_file_entry;           /* -zlf option */
@@ -254,7 +325,7 @@ extern bool             Modend;         // end of module is reached
 extern bool             Use32;          // if current segment is 32-bit
 extern int              Token_Count;    // number of tokens in current line
 
-// defined in write.c
+// defined in assemble.c
 
 extern struct asm_sym LineItem;
 #define LineNumber LineItem.offset
@@ -264,7 +335,7 @@ extern struct asm_sym WordSize;
 extern bool             PhaseError;
 extern bool             write_to_file;
 
-// functions in write.c
+// functions in assemble.c
 
 extern void             OutputCodeByte( unsigned char );
 extern void             OutputDataByte( unsigned char );
@@ -276,9 +347,5 @@ extern void             AddLinnumDataRef( void );
 // main.c
 
 extern void             CloseFiles( void );
-
-// functions in tokenize.c
-
-extern int              Tokenize( char * , int index);
 
 #endif

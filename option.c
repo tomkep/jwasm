@@ -528,29 +528,45 @@ static option optiontab[] = {
 };
 
 // handle OPTION directive
+// syntax:
+// OPTION option[:value][,option[:value,...]]
 
-int OptionDirective( int i )
+ret_code OptionDirective( int i )
 {
-    option *po;
+    option *po = NULL;
 
-    DebugMsg(("option directive, next token: %X\n", AsmBuffer[i]->token));
+    DebugMsg(( "option directive enter\n" ));
 
-    switch (AsmBuffer[i]->token) {
-    case T_DIRECTIVE:      /* PROC, SEGMENT are of this type */
-    case T_UNARY_OPERATOR: /* OFFSET keyword is of this type */
-    case T_RES_ID:
-    case T_ID:
-        for ( po = optiontab; po->name != NULL ; po++) {
-            if (0 == stricmp(AsmBuffer[i]->string_ptr, po->name)) {
-                i++;
-                if (po->func(&i) == ERROR)
-                    return( ERROR );
-                if (AsmBuffer[i]->token == T_FINAL)
-                    return( NOT_ERROR );
+    for ( ; ; ) {
+        switch (AsmBuffer[i]->token) {
+        case T_DIRECTIVE:      /* PROC, SEGMENT are of this type */
+        case T_UNARY_OPERATOR: /* OFFSET keyword is of this type */
+        case T_RES_ID:
+        case T_ID:
+            DebugMsg(( "option=%s\n", AsmBuffer[i]->string_ptr ));
+            for ( po = optiontab; po->name != NULL ; po++) {
+                if (0 == stricmp(AsmBuffer[i]->string_ptr, po->name)) {
+                    i++;
+                    if (po->func(&i) == ERROR)
+                        return( ERROR );
+                    break;
+                }
             }
+            break;
+        default:
+            AsmError( SYNTAX_ERROR );
+            return( ERROR );
         }
+        if ( AsmBuffer[i]->token == T_COMMA )
+            i++;
+        else
+            break;
     }
-    AsmError(SYNTAX_ERROR);
-    return( ERROR );
+    if ( po == NULL || po->name == NULL || AsmBuffer[i]->token != T_FINAL ) {
+        DebugMsg(( "option syntax error: >%s<\n", AsmBuffer[i]->string_ptr ));
+        AsmError( SYNTAX_ERROR );
+        return( ERROR );
+    }
+    return( NOT_ERROR );
 }
 

@@ -28,19 +28,14 @@
 *
 ****************************************************************************/
 
-#ifndef _ASMLABEL_H_
-#define _ASMLABEL_H_
-
-#if defined( _STANDALONE_ )
+#ifndef _LABELS_H_
+#define _LABELS_H_
 
 extern void             LabelsInit( void );
 extern asm_sym *        IsLabelType( char * );
-extern int              LabelDirective( int );
+extern ret_code         LabelDirective( int );
 extern char *           GetCurrAnonLabel(char *);
 extern char *           GetNextAnonLabel(char *);
-
-#endif
-
 extern int              LabelCreate( char *, memtype, struct asm_sym * vartype, bool);
 
 #endif

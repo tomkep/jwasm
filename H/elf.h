@@ -558,8 +558,8 @@ typedef struct {
     uint_32  lib_name;
 } Elf32_Library;
 
-int elf_write_header( int fh );
-int elf_write_data( int fh );
+ret_code elf_write_header( int fh );
+ret_code elf_write_data( int fh );
 
 
 #endif // _ELF_H_INCLUDED_

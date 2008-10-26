@@ -43,6 +43,7 @@
 #include "mangle.h"
 #include "labels.h"
 #include "input.h"
+#include "tokenize.h"
 #include "expreval.h"
 #include "types.h"
 #include "condasm.h"
@@ -50,6 +51,7 @@
 #include "macro.h"
 #include "proc.h"
 #include "fastpass.h"
+#include "listing.h"
 
 #include "myassert.h"
 
@@ -191,7 +193,7 @@ static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_n
 
 // LOCAL directive. Called on Pass 1 only
 
-int LocalDef( int i )
+ret_code LocalDef( int i )
 /*******************/
 {
     char        *string;
@@ -357,7 +359,7 @@ int LocalDef( int i )
 
 // parse parameters of a PROC/PROTO
 
-static int ParseProcParams(dir_node *proc, int i, bool bDefine)
+static ret_code ParseParams(dir_node *proc, int i, bool bDefine)
 {
     char            *token;
     char            *typetoken;
@@ -395,7 +397,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
         /* read symbol */
         if (bDefine) {
             if (AsmBuffer[i]->token != T_ID) {
-                DebugMsg(("ParseProcParams: name missing/invalid for parameter %u, i=%u\n", cntParam+1, i));
+                DebugMsg(("ParseParams: name missing/invalid for parameter %u, i=%u\n", cntParam+1, i));
                 AsmError( SYNTAX_ERROR ); /* for PROC, parameter needs a name */
                 return( ERROR );
             }
@@ -486,7 +488,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
             }
         }
     no_arbitrary:
-        DebugMsg(("ParseProcParams: cnpParam=%u, i=%u, token=%s, type=%s\n", cntParam, i, token, typetoken));
+        DebugMsg(("ParseParams: cnpParam=%u, i=%u, token=%s, type=%s\n", cntParam, i, token, typetoken));
 
         if( type == ERROR ) {
             if ((AsmBuffer[i]->token == T_RES_ID) && (AsmBuffer[i]->value == T_VARARG)) {
@@ -505,7 +507,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
                 mem_type = MT_EMPTY;
             } else {
                 if( !(symtype = IsLabelType( AsmBuffer[i]->string_ptr ) ) ) {
-                    DebugMsg(("ParseProcParams: type invalid for parameter %u\n", cntParam+1));
+                    DebugMsg(("ParseParams: type invalid for parameter %u\n", cntParam+1));
                     AsmError( INVALID_QUALIFIED_TYPE );
                     return( ERROR );
                 }
@@ -542,7 +544,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
             else
                 oldsize = SizeFromMemtype( paracurr->sym->mem_type, Use32 );
             if (oldsize != newsize) {
-                DebugMsg(("ParseProcParams: old memtype=%u, new memtype=%u\n", paracurr->sym->mem_type, mem_type));
+                DebugMsg(("ParseParams: old memtype=%u, new memtype=%u\n", paracurr->sym->mem_type, mem_type));
                 AsmErr( SYMBOL_TYPE_CONFLICT, token );
                 return( ERROR );
             }
@@ -556,13 +558,13 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
             }
 #else
             if (paracurr->sym->mem_type != mem_type) {
-                DebugMsg(("ParseProcParams: old memtype=%u, new memtype=%u\n", paracurr->sym->mem_type, mem_type));
+                DebugMsg(("ParseParams: old memtype=%u, new memtype=%u\n", paracurr->sym->mem_type, mem_type));
                 AsmErr( SYMBOL_TYPE_CONFLICT, token );
                 return( ERROR );
             }
             if (symtype != NULL)
                 if (paracurr->sym->type != symtype) {
-                    DebugMsg(("ParseProcParams: struct param type=%X, symtype=%X\n", paracurr->sym->type, symtype));
+                    DebugMsg(("ParseParams: struct param type=%X, symtype=%X\n", paracurr->sym->type, symtype));
                     AsmErr( SYMBOL_TYPE_CONFLICT, token );
                     return( ERROR );
                 }
@@ -583,7 +585,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
 
         } else if (proc->e.procinfo->init == TRUE) {
             /* second definition has more parameters than first */
-            DebugMsg(("ParseProcParams: different param count\n"));
+            DebugMsg(("ParseParams: different param count\n"));
             AsmError( CONFLICTING_PARAMETER_DEFINITION );
             return( ERROR );
         } else {
@@ -673,7 +675,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
     if (proc->e.procinfo->init == TRUE) {
         if (paracurr) {
             /* first definition has more parameters than second */
-            DebugMsg(("ParseProcParams: a param is left over, cntParam=%u\n", cntParam));
+            DebugMsg(("ParseParams: a param is left over, cntParam=%u\n", cntParam));
             AsmError( CONFLICTING_PARAMETER_DEFINITION );
             return( ERROR );
         }
@@ -694,7 +696,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
 
         for (;cntParam ;cntParam--) {
             for (curr = 1,paranode = proc->e.procinfo->paralist;curr < cntParam;paranode = paranode->next, curr++);
-            DebugMsg(("ParseProcParams: parm=%s, ofs=%u, size=%d\n", paranode->sym->name, offset, paranode->sym->first_size));
+            DebugMsg(("ParseParams: parm=%s, ofs=%u, size=%d\n", paranode->sym->name, offset, paranode->sym->first_size));
             if (paranode->sym->state == SYM_TMACRO)
                 ;
             else {
@@ -716,7 +718,7 @@ static int ParseProcParams(dir_node *proc, int i, bool bDefine)
  3. if no segment is set, use cpu setting
  */
 
-int ExamineProc( dir_node *proc, int i, bool IsProc )
+ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
 /*******************************************/
 {
     char            *token;
@@ -743,7 +745,7 @@ int ExamineProc( dir_node *proc, int i, bool IsProc )
     if ( IsProc ) {
         proc->e.procinfo->export = ModuleInfo.procs_export;
         proc->sym.public = ~ModuleInfo.procs_private;
-        proc->e.procinfo->pe_type = ( ( curr_cpu & P_CPU_MASK ) == P_286 ) || ( ( curr_cpu & P_CPU_MASK ) == P_386 );
+        proc->e.procinfo->pe_type = ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_286 ) || ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_386 );
     }
 
     if( AsmBuffer[i]->token == T_STRING ) {
@@ -881,22 +883,20 @@ int ExamineProc( dir_node *proc, int i, bool IsProc )
     } else  {
         if( AsmBuffer[i]->token == T_COMMA )
             i++;
-        if (ERROR == ParseProcParams(proc, i, IsProc ))
+        if (ERROR == ParseParams(proc, i, IsProc ))
             /* do proceed if the parameter scan returns an error */
             ;//return(ERROR);
     }
 
     proc->e.procinfo->init = TRUE;
     DebugMsg(("ExamineProc: parasize=%u\n", proc->e.procinfo->parasize));
-    if ( IsProc == TRUE) {
-        CurrProc = proc;
-        DefineProc = TRUE;
-    }
 
     return( NOT_ERROR );
 }
 
-int ProcDef( int i )
+// PROC directive
+
+ret_code ProcDef( int i )
 /******************/
 {
     struct asm_sym      *sym;
@@ -967,7 +967,7 @@ int ProcDef( int i )
             return( ERROR );
         }
 
-        if( dir->sym.public == TRUE && oldpubstate == FALSE)
+        if( dir->sym.public == TRUE && oldpubstate == FALSE )
             AddPublicData( dir );
     } else {
         /**/myassert( sym != NULL );
@@ -985,9 +985,11 @@ int ProcDef( int i )
 #endif
             PhaseError = TRUE;
         }
-        CurrProc = (dir_node *)sym;
-        DefineProc = TRUE;
     }
+
+    CurrProc = (dir_node *)sym;
+    DefineProc = TRUE;
+    in_epilogue = FALSE;
 
     if( Options.line_numbers && write_to_file == TRUE ) {
         AddLinnumDataRef();
@@ -997,11 +999,12 @@ int ProcDef( int i )
     return( NOT_ERROR );
 }
 
-/* a PROTO is virtually an EXTERNDEF for a PROC.
+/* PROTO directive.
+ PROTO is virtually an EXTERNDEF for a PROC.
  there is no segment associated with it, however.
  */
 
-int ProtoDef( int i, char * name )
+ret_code ProtoDef( int i, char * name )
 /******************/
 {
     struct asm_sym      *sym;
@@ -1075,7 +1078,6 @@ int ProtoDef( int i, char * name )
     return( NOT_ERROR );
 }
 
-
 static void ProcFini( void )
 /**************************/
 {
@@ -1088,39 +1090,33 @@ static void ProcFini( void )
     DefineProc = FALSE; /* in case there was an empty PROC/ENDP pair */
 }
 
-// ENDP detected
+// ENDP directive
 
-int ProcEnd( int i )
+ret_code EndpDef( int i )
 /******************/
 {
     if( StructDef.struct_depth > 0 ) {
         AsmError( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION );
-        return( ERROR );
     } else if( i < 0 ) {
         AsmError( PROC_MUST_HAVE_A_NAME );
-        // ProcFini();
-        return( ERROR );
-    } else if( CurrProc == NULL ) {
-        DebugMsg(("ProcEnd: nesting error, CurrProc is NULL\n"));
-        AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
-        return( ERROR );
-    // } else if( (dir_node *)SymSearch( AsmBuffer[i]->string_ptr ) == CurrProc ) {
-    } else if( SymCmpFunc(CurrProc->sym.name, AsmBuffer[i]->string_ptr ) == 0 ) {
+    } else if( CurrProc && (SymCmpFunc(CurrProc->sym.name, AsmBuffer[i]->string_ptr ) == 0 )) {
         ProcFini();
         return( NOT_ERROR );
     } else {
-        AsmError( PROC_NAME_DOES_NOT_MATCH );
-        // ProcFini();
-        return( ERROR );
+        AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
     }
+    return( ERROR );
 }
 
 void CheckProcOpen( void )
 /************************/
 {
+#if NESTEDPROCS
     while( CurrProc != NULL ) {
-        if( Parse_Pass == PASS_1 )
-            AsmErr( PROC_IS_NOT_CLOSED, CurrProc->sym.name );
+#else
+    if( CurrProc != NULL ) {
+#endif
+        AsmErr( PROC_IS_NOT_CLOSED, CurrProc->sym.name );
         ProcFini();
     }
 }
@@ -1179,7 +1175,7 @@ static int WritePrologue( void )
             char retvalue[MAX_LINE_LEN];
             char currline[MAX_LINE_LEN];
             label_list *curr;
-            strcpy( currline, CurrString );
+            strcpy( currline, CurrSource );
             sprintf(buffer,"%s(%s, %u, %u, %u, <%s>, %s)", ModuleInfo.proc_prologue,
                     CurrProc->sym.name, flags, info->parasize, info->localsize,
                     reglst, "");
@@ -1260,7 +1256,7 @@ static int WritePrologue( void )
             InputQueueLine( buffer );
         }
     }
-    InputQueueLine( CurrString );
+    InputQueueLine( CurrSource );
 
     return( EMPTY );
 }
@@ -1451,8 +1447,9 @@ static void write_epilogue( void )
 }
 
 // a RET <nnnn> has occured inside a PROC.
+// count = number of tokens in buffer (=Token_Count)
 
-int RetInstr( int i, int count, bool flag_iret )
+ret_code RetInstr( int i, int count, bool flag_iret )
 /****************************************/
 {
     char        buffer[20];
@@ -1460,6 +1457,10 @@ int RetInstr( int i, int count, bool flag_iret )
     expr_list   opndx;
 
     info = CurrProc->e.procinfo;
+
+    if (AsmFiles.file[LST]) {
+        LstWriteFile( LSTTYPE_DIRECTIVE, GetCurrOffset(), NULL );
+    }
 
     PushLineQueue();
 
@@ -1533,7 +1534,6 @@ void ProcInit()
 #endif
     CurrProc  = NULL;
     DefineProc = FALSE;
-    in_epilogue = FALSE;
     ModuleInfo.proc_prologue = "";
     ModuleInfo.proc_epilogue = "";
     ModuleInfo.procs_private = FALSE;

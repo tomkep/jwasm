@@ -50,8 +50,6 @@ struct asmfixup         *InsFixups[3];
 int_8                   Frame;          // Frame of current fixup
 uint_8                  Frame_Datum;    // Frame datum of current fixup
 
-#if defined( _STANDALONE_ )
-
 /* set global vars Frame and Frame_Datum */
 
 void find_frame( struct asm_sym *sym )
@@ -95,7 +93,6 @@ void find_frame( struct asm_sym *sym )
         }
     }
 }
-#endif
 
 void add_frame( void )
 /********************/
@@ -287,8 +284,6 @@ int BackPatch( struct asm_sym *sym )
     }
     return( NOT_ERROR );
 }
-
-#if defined( _STANDALONE_ )
 
 struct fixup *CreateFixupRec( int index )
 /***************************************/
@@ -598,4 +593,3 @@ int MakeFpFixup( struct asm_sym *sym )
     return( NOT_ERROR );
 }
 
-#endif

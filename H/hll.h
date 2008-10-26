@@ -53,8 +53,8 @@ typedef struct hll_list {
 /*---------------------------------------------------------------------------*/
 
 extern void             HllInit( void );    // reset label counter for hll labels
-extern int              HllStartDef( int ); // begin a .IF, .WHILE, .REPEAT
-extern int              HllEndDef( int );   // end a .IF, .WHILE, .REPEAT
-extern int              HllExitDef( int );  // exit a .IF, .WHILE, .REPEAT
+extern ret_code         HllStartDef( int ); // begin a .IF, .WHILE, .REPEAT
+extern ret_code         HllEndDef( int );   // end a .IF, .WHILE, .REPEAT
+extern ret_code         HllExitDef( int );  // exit a .IF, .WHILE, .REPEAT
 
 #endif

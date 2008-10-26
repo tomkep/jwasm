@@ -241,8 +241,8 @@ struct obj_rec {
 
 /*
     Nothing should rely on the data pointing to the same buffer all the time.
-    i.e., any routine is allowed to ObjDetachData( objr ) and
-        ObjAttachData( objr, ptr ) or ObjAllocData( objr, len )
+    i.e., any routine is allowed to OmfDetachData( objr ) and
+        OmfAttachData( objr, ptr ) or OmfAllocData( objr, len )
 
     Most of the above structure is private to objrec.c (and the macros
     defined below).  See the following functions for instructions about
@@ -253,13 +253,13 @@ struct obj_rec {
 extern void         OmfRecInit( void );
 extern void         OmfRecFini( void );
 /*
-    ObjRecInit must be called before any of the other routines in this
-    module.  ObjRecFini free's all existing object records, and any
+    OmfRecInit must be called before any of the other routines in this
+    module.  OmfRecFini free's all existing object records, and any
     memory used by the module.
 */
 
 
-extern obj_rec      *ObjNewRec( uint_8 command );
+extern obj_rec      *OmfNewRec( uint_8 command );
 /*
     Create an object record of type 'command'.  Does not allocate or attach
     any data to the record, or fill in any of the specific fields for each
@@ -267,72 +267,72 @@ extern obj_rec      *ObjNewRec( uint_8 command );
 */
 
 
-extern void         ObjKillRec( obj_rec *objr );
+extern void         OmfKillRec( obj_rec *objr );
 /*
     Free's the memory used by an object record.  If the record had data
-    allocated for it (ObjAllocData) or ObjCanFree was called on the record,
+    allocated for it (OmfAllocData) or OmfCanFree was called on the record,
     then the data is free'd as well.  Records with extra memory (such as
     the fixup chain on FIXUPs, or the line number array on LINNUM) have the
     extra memory free'd as well.
 */
 
 
-extern void         ObjAllocData( obj_rec *objr, uint_16 len );
+extern void         OmfAllocData( obj_rec *objr, uint_16 len );
 /*
     Allocate a piece of memory of length len, attach it to the object
     record, and set the can_free bit.  This is the most common way to
     fill in data for object records.  Data allocated this way will be
-    freed when ObjKillRec/ObjDetachData is called on the record.
+    freed when OmfKillRec/OmfDetachData is called on the record.
 */
 
 
-extern void         ObjAttachData( obj_rec *objr, uint_8 *data, uint_16 len );
+extern void         OmfAttachData( obj_rec *objr, uint_8 *data, uint_16 len );
 /*
     This is useful for attaching constants to an object record.  For example,
     when creating the 80386 comment record for pharlap OMF, you could do the
     following:
 
-        objr = ObjNewRec( CMD_COMENT );
+        objr = OmfNewRec( CMD_COMENT );
         objr->d.coment.attr = 0x80;
         coment->d.coment.class = CMT_EASY_OMF;
-        ObjAttachData( coment, "80386", 5 );
+        OmfAttachData( coment, "80386", 5 );
 
-    Memory attached this way is not free'd by ObjKillRec or ObjDetachData.
+    Memory attached this way is not free'd by OmfKillRec or OmfDetachData.
 */
 
 
-extern void         ObjDetachData( obj_rec *objr );
+extern void         OmfDetachData( obj_rec *objr );
 /*
     Free's the data associated with an object record, but does not free
-    the actual object record itself.  Called as part of ObjKillRec().
+    the actual object record itself.  Called as part of OmfKillRec().
 */
 
 
-extern void         ObjCanFree( obj_rec *objr );
+extern void         OmfCanFree( obj_rec *objr );
 /*
-    Indicates that ObjDetachData or ObjKillRec can free the data associated
+    Indicates that OmfDetachData or OmfKillRec can free the data associated
     with this record.  Not necessary if the data was allocated with
-    ObjAllocData.
+    OmfAllocData.
 */
 
 
-extern uint_8       ObjGet8( obj_rec *objr );
-extern uint_16      ObjGet16( obj_rec *objr );
-extern uint_32      ObjGet32( obj_rec *objr );
-extern uint_32      ObjGetEither( obj_rec *objr );
-extern uint_16      ObjGetIndex( obj_rec *objr );
-extern uint_8       *ObjGet( obj_rec *objr, uint_16 len );
-extern int          ObjEOR( obj_rec *objr );
-extern uint_16      ObjRTell( obj_rec *objr );
-extern void         ObjRSeek( obj_rec *objr, uint_16 set );
+extern uint_8       OmfGet8( obj_rec *objr );
+extern uint_16      OmfGet16( obj_rec *objr );
+extern uint_32      OmfGet32( obj_rec *objr );
+extern uint_32      OmfGetEither( obj_rec *objr );
+extern uint_16      OmfGetIndex( obj_rec *objr );
+extern uint_8       *OmfGet( obj_rec *objr, uint_16 len );
+extern int          OmfEOR( obj_rec *objr );
+extern uint_16      OmfRTell( obj_rec *objr );
+extern void         OmfRSeek( obj_rec *objr, uint_16 set );
 extern uint_16      ObjRemain( obj_rec *objr );
-extern void         ObjPut8( obj_rec *objr, uint_8 byte );
-extern void         ObjPut16( obj_rec *objr, uint_16 word );
-extern void         ObjPut32( obj_rec *objr, uint_32 dword );
-extern void         ObjPutIndex( obj_rec *objr, uint_16 idx );
-extern void         ObjPutEither( obj_rec *objr, uint_32 val );
-extern void         ObjPut( obj_rec *objr, const uint_8 *data, uint_16 len );
-extern void         ObjPutName( obj_rec *objr, const char *name, uint_8 len );
+extern void         OmfPut8( obj_rec *objr, uint_8 byte );
+extern void         OmfPut16( obj_rec *objr, uint_16 word );
+extern void         OmfPut32( obj_rec *objr, uint_32 dword );
+extern void         OmfPutIndex( obj_rec *objr, uint_16 idx );
+extern void         OmfPutEither( obj_rec *objr, uint_32 val );
+extern void         OmfPut( obj_rec *objr, const uint_8 *data, uint_16 len );
+extern void         OmfPutName( obj_rec *objr, const char *name, uint_8 len );
 /*
     Notes:
 
@@ -341,25 +341,25 @@ extern void         ObjPutName( obj_rec *objr, const char *name, uint_8 len );
     the data.  The following functions are used to read and write data
     and modify the "file" pointer.
 
-    ObjGet8         return uint_8 at pointer, and bump pointer by 1
-    ObjGet16        return uint_16 at pointer, and bump pointer by 2
-    ObjGet32        return uint_32 at pointer, and bump pointer by 4
-    ObjGetEither    if record is_32 then ObjGet32 else ObjGet16
-    ObjGetIndex     return the intel index at pointer, bump ptr by 1 or 2
-    ObjGet          return ptr to len bytes, bump ptr by len.
+    OmfGet8         return uint_8 at pointer, and bump pointer by 1
+    OmfGet16        return uint_16 at pointer, and bump pointer by 2
+    OmfGet32        return uint_32 at pointer, and bump pointer by 4
+    OmfGetEither    if record is_32 then OmfGet32 else OmfGet16
+    OmfGetIndex     return the intel index at pointer, bump ptr by 1 or 2
+    OmfGet          return ptr to len bytes, bump ptr by len.
                     The ptr to the entire data record is returned by
-                    the call ObjGet( rec, 0 );
-    ObjEOR          returns TRUE (non-zero) if pointer is at end of record
-    ObjRTell        returns the offset of the pointer into the data
-    ObjRSeek        sets the offset of the pointer into the data
-    ObjRemain       how many bytes left in record
-    ObjPut8         write uint_8 at pointer, and bump pointer by 1
-    ObjPut16        write uint_16 at pointer, and bump pointer by 2
-    ObjPut32        write uint_32 at pointer, and bump pointer by 4
-    ObjPutEither    if record is_32 then ObjPut32 else ObjPut16
-    ObjPutIndex     return the intel index at pointer, bump ptr by 1 or 2
-    ObjPut          put len bytes of data at pointer, and bump ptr by len
-    ObjPutName      ObjPut8( len ) then ObjPut( name, len )
+                    the call OmfGet( rec, 0 );
+    OmfEOR          returns TRUE (non-zero) if pointer is at end of record
+    OmfRTell        returns the offset of the pointer into the data
+    OmfRSeek        sets the offset of the pointer into the data
+    OmfRemain       how many bytes left in record
+    OmfPut8         write uint_8 at pointer, and bump pointer by 1
+    OmfPut16        write uint_16 at pointer, and bump pointer by 2
+    OmfPut32        write uint_32 at pointer, and bump pointer by 4
+    OmfPutEither    if record is_32 then OmfPut32 else OmfPut16
+    OmfPutIndex     return the intel index at pointer, bump ptr by 1 or 2
+    OmfPut          put len bytes of data at pointer, and bump ptr by len
+    OmfPutName      OmfPut8( len ) then OmfPut( name, len )
 */
 
 
@@ -369,13 +369,13 @@ extern void         ObjTruncRec( obj_rec *objr );
     the "file" pointer up to the point where ObjTruncRec was called.  For
     example,
 
-        objr = ObjNewRec( CMD_COMENT );
+        objr = OmfNewRec( CMD_COMENT );
         objr->d.comment.attr = 0x80;
         objr->d.comment.class = 0xff;
-        ObjAllocData( objr, 100 );
-        ObjRSeek( objr, 5 );
-        ObjPut( objr, "willy_wonka", 11 );
-        ObjTruncRec( objr );
+        OmfAllocData( objr, 100 );
+        OmfRSeek( objr, 5 );
+        OmfPut( objr, "willy_wonka", 11 );
+        OmfTruncRec( objr );
 
     The object record constructed by this would only have the bytes starting
     at offset 5, and ending at offset 15 written out to the object file.
@@ -391,10 +391,10 @@ extern void         ObjTruncRec( obj_rec *objr );
     The following macros are just for speed.
 */
 
-#define ObjEOR(objr)            ( (objr)->curoff >= (objr)->length )
-#define ObjRTell(objr)          ( (objr)->curoff )
-#define ObjRSeek(objr,set)      (void)( (objr)->curoff = set )
-#define ObjRemain(objr)         ( (objr)->length - (objr)->curoff )
-#define ObjTruncRec(objr)       (void)( (objr)->length = (objr)->curoff )
-#define ObjCanFree(objr)        (void)( (objr)->free_data = 1 )
+#define OmfEOR(objr)            ( (objr)->curoff >= (objr)->length )
+#define OmfRTell(objr)          ( (objr)->curoff )
+#define OmfRSeek(objr,set)      (void)( (objr)->curoff = set )
+#define OmfRemain(objr)         ( (objr)->length - (objr)->curoff )
+#define OmfTruncRec(objr)       (void)( (objr)->length = (objr)->curoff )
+#define OmfCanFree(objr)        (void)( (objr)->free_data = 1 )
 #endif

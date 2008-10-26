@@ -71,14 +71,15 @@ typedef struct {
 
 extern OBJ_WFILE    *ObjWriteOpen( const char *filename );
 extern void         ObjWriteClose( OBJ_WFILE *obj );
-extern void         ObjWBegRec( OBJ_WFILE *obj, uint_8 command );
-extern void         ObjWEndRec( OBJ_WFILE *obj );
-extern void         ObjWrite8( OBJ_WFILE *obj, uint_8 byte );
-extern void         ObjWrite16( OBJ_WFILE *obj, uint_16 word );
-extern void         ObjWrite32( OBJ_WFILE *obj, uint_32 dword );
-extern void         ObjWriteIndex( OBJ_WFILE *obj, uint_16 index );
-extern void         ObjWrite( OBJ_WFILE *obj, const uint_8 *buffer, size_t len );
-extern void         ObjWriteRec( OBJ_WFILE *obj, uint_8 command,
+
+extern void         OmfWBegRec( OBJ_WFILE *obj, uint_8 command );
+extern void         OmfWEndRec( OBJ_WFILE *obj );
+extern void         OmfWrite8( OBJ_WFILE *obj, uint_8 byte );
+extern void         OmfWrite16( OBJ_WFILE *obj, uint_16 word );
+extern void         OmfWrite32( OBJ_WFILE *obj, uint_32 dword );
+extern void         OmfWriteIndex( OBJ_WFILE *obj, uint_16 index );
+extern void         OmfWrite( OBJ_WFILE *obj, const uint_8 *buffer, size_t len );
+extern void         OmfWriteRec( OBJ_WFILE *obj, uint_8 command,
                         uint_16 length, const uint_8 *contents );
-extern void         ObjWFlushBuffer( OBJ_WFILE *out );
+extern void         OmfWFlushBuffer( OBJ_WFILE *out );
 #endif

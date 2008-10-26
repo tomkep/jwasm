@@ -24,8 +24,10 @@
 *
 *  ========================================================================
 *
-* Description:  Processing of segment and group related directives.
-*
+* Description:  Processing of segment and group related directives:
+*               - SEGMENT, ENDS
+*               - GROUP
+*               - .CODE, .DATA, .DATA?, .CONST, .STACK, .FARDATA, .FARDATA?
 ****************************************************************************/
 
 
@@ -37,6 +39,7 @@
 #include "parser.h"
 #include "directiv.h"
 #include "input.h"
+#include "tokenize.h"
 #include "queues.h"
 #include "expreval.h"
 #include "omf.h"
@@ -46,8 +49,11 @@
 
 #include "myassert.h"
 
+#define is_valid_id_char( ch ) \
+    ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
+
 /* prototypes */
-extern uint             checkword( char **token );
+extern ret_code         checkword( char **token );
 extern int              SetAssumeCSCurrSeg( void );
 
 extern symbol_queue     Tables[];       // tables of definitions
@@ -77,7 +83,7 @@ typedef enum {
 typedef struct {
     sim_seg     seg;                    // segment id
     char        close[MAX_LINE_LEN];    // closing line for this segment
-    int         stack_size;             // size of stack segment
+//    int         stack_size;             // size of stack segment
 } last_seg_info;        // information about last opened simplified segment
 
 extern struct asm_sym   *SegOverride;
@@ -126,6 +132,7 @@ static bool             saved_Use32;
 
 dir_node         *flat_grp; /* magic FLAT group */
 
+/* generic byte buffer, used for OMF LEDATA records only */
 static uint_8           codebuf[ 1024 ];
 
 #define ROUND_UP( i, r ) (((i)+((r)-1)) & ~((r)-1))
@@ -290,7 +297,9 @@ static dir_node *CreateGroup( char *name )
     return( grp );
 }
 
-int GrpDef( int i )
+// handle GROUP directive (OMF only)
+
+ret_code GrpDef( int i )
 /*****************/
 {
     char        *name;
@@ -325,10 +334,10 @@ int GrpDef( int i )
         if (*name == '.' && *(name+1) == NULLC && AsmBuffer[i+1]->token == T_ID) {
             char * p = AsmBuffer[i+1]->string_ptr;
             AddTokens(i, -1);
-            AsmBuffer[i]->string_ptr = CurrStringEnd;
+            AsmBuffer[i]->string_ptr = StringBufferEnd;
             *(AsmBuffer[i]->string_ptr) = '.';
             strcpy(AsmBuffer[i]->string_ptr+1, p);
-            CurrStringEnd = CurrStringEnd + strlen(AsmBuffer[i]->string_ptr) + 1;
+            StringBufferEnd = StringBufferEnd + strlen(AsmBuffer[i]->string_ptr) + 1;
             name = AsmBuffer[i]->string_ptr;
         }
 
@@ -392,7 +401,7 @@ static int SetUse32( void )
     } else {
         GlobalVars.code_seg = SEGISCODE( CurrSeg );
         Use32 = CurrSeg->seg->e.seginfo->Use32;
-        if( Use32 && ( ( curr_cpu & P_CPU_MASK ) < P_386 ) ) {
+        if( Use32 && ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) ) {
             AsmError( WRONG_CPU_FOR_32BIT_SEGMENT );
             return( ERROR );
         }
@@ -416,7 +425,7 @@ int SetUse32Def( bool flag )
 
 // close segment
 
-static int CloseSeg(char * name)
+static ret_code CloseSeg(char * name)
 {
     struct asm_sym      *sym;
 
@@ -427,12 +436,12 @@ static int CloseSeg(char * name)
     }
 
     if( SymCmpFunc(CurrSeg->seg->sym.name, name ) != 0 ) {
-        DebugMsg(("SegDef(%s): ENDS segment name not on top of stack\n"));
+        DebugMsg(("CloseSeg(%s): ENDS segment name not on top of stack\n"));
         AsmErr( BLOCK_NESTING_ERROR, name );
         return( ERROR );
     }
 
-    DebugMsg(("SegDef(%s) ENDS, current ofs=%X\n", name, CurrSeg->seg->e.seginfo->current_loc));
+    DebugMsg(("CloseSeg(%s): current ofs=%X\n", name, CurrSeg->seg->e.seginfo->current_loc));
 
     if (Parse_Pass > PASS_1 && Options.output_format == OFORMAT_OMF)
         omf_FlushCurrSeg();
@@ -444,7 +453,7 @@ static int CloseSeg(char * name)
 
 // SEGMENT/ENDS if pass is > 1
 
-int  SetCurrSeg( int i )
+ret_code SetCurrSeg( int i )
 /**********************/
 {
     char        *name;
@@ -567,7 +576,7 @@ static seg_type SegmentNameType( char *name )
 
 // SEGMENT and ENDS directives (Pass ONE only!)
 
-int SegDef( int i )
+ret_code SegDef( int i )
 /*****************/
 {
     char                defined;
@@ -651,12 +660,12 @@ int SegDef( int i )
             AsmErr( SYMBOL_REDEFINITION, name );
             return( ERROR );
         }
-
+#if 0
         if( lastseg.stack_size > 0 ) {
             seg->d.segdef.seg_length = lastseg.stack_size;
             lastseg.stack_size = 0;
         }
-
+#endif
         i += 2; /* go past segment name and "SEGMENT " */
 
         for( ; i < Token_Count; i ++ ) {
@@ -745,6 +754,7 @@ int SegDef( int i )
                 dir->e.seginfo->Use32 = TypeInfo[type].value;
                 break;
             case TOK_FLAT:
+                DefineFlatGroup();
                 dir->e.seginfo->Use32 = 1;
                 dir->e.seginfo->group = &flat_grp->sym;
                 break;
@@ -833,7 +843,7 @@ static void input_group( int type, char *name )
 {
     char        buffer[MAX_LINE_LEN];
 
-    /* no DGROUP for FLAT or COFF */
+    /* no DGROUP for FLAT or COFF/ELF */
     if( ModuleInfo.model == MOD_FLAT ||
         Options.output_format == OFORMAT_COFF ||
         Options.output_format == OFORMAT_ELF)
@@ -882,10 +892,10 @@ static void close_lastseg( void )
 #else
     lastseg.seg = SIM_NONE;
     DebugMsg(("close_lastseg: current seg=%s\n", sym_CurSeg->string_ptr));
-    if (sym_CurSeg->string_ptr && (*sym_CurSeg->string_ptr != '\0')) {
+    if ( sym_CurSeg->string_ptr && (*sym_CurSeg->string_ptr != '\0') ) {
         char buffer[MAX_LINE_LEN];
-        strcpy(buffer, sym_CurSeg->string_ptr);
-        strcat(buffer, " ENDS");
+        strcpy( buffer, sym_CurSeg->string_ptr );
+        strcat( buffer, " ENDS" );
         InputQueueLine( buffer );
     }
 #endif
@@ -904,7 +914,7 @@ static char * SetSimSeg(int segm, char * name, char * buffer)
             pUse = "FLAT";
         else
             pUse = "USE32";
-        if ((curr_cpu & P_CPU_MASK ) <= P_386)
+        if (( ModuleInfo.curr_cpu & P_CPU_MASK ) <= P_386)
             pAlign = "DWORD";
         else
             pAlign = "PARA";
@@ -948,17 +958,18 @@ static char *get_sim_code_end( char *buffer, char *name )
     return( buffer );
 }
 
-int SimSeg( int i )
+
+int SimplifiedSegDir( int i )
 /*****************/
 /* Handles simplified segment, based on optasm pg. 142-146 */
 {
     char        buffer[ MAX_LINE_LEN ];
-    int         bit;
+    unsigned    size;
     char        *string;
     int         type;
     int         seg;
 
-    DebugMsg(("SimSeg enter\n"));
+    DebugMsg(("SimplifiedSegDir(%u) enter\n", i ));
 
     if( ModuleInfo.model == MOD_NONE ) {
         AsmError( MODEL_IS_NOT_DECLARED );
@@ -968,20 +979,25 @@ int SimSeg( int i )
 
     PushLineQueue();
 
-    if( AsmBuffer[i]->value != T_DOT_STACK ) {
-        close_lastseg();
-    }
-    buffer[0] = '\0';
     type = AsmBuffer[i]->value;
+
+    if( type != T_DOT_STACK ) {
+        close_lastseg();  /* emit a "xxx ENDS" line to close current seg */
+    }
+
+    buffer[0] = NULLC;
     i++; /* get past the directive token */
-    if( i < Token_Count ) {
+    if( i < Token_Count && type != T_DOT_STACK ) {
         /* the segment name might begin with a dot.
          Then use ->pos instead of ->string_ptr!
          */
-        if ( AsmBuffer[i]->token == T_DOT )
+        if ( AsmBuffer[i]->token == T_DOT &&
+             is_valid_id_char( *(AsmBuffer[i]->pos+1) ) ) {
             string = AsmBuffer[i]->pos;
-        else
+            i++;
+        } else
             string = AsmBuffer[i]->string_ptr;
+        i++;
     } else {
         string = NULL;
     }
@@ -1006,9 +1022,7 @@ int SimSeg( int i )
         }
         break;
     case T_DOT_STACK:
-        InputQueueLine( SetSimSeg(SIM_STACK, NULL, buffer));
-        input_group( type, NULL );
-        InputQueueLine( EndSimSeg(SIM_STACK, buffer));
+        size = DEFAULT_STACK_SIZE;
         if( i < Token_Count ) {
             expr_list opndx;
             if (EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR)
@@ -1016,14 +1030,16 @@ int SimSeg( int i )
             if( opndx.type != EXPR_CONST || opndx.string != NULL ) {
                 AsmError( CONSTANT_EXPECTED );
                 return( ERROR );
-            } else {
-                lastseg.stack_size = opndx.value;
-                if (AsmBuffer[i]->token != T_FINAL)
-                    AsmError( SYNTAX_ERROR );
             }
-        } else {
-            lastseg.stack_size = DEFAULT_STACK_SIZE;
+            size = opndx.value;
         }
+        InputQueueLine( SetSimSeg( SIM_STACK, NULL, buffer ));
+        /* add stack to dgroup for segmented models */
+        input_group( type, NULL );
+        InputQueueLine( "ORG 0" );
+        sprintf( buffer, "db %u dup (?)", size );
+        InputQueueLine( buffer );
+        InputQueueLine( EndSimSeg( SIM_STACK, buffer ));
         break;
     case T_DOT_DATA:
     case T_DOT_DATA_UN:             // .data?
@@ -1069,6 +1085,8 @@ int SimSeg( int i )
         /**/myassert( 0 );
         break;
     }
+    if (AsmBuffer[i]->token != T_FINAL)
+        AsmError( SYNTAX_ERROR );
     DebugMsg(("SimSeg exit\n"));
     return( NOT_ERROR );
 }
@@ -1117,10 +1135,10 @@ void DefineFlatGroup( void )
 /***********************/
 {
 
-    if( MAGIC_FLAT_GROUP == 0 ) {
+    if( ModuleInfo.flatgrp_idx == 0 ) {
         flat_grp = CreateGroup( "FLAT" );
         if( flat_grp != NULL ) {
-            MAGIC_FLAT_GROUP = GetGrpIdx( &flat_grp->sym );
+            ModuleInfo.flatgrp_idx = GetGrpIdx( &flat_grp->sym );
         }
     }
 }
@@ -1214,7 +1232,7 @@ int SegmentModulePrologue(int type)
     char        buffer[ MAX_LINE_LEN ];
 
     lastseg.seg = SIM_NONE;
-    lastseg.stack_size = 0;
+    //lastseg.stack_size = 0;
 
     if (Parse_Pass == PASS_1) {
         /* Generates codes for code segment */

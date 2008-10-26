@@ -32,8 +32,6 @@
 #ifndef _INPUT_H_INCLUDED
 #define _INPUT_H_INCLUDED
 
-#include "bool.h"
-
 extern void     PushLineQueue( void );
 extern bool     PopLineQueue( void );
 extern void     InputQueueLine( char *line );
@@ -44,8 +42,5 @@ extern void     AddStringToIncludePath( char *string );
 extern void     InputInit( void );
 extern void     InputFini( void );
 extern int      AsmLine( char * );
-
-extern char     *CurrString;    // Current Input Line
-extern char     *CurrStringEnd; // start free space in Input Line
 
 #endif

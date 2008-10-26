@@ -68,6 +68,10 @@ void Fatal( unsigned msg, ... )
     const FNAME *fname;
 
     MsgPrintf( MSG_ERROR );
+    fname = get_curr_srcfile();
+    if (fname)
+        printf(" (%s,%u)", fname->name, LineNumber);
+    printf(": ");
     MsgPrintf( Fatal_Msg[msg].message );
     if( Fatal_Msg[msg].num > 0 ) {
         va_start( arg, msg );
@@ -76,14 +80,12 @@ void Fatal( unsigned msg, ... )
         }
         va_end( arg );
     }
-    fname = get_curr_srcfile();
-    if (fname)
-        printf(" at %s, line %u", fname->name, LineNumber);
     printf("\n");
+    /* make sure the object file is deleted before exit */
+    ModuleInfo.error_count++;
     if( Fatal_Msg[msg].action != NULL ) {
         Fatal_Msg[msg].action();
     }
-    CloseFiles();
     exit( Fatal_Msg[msg].ret );
 }
 

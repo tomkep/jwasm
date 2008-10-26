@@ -24,22 +24,20 @@
 *
 *  ========================================================================
 *
-* Description:  include the generated opcode table
+* Description:  prototypes for tokenizer
 *
 ****************************************************************************/
 
-#ifdef DEFINE_ASMOPS
 
-#include "opcodes.gh"
-#undef DEFINE_ASMOPS
+#ifndef _TOKENIZE_H_INCLUDED
+#define _TOKENIZE_H_INCLUDED
 
-#else
+extern char     *CurrSource;      // current source line
+extern char     *StringBufferEnd; // start free space in string buffer
 
-#ifndef _OPCODES_H_
-#define _OPCODES_H_
-
-#include "opcodes.gh"
-
-#endif
+extern int      Tokenize( char * , int index);
+extern int      GetTokenStateSize( void );
+extern void     SaveTokenState( unsigned char * pSave );
+extern void     RestoreTokenState( unsigned char * pSave );
 
 #endif

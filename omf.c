@@ -98,10 +98,10 @@ void omf_write_record( obj_rec *objr, char kill )
 /*******************************************/
 {
     /**/myassert( objr != NULL );
-    ObjRSeek( objr, 0 );
+    OmfRSeek( objr, 0 );
     jumpTable[ JUMP_OFFSET(objr->command) ] ( objr, &pobjState );
     if( kill ) {
-        ObjKillRec( objr );
+        OmfKillRec( objr );
     }
 }
 
@@ -182,24 +182,24 @@ void omf_OutSelect( bool starts )
         GlobalVars.data_in_code = FALSE;
 
         if( write_to_file == TRUE ) {
-            objr = ObjNewRec( CMD_COMENT );
+            objr = OmfNewRec( CMD_COMENT );
             objr->d.coment.attr = 0x80;
             objr->d.coment.class = CMT_DISASM_DIRECTIVE;
 
-            ObjAllocData( objr, 11 );
+            OmfAllocData( objr, 11 );
             curr = GetCurrOffset();
             if( (GlobalVars.sel_start > 0xffffUL) || (curr > 0xffffUL) ) {
-                ObjPut8( objr, DDIR_SCAN_TABLE_32 );
-                ObjPutIndex( objr, GlobalVars.sel_idx );
-                ObjPut32( objr, GlobalVars.sel_start );
-                ObjPut32( objr, GetCurrOffset() );
+                OmfPut8( objr, DDIR_SCAN_TABLE_32 );
+                OmfPutIndex( objr, GlobalVars.sel_idx );
+                OmfPut32( objr, GlobalVars.sel_start );
+                OmfPut32( objr, GetCurrOffset() );
             } else {
-                ObjPut8( objr, DDIR_SCAN_TABLE );
-                ObjPutIndex( objr, GlobalVars.sel_idx );
-                ObjPut16( objr, GlobalVars.sel_start );
-                ObjPut16( objr, GetCurrOffset() );
+                OmfPut8( objr, DDIR_SCAN_TABLE );
+                OmfPutIndex( objr, GlobalVars.sel_idx );
+                OmfPut16( objr, GlobalVars.sel_start );
+                OmfPut16( objr, GetCurrOffset() );
             }
-            ObjTruncRec( objr );
+            OmfTruncRec( objr );
             omf_write_record( objr, TRUE );
         }
         GlobalVars.sel_idx = 0;
@@ -223,7 +223,7 @@ void omf_write_linnum( void )
     if( ldata == NULL ) {
         AsmError( NO_MEMORY );
     } else {
-        objr = ObjNewRec( CMD_LINNUM );
+        objr = OmfNewRec( CMD_LINNUM );
         objr->is_32 = need_32;
         objr->d.linnum.num_lines = count;
         objr->d.linnum.lines = ldata;
@@ -322,8 +322,8 @@ void omf_write_ledata( void )
     size = CurrSeg->seg->e.seginfo->current_loc - CurrSeg->seg->e.seginfo->start_loc;
     if( size > 0 && write_to_file == TRUE) {
         LastCodeBufSize = size;
-        objr = ObjNewRec( CMD_LEDATA );
-        ObjAttachData( objr, CurrSeg->seg->e.seginfo->CodeBuffer, size );
+        objr = OmfNewRec( CMD_LEDATA );
+        OmfAttachData( objr, CurrSeg->seg->e.seginfo->CodeBuffer, size );
         objr->d.ledata.idx = CurrSeg->seg->e.seginfo->segrec->d.segdef.idx;
         objr->d.ledata.offset = CurrSeg->seg->e.seginfo->start_loc;
         if( objr->d.ledata.offset > 0xffffUL )
@@ -337,19 +337,19 @@ void omf_write_ledata( void )
             omf_split_fixup_list( &fl16, &fl32 );
             /* Process Fixup, if any */
             if( fl16 != NULL ) {
-                objr = ObjNewRec( CMD_FIXUP );
+                objr = OmfNewRec( CMD_FIXUP );
                 objr->is_32 = FALSE;
                 objr->d.fixup.fixup = fl16;
                 omf_write_record( objr, TRUE );
             }
             if( fl32 != NULL ) {
-                objr = ObjNewRec( CMD_FIXUP );
+                objr = OmfNewRec( CMD_FIXUP );
                 objr->is_32 = TRUE;
                 objr->d.fixup.fixup = fl32;
                 omf_write_record( objr, TRUE );
             }
 #else
-            objr = ObjNewRec( CMD_FIXUP );
+            objr = OmfNewRec( CMD_FIXUP );
             objr->d.fixup.fixup = CurrSeg->seg->e.seginfo->FixupListHead;
             omf_check_need_32bit( objr );
             omf_write_record( objr, TRUE );
@@ -371,10 +371,10 @@ void omf_write_end_of_pass1( void )
 {
     obj_rec     *objr;
 
-    objr = ObjNewRec( CMD_COMENT );
+    objr = OmfNewRec( CMD_COMENT );
     objr->d.coment.attr = 0x00;
     objr->d.coment.class = CMT_MS_END_PASS_1;
-    ObjAttachData( objr, (uint_8 *)"\x001", 1 );
+    OmfAttachData( objr, (uint_8 *)"\x001", 1 );
     omf_write_record( objr, TRUE );
 }
 
@@ -383,10 +383,10 @@ void omf_write_dosseg( void )
 {
     obj_rec     *objr;
 
-    objr = ObjNewRec( CMD_COMENT );
+    objr = OmfNewRec( CMD_COMENT );
     objr->d.coment.attr = 0x80;
     objr->d.coment.class = CMT_DOSSEG;
-    ObjAttachData( objr, (uint_8 *)"", 0 );
+    OmfAttachData( objr, (uint_8 *)"", 0 );
     omf_write_record( objr, TRUE );
 }
 
@@ -400,10 +400,10 @@ void omf_write_lib( void )
     DebugMsg(("omf_write_lib() enter\n"));
     for( curr = Tables[TAB_LIB].head; curr; curr = curr->next ) {
         name = curr->sym.name;
-        objr = ObjNewRec( CMD_COMENT );
+        objr = OmfNewRec( CMD_COMENT );
         objr->d.coment.attr = 0x80;
         objr->d.coment.class = CMT_DEFAULT_LIBRARY;
-        ObjAttachData( objr, (uint_8 *)name, strlen( name ) );
+        OmfAttachData( objr, (uint_8 *)name, strlen( name ) );
         omf_write_record( objr, TRUE );
     }
     DebugMsg(("omf_write_lib() exit\n"));
@@ -420,17 +420,17 @@ void omf_write_export( void )
     for( dir = Tables[TAB_PROC].head; dir != NULL; dir = dir->next ) {
         if( dir->e.procinfo->export ) {
 
-            objr = ObjNewRec( CMD_COMENT );
+            objr = OmfNewRec( CMD_COMENT );
             objr->d.coment.attr = 0x00;
             objr->d.coment.class = CMT_DLL_ENTRY;
 
             Mangle( &dir->sym, buffer );
 
-            ObjAllocData( objr, 4 + strlen( buffer )  );
-            ObjPut8( objr, 2 );
-            ObjPut8( objr, 0 );             // temporary
-            ObjPutName( objr, buffer, strlen( buffer ) );
-            ObjPut8( objr, 0 );
+            OmfAllocData( objr, 4 + strlen( buffer )  );
+            OmfPut8( objr, 2 );
+            OmfPut8( objr, 0 );             // temporary
+            OmfPutName( objr, buffer, strlen( buffer ) );
+            OmfPut8( objr, 0 );
             omf_write_record( objr, TRUE );
         }
     }
@@ -453,14 +453,14 @@ void omf_write_grp( void )
 
     for( curr = Tables[TAB_GRP].head; curr; curr = curr->next ) {
 
-        grp = ObjNewRec( CMD_GRPDEF );
+        grp = OmfNewRec( CMD_GRPDEF );
 
         grp->d.grpdef.idx = curr->e.grpinfo->idx;
 
         /* we might need up to 3 bytes for each seg in dgroup and 1 byte for
            the group name index */
-        ObjAllocData( grp, 1 + 3 * curr->e.grpinfo->numseg );
-        ObjPut8( grp, GetLnameIdx( curr->sym.name ) );
+        OmfAllocData( grp, 1 + 3 * curr->e.grpinfo->numseg );
+        OmfPut8( grp, GetLnameIdx( curr->sym.name ) );
 
         for( seg = curr->e.grpinfo->seglist; seg; seg = seg->next ) {
             writeseg = TRUE;
@@ -474,11 +474,11 @@ void omf_write_grp( void )
                 // AsmErr( SEG_NOT_DEFINED, segminfo->sym.name );
                 // LineNumber = line_num;
             } else {
-                ObjPut8( grp, GRP_SEGIDX );
-                ObjPutIndex( grp, segminfo->e.seginfo->segrec->d.segdef.idx);
+                OmfPut8( grp, GRP_SEGIDX );
+                OmfPutIndex( grp, segminfo->e.seginfo->segrec->d.segdef.idx);
             }
         }
-        ObjTruncRec( grp );
+        OmfTruncRec( grp );
         omf_write_record( grp, TRUE );
     }
     DebugMsg(("omf_write_grp exit\n"));
@@ -508,7 +508,13 @@ void omf_write_seg( void )
             continue;
         }
         objr = curr->e.seginfo->segrec;
-        objr->is_32 = TRUE;
+        if ( curr->e.seginfo->Use32 ) {
+            objr->is_32 = ( objr->d.segdef.seg_length >= 0x10000 );
+        } else {
+            if ( objr->d.segdef.seg_length > 0x10000 )
+                AsmErr( SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
+            objr->is_32 = FALSE;
+        }
         objr->d.segdef.use_32 = curr->e.seginfo->Use32;
         objr->d.segdef.ovl_name_idx = 1;
         objr->d.segdef.seg_name_idx = GetLnameIdx( curr->sym.name );
@@ -516,12 +522,12 @@ void omf_write_seg( void )
         if( curr->e.seginfo->segtype == SEGTYPE_CODE ) {
             obj_rec     *rec;
 
-            rec = ObjNewRec( CMD_COMENT );
+            rec = OmfNewRec( CMD_COMENT );
             rec->d.coment.attr = CMT_TNP;
             rec->d.coment.class = CMT_LINKER_DIRECTIVE;
-            ObjAllocData( rec, 3  );
-            ObjPut8( rec, LDIR_OPT_FAR_CALLS );
-            ObjPutIndex( rec, seg_index );
+            OmfAllocData( rec, 3  );
+            OmfPut8( rec, LDIR_OPT_FAR_CALLS );
+            OmfPutIndex( rec, seg_index );
             omf_write_record( rec, TRUE );
         }
     }
@@ -539,14 +545,14 @@ void omf_write_lnames( void )
     /* todo: Masm splits the LNAMES record if it exceeds 1024 bytes
      */
 
-    objr = ObjNewRec( CMD_LNAMES );
+    objr = OmfNewRec( CMD_LNAMES );
     objr->d.lnames.first_idx = 1;
     objr->d.lnames.num_names = LnamesIdx;
     total_size = GetLnameData( &lname );
     /* fixme: what if lnames are > 1024? */
     DebugMsg(("omf_write_lnames(): total_size=%u\n", total_size));
     if( total_size > 0 ) {
-        ObjAttachData( objr, (uint_8 *)lname, total_size );
+        OmfAttachData( objr, (uint_8 *)lname, total_size );
     }
 //    ObjCanFree( objr ); /* tell that data attachment can be freed */
     omf_write_record( objr, TRUE );
@@ -572,7 +578,7 @@ void omf_write_extdef( )
     num = 0;
 
     DebugMsg(("omf_write_extdef enter\n"));
-    objr = ObjNewRec( CMD_EXTDEF );
+    objr = OmfNewRec( CMD_EXTDEF );
     objr->d.extdef.first_idx = 0;
 
     // first scan the EXTERN/EXTERNDEF items
@@ -585,13 +591,13 @@ void omf_write_extdef( )
         len = strlen( buffer );
 
         if( total_size + len + 2 >= MAX_EXT_LENGTH ) {
-            ObjAttachData( objr, (uint_8 *)name, total_size );
+            OmfAttachData( objr, (uint_8 *)name, total_size );
             objr->d.extdef.num_names = num;
             omf_write_record( objr, TRUE );
             total_size = 0;
             i = 0;
             num = 0;
-            objr = ObjNewRec( CMD_EXTDEF );
+            objr = OmfNewRec( CMD_EXTDEF );
             objr->d.extdef.first_idx = curr->sym.idx - 1;
         }
         total_size += len + 2;
@@ -614,13 +620,13 @@ void omf_write_extdef( )
             len = strlen( buffer );
 
             if( total_size + len + 2 >= MAX_EXT_LENGTH ) {
-                ObjAttachData( objr, (uint_8 *)name, total_size );
+                OmfAttachData( objr, (uint_8 *)name, total_size );
                 objr->d.extdef.num_names = num;
                 omf_write_record( objr, TRUE );
                 total_size = 0;
                 i = 0;
                 num = 0;
-                objr = ObjNewRec( CMD_EXTDEF );
+                objr = OmfNewRec( CMD_EXTDEF );
                 objr->d.extdef.first_idx = curr->sym.idx - 1;
             }
             total_size += len + 2;
@@ -635,11 +641,11 @@ void omf_write_extdef( )
     }
     DebugMsg(("omf_write_extdef: attach data, curr=%X, size=%u, last=%u, names=%u, MAX=%u\n", curr, total_size, len, num, MAX_EXT_LENGTH));
     if( num != 0 ) {
-        ObjAttachData( objr, (uint_8 *)name, total_size );
+        OmfAttachData( objr, (uint_8 *)name, total_size );
         objr->d.extdef.num_names = num;
         omf_write_record( objr, TRUE );
     } else {
-        ObjKillRec( objr );
+        OmfKillRec( objr );
     }
     DebugMsg(("omf_write_extdef exit\n"));
     return;
@@ -676,7 +682,7 @@ static int get_number_of_bytes_for_size_in_commdef( unsigned long value )
 
 // write OMF COMDEF records
 
-int omf_write_comdef( )
+ret_code omf_write_comdef( )
 /**********************************************/
 {
     obj_rec     *objr;
@@ -775,9 +781,9 @@ int omf_write_comdef( )
         } /* end for */
 
         if( num > 0 ) {
-            objr = ObjNewRec( CMD_COMDEF );
+            objr = OmfNewRec( CMD_COMDEF );
             objr->d.comdef.first_idx = start;
-            ObjAttachData( objr, (uint_8 *)name, total_size );
+            OmfAttachData( objr, (uint_8 *)name, total_size );
             objr->d.comdef.num_names = num;
             omf_write_record( objr, TRUE );
         }
@@ -794,7 +800,7 @@ void omf_write_header( void )
     char        *name;
 
     DebugMsg(("omf_write_header() enter\n"));
-    objr = ObjNewRec( CMD_THEADR );
+    objr = OmfNewRec( CMD_THEADR );
     if( Options.module_name != NULL ) {
         name = Options.module_name;
     } else {
@@ -804,14 +810,14 @@ void omf_write_header( void )
         for (;name > ModuleInfo.srcfile->fullname && *(name-1) != '/' && *(name-1) != '\\';name--);
     }
     len = strlen( name );
-    ObjAllocData( objr, len + 1 );
-    ObjPutName( objr, name, len );
-    ObjTruncRec( objr );
+    OmfAllocData( objr, len + 1 );
+    OmfPutName( objr, name, len );
+    OmfTruncRec( objr );
     omf_write_record( objr, TRUE );
     DebugMsg(("omf_write_header() exit\n"));
 }
 
-int omf_write_autodep( void )
+ret_code omf_write_autodep( void )
 /******************************/
 {
     obj_rec         *objr;
@@ -820,7 +826,7 @@ int omf_write_autodep( void )
     const FNAME     *curr;
 
     for( curr = FNames; curr != NULL; curr = curr->next ) {
-        objr = ObjNewRec( CMD_COMENT );
+        objr = OmfNewRec( CMD_COMENT );
         objr->d.coment.attr = 0x80;
         objr->d.coment.class = CMT_DEPENDENCY;
 
@@ -830,17 +836,17 @@ int omf_write_autodep( void )
         strcpy(buff + 5, curr->name);
         len += 5;
 
-        ObjAttachData( objr, (uint_8 *)buff, len );
+        OmfAttachData( objr, (uint_8 *)buff, len );
 
         omf_write_record( objr, TRUE );
     }
     // one NULL dependency record must be on the end
-    objr = ObjNewRec( CMD_COMENT );
+    objr = OmfNewRec( CMD_COMENT );
     objr->d.coment.attr = 0x80;
     objr->d.coment.class = CMT_DEPENDENCY;
-    ObjAttachData( objr, (uint_8 *)"", 0 );
+    OmfAttachData( objr, (uint_8 *)"", 0 );
     omf_write_record( objr, TRUE );
-    return NOT_ERROR;
+    return( NOT_ERROR );
 }
 
 void omf_write_alias( void )
@@ -874,14 +880,14 @@ void omf_write_alias( void )
         strncpy( new, subst, len2 );
         new -= len1 + 2;
 
-        objr = ObjNewRec( CMD_ALIAS );
-        ObjAttachData( objr, (uint_8 *)new, len1+len2+2);
+        objr = OmfNewRec( CMD_ALIAS );
+        OmfAttachData( objr, (uint_8 *)new, len1+len2+2);
         omf_write_record( objr, TRUE );
         first = FALSE;
     }
 }
 
-int omf_write_pub( void )
+ret_code omf_write_pub( void )
 /**************************/
 /* note that procedures with public or export visibility are written out here */
 {
@@ -900,7 +906,7 @@ int omf_write_pub( void )
 
         /* create a public record for this segment */
 
-        objr = ObjNewRec( cmd );
+        objr = OmfNewRec( cmd );
         objr->is_32 = need32;
         objr->d.pubdef.base.grp_idx = grp;
         objr->d.pubdef.base.seg_idx = seg;

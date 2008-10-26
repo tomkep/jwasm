@@ -106,7 +106,9 @@ global_options Options = {
     /* module_name      */          NULL,
 
     /* default_name_mangler  */     NULL,
+#if COCTALS
     /* allow_c_octals        */     FALSE,
+#endif
     /* no_comment_data_in_code_records */   FALSE,
     /* no_dependencies       */     FALSE,
     /* no_file_entry         */     FALSE,
@@ -145,6 +147,7 @@ struct qitem * IncQueue = NULL;
     ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
 #if !defined(__UNIX__)
+#ifdef __WATCOMC__
 
 typedef union cu {
     int c;
@@ -171,6 +174,7 @@ char * _stdcall CharUpperA(char * lpsz)
                 *p.p = *p.p - 0x20;
     return(lpsz);
 }
+#endif
 #endif
 
 static char *CopyOfParm( void )
@@ -691,7 +695,9 @@ static void Set_Mf( void ) { Options.model = MOD_FLAT; }
 
 static void Set_N( void ) { set_some_kinda_name( OptValue, CopyOfParm() ); }
 
+#if COCTALS
 static void Set_O( void ) { Options.allow_c_octals = TRUE; }
+#endif
 
 static void Set_OMF( void ) { Options.output_format = OFORMAT_OMF;}
 
@@ -791,7 +797,9 @@ static struct option const cmdl_options[] = {
     { "nm=$",   'm',      Set_N },
     { "nt=$",   't',      Set_N },
     { "nologo", 0,        Set_NOLOGO },
+#if COCTALS
     { "o",      0,        Set_O },
+#endif
     { "omf",    0,        Set_OMF },
     { "q",      0,        Set_Q },
     { "Sg",     0,        Set_SG },
@@ -893,7 +901,7 @@ static void main_init( void )
     int         i;
 
     MemInit();
-    for( i = 0; i <= FILE_TYPES; i++ ) {
+    for( i = 0; i <= NUM_FILE_TYPES; i++ ) {
         AsmFiles.file[i] = NULL;
         AsmFiles.fname[i] = NULL;
     }
@@ -911,7 +919,7 @@ void CloseFiles( void )
             Fatal( MSG_CANNOT_CLOSE_FILE, AsmFiles.fname[ASM] );
         }
     }
-    CloseLstFile();
+    LstCloseFile();
 
     /* close OBJ file */
     if ( pobjState.file_out != NULL )
@@ -1528,7 +1536,7 @@ void set_fpu_parameters( void )
     }
 }
 
-// called by write.c
+// called by assemble.c
 // this is called for every pass.
 // symbol table and ModuleInfo are initialized.
 

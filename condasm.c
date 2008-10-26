@@ -58,7 +58,7 @@ extern bool SkipMacroMode;
  -----------------------------------------------------------------------
   condition check    on           active, inactive
   inactive           off          condition check, active
-  active             on           condition check, done
+  active             on           done
   done               off          -
 */
 
@@ -308,7 +308,7 @@ static bool check_defd( char *string )
     }
 }
 
-static char check_blank( char *string )
+static bool check_blank( char *string )
 /************************************/
 {
     for (;*string;string++)
@@ -317,7 +317,7 @@ static char check_blank( char *string )
     return( TRUE );
 }
 
-static char check_dif( bool sensitive, char *string, char *string2 )
+static bool check_dif( bool sensitive, char *string, char *string2 )
 /******************************************************************/
 {
     if( sensitive ) {

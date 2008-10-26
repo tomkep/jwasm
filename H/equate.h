@@ -28,8 +28,11 @@
 *
 ****************************************************************************/
 
+#ifndef _EQUATE_H_INCLUDED
+#define _EQUATE_H_INCLUDED
 
-extern int    DefineConstant( bool redefine );
-extern void   MakeConstantUnderscored( int token );
-extern asm_sym * CreateConstant( char *, int, int, bool );
+extern ret_code DefineConstant( bool redefine );
+extern void     MakeConstantUnderscored( int token );
+extern asm_sym  *CreateConstant( char *, int, int, bool );
 
+#endif

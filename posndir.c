@@ -203,7 +203,7 @@ int AlignDirective( int directive, int i )
         fill_in_objfile_space( align_val );
     }
     if (AsmFiles.file[LST]) {
-        WriteLstFile(LSTTYPE_LIDATA, CurrAddr, NULL );
+        LstWriteFile(LSTTYPE_LIDATA, CurrAddr, NULL );
         directive_listed = TRUE;
     }
     DebugMsg(("AlignDirective exit\n"));

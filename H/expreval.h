@@ -69,7 +69,6 @@ typedef struct expr_list {
                                     //
     unsigned        indirect : 1;   // Whether inside [] or not
     unsigned        explicit : 1;   // Whether expression type explicitly given
-    unsigned        empty    : 1;   // ???
     unsigned        abs      : 1;
     unsigned        stackbased : 1; // a stack variable
 #if FLAG_LABELDIFF

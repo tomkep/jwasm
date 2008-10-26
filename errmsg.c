@@ -29,15 +29,13 @@
 ****************************************************************************/
 
 
-#if defined( _STANDALONE_ )
-
 #include <stdarg.h>
 #include <ctype.h>
 
 #include "globals.h"
 #include "symbols.h"
 #include "directiv.h"
-#include "input.h"
+#include "tokenize.h"
 #include "symbols.h"
 #include "queues.h"
 #include "macro.h"
@@ -229,7 +227,7 @@ static void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args )
         fwrite( buffer, 1, i, fp );
         if (AsmFiles.file[LST] && fp == ErrFile) {
             fwrite( "                           ", 1, 26+1, AsmFiles.file[LST] );
-            fwrite( CurrString, 1, strlen(CurrString), AsmFiles.file[LST] );
+            fwrite( CurrSource, 1, strlen( CurrSource ), AsmFiles.file[LST] );
             fwrite( "\n", 1, 1, AsmFiles.file[LST] );
             if( LineNumber != 0 && fname != NULL ) {
                 fprintf( AsmFiles.file[LST], "%s(%lu): ", fname->name, LineNumber );
@@ -258,4 +256,3 @@ int InternalError( const char *file, unsigned line )
 }
 #endif
 
-#endif

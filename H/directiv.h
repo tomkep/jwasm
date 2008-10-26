@@ -288,7 +288,9 @@ typedef struct {
     lang_type           langtype;        // language;
     os_type             ostype;          // operating system;
     seg_order           segorder;        // .alpha, .seq, .dosseg
-    short               cpu;             // cpu setting;
+    short               cpu;             // cpu setting (value @cpu symbol);
+    enum asm_cpu        curr_cpu;        // cpu setting (OW stylex);
+    unsigned char       radix;           // current .RADIX setting
     unsigned            use32:1;         // If 32-bit segment is used
     unsigned            cmdline:1;       // memory model set by cmdline opt?
     unsigned            defUse32:1;      // default segment size 32-bit
@@ -304,12 +306,10 @@ typedef struct {
     unsigned            list:1;          // .list/.nolist
     unsigned            cref:1;          // .cref/.nocref
     unsigned            setif2:1;        // option setif2
-    unsigned            flat_idx;        // index of FLAT group
+    unsigned            flatgrp_idx;     // index of FLAT group
     char                name[_MAX_FNAME];// name of module
     const FNAME         *srcfile;
 } module_info;                           // Information about the module
-
-#define MAGIC_FLAT_GROUP        ModuleInfo.flat_idx
 
 extern module_info      ModuleInfo;
 
@@ -332,16 +332,13 @@ extern int              FindSimpleType( int );  // find simple type
 //extern int              RegisterValueToIndex( int, bool *);
 extern int              SizeFromRegister( int );
 extern struct asm_sym   *MakeExtern( char *name, memtype type, struct asm_sym * vartype, struct asm_sym *, bool );
-extern int              EchoDef( int );         // handle ECHO directive
-extern int              OptionDirective( int ); // handle OPTION directive
-
-extern int              SetModel( int );        // handle .MODEL statement
+extern ret_code         EchoDef( int );         // handle ECHO directive
+extern ret_code         OptionDirective( int ); // handle OPTION directive
 
 extern void             ModuleInit( void );
 /* Initializes the information about the module, which are contained in
    ModuleInfo */
 
-extern int              ModuleEnd( int );       // handle END statement
 extern int              FixOverride( int );
 /* Get the correct frame and frame_datum for a label when there is a segment
    or group override. */
@@ -357,7 +354,7 @@ extern void             SetMasm510( bool );
 
 extern seg_item         *CurrSeg;       // points to stack of opened segments
 
-extern int              directive( int , long );
+extern ret_code         directive( int , long );
 extern uint_32          GetCurrSegStart(void);
 /* Get offset of segment at the start of current LEDATA record */
 
@@ -368,13 +365,13 @@ extern uint_32          GetCurrSegStart(void);
 extern void             SetSymSegOfs( struct asm_sym * );
 /* Store location information about a symbol */
 extern int              SymIs32( struct asm_sym * );
-extern int              SimSeg( int );          // handle simplified segment
+extern int              SimplifiedSegDir( int );
 
 
 extern direct_idx       GetLnameIdx( char * );
 
 extern uint_32          GetCurrOffset( void );  // Get offset from current segment
-extern int              SetCurrOffset( int_32, bool, bool );
+extern ret_code         SetCurrOffset( int_32, bool, bool );
 
 extern dir_node         *GetCurrSeg( void );
 /* Get current segment; NULL means none */
@@ -388,15 +385,16 @@ extern uint             GetSegIdx( struct asm_sym * );
 /* get symbol's segment index, from the symbol itself */
 
 
-extern int              GrpDef( int );          // define a group
-extern int              SegDef( int );          // open or close a segment
-extern int              SetCurrSeg( int );      // open or close a segment in
+extern ret_code         GrpDef( int );          // define a group
+extern ret_code         SegDef( int );          // open or close a segment
+extern ret_code         SetCurrSeg( int );      // open or close a segment in
                                                 // the second pass
 extern void             SegmentInit( int );     // init segments
-extern struct asm_sym   *GetGrp( struct asm_sym * );
+extern asm_sym          *GetGrp( struct asm_sym * );
 
 extern uint_32          GetCurrSegAlign( void );
 extern int              SetUse32Def( bool );
+extern void             DefineFlatGroup( void );
 
 // input.c
 

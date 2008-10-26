@@ -37,7 +37,7 @@
 #include "directiv.h"
 #include "equate.h"
 #include "expreval.h"
-#include "input.h"
+#include "tokenize.h"
 #include "labels.h"
 #include "macro.h"
 #include "listing.h"
@@ -45,7 +45,7 @@
 #define is_valid_id_char( ch ) \
     ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
-int LoopDirective( int i, int directive )
+ret_code LoopDirective( int i, int directive )
 /*************************************/
 {
     int start = i - 1; /* location of "directive name .. after any labels" */
@@ -62,7 +62,7 @@ int LoopDirective( int i, int directive )
     DebugMsg(("LoopDirective(%u, %u) enter\n", i, directive));
 
     if (ModuleInfo.list == TRUE)
-        WriteLstFile(LSTTYPE_MACRO, 0, NULL);
+        LstWriteFile(LSTTYPE_MACRO, 0, NULL);
 
     switch (directive) {
     case T_REPT:

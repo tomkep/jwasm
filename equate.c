@@ -40,7 +40,7 @@
 #include "symbols.h"
 #include "directiv.h"
 #include "labels.h"
-#include "input.h"
+#include "tokenize.h"
 #include "macro.h"
 #include "fastpass.h"
 #include "listing.h"
@@ -53,7 +53,7 @@ extern void GetInsString( enum asm_token , char *, int );
 //   EQU:    redefine=FALSE
 //   '=':    redefine=TRUE
 
-int DefineConstant( bool redefine )
+ret_code DefineConstant( bool redefine )
 /***********************************************************/
 {
     asm_sym *sym;
@@ -64,7 +64,7 @@ int DefineConstant( bool redefine )
     }
     if (sym = CreateConstant( AsmBuffer[0]->string_ptr, 0, 2, redefine ) ) {
         if (ModuleInfo.list == TRUE) {
-            WriteLstFile(LSTTYPE_EQUATE, 0, sym);
+            LstWriteFile(LSTTYPE_EQUATE, 0, sym);
             directive_listed = TRUE;
         }
         return(NOT_ERROR);
@@ -72,9 +72,10 @@ int DefineConstant( bool redefine )
     return(ERROR);
 }
 
-// this is to define values like
-// __386__, __486__
-// if directives like .386, .486, ... are found
+#if 0
+// this is to define values like __386__, __486__, ...
+// if directives like .386, .486, ... are found.
+// it isn't Masm-compatible.
 
 void MakeConstantUnderscored( int token )
 /*****************************/
@@ -90,6 +91,7 @@ void MakeConstantUnderscored( int token )
     CreateConstant( buffer, 1, -1, TRUE );
     return;
 }
+#endif
 
 #if FASTPASS
 

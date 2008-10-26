@@ -31,24 +31,21 @@
 #ifndef _MACRO_H_
 #define _MACRO_H_
 
-extern void    AddTokens( int start, int count );
+extern void     AddTokens( int start, int count );
 extern dir_node *CreateMacro( char * );     // create a macro symbol
-extern void    ReleaseMacroData( dir_node * );
-extern int     MacroDef( int );             // define a macro
-extern int     FillMacro( dir_node *, int, bool );  // set macro content
-extern int     PurgeMacro( int );           // remove a macro
-extern int     ExpandMacro( char * );
-extern int     RunMacro( dir_node *, char *, char *, bool, bool, bool );
-extern int     EndMacro( int, int );
-extern asm_sym *SetTextMacro( asm_sym*, char *, char * );
-extern int     GetTextMacroValue( char *, char *);
-extern int     CatStrDef( int, asm_sym** ); // CatStr + TEXTEQU directive
-extern int     SubStrDef( int, char *);     // SubStr directive
-extern int     SizeStrDef( int );           // SizeStr directive
-extern int     InStrDef( int, char *);      // InStr directive
-extern int     LoopDirective( int, int );   // FOR,FORC,IRP,IRPC,REPT,...
-extern int     MacroInit( int );
-
-#define STRING_EXPANDED (NOT_ERROR+1)
+extern void     ReleaseMacroData( dir_node * );
+extern ret_code MacroDef( int );             // define a macro
+extern ret_code FillMacro( dir_node *, int, bool );  // set macro content
+extern ret_code PurgeMacro( int );           // remove a macro
+extern ret_code ExpandMacro( char * );
+extern int      RunMacro( dir_node *, char *, char *, bool, bool, bool );
+extern asm_sym  *SetTextMacro( asm_sym*, char *, char * );
+extern int      GetTextMacroValue( char *, char *);
+extern ret_code CatStrDef( int, asm_sym** ); // CatStr + TEXTEQU directive
+extern ret_code SubStrDef( int, char *);     // SubStr directive
+extern ret_code SizeStrDef( int );           // SizeStr directive
+extern ret_code InStrDef( int, char *);      // InStr directive
+extern ret_code LoopDirective( int, int );   // FOR,FORC,IRP,IRPC,REPT,...
+extern int      MacroInit( int );
 
 #endif

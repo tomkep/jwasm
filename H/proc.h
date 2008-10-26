@@ -37,13 +37,13 @@ extern dir_node         *CurrProc;      // current procedure
 /*---------------------------------------------------------------------------*/
 
 extern int              proc_check( void );
-extern int              ExamineProc( dir_node *, int , bool );  // common for PROC/PROTO
-extern int              LocalDef( int );        // LOCAL directive
-extern int              ProcDef( int );         // PROC directive
-extern int              ProtoDef( int, char * );// PROTO directive
-extern int              ProcEnd( int );         // ENDP directive
-extern int              InvokeDef( int );       // INVOKE directive
-extern int              RetInstr( int, int, bool );// emit return statement from procedure
+extern ret_code         ExamineProc( dir_node *, int , bool );  // common for PROC/PROTO
+extern ret_code         LocalDef( int );        // LOCAL directive
+extern ret_code         ProcDef( int );         // PROC directive
+extern ret_code         ProtoDef( int, char * );// PROTO directive
+extern ret_code         EndpDef( int );         // ENDP directive
+extern ret_code         InvokeDirective( int );
+extern ret_code         RetInstr( int, int, bool );// emit return statement from procedure
 //extern int              WritePrologue( void );  // emit prologue statement after the
                                                 // declaration of a procedure
 extern void             ProcInit( void );

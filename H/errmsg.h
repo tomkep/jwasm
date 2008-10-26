@@ -50,7 +50,7 @@ extern void AsmWarn( int level, int msgnum, ... );
 extern void AsmNote( int msgnum, ... );
 
 #if DEBUG_OUT
-    #define DebugCurrLine() printf( "%s\n", CurrString );
+    #define DebugCurrLine() printf( "%s\n", CurrSource );
     #define AsmIntErr( x ) DebugCurrLine(); printf( "Internal error = %d\n", x )
 #else
     #define DebugCurrLine()

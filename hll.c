@@ -4,7 +4,13 @@
 *
 *  ========================================================================
 *
-* Description:  support the hll constructs .IF, .WHILE, .REPEAT, ...
+* Description:  implements hll directives:
+*               .IF, .WHILE, .REPEAT, .ELSE, .ELSEIF, .ENDIF,
+*               .ENDW, .UNTIL, .UNTILCXZ, .BREAK, .CONTINUE.
+*               also handles C operators:
+*               ==, !=, >=, <=, >, <, &&, ||, &, !,
+*               and flags:
+*               ZERO?, CARRY?, SIGN?, PARITY?, OVERFLOW?
 *
 ****************************************************************************/
 
@@ -30,7 +36,7 @@
 
 #define LABELSIZE 8
 
-static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp);
+static ret_code GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp);
 
 #define LABELFIRST 0
 #define LABELTEST  1
@@ -66,7 +72,7 @@ static char * MakeAnonymousLabel(void)
     char *p = AsmAlloc( LABELSIZE );
     sprintf(p, "@C%04u", ModuleInfo.hll_label);
     ModuleInfo.hll_label++;
-    return (p);
+    return ( p );
 }
 
 // get a C binary operator from the token stream.
@@ -149,7 +155,7 @@ static void RenderOpnd(expr_list * op, char * buffer, int start, int end)
 
 // a "token" in a C expression actually is a set of ASM tokens
 
-static int GetToken(hll_list * hll, int *i, bool is_true, expr_list * opndx)
+static ret_code GetToken(hll_list * hll, int *i, bool is_true, expr_list * opndx)
 {
     int end_tok;
 
@@ -194,7 +200,7 @@ static void SetLabel(hll_list *hll, int label, char * labelname)
 // 3. unary operator "!" + one token
 // 4. one token (short form for "<token> != 0")
 
-static int GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **jmp)
+static ret_code GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **jmp)
 {
     expr_list opndx;
     expr_list op2;
@@ -520,7 +526,7 @@ static void ReplaceLabel(char * p, char * olabel, char * nlabel)
 
 // operator &&, which has the second lowest precedence, is handled here
 
-static int GetAndExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp)
+static ret_code GetAndExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp)
 {
     c_bop op;
     int cur_pos;
@@ -563,7 +569,7 @@ static int GetAndExpression(hll_list * hll, int *i, int ilabel, bool is_true, ch
 
 // operator ||, which has the lowest precedence, is handled here
 
-static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp)
+static ret_code GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp)
 {
     c_bop op;
     int cur_pos;
@@ -628,7 +634,7 @@ static int GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char 
 
 // update hll->condlines
 
-static int WriteExprSrc(hll_list * hll, char * buffer)
+static ret_code WriteExprSrc(hll_list * hll, char * buffer)
 {
     int size;
     char *p;
@@ -647,7 +653,7 @@ static int WriteExprSrc(hll_list * hll, char * buffer)
 
     AsmFree(hll->condlines);
     hll->condlines = p;
-    return(1);
+    return( NOT_ERROR );
 }
 
 // evaluate the C like boolean expression found in HLL structs
@@ -658,7 +664,7 @@ static int WriteExprSrc(hll_list * hll, char * buffer)
 // label: label to jump to if expression is <is_true>!
 // is_true: TRUE/FALSE
 
-static int EvaluateHllExpression(hll_list * hll, int *i, int ilabel, bool is_true)
+static ret_code EvaluateHllExpression(hll_list * hll, int *i, int ilabel, bool is_true)
 {
     char *lastjmp = NULL;
     char buffer[MAX_LINE_LEN*2];
@@ -679,7 +685,7 @@ static int EvaluateHllExpression(hll_list * hll, int *i, int ilabel, bool is_tru
 
 // write ASM test lines
 
-static int HllPushTestLines(hll_list * hll)
+static ret_code HllPushTestLines(hll_list * hll)
 {
     char *p = hll->condlines;
     char *p2;
@@ -706,7 +712,7 @@ static int HllPushTestLines(hll_list * hll)
 
 // for .UNTILCXZ check if expression is simple enough
 
-static int HllCheckTestLines(hll_list * hll)
+static ret_code HllCheckTestLines(hll_list * hll)
 {
     int lines = 0;
     int i;
@@ -745,7 +751,7 @@ void HllInit()
 
 // Start a .IF, .WHILE, .REPEAT item
 
-int HllStartDef( int i )
+ret_code HllStartDef( int i )
 /********************/
 {
     struct hll_list      *hll;
@@ -870,7 +876,7 @@ int HllStartDef( int i )
 // End a .IF, .WHILE, .REPEAT item
 // that is: .ENDIF, .ENDW, .UNTIL and .UNTILCXZ are handled here
 
-int HllEndDef( int i )
+ret_code HllEndDef( int i )
 /********************/
 {
     struct asm_sym      *sym;
@@ -1000,7 +1006,7 @@ int HllEndDef( int i )
 // Exit current .IF, .WHILE, .REPEAT item
 // that is: .ELSE, .ELSEIF, .CONTINUE and .BREAK are handled here
 
-int HllExitDef( int i )
+ret_code HllExitDef( int i )
 /********************/
 {
     int                 level;
