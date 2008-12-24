@@ -36,6 +36,6 @@ extern asm_sym *        IsLabelType( char * );
 extern ret_code         LabelDirective( int );
 extern char *           GetCurrAnonLabel(char *);
 extern char *           GetNextAnonLabel(char *);
-extern int              LabelCreate( char *, memtype, struct asm_sym * vartype, bool);
+extern ret_code         LabelCreate( char *, memtype, struct asm_sym * vartype, bool);
 
 #endif

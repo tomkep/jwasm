@@ -41,13 +41,16 @@ typedef struct _assumes_context {
 } assumes_context;
 
 typedef struct _listing_context {
+    enum listmacro list_macro;
     unsigned list:1;
     unsigned cref:1;
+    unsigned listif:1;
+    unsigned list_generated_code:1;
 } listing_context;
 
 typedef struct _cpu_context {
-    short cpu;          /* saved ModuleInfo.cpu */
-    enum asm_cpu cicpu; /* saved CodeInfo.cpu   */
+    short cpu;              /* saved ModuleInfo.cpu      */
+    enum asm_cpu curr_cpu;  /* saved ModuleInfo.curr_cpu */
 } cpu_context;
 
 typedef struct _radix_context {
@@ -130,14 +133,17 @@ ret_code ContextDirective( int directive, int i )
                             ModuleInfo.radix = rcontext->radix;
                         }
                         if (lcontext) {
+                            ModuleInfo.list_macro = lcontext->list_macro;
                             ModuleInfo.list = lcontext->list;
                             ModuleInfo.cref = lcontext->cref;
+                            ModuleInfo.listif = lcontext->listif;
+                            ModuleInfo.list_generated_code = lcontext->list_generated_code;
                         }
                         if (ccontext) {
                             ModuleInfo.cpu     = ccontext->cpu;
                             if (sym_Cpu)
                                 sym_Cpu->value = ccontext->cpu;
-                            ModuleInfo.curr_cpu = ccontext->cicpu;
+                            ModuleInfo.curr_cpu = ccontext->curr_cpu;
                         }
                         // remove the item
                         AsmFree(pcontext);
@@ -181,12 +187,15 @@ ret_code ContextDirective( int directive, int i )
                             rcontext->radix = ModuleInfo.radix;
                         }
                         if (lcontext) {
-                            lcontext->list = ModuleInfo.list;
-                            lcontext->cref = ModuleInfo.cref;
+                            lcontext->list_macro = ModuleInfo.list_macro;
+                            lcontext->list   = ModuleInfo.list;
+                            lcontext->cref   = ModuleInfo.cref;
+                            lcontext->listif = ModuleInfo.listif;
+                            lcontext->list_generated_code = ModuleInfo.list_generated_code;
                         }
                         if (ccontext) {
-                            ccontext->cpu   = ModuleInfo.cpu;
-                            ccontext->cicpu = ModuleInfo.curr_cpu;
+                            ccontext->cpu      = ModuleInfo.cpu;
+                            ccontext->curr_cpu = ModuleInfo.curr_cpu;
                         }
                         push( &ContextStack, pcontext );
                     }

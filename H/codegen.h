@@ -31,12 +31,20 @@
 #ifndef _CODEGEN_H_INCLUDED
 #define _CODEGEN_H_INCLUDED
 
+#define BIT_012         0x07
+#define BIT_345         0x38
+#define BIT_67          0xC0
+#define NOT_BIT_012     0xF8
+#define NOT_BIT_345     0xC7
+#define NOT_BIT_67      0x3F
+
 #define IS_CALL( inst )     ( inst == T_CALL )
 #define IS_JMPCALL( inst )  ( inst == T_CALL || inst == T_JMP )
 #define IS_JMP( inst )      ( inst >= T_JA && inst <= T_JZ )
 #define IS_BRANCH( inst )   ( IS_JMP( inst ) || IS_CALL( inst ) )
 #define IS_ANY_BRANCH( inst )    \
             ( IS_BRANCH( inst ) || ( ( inst >= T_LOOP ) && ( inst <= T_LOOPZW ) ) )
+#define IS_CONDJMP( inst )  ( ( inst != T_JMP ) && ( inst >= T_JA ) && ( inst <= T_JZ ) && ( inst != T_JCXZ ) && ( inst != T_JECXZ ) )
 
 #define MOD_00          0x00
 #define MOD_01          0x40
@@ -81,6 +89,7 @@
 #define SET_ADRSIZ_32( s ) ( s->prefix.adrsiz = ( s->use32 ) ? FALSE : TRUE )
 #define SET_ADRSIZ_16( s ) ( s->prefix.adrsiz = ( s->use32 ) ? TRUE : FALSE )
 #define SET_ADRSIZ_NO( s ) ( s->prefix.adrsiz = FALSE )
+
 #define SET_OPSIZ( s, x ) ( s->prefix.opsiz = (( x ) ^ ( s->use32 )) ? TRUE : FALSE )
 #define SET_OPSIZ_32( s ) ( s->prefix.opsiz = ( s->use32 ) ? FALSE : TRUE )
 #define SET_OPSIZ_16( s ) ( s->prefix.opsiz = ( s->use32 ) ? TRUE : FALSE )

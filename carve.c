@@ -30,6 +30,7 @@
 
 
 #include <stddef.h>
+#include "globals.h"
 #include "memalloc.h"
 #include "carve.h"
 #include "myassert.h"

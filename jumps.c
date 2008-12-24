@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  CALL/JMP processing. Includes
+* Description:  parser CALL/JMP processing. Includes
 *               - "far call optimisation": a "call FAR ptr <proc>" is
 *                 exchanged by a "push cs" + "call NEAR ptr <proc>".
 *               - "short jump extension": a conditional jump with a
@@ -43,128 +43,47 @@
 #include "directiv.h"
 #include "fastpass.h"
 #include "directiv.h"
+#include "segment.h"
 #include "input.h"
+#include "assume.h"
 
-/* prototypes */
-int ptr_operator( memtype mem_type, uint_8 fix_mem_type );
-int jmp( expr_list *opndx );
-
-extern void             GetInsString( enum asm_token, char *, int );
-extern void             check_assume( struct asm_sym *sym, enum prefix_reg default_reg );
-
-static enum asm_token getJumpNegation( enum asm_token instruction )
-/*****************************************************************/
-{
-    switch( instruction ) {
-    case T_JA:          return( T_JNA );
-    case T_JAE:         return( T_JNAE );
-    case T_JB:          return( T_JNB );
-    case T_JBE:         return( T_JNBE );
-    case T_JC:          return( T_JNC );
-    case T_JE:          return( T_JNE );
-    case T_JG:          return( T_JNG );
-    case T_JGE:         return( T_JNGE );
-    case T_JL:          return( T_JNL );
-    case T_JLE:         return( T_JNLE );
-    case T_JNA:         return( T_JA );
-    case T_JNAE:        return( T_JAE );
-    case T_JNB:         return( T_JB );
-    case T_JNBE:        return( T_JBE );
-    case T_JNC:         return( T_JC );
-    case T_JNE:         return( T_JE );
-    case T_JNG:         return( T_JG );
-    case T_JNGE:        return( T_JGE );
-    case T_JNL:         return( T_JL );
-    case T_JNLE:        return( T_JLE );
-    case T_JNO:         return( T_JO );
-    case T_JNP:         return( T_JP );
-    case T_JNS:         return( T_JS );
-    case T_JNZ:         return( T_JZ );
-    case T_JO:          return( T_JNO );
-    case T_JP:          return( T_JNP );
-    case T_JPE:         return( T_JPO );
-    case T_JPO:         return( T_JPE );
-    case T_JS:          return( T_JNS );
-    case T_JZ:          return( T_JNZ );
-    default:
-        return( (enum asm_token)ERROR );
-    }
-}
+extern void     Set_Memtype( memtype mem_type, bool fix_mem_type );
 
 // "short jump extension": extend a (conditional) jump.
 // example:
 // "jz label"
 // is converted to
-// "jnz SHORT $+3|5"
+// "jnz SHORT $+x"  ( x = sizeof(next ins), may be 3|5|6|7|8 )
 // "jmp label"
 
 static void jumpExtend( int far_flag )
 /*************************************/
 {
-    unsigned i;
+    uint_8 opcode;
     unsigned next_ins_size;
-    enum asm_token negation;
-    char buffer[MAX_LINE_LEN];
-
-    /* there MUST be a conditional jump instruction in asmbuffer */
-    for( i = 0; ; i++ ) {
-        if( ( AsmBuffer[i]->token == T_INSTRUCTION )
-            && IS_JMP( AsmBuffer[i]->value ) ) {
-            break;
-        }
-    }
-
-    PushLineQueue();
 
     if( Parse_Pass == PASS_2 )
         AsmWarn( 4, EXTENDING_JUMP );
 
-    negation = getJumpNegation( AsmBuffer[i]->value );
-    GetInsString( negation, buffer, MAX_LINE_LEN );
     if( far_flag ) {
-        next_ins_size = CodeInfo->use32 ? 7 : 5;
+        if ( CodeInfo->prefix.opsiz ) {
+            /* it's 66 EA OOOO SSSS or 66 EA OOOOOOOO SSSS */
+            next_ins_size = CodeInfo->use32 ? 6 : 8;
+        } else {
+            /* it's EA OOOOOOOO SSSS or EA OOOO SSSS */
+            next_ins_size = CodeInfo->use32 ? 7 : 5;
+        }
     } else {
+        /* it's E9 OOOOOOOO or E9 OOOO */
         next_ins_size = CodeInfo->use32 ? 5 : 3;
     }
-    sprintf( buffer + strlen( buffer ), " SHORT $+%u", next_ins_size+2 );
-#if FASTPASS
-    InputQueueLineEx( buffer, 0 );
-#else
-    InputQueueLine( buffer );
-#endif
 
-#if 1
-    strcpy( buffer, "jmp " );
-    /* In JWasm the original source is stored in AsmBuffer->pos */
-    strcat( buffer, AsmBuffer[i+1]->pos );
-#else
-    if( far_flag ) {
-        strcpy( buffer, "jmpf " ); /* JWasm won't accept "jmpf" */
-    } else {
-        strcpy( buffer, "jmp " );
-    }
-    for( i++; AsmBuffer[i]->token != T_FINAL; i++ ) {
-        switch( AsmBuffer[i]->token ) {
-        case T_NUM:
-            itoa( AsmBuffer[i]->value, buffer+strlen( buffer ), 10 );
-            break;
-        case T_OP_SQ_BRACKET:
-            strcat( buffer, "[" );
-            break;
-        case T_CL_SQ_BRACKET:
-            strcat( buffer, "]" );
-            break;
-        default:
-            strcat( buffer, AsmBuffer[i]->string_ptr );
-            break;
-        }
-    }
-#endif
-#if FASTPASS
-    InputQueueLineEx( buffer, 1 );
-#else
-    InputQueueLine( buffer );
-#endif
+    /* it's ensured that the short jump version is first in AsmOpTable */
+    opcode = AsmOpTable[AsmResWord[CodeInfo->token].position].opcode;
+    OutputCodeByte( opcode ^ 1 ); /* the negation is achieved by XOR 1 */
+    OutputCodeByte( next_ins_size );
+    CodeInfo->token = T_JMP;
+
     return;
 }
 
@@ -174,61 +93,26 @@ static void jumpExtend( int far_flag )
 static void FarCallToNear( void )
 /*******************************/
 {
-    unsigned i;
-    char buffer[MAX_LINE_LEN];
-
-    /* there MUST be a call instruction in asmbuffer */
-    for( i = 0; ; i++ ) {
-        if( ( AsmBuffer[i]->token == T_INSTRUCTION )
-            && ( AsmBuffer[i]->value == T_CALL ) ) {
-            break;
-        }
-    }
     if( Parse_Pass == PASS_2 )
         AsmWarn( 4, CALL_FAR_TO_NEAR );
 
-    PushLineQueue();
+    OutputCodeByte( 0x0E ); /* 0x0E is "PUSH CS" opcode */
+    CodeInfo->mem_type = MT_NEAR;
+    CodeInfo->mem_type_fixed = TRUE;
 
-#if FASTPASS
-    InputQueueLineEx( "PUSH CS", 0 );
-#else
-    InputQueueLine( "PUSH CS" );
-#endif
-    strcpy( buffer, "CALL NEAR PTR " );
-#if 1
-    /* In JWasm the original source is stored in AsmBuffer->pos */
-    strcat( buffer, AsmBuffer[i+1]->pos);
-#else
-    for( i++; AsmBuffer[i]->token != T_FINAL; i++ ) {
-        switch( AsmBuffer[i]->token ) {
-        case T_NUM:
-            itoa( AsmBuffer[i]->value, buffer+strlen( buffer ), 10 );
-            break;
-        case T_OP_SQ_BRACKET:
-            strcat( buffer, "[" );
-            break;
-        case T_CL_SQ_BRACKET:
-            strcat( buffer, "]" );
-            break;
-        default:
-            strcat( buffer, AsmBuffer[i]->string_ptr );
-            break;
-        }
-    }
-#endif
-#if FASTPASS
-    InputQueueLineEx( buffer, 1 );
-#else
-    InputQueueLine( buffer );
-#endif
     return;
 }
 
-int jmp( expr_list *opndx )
+ret_code jmp( expr_list *opndx )
 /*
+ called by idata_fixup() and idata_nofixup()
+ ( that means, it isn't called for memory operands! )
  determine the displacement of jmp;
  current instruction is CALL, JMP, Jxx, LOOPx, JCXZ or JECXZ
- possible return values are: NOT_ERROR, ERROR, SCRAP_INSTRUCTION, INDIRECT_JUMP
+ possible return values are:
+ - NOT_ERROR,
+ - ERROR,
+ - INDIRECT_JUMP (is handled as error by the caller, but probably never occurs)
 */
 {
     int_32              addr;
@@ -236,47 +120,44 @@ int jmp( expr_list *opndx )
     enum fixup_options  fixup_option;
     enum sym_state      state;
     struct asm_sym      *sym;
+    memtype             mem_type;
     dir_node            *seg;
 
-    DebugMsg(("Jmp(sym=%X) enter\n", opndx->sym));
+    DebugMsg(("Jmp(sym=%X) enter\n", opndx->sym ));
     CodeInfo->data[Opnd_Count] = opndx->value;
     sym = opndx->sym;
-    if( sym == NULL ) {
-        if( IS_JMPCALL( CodeInfo->info.token ) )
+    if( sym == NULL ) { /* the codegen most likely will reject this instr! */
+
+        if( IS_JMPCALL( CodeInfo->token ) )
             CodeInfo->isfar = TRUE;
+
         if( CodeInfo->data[Opnd_Count] > USHRT_MAX )
-            CodeInfo->info.opnd_type[Opnd_Count] = OP_I32;
+            CodeInfo->opnd_type[Opnd_Count] = OP_I32;
         else
-            CodeInfo->info.opnd_type[Opnd_Count] = OP_I16;
+            CodeInfo->opnd_type[Opnd_Count] = OP_I16;
+
         return( NOT_ERROR );
     }
-    DebugMsg(("Jmp: sym=>%s<, state=%u, mem_type=%u, ofs=%X\n", sym->name, sym->state, sym->mem_type, sym->offset));
+    DebugMsg(("Jmp: explicit=%u op.memtype=%u sym=>%s< state=%u mem_type=%u ofs=%X\n", opndx->explicit, opndx->mem_type, sym->name, sym->state, sym->mem_type, sym->offset));
 
-#if 0
-    /* MT_ERROR will never be set in a symbol! */
-    /* undefined labels are detected in the expression evaluator */
-    if( sym->mem_type == MT_ERROR ) {
-        AsmErr( LABEL_NOT_DEFINED, sym->name );
-        return( ERROR );
-    }
-#endif
     state = sym->state;
     seg = GetSeg( sym );
     if( seg == NULL || CurrSeg == NULL || CurrSeg->seg != seg ) {
-        /* if label has a different segment and jump/call is near,
+        /* if label has a different segment and jump/call is near or short,
          report an error */
         if ( ModuleInfo.flatgrp_idx != 0 )
             ;
-        else if (seg != NULL && CurrSeg != NULL)
+        else if (seg != NULL && CurrSeg != NULL) {
             /* if the segments belong to the same group, it's ok */
             if (((dir_node *)seg)->e.seginfo->group != NULL &&
                 CurrSeg->seg->e.seginfo->group != NULL &&
                 ((dir_node *)seg)->e.seginfo->group == CurrSeg->seg->e.seginfo->group)
                 ;
-            else if (opndx->mem_type == MT_NEAR) {
-                AsmError(NO_FAR_JUMP_TO_NEAR_LABEL);
+            else if ( opndx->mem_type == MT_NEAR || opndx->mem_type == MT_SHORT ) {
+                AsmError( NO_FAR_JUMP_TO_NEAR_LABEL );
                 return( ERROR );
             }
+        }
         /* jumps to another segment are just like to another file */
         state = SYM_EXTERNAL;
     }
@@ -288,26 +169,41 @@ int jmp( expr_list *opndx )
     fixup_type = FIX_RELOFF8;
     switch( state ) {
     case SYM_UNDEFINED:
-        SetSymSegOfs(sym);
+        SetSymSegOfs( sym );
         /* fall through */
     case SYM_INTERNAL:
     case SYM_PROC:
-        if(  ( CodeInfo->mem_type == MT_EMPTY || CodeInfo->mem_type == MT_SHORT
-                || CodeInfo->mem_type == MT_NEAR )
-            && sym->mem_type != MT_WORD     /* the symbol's memtype shouldn't */
-            && sym->mem_type != MT_DWORD    /* be used (type casts!) */
-            && sym->mem_type != MT_FWORD
-            && CodeInfo->isfar == FALSE ) {
-            if( ( CodeInfo->info.token == T_CALL )
-                && ( CodeInfo->mem_type == MT_EMPTY )
-                && ( sym->mem_type == MT_FAR ) ) {
-                FarCallToNear();
-                return( SCRAP_INSTRUCTION );
+        /* if a segment override is active,
+         check if it's matching the assumed value of CS.
+         If no, assume a FAR call.
+         */
+        if ( CodeInfo->prefix.SegOverride != NULL && CodeInfo->mem_type == MT_EMPTY ) {
+            if ( CodeInfo->prefix.SegOverride != GetOverrideAssume( ASSUME_CS) ) {
+                CodeInfo->mem_type = MT_FAR;
             }
+        }
+        if(  ( CodeInfo->mem_type == MT_EMPTY ||
+               CodeInfo->mem_type == MT_SHORT ||
+               CodeInfo->mem_type == MT_NEAR )
+             && sym->mem_type != MT_WORD     /* the symbol's memtype shouldn't */
+             && sym->mem_type != MT_DWORD    /* be used (type casts!) */
+             && sym->mem_type != MT_FWORD
+             && CodeInfo->isfar == FALSE ) {
+
+            /* if the label is FAR - or there is a segment override
+             which equals assumed value of CS - and there is no type cast,
+             then do "far call translation".
+             */
+            if( CodeInfo->token == T_CALL &&
+                CodeInfo->mem_type == MT_EMPTY &&
+                ( sym->mem_type == MT_FAR || CodeInfo->prefix.SegOverride ) ) {
+                FarCallToNear();
+            }
+
             addr = sym->offset;
             addr -= ( GetCurrOffset() + 2 );  // calculate the displacement
             addr += CodeInfo->data[Opnd_Count];
-            switch( CodeInfo->info.token ) {
+            switch( CodeInfo->token ) {
             case T_JCXZ:
             case T_LOOPW:
             case T_LOOPEW:
@@ -331,49 +227,56 @@ int jmp( expr_list *opndx )
                 }
                 break;
             }
-            if( CodeInfo->info.token == T_CALL && CodeInfo->mem_type == MT_EMPTY ) {
+
+            if( CodeInfo->token == T_CALL && CodeInfo->mem_type == MT_EMPTY ) {
                 CodeInfo->mem_type = MT_NEAR;
             }
-            if( CodeInfo->mem_type != MT_NEAR && CodeInfo->info.token != T_CALL
+
+            if( CodeInfo->mem_type != MT_NEAR && CodeInfo->token != T_CALL
                 && ( addr >= SCHAR_MIN && addr <= SCHAR_MAX ) ) {
-                CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
+                CodeInfo->opnd_type[Opnd_Count] = OP_I8;
             } else {
-                /* near jmp */
-                if( CodeInfo->use32 ) {
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I32;
+                /* near destination */
+                /* is there a type coercion? */
+                if ( opndx->ofs_size != OFSSIZE_EMPTY ) {
+                    if ( opndx->ofs_size == OFSSIZE_16 ) {
+                        CodeInfo->opnd_type[Opnd_Count] = OP_I16;
+                        addr -= 1; // 16 bit displacement
+                    } else {
+                        CodeInfo->opnd_type[Opnd_Count] = OP_I32;
+                        addr -= 3; // 32 bit displacement
+                    }
+                    SET_OPSIZ( CodeInfo, opndx->ofs_size == OFSSIZE_32 );
+                    if ( CodeInfo->prefix.opsiz )
+                        addr--;
+                } else if( CodeInfo->use32 ) {
+                    CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                     addr -= 3; // 32 bit displacement
                 } else {
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I16;
+                    CodeInfo->opnd_type[Opnd_Count] = OP_I16;
                     addr -= 1; // 16 bit displacement
                 }
-                if( IS_JMP( CodeInfo->info.token ) ) {
-                    switch( CodeInfo->info.token ) {
-                    case T_JMP:
-                    case T_JCXZ:
-                    case T_JECXZ:
-                        break;
-                    default: /* the rest are the conditional jumps */
-                        // 1 extra byte for opcode ( 0F )
-                        addr--;
-                        break;
-                    }
+                if( IS_CONDJMP( CodeInfo->token ) ) {
+                    // 1 extra byte for opcode ( 0F )
+                    addr--;
                 }
             }
 
             /* store the displacement */
             CodeInfo->data[Opnd_Count] = addr;
 
-#define GOOD_PHASE  !PhaseError &&
-
-            if ( CodeInfo->info.token == T_JCXZ ||
-                 CodeInfo->info.token == T_JECXZ ||
-                 (CodeInfo->info.token >= T_LOOP &&
-                  CodeInfo->info.token <= T_LOOPZW) ) {
-                if( GOOD_PHASE (CodeInfo->info.opnd_type[Opnd_Count] != OP_I8) ) {
+            if ( CodeInfo->mem_type == MT_SHORT ||
+                 CodeInfo->token == T_JCXZ ||
+                 CodeInfo->token == T_JECXZ ||
+                 (CodeInfo->token >= T_LOOP &&
+                  CodeInfo->token <= T_LOOPZW) ) {
+                if( Parse_Pass > PASS_1 &&
+                    PhaseError == FALSE &&
+                    (CodeInfo->opnd_type[Opnd_Count] != OP_I8) ) {
                     AsmError( JUMP_OUT_OF_RANGE );
                     return( ERROR );
                 }
-                CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
+                CodeInfo->opnd_type[Opnd_Count] = OP_I8;
                 break;
             }
             /* remaining instructions: CALL, JMP, Jxx */
@@ -382,13 +285,15 @@ int jmp( expr_list *opndx )
             /* for 386 and above this is not needed, since there exists
              an extended version of Jxx */
             if( ( ModuleInfo.curr_cpu & P_CPU_MASK) < P_386 &&
-                CodeInfo->info.token != T_CALL &&
-                CodeInfo->info.token != T_JMP) {
+                CodeInfo->token != T_CALL &&
+                CodeInfo->token != T_JMP) {
                 /* look into jump extension */
-                if( CodeInfo->info.opnd_type[Opnd_Count] != OP_I8 ) {
+                if( CodeInfo->opnd_type[Opnd_Count] != OP_I8 ) {
                     if( CodeInfo->mem_type == MT_EMPTY && ModuleInfo.ljmp == TRUE) {
                         jumpExtend( FALSE );
-                        return( SCRAP_INSTRUCTION );
+                        addr -= 1;
+                        CodeInfo->data[Opnd_Count] = addr;
+                        //return( SCRAP_INSTRUCTION );
                     } else if( !PhaseError ) {
                         AsmError( JUMP_OUT_OF_RANGE );
                         return( ERROR );
@@ -397,42 +302,43 @@ int jmp( expr_list *opndx )
             }
             break;
         }
-        /* otherwise fall through & get handled like external symbols */
-//    case SYM_UNDEFINED:
+        /* fall through, handle FAR destinations like external symbols */
     case SYM_EXTERNAL:
 
+        if ( opndx->explicit ) {
+            mem_type = opndx->mem_type;
+        } else {
+            mem_type = sym->mem_type;
+        }
         /* forward ref, or external symbol */
-        if( CodeInfo->mem_type == MT_EMPTY && sym->mem_type != MT_EMPTY ) {
-            switch( sym->mem_type ) {
+        if( CodeInfo->mem_type == MT_EMPTY && mem_type != MT_EMPTY ) {
+            switch( mem_type ) {
             case MT_FAR:
-                if( IS_JMPCALL( CodeInfo->info.token ) ) {
+                if( IS_JMPCALL( CodeInfo->token ) ) {
                     CodeInfo->isfar = TRUE;
                 }
                 // fall through
             case MT_SHORT:
             case MT_NEAR:
-                CodeInfo->mem_type = sym->mem_type;
+                CodeInfo->mem_type = mem_type;
                 break;
             case MT_PROC:
                 CodeInfo->mem_type = IS_PROC_FAR() ? MT_FAR : MT_NEAR;
-                if( IS_JMPCALL( CodeInfo->info.token )
-                    && ( CodeInfo->mem_type == MT_FAR ) ) {
-                    CodeInfo->isfar = TRUE;
-                }
+                if( CodeInfo->mem_type == MT_FAR )
+                    if ( IS_JMPCALL( CodeInfo->token ) )
+                        CodeInfo->isfar = TRUE;
                 break;
-            case MT_FWORD:
-                if( ptr_operator( MT_FWORD, TRUE ) == ERROR )
-                    return( ERROR );
+            case MT_FWORD: /* shouldn't happen! */
+                Set_Memtype( MT_FWORD, TRUE );
                 break;
             default:
-                CodeInfo->mem_type = sym->mem_type;
+                CodeInfo->mem_type = mem_type;
             }
         }
 
         /* handle far JMP + CALL? */
-        if (IS_JMPCALL( CodeInfo->info.token ) &&
-            (CodeInfo->isfar == TRUE ||
-             CodeInfo->mem_type == MT_FAR)) {
+        if ( IS_JMPCALL( CodeInfo->token ) &&
+             ( CodeInfo->isfar == TRUE || CodeInfo->mem_type == MT_FAR )) {
             switch( CodeInfo->mem_type ) {
             case MT_SHORT:
             case MT_NEAR:
@@ -443,47 +349,47 @@ int jmp( expr_list *opndx )
                 /* fall through */
             case MT_FAR:
             case MT_EMPTY:
-                SET_OPSIZ( CodeInfo, SymIs32( sym ));
+                if ( opndx->explicit && opndx->ofs_size != OFSSIZE_EMPTY )
+                    SET_OPSIZ( CodeInfo, opndx->ofs_size == OFSSIZE_32 );
+                else
+                    SET_OPSIZ( CodeInfo, SymIs32( sym ));
+
+                /* set global vars Frame + Frame_Datum */
                 find_frame( sym );
+
                 if( Opnd_Count == OPND2 ) {
                     if( oper_32( CodeInfo ) ) {
                         fixup_type = FIX_OFF32;
-                        CodeInfo->info.opnd_type[Opnd_Count] = OP_I32;
+                        CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                     } else {
                         fixup_type = FIX_OFF16;
-                        CodeInfo->info.opnd_type[Opnd_Count] = OP_I16;
+                        CodeInfo->opnd_type[Opnd_Count] = OP_I16;
                     }
                 } else {
                     if( oper_32( CodeInfo ) ) {
                         fixup_type = FIX_PTR32;
-                        CodeInfo->info.opnd_type[Opnd_Count] = OP_J48;
+                        CodeInfo->opnd_type[Opnd_Count] = OP_J48;
                     } else {
                         fixup_type = FIX_PTR16;
-                        CodeInfo->info.opnd_type[Opnd_Count] = OP_J32;
+                        CodeInfo->opnd_type[Opnd_Count] = OP_J32;
                     }
                 }
                 break;
-            case MT_BYTE:
-            case MT_WORD:
-            case MT_SBYTE:
-            case MT_SWORD:
-                AsmError( INVALID_SIZE );
-                return( ERROR );
             case MT_DWORD:
             case MT_FWORD:
             case MT_SDWORD:
+            case MT_PTR:
+                /* shouldn't happen! */
                 return( INDIRECT_JUMP );
-            case MT_QWORD:
-            case MT_TBYTE:
-            case MT_OWORD:
+            default:
                 AsmError( INVALID_SIZE );
                 return( ERROR );
             }
             AddFixup( sym, fixup_type, fixup_option );
-            return(NOT_ERROR);
-        }  /* end FAR JMP/CALL */
+            return( NOT_ERROR );
+        }  /* end if FAR JMP/CALL */
 
-        switch( CodeInfo->info.token ) {
+        switch( CodeInfo->token ) {
         case T_CALL:
             if( CodeInfo->mem_type == MT_SHORT ) {
                 AsmError( CANNOT_USE_SHORT_WITH_CALL );
@@ -492,10 +398,10 @@ int jmp( expr_list *opndx )
                 fixup_option = OPTJ_CALL;
                 if( CodeInfo->use32 ) {
                     fixup_type = FIX_RELOFF32;
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I32;
+                    CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                 } else {
                     fixup_type = FIX_RELOFF16;
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I16;
+                    CodeInfo->opnd_type[Opnd_Count] = OP_I16;
                 }
                 break;
             }
@@ -505,57 +411,50 @@ int jmp( expr_list *opndx )
             case MT_SHORT:
                 fixup_option = OPTJ_EXPLICIT;
                 fixup_type = FIX_RELOFF8;
-                CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
-                break;
-            case MT_FAR:
-                AsmError( SYNTAX_ERROR );
+                CodeInfo->opnd_type[Opnd_Count] = OP_I8;
                 break;
             case MT_EMPTY:
                 // forward reference
-                // inline assembler jmp default distance is near
-                // stand-alone assembler jmp default distance is short
+                // default distance is short
                 fixup_option = OPTJ_NONE;
                 /* guess short if JMP, we will expand later if needed */
                 fixup_type = FIX_RELOFF8;
-                CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
+                CodeInfo->opnd_type[Opnd_Count] = OP_I8;
                 break;
             case MT_NEAR:
                 fixup_option = OPTJ_EXPLICIT;
                 if( CodeInfo->use32 ) {
                     fixup_type = FIX_RELOFF32;
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I32;
+                    CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                 } else {
                     fixup_type = FIX_RELOFF16;
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I16;
+                    CodeInfo->opnd_type[Opnd_Count] = OP_I16;
                 }
                 break;
             case MT_DWORD:
             case MT_WORD:
             case MT_SDWORD:
             case MT_SWORD:
+                /* shouldn't happen! */
                 return( INDIRECT_JUMP );
-            case MT_SBYTE:
-            case MT_BYTE:
-            case MT_FWORD:
-            case MT_QWORD:
-            case MT_TBYTE:
-            case MT_OWORD:
+            default:
                 AsmError( INVALID_SIZE );
                 return( ERROR );
             }
-//            check_assume( sym, EMPTY );
+            // deactivated because there's no override involved here
+            // check_assume( sym, EMPTY );
             break;
         default: /* JCXZ, JECXZ, LOOPxx, Jxx */
             // JCXZ, JECXZ and LOOPxx always require SHORT label
-            if ( CodeInfo->info.token == T_JCXZ ||
-                 CodeInfo->info.token == T_JECXZ ||
-                 (CodeInfo->info.token >= T_LOOP &&
-                  CodeInfo->info.token <= T_LOOPZW) ) {
+            if ( CodeInfo->token == T_JCXZ ||
+                 CodeInfo->token == T_JECXZ ||
+                 (CodeInfo->token >= T_LOOP &&
+                  CodeInfo->token <= T_LOOPZW) ) {
                 if( CodeInfo->mem_type != MT_EMPTY && CodeInfo->mem_type != MT_SHORT ) {
                     AsmError( ONLY_SHORT_DISPLACEMENT_IS_ALLOWED );
                     return( ERROR );
                 }
-                CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
+                CodeInfo->opnd_type[Opnd_Count] = OP_I8;
                 fixup_option = OPTJ_EXPLICIT;
                 fixup_type = FIX_RELOFF8;
                 break;
@@ -566,31 +465,48 @@ int jmp( expr_list *opndx )
                 case MT_SHORT:
                     fixup_option = OPTJ_EXPLICIT;
                     fixup_type = FIX_RELOFF8;
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
+                    CodeInfo->opnd_type[Opnd_Count] = OP_I8;
                     break;
                 case MT_EMPTY:
                     // forward reference
-                    // inline assembler default distance is near
-                    // stand-alone assembler default distance is short
                     fixup_option = OPTJ_JXX;
                     fixup_type = FIX_RELOFF8;
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
+                    CodeInfo->opnd_type[Opnd_Count] = OP_I8;
                     break;
                 case MT_NEAR:
                     fixup_option = OPTJ_EXPLICIT;
-                    if( CodeInfo->use32 ) {
+                    /* it might be useful to allow to use the
+                     16bit version of the near jump in 32bit mode
+                     since it is 1 byte shorter! */
+                    if ( opndx->explicit && opndx->ofs_size != OFSSIZE_EMPTY ) {
+                        SET_OPSIZ( CodeInfo, opndx->ofs_size == OFSSIZE_32 );
+                        CodeInfo->opnd_type[Opnd_Count] = (opndx->ofs_size == OFSSIZE_32) ? OP_I32 : OP_I16;
+                    } else if( CodeInfo->use32 ) {
                         fixup_type = FIX_RELOFF32;
-                        CodeInfo->info.opnd_type[Opnd_Count] = OP_I32;
+                        CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                     } else {
                         fixup_type = FIX_RELOFF16;
-                        CodeInfo->info.opnd_type[Opnd_Count] = OP_I16;
+                        CodeInfo->opnd_type[Opnd_Count] = OP_I16;
                     }
                     break;
                 case MT_FAR:
-                    if (ModuleInfo.ljmp) {
+                    if ( ModuleInfo.ljmp ) { /* OPTION LJMP set? */
+                        if ( opndx->explicit && opndx->ofs_size != OFSSIZE_EMPTY )
+                            SET_OPSIZ( CodeInfo, opndx->ofs_size == OFSSIZE_32 );
+                        else
+                            SET_OPSIZ( CodeInfo, SymIs32( sym ));
                         jumpExtend( TRUE );
-                        return( SCRAP_INSTRUCTION );
+                        if( oper_32( CodeInfo ) ) {
+                            fixup_type = FIX_PTR32;
+                            CodeInfo->opnd_type[Opnd_Count] = OP_J48;
+                        } else {
+                            fixup_type = FIX_PTR16;
+                            CodeInfo->opnd_type[Opnd_Count] = OP_J32;
+                        }
+                        break;
+                        //return( SCRAP_INSTRUCTION );
                     }
+                    /* fall through */
                 default:
                     AsmError( ONLY_SHORT_AND_NEAR_DISPLACEMENT_IS_ALLOWED );
                     return( ERROR );
@@ -598,22 +514,34 @@ int jmp( expr_list *opndx )
             } else {
                 // the only mode in 8086, 80186, 80286 is
                 // Jxx SHORT
+                // Masm allows "Jxx near" if LJMP is on (default)
                 switch( CodeInfo->mem_type ) {
                 case MT_EMPTY:
                     fixup_option = OPTJ_EXTEND;
                     fixup_type = FIX_RELOFF8;
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
+                    CodeInfo->opnd_type[Opnd_Count] = OP_I8;
                     break;
                 case MT_SHORT:
                     fixup_option = OPTJ_EXPLICIT;
                     fixup_type = FIX_RELOFF8;
-                    CodeInfo->info.opnd_type[Opnd_Count] = OP_I8;
+                    CodeInfo->opnd_type[Opnd_Count] = OP_I8;
                     break;
+                case MT_NEAR: /* allow Jxx NEAR if LJMP on */
                 case MT_FAR:
-                    if (ModuleInfo.ljmp) {
-                        jumpExtend( TRUE );
-                        return( SCRAP_INSTRUCTION );
+                    if ( ModuleInfo.ljmp ) {
+                        if ( CodeInfo->mem_type == MT_FAR ) {
+                            jumpExtend( TRUE );
+                            fixup_type = FIX_PTR16;
+                            CodeInfo->opnd_type[Opnd_Count] = OP_J32;
+                        } else {
+                            jumpExtend( FALSE );
+                            fixup_type = FIX_RELOFF16;
+                            CodeInfo->opnd_type[Opnd_Count] = OP_I16;
+                        }
+                        break;
+                        //return( SCRAP_INSTRUCTION );
                     }
+                    /* fall through */
                 default:
                     AsmError( ONLY_SHORT_DISPLACEMENT_IS_ALLOWED );
                     return( ERROR );
@@ -621,8 +549,8 @@ int jmp( expr_list *opndx )
             }
         }
         AddFixup( sym, fixup_type, fixup_option );
-        break;
-    default: /* SYM_STACK */
+        break; /* end case SYM_EXTERNAL */
+    default: /* SYM_STACK, SYM_SEG, SYM_GRP, ... */
         DebugMsg(("jmp, error, sym=%s, state=%u, memtype=%u\n", sym->name, sym->state, sym->mem_type));
         AsmError( NO_JUMP_TO_AUTO );
         return( ERROR );
@@ -630,97 +558,3 @@ int jmp( expr_list *opndx )
     return( NOT_ERROR );
 }
 
-int ptr_operator( memtype mem_type, uint_8 fix_mem_type )
-/***********************************************/
-/*
-  determine what should be done with SHORT, NEAR, FAR, BYTE, WORD, DWORD, PTR
-  operator;
-  out: CodeInfo->mem_type
-       CodeInfo->mem_type_fixed
-       CodeInfo->isfar
-       CodeInfo->prefix.opsiz
-*/
-{
-    /* new idea:
-     * when we get a near/far/dword/etc, just set distance / mem_type
-     * operator will be called again with PTR, then we set the opsiz, etc.
-     */
-    if( CodeInfo->info.token == T_LEA )
-        return( NOT_ERROR );
-    if( CodeInfo->info.token == T_SMSW )
-        return( NOT_ERROR );
-    if( mem_type == MT_PTR ) {
-        /* finish deciding what type to make the inst NOW
-         * ie: decide size overrides etc.
-         */
-        if( CodeInfo->use32 && MEM_TYPE( CodeInfo->mem_type, WORD ) ) {
-            // if we are in use32 mode, we have to add OPSIZ prefix for
-            // most of the 386 instructions ( except MOVSX and MOVZX )
-            // when we find WORD PTR
-
-            if( !IS_BRANCH( CodeInfo->info.token ) ) {
-                if( CodeInfo->info.opnd_type[OPND1] == OP_MMX ) {
-                /* JBS 2001/02/19
-                no WORD operands for MMX instructions, only 64-bit or 128-bit
-                so no WORD override needed
-                    */
-                } else {
-                    switch( CodeInfo->info.token ) {
-                    case T_MOVSX:
-                    case T_MOVZX:
-                        break;
-                    default:
-                        CodeInfo->prefix.opsiz = TRUE;
-                        break;
-                    }
-                }
-            }
-
-        } else if( !CodeInfo->use32 && MEM_TYPE( CodeInfo->mem_type, DWORD ) ) {
-
-            /* if we are not in use32 mode, we have to add OPSIZ
-             * when we find DWORD PTR
-             * unless we have a LXS ins.
-             * which moves a DWORD ptr into SR:word reg
-             * fixme  - can this be done by breaking up the LXS instructions in
-             *          asmins.h, and then putting F_32 or F_16 to append
-             *      opsize bytes when necessary ?
-             */
-            if( !IS_BRANCH( CodeInfo->info.token ) ) {
-
-                if( CodeInfo->info.opnd_type[OPND1] == OP_MMX ) {
-                    /* JBS 2001/02/19
-                       no WORD operands for MMX instructions, only 64-bit or 128-bit
-                       so no DWORD override needed
-                     */
-                } else {
-                    switch( CodeInfo->info.token ) {
-                    case T_LDS:
-                    case T_LES:
-                    case T_LFS:
-                    case T_LGS:
-                    case T_LSS:
-                        /* in these cases, opsize does NOT need to be changed  */
-                        break;
-                    default:
-                        // OPSIZ prefix
-                        CodeInfo->prefix.opsiz = TRUE;
-                    }
-                }
-            }
-        }
-    } else {
-        if( ( mem_type != MT_EMPTY ) && ( CodeInfo->mem_type_fixed == FALSE ) ) {
-            if( mem_type != MT_TYPE ) {
-                CodeInfo->mem_type = mem_type;
-                if( fix_mem_type ) {
-                    CodeInfo->mem_type_fixed = TRUE;
-                    if( IS_JMPCALL( CodeInfo->info.token ) && ( mem_type == MT_FAR ) ) {
-                        CodeInfo->isfar = TRUE;
-                    }
-                }
-            }
-        }
-    }
-    return( NOT_ERROR );
-}

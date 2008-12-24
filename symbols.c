@@ -32,8 +32,8 @@
 #include "globals.h"
 #include "symbols.h"
 #include "memalloc.h"
-#include "banner.h"
 #include "directiv.h"
+#include "segment.h"
 #include "queues.h"
 #include "fixup.h"
 #include "token.h"
@@ -43,41 +43,48 @@
 #include "types.h"
 #include "proc.h"
 
-// reorganize the symbol table permanently, so the last found item
-// is always first in a line. Gives no significant speed boost.
+// reorganize the symbol table permanently, so the item found in last
+// search is always first in a line. Gives no significant speed boost.
 #define DYNREO 0
 
-/* set size of hash table for symbol table searches. This affects
+/* size of hash table for symbol table searches. This affects
   assembly speed.
   */
 
-//#define HASH_TABLE_SIZE 211
+#define HASH_MAGNITUDE 15  /* is 15 since v1.94, previously 12 */
+
+#if HASH_MAGNITUDE==12
 #define HASH_TABLE_SIZE 2003
-//#define HASH_TABLE_SIZE 8009
+#else
+#define HASH_TABLE_SIZE 8009
+#endif
 
-// static struct asm_sym   *sym_table[ HASH_TABLE_SIZE ] = { NULL };
-static struct asm_sym   *sym_table[ HASH_TABLE_SIZE ];
+#define USEFIXSTRCMP 0 /* don't use a function pointer for string compare */
 
-/* initialize the whole table to null pointers */
+#if USEFIXSTRCMP
+//#define STRCMP( x, y, z ) ( ModuleInfo.case_sensitive ? strcmp( x, y ) : stricmp( x, y ) )
+#define STRCMP( x, y, z ) ( ModuleInfo.case_sensitive ? memcmp( x, y, z ) : memicmp( x, y, z ) )
+#else
+#define STRCMP( x, y, z ) SymCmpFunc( x, y )
+#endif
+
+struct asm_sym *sym_CurSeg;  /* the @CurSeg symbol */
+struct asm_sym symPC;        /* the '$' symbol     */
+
+StrCmpFunc SymCmpFunc;
 
 static unsigned         SymCount;    /* Number of symbols in table */
+static char             szDate[12];  /* value of @Date symbol */
+static char             szTime[12];  /* value of @Time symbol */
+static struct asm_sym   *sym_table[ HASH_TABLE_SIZE ];
 
-static char             szDate[12];
-static char             szTime[12];
-
-struct asm_sym *sym_CurSeg;
-struct asm_sym symPC;
-
-StrCmpFunc SymCmpFunc = stricmp;
-
-/* use the same hash fcn */
 static unsigned int hashpjw( const char *s )
 /******************************************/
 {
     unsigned h;
     unsigned g;
 
-#if 1
+#if HASH_MAGNITUDE==12
     for( h = 0; *s; ++s ) {
         /* ( h & ~0x0fff ) == 0 is always true here */
         h = (h << 4) + (*s | ' ');
@@ -87,18 +94,18 @@ static unsigned int hashpjw( const char *s )
     }
 #else
     for( h = 0; *s; ++s ) {
-        h = (h << 6) + (*s & 0x3F);
-        g = h & ~0xffffff;
+        h = (h << 5) + (*s | ' ');
+        g = h & ~0x7fff;
         h ^= g;
-        h ^= g >> 24;
+        h ^= g >> 15;
     }
 #endif
     return( h % HASH_TABLE_SIZE );
 }
 
-void SymSetCmpFunc(bool nocasemap)
+void SymSetCmpFunc( void )
 {
-    if (nocasemap == TRUE)
+    if ( ModuleInfo.case_sensitive == TRUE )
         SymCmpFunc = strcmp;
     else
         SymCmpFunc = stricmp;
@@ -167,19 +174,20 @@ static struct asm_sym **SymFind( const char *name )
     len = strlen(name);
 
     if (CurrProc) {
-        label_list *paracurr;
-        for (paracurr = CurrProc->e.procinfo->paralist;paracurr;paracurr = paracurr->next)
-            if (len == paracurr->sym->name_size && SymCmpFunc( name, paracurr->sym->name) == 0 ) {
-                DebugMsg(("SymFind: '%s' found in proc's param namespace\n", name));
-                return( &paracurr->sym );
+        for ( sym2 = (asm_sym *)CurrProc->e.procinfo->paralist; sym2; sym2 = sym2->next )
+            if (len == sym2->name_size && STRCMP( name, sym2->name, len ) == 0 ) {
+                DebugMsg(("SymFind: '%s' found in proc's param namespace\n", name ));
+                sym = &sym2;
+                return( sym );
             }
-        for (paracurr = CurrProc->e.procinfo->locallist;paracurr;paracurr = paracurr->next)
-            if (len == paracurr->sym->name_size && SymCmpFunc( name, paracurr->sym->name ) == 0 ) {
+        for ( sym2 = (asm_sym *)CurrProc->e.procinfo->locallist; sym2; sym2 = sym2->next )
+            if (len == sym2->name_size && STRCMP( name, sym2->name, len ) == 0 ) {
                 DebugMsg(("SymFind: '%s' found in proc's local namespace\n", name));
-                return( &paracurr->sym );
+                sym = &sym2;
+                return( sym );
             }
-        for (sym2 = CurrProc->e.procinfo->labellist;sym2;sym2 = sym2->next)
-            if (len == sym2->name_size && SymCmpFunc( name, sym2->name ) == 0 ) {
+        for ( sym2 = CurrProc->e.procinfo->labellist; sym2; sym2 = sym2->next)
+            if (len == sym2->name_size && STRCMP( name, sym2->name, len ) == 0 ) {
                 DebugMsg(("SymFind: '%s' found in proc's label namespace\n", name));
                 sym = &sym2;
                 return( sym );
@@ -190,7 +198,7 @@ static struct asm_sym **SymFind( const char *name )
     sym = &sym_table[ i ];
 
     for( ; *sym; sym = &((*sym)->next) ) {
-        if (len == (*sym)->name_size && SymCmpFunc( name, (*sym)->name ) == 0 ) {
+        if (len == (*sym)->name_size && STRCMP( name, (*sym)->name, len ) == 0 ) {
 #if DYNREO
             if (sym != &sym_table [i]) {
                 sym2 = *sym;
@@ -201,7 +209,7 @@ static struct asm_sym **SymFind( const char *name )
             DebugMsg(("SymFind: '%s' found\n", name));
             return( &sym_table [i] );
 #else
-            DebugMsg(("SymFind: '%s' found\n", name));
+            DebugMsg(("SymFind: '%s' found, state=%u\n", name, (*sym)->state ));
             return( sym );
 #endif
         }
@@ -339,8 +347,6 @@ int SymChangeName( const char *old, const char *new )
     return( NOT_ERROR );
 }
 
-#endif
-
 void SymTakeOut( const char *name )
 /*********************************/
 {
@@ -359,6 +365,7 @@ void SymTakeOut( const char *name )
     }
     return;
 }
+#endif
 
 // free a symbol directly without a try to find it first
 // (it's not in global namespace)
@@ -376,15 +383,17 @@ void SymFree( struct asm_sym *sym)
 // it's not in global namespace. The symbol's address may change,
 // the changed symbol is returned.
 
-struct asm_sym *SymSetName( struct asm_sym *sym, const char * name)
+void SymSetName( struct asm_sym *sym, const char * name)
 /*********************************/
 {
     AsmFree( sym->name );
     sym->name_size = strlen( name );
     sym->name = AsmAlloc( sym->name_size + 1 );
     strcpy( sym->name, name );
-    return( sym );
+    return;
 }
+
+/* if the symbol does exist in the table, return the old one */
 
 static struct asm_sym *SymAddToTable( struct asm_sym *sym )
 /*****************************************************/
@@ -431,37 +440,54 @@ struct asm_sym *SymSearch( const char *name )
     return( *sym_ptr );
 }
 
+void SymMakeAllSymbolsPublic( void )
+{
+    int i;
+    struct asm_sym  *sym;
+
+    for( i = 0; i < HASH_TABLE_SIZE; i++ ) {
+        for( sym = sym_table[i]; sym; sym = sym->next ) {
+            if ( sym->state == SYM_INTERNAL &&
+                 sym->mem_type != MT_ABS &&  /* no symbolic constants */
+                 sym->predefined == FALSE && /* no predefined symbols ($) */
+                 sym->public == FALSE ) {
+                sym->public = TRUE;
+                AddPublicData( sym );
+            }
+        }
+    }
+}
+
+#ifdef DEBUG_OUT
 void DumpSymbols( void );
+#endif
 
 void SymFini( void )
 /*********************/
 {
-    struct asm_sym      *sym;
-    dir_node            *dir;
     unsigned            i;
 
 #if defined( DEBUG_OUT )
     DumpSymbols();
 #endif
 
-    /* free the symbol table */
 #if FASTMEM==0
+    /* free the symbol table */
+    /* there are some items which are located in static memory! */
     for( i = 0; i < HASH_TABLE_SIZE; i++ ) {
+        struct asm_sym  *sym;
         struct asm_sym  *next;
-        next = sym_table[i];
-        for( ;; ) {
-            sym = next;
-            if( sym == NULL )
-                break;
-            dir = (dir_node *)sym;
+        sym = sym_table[i];
+        for( ; sym; ) {
             next = sym->next;
-            dir_free( dir, FALSE );
-            FreeASym( sym );
-            --SymCount;
+            dir_free( (dir_node *)sym, FALSE );
+            if ( sym->staticmem == FALSE )
+                FreeASym( sym );
+            SymCount--;
+            sym = next;
         }
     }
     myassert( SymCount == 0 );
-#else
 #endif
 
 }
@@ -525,6 +551,9 @@ void SymInit( )
     symPC.state = SYM_INTERNAL;
     symPC.defined = TRUE;
     symPC.predefined = TRUE;
+#if FASTMEM==0
+    symPC.staticmem = TRUE;
+#endif
     symPC.mem_type = MT_NEAR;
     symPC.name_size = 1;
     symPC.list = FALSE; /* don't display the '$' symbol in symbol list */
@@ -536,6 +565,9 @@ void SymInit( )
     LineItem.state = SYM_INTERNAL;
     LineItem.defined = TRUE;
     LineItem.predefined = TRUE;
+#if FASTMEM==0
+    LineItem.staticmem = TRUE;
+#endif
     LineItem.variable = TRUE;
     LineItem.name_size = strlen(LineItem.name);
     SymAddToTable(&LineItem);
@@ -545,6 +577,9 @@ void SymInit( )
     WordSize.state = SYM_INTERNAL;
     WordSize.defined = TRUE;
     WordSize.predefined = TRUE;
+#if FASTMEM==0
+    WordSize.staticmem = TRUE;
+#endif
     WordSize.variable = TRUE;
     WordSize.name_size = strlen(WordSize.name);
     SymAddToTable(&WordSize);
@@ -630,18 +665,16 @@ struct asm_sym **SymSort( unsigned int *count )
 
 #if defined( DEBUG_OUT )
 
-#if 0
 static void DumpSymbol( struct asm_sym *sym )
 /*******************************************/
 {
     dir_node    *dir;
     char        *type;
-    char        value[512];
     const char  *langtype;
-    char        *public;
+    char        *visibility;
 
     dir = (dir_node *)sym;
-    *value = 0;
+
     switch( sym->state ) {
     case SYM_SEG:
         type = "SEGMENT";
@@ -686,7 +719,7 @@ static void DumpSymbol( struct asm_sym *sym )
         type = "CLASS";
         break;
     case SYM_STRUCT_FIELD:
-        type = "STRUCTURE FIELD";
+        type = "STRUCT FIELD";
         break;
     case SYM_UNDEFINED:
         type = "UNDEFINED";
@@ -694,7 +727,6 @@ static void DumpSymbol( struct asm_sym *sym )
     case SYM_INTERNAL:
         if (dir->sym.mem_type == MT_ABS) {
             type = "NUMBER";
-            sprintf(value, "%Xh", dir->sym.offset);
         } else
             type = "INTERNAL";
         break;
@@ -703,14 +735,12 @@ static void DumpSymbol( struct asm_sym *sym )
         break;
     }
     if( sym->public ) {
-        public = "PUBLIC ";
+        visibility = "PUBLIC ";
     } else {
-        public = "";
+        visibility = "";
     }
-    langtype = get_sym_lang( sym );
-    DoDebugMsg( "%-30s\t%s\t%s%s\t%8X\t%s\n", sym->name, type, public, langtype, sym->offset, value );
+    DoDebugMsg( "%8X: %-30s %-12s  %8X  %8X %8X %s\n", sym, sym->name, type, sym->offset, dir->e, sym->name, visibility );
 }
-#endif
 
 void DumpSymbols( void )
 /*******************/
@@ -719,30 +749,36 @@ void DumpSymbols( void )
     unsigned            i;
     unsigned            count = 0;
     unsigned            max = 0;
+    unsigned            num0 = 0;
+    unsigned            num1 = 0;
+    unsigned            num5 = 0;
+    unsigned            num10 = 0;
     unsigned            curr = 0;
-    unsigned            empty = 0;
 
     printf( "\n" );
     for( i = 0; i < HASH_TABLE_SIZE; i++ ) {
-        struct asm_sym  *next;
-        next = sym_table[i];
-        if (next == NULL)
-            empty++;
-        for(curr = 0 ;; ) {
-            sym = next;
-            if( sym == NULL )
-                break;
-            count++;
+        for( sym = sym_table[i], curr = 0; sym; sym = sym->next ) {
             curr++;
-            next = sym->next;
-            //DumpSymbol( sym );
-            //flushall(); // make sure everything is dumped out
+#ifdef TRMEM
+            DumpSymbol( sym );
+#endif
         }
+        count += curr;
+        if ( curr == 0 )
+            num0++;
+        else if ( curr == 1 )
+            num1++;
+        else if ( curr <= 5 )
+            num5++;
+        else if ( curr <= 10 )
+            num10++;
         if (max < curr)
             max = curr;
     }
-    printf( "%u items in symbol table, expected %u\n", count, SymCount );
-    printf( "%u items max in one line, %u lines empty\n", max, empty );
+    if ( Options.quiet == FALSE ) {
+        printf( "%u items in symbol table, expected %u\n", count, SymCount );
+        printf( "max items in a line=%u, lines with 0/1/<=5/<=10 items=%u/%u/%u/%u, \n", max, num0, num1, num5, num10 );
+    }
 }
 #endif
 

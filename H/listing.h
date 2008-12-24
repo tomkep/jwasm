@@ -32,16 +32,24 @@
 #ifndef _LISTING_H_INCLUDED
 #define _LISTING_H_INCLUDED
 
-// extern void LstMsg( const char *format, ... );
+enum lsttype {
+ LSTTYPE_LIDATA    = 0,
+ LSTTYPE_EQUATE    = 1,
+ LSTTYPE_DIRECTIVE = 2,
+ LSTTYPE_MACRO     = 3,
+ LSTTYPE_STRUCT    = 4,
+ LSTTYPE_LABEL     = 5
+};
+
 extern void LstOpenFile( void );
 extern void LstCloseFile( void );
-extern void LstWriteFile( int type, unsigned int ofs, void * sym );
+extern void LstWrite( enum lsttype, unsigned int ofs, void * sym );
+extern void LstWriteSrcLine( void );
 extern void LstWriteCRef( void );
+extern void LstPrintf( const char *format, ... );
+extern void LstNL( void );
 
-#define LSTTYPE_LIDATA    0
-#define LSTTYPE_EQUATE    1
-#define LSTTYPE_DIRECTIVE 2
-#define LSTTYPE_MACRO     3
-#define LSTTYPE_STRUCT    4
+extern uint_32 list_pos;        /* current LST file position */
+extern uint_32 list_pos_start;  /* position of current line */
 
 #endif

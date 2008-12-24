@@ -33,8 +33,8 @@
 
 enum {
 #undef fix
-#define fix( cmd, number, msg, act, ret ) cmd
-#include "fatald.h"
+#define fix( cmd, number, act, ret ) MSG_ ## cmd
+#include "fatalmsg.h"
 };
 
 /* number = number of arguments that follow; ret = return value */

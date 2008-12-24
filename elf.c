@@ -25,6 +25,7 @@
 #include "memalloc.h"
 #include "fixup.h"
 #include "directiv.h"
+#include "segment.h"
 #include "queues.h"
 #include "elf.h"
 #include "myassert.h"
@@ -86,7 +87,7 @@ static intseg internal_segs[] = {
 
 static char * ElfConvertSectionName(asm_sym * sym)
 {
-    static char name[MAX_LINE_LEN];
+    static char name[MAX_ID_LEN+1];
 
     if (memcmp(sym->name, "_TEXT", 5) == 0) {
         if (sym->name[5] == NULLC)
@@ -153,7 +154,7 @@ static void set_symtab_values()
     localname *localshead = NULL;
     localname *localstail = NULL;
     localname *localscurr;
-    char buffer[MAX_LINE_LEN];
+    char buffer[MAX_ID_LEN+1];
 
     /* symbol table. there is
      - 1 NULL entry,
@@ -480,23 +481,9 @@ static unsigned int Get_Num_Relocs(dir_node *curr)
 
 static unsigned int Get_Alignment(dir_node *curr)
 {
-    switch (curr->e.seginfo->segrec->d.segdef.align) {
-    case SEGDEF_ALIGN_ABS:
+    if ( curr->e.seginfo->alignment == -1 )
         return( 0 );
-    case SEGDEF_ALIGN_BYTE:
-        return( 1 );
-    case SEGDEF_ALIGN_WORD:
-        return( 2 );
-    case SEGDEF_ALIGN_DWORD:
-        return( 4 );
-    case SEGDEF_ALIGN_PARA:
-        return( 16 );
-    case SEGDEF_ALIGN_PAGE:
-        return( 512 );
-    case SEGDEF_ALIGN_4KPAGE:
-        return( 4096 );
-    }
-    return( 0 );
+    return( 1 << curr->e.seginfo->alignment );
 }
 
 /* write ELF section table */
@@ -505,7 +492,7 @@ static int elf_write_section_table( int fh )
 {
     dir_node    *curr;
     obj_rec     *objr;
-    char        *p;
+    uint_8      *p;
     struct asmfixup *fix;
     uint        seg_index;
     uint        offset;
@@ -526,7 +513,7 @@ static int elf_write_section_table( int fh )
     if (write(fh, &shdr, sizeof(shdr)) != sizeof(shdr)) /* write the empty NULL entry */
         WriteError();
 
-    p = internal_segs[SHSTRTAB_IDX].data;
+    p = (uint_8 *)internal_segs[SHSTRTAB_IDX].data;
     p++;
 
     /* write the section headers defined in the module */
@@ -538,7 +525,7 @@ static int elf_write_section_table( int fh )
         }
         memset(&shdr, 0, sizeof(shdr));
 
-        shdr.sh_name = p - internal_segs[SHSTRTAB_IDX].data;
+        shdr.sh_name = p - (uint_8 *)internal_segs[SHSTRTAB_IDX].data;
         p += strlen(p) + 1;
         shdr.sh_type = SHT_PROGBITS;
         if (curr->e.seginfo->segtype == SEGTYPE_BSS) {
@@ -581,7 +568,7 @@ static int elf_write_section_table( int fh )
 
     /* write headers of internal sections */
     for (seg = internal_segs ; seg->name; seg++) {
-        shdr.sh_name = p - internal_segs[SHSTRTAB_IDX].data;
+        shdr.sh_name = p - (uint_8 *)internal_segs[SHSTRTAB_IDX].data;
         p += strlen(p) + 1;
         shdr.sh_type = seg->type;
         shdr.sh_flags = 0;
@@ -612,7 +599,7 @@ static int elf_write_section_table( int fh )
             continue;
         memset(&shdr, 0, sizeof(shdr));
 
-        shdr.sh_name = p - internal_segs[SHSTRTAB_IDX].data;
+        shdr.sh_name = p - (uint_8 *)internal_segs[SHSTRTAB_IDX].data;
         p += strlen(p) + 1;
         shdr.sh_type = SHT_REL;
         shdr.sh_flags = 0;
@@ -645,15 +632,14 @@ static int elf_write_section_table( int fh )
 ret_code elf_write_header( int fh )
 {
     dir_node   *dir;
-    char       buffer[MAX_LINE_LEN];
 
     DebugMsg(("elf_write_header: enter\n"));
 
     SizeLongNames = sizeof(uint_32);
 
-    srcname = AsmFiles.fname[ASM];
+    srcname = FileInfo.fname[ASM];
     srcname += strlen(srcname);
-    while (srcname > AsmFiles.fname[ASM] &&
+    while (srcname > FileInfo.fname[ASM] &&
            *(srcname-1) != '/' &&
            *(srcname-1) != '\\') srcname--;
 
@@ -708,7 +694,6 @@ ret_code elf_write_symbols( int fh )
     char        *p;
     uint        len;
     uint        i;
-    char        buffer[MAX_LINE_LEN];
 
     DebugMsg(("elf_write_symbols: enter\n"));
 
@@ -783,7 +768,7 @@ ret_code elf_write_data( int fh )
                         fixup->type == FIX_OFF16 ||
                         fixup->type == FIX_PTR16 ||
                         fixup->type == FIX_PTR32) {
-                        AsmErr( INVALID_ELF_FIXUP_TYPE, fixup->type );
+                        AsmErr( INVALID_FIXUP_TYPE, "ELF", fixup->type );
                     } else
                         AsmErr( UNKNOWN_FIXUP_TYPE, fixup->type );
                 }

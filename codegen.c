@@ -35,17 +35,16 @@
 #include "memalloc.h"
 #include "fixup.h"
 #include "directiv.h"
+#include "fpfixup.h"
 
-extern int  AddFloatingPointEmulationFixup( const struct asm_ins *, bool );
-
-// for FAR calls/jmps there was a non-compatible solution
-// implemented which required two additional opcodes, CALLF and JMPF.
+// for FAR calls/jmps there was a non-compatible solution implemented
+// in WASM which required two additional opcodes, CALLF and JMPF.
 // this has been removed for JWasm, but there's now the need to
 // find the correct entries in AsmOpTable. The following numbers
 // are required to find the correct starting index for the FAR variant.
 
-#define NUMCALLN 8  /* no of entries for CALLN in INSTRUCT.H */
-#define NUMJMPN  9  /* no of entries for JMPN in INSTRUCT.H */
+#define NUMCALLN 6  /* no of entries for near CALLs in INSTRUCT.H */
+#define NUMJMPN  7  /* no of entries for near JMPs in INSTRUCT.H */
 
 static ret_code match_phase_3( int *i, OPNDTYPE determinant );
 
@@ -55,7 +54,7 @@ static ret_code output_3DNow( int i )
     const struct asm_ins *ins = &AsmOpTable[i];
 
     if( ins->byte1_info == F_0F0F ) {
-        OutputCodeByte( ins->opcode | CodeInfo->info.opcode );
+        OutputCodeByte( ins->opcode | CodeInfo->opcode );
     }
     return( NOT_ERROR );
 }
@@ -66,12 +65,13 @@ static ret_code output( int i )
 - determine what code should be output and their order;
 - output prefix bytes ( ADRSIZ, OPSIZ, LOCK, REPxx, segment override prefix, etc )
   , opcode, "mod r/m" byte and "s-i-b" byte;
+- i: index into AsmOpTable
 - possible return codes: ERROR, NOT_ERROR
 */
 {
     const struct asm_ins *ins = &AsmOpTable[i];
     struct asm_code      *rCode = CodeInfo;
-    unsigned_8           tmp;
+    uint_8           tmp;
 
     /*
      * Output debug info - line numbers
@@ -83,7 +83,7 @@ static ret_code output( int i )
     /*
      * Check if FP is valid
      */
-    if((( ins->cpu & P_FPU_MASK ) != P_NO87 ) && ( Options.floating_point == NO_FP_ALLOWED )) {
+    if((( ins->cpu & P_FPU_MASK ) != P_NO87 ) && ( Options.floating_point == FPO_DISABLED )) {
         AsmError( NO_FP_WITH_FPC_SET );
         return( ERROR );
     }
@@ -92,8 +92,8 @@ static ret_code output( int i )
      */
     if(( ModuleInfo.emulator == TRUE )
         && ( !rCode->use32 )
-        && ( ins->allowed_prefix != NO_FWAIT )
-        && (( ins->allowed_prefix == FWAIT ) || (( ins->cpu&P_FPU_MASK ) != P_NO87 ))) {
+        && ( ins->allowed_prefix != AP_NO_FWAIT )
+        && (( ins->allowed_prefix == AP_FWAIT ) || (( ins->cpu & P_FPU_MASK ) != P_NO87 ))) {
             if( AddFloatingPointEmulationFixup( ins, FALSE ) == ERROR ) {
                 return( ERROR );
             }
@@ -105,8 +105,14 @@ static ret_code output( int i )
     if( ( ins->cpu & P_CPU_MASK ) > ( ModuleInfo.curr_cpu & P_CPU_MASK )
         || ( ins->cpu & P_FPU_MASK ) > ( ModuleInfo.curr_cpu & P_FPU_MASK )
         || ( ins->cpu & P_EXT_MASK ) > ( ins->cpu & ModuleInfo.curr_cpu & P_EXT_MASK ) ) {
-        DebugMsg(("output: wrong cpu setting\n"));
-        AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
+        DebugMsg(("output: wrong cpu setting: instr=%X, Module=%X\n", ins->cpu, ModuleInfo.curr_cpu ));
+        /* if instruction is valid for 16bit cpu, but operands aren't,
+         then display a more specific error message! */
+        if( ins->cpu == P_386 &&
+            ( ( AsmOpTable[AsmResWord[CodeInfo->token].position].cpu & P_CPU_MASK ) <= P_386 ))
+            AsmError( INSTRUCTION_FORM_REQUIRES_80386 );
+        else
+            AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
         return( ERROR );
     }
 
@@ -116,13 +122,13 @@ static ret_code output( int i )
     if( rCode->prefix.ins != EMPTY ) {
         switch( rCode->prefix.ins ) {
         case T_LOCK:
-            if( ins->allowed_prefix != LOCK ) {
+            if( ins->allowed_prefix != AP_LOCK ) {
                 AsmError( LOCK_PREFIX_IS_NOT_ALLOWED_ON_THIS_INSTRUCTION );
                 return( ERROR );
             }
             break;
         case T_REP:
-            if( ins->allowed_prefix != REP ) {
+            if( ins->allowed_prefix != AP_REP ) {
                 if (ModuleInfo.m510 == FALSE) {
                     AsmError( REP_PREFIX_IS_NOT_ALLOWED_ON_THIS_INSTRUCTION );
                     return( ERROR );
@@ -133,7 +139,7 @@ static ret_code output( int i )
         case T_REPE:
         case T_REPNZ:
         case T_REPNE:
-            if( ins->allowed_prefix != REPxx ) {
+            if( ins->allowed_prefix != AP_REPxx ) {
                 AsmError( REPX_PREFIX_IS_NOT_ALLOWED_ON_THIS_INSTRUCTION );
                 return( ERROR );
             }
@@ -172,14 +178,14 @@ static ret_code output( int i )
                 OutputCodeByte( OP_NOP );
             }
         }
-    } else if( ins->allowed_prefix == FWAIT ) {
+    } else if( ins->allowed_prefix == AP_FWAIT ) {
         OutputCodeByte( OP_WAIT );
     } else if(( ModuleInfo.emulator == TRUE )
         && ( !rCode->use32 )
-        && ( ins->allowed_prefix != NO_FWAIT )
-        && (( ins->allowed_prefix == FWAIT ) || (( ins->cpu & P_FPU_MASK ) != P_NO87 ))) {
+        && ( ins->allowed_prefix != AP_NO_FWAIT )
+        && (( ins->allowed_prefix == AP_FWAIT ) || (( ins->cpu & P_FPU_MASK ) != P_NO87 ))) {
         OutputCodeByte( OP_WAIT );
-    } else if( ins->allowed_prefix != NO_FWAIT ) {
+    } else if( ins->allowed_prefix != AP_NO_FWAIT ) {
         // implicit FWAIT synchronization for 8087 (CPU 8086/80186)
         if((( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_286 )
             && (( ins->cpu & P_FPU_MASK ) == P_87 )) {
@@ -192,8 +198,8 @@ static ret_code output( int i )
      */
     if(( ModuleInfo.emulator == TRUE )
         && ( !rCode->use32 )
-        && ( ins->allowed_prefix != NO_FWAIT )
-        && (( ins->allowed_prefix == FWAIT ) || (( ins->cpu&P_FPU_MASK ) != P_NO87 ))) {
+        && ( ins->allowed_prefix != AP_NO_FWAIT )
+        && (( ins->allowed_prefix == AP_FWAIT ) || (( ins->cpu & P_FPU_MASK ) != P_NO87 ))) {
         if( AddFloatingPointEmulationFixup( ins, TRUE ) == ERROR ) {
             return( ERROR );
         }
@@ -209,6 +215,7 @@ static ret_code output( int i )
      */
     if( ins->cpu & NO_OPPRFX )
         rCode->prefix.opsiz = FALSE;
+
     switch( ins->byte1_info ) {
     case F_16:
         if( rCode->use32 ) rCode->prefix.opsiz = TRUE;
@@ -226,11 +233,11 @@ static ret_code output( int i )
     default:
         break;
     }
-    if( rCode->prefix.opsiz == TRUE ) {
+    if( rCode->prefix.opsiz == TRUE && ins->allowed_prefix != AP_NO_OPPRF ) {
 #if 1 /* not really needed if all instructions have correct cpu flags */
         if(( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
-            DebugMsg(("output: wrong cpu setting\n"));
-            AsmError( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING );
+            DebugMsg(("output: incstruction form requires 386\n"));
+            AsmError( INSTRUCTION_FORM_REQUIRES_80386 );
             return( ERROR );
         }
 #endif
@@ -261,8 +268,8 @@ static ret_code output( int i )
     /*
      * Output segment prefix
      */
-    if( rCode->prefix.seg != EMPTY ) {
-        OutputCodeByte( rCode->prefix.seg );
+    if( rCode->prefix.RegOverride != EMPTY ) {
+        OutputCodeByte( rCode->prefix.RegOverride );
     }
     /*
      * Output extended opcode
@@ -285,31 +292,31 @@ static ret_code output( int i )
     }
     if( ins->opnd_dir ) {
         /* The reg and r/m fields are backwards */
-        tmp = rCode->info.rm_byte;
-        rCode->info.rm_byte = ( tmp & 0xc0 ) | ((tmp >> 3) & 0x7) | ((tmp << 3) & 0x38);
+        tmp = rCode->rm_byte;
+        rCode->rm_byte = ( tmp & 0xc0 ) | ((tmp >> 3) & 0x7) | ((tmp << 3) & 0x38);
     }
     switch( ins->rm_info ) {
     case R_in_OP:
-        OutputCodeByte( ins->opcode | ( rCode->info.rm_byte & NOT_BIT_67 ) );
+        OutputCodeByte( ins->opcode | ( rCode->rm_byte & NOT_BIT_67 ) );
         break;
     case no_RM:
-        OutputCodeByte( ins->opcode | rCode->info.opcode );
+        OutputCodeByte( ins->opcode | rCode->opcode );
         break;
     case no_WDSx:
         /* for SSSE3, instruction rm_byte is additional opcode byte */
         OutputCodeByte( ins->opcode );
         OutputCodeByte( ins->rm_byte );
-        OutputCodeByte( rCode->info.rm_byte );
+        OutputCodeByte( rCode->rm_byte );
         goto common_wds;
     case no_WDS:
-        rCode->info.opcode = 0;
+        rCode->opcode = 0;
         // no break
     default:
         // don't output opcode for 3DNow! instructions
         if( ins->byte1_info != F_0F0F ) {
-            OutputCodeByte( ins->opcode | rCode->info.opcode );
+            OutputCodeByte( ins->opcode | rCode->opcode );
         }
-        tmp = ins->rm_byte | rCode->info.rm_byte;
+        tmp = ins->rm_byte | rCode->rm_byte;
         OutputCodeByte( tmp );
     common_wds:
         if( addr_32( rCode ) ) {
@@ -342,7 +349,15 @@ static ret_code output_data( OPNDTYPE determinant, int index )
 
     DebugMsg(("output_data(%X, %u) enter\n", determinant, index));
 
-    switch( CodeInfo->info.token ) {
+#if 1
+    /* it's not just CMPS/LODS/MOVS/SCAS/STOS, but also
+     the varians with B,W and D suffix which accept a memory operand
+     */
+    if ( CodeInfo->token == T_XLAT ||
+         AsmOpTable[AsmResWord[CodeInfo->token].position].allowed_prefix == AP_REP ||
+         AsmOpTable[AsmResWord[CodeInfo->token].position].allowed_prefix == AP_REPxx ) {
+#else
+    switch( CodeInfo->token ) {
     case T_CMPS:
     case T_LODS:
     case T_MOVS:
@@ -351,6 +366,7 @@ static ret_code output_data( OPNDTYPE determinant, int index )
     case T_SCAS:
     case T_STOS:
     case T_XLAT:
+#endif
         /* these instructions don't really want the memory operand */
         return( NOT_ERROR );
     }
@@ -368,17 +384,17 @@ static ret_code output_data( OPNDTYPE determinant, int index )
         out = 6;
     } else if( determinant & OP_M_ANY ) {
         // switch on the mode ( the leftmost 2 bits )
-        switch( CodeInfo->info.rm_byte & BIT_67 ) {
+        switch( CodeInfo->rm_byte & BIT_67 ) {
         case MOD_01:  // mode = 01
             out = 1;
             break;
         case MOD_00:
             if( !addr_32( CodeInfo ) ) {
-                if( ( CodeInfo->info.rm_byte & BIT_012 ) == D16 ) {
+                if( ( CodeInfo->rm_byte & BIT_012 ) == D16 ) {
                      out = 2;
                 }
             } else {
-                switch( CodeInfo->info.rm_byte & BIT_012 ) {
+                switch( CodeInfo->rm_byte & BIT_012 ) {
                 case S_I_B:
                     if( ( CodeInfo->sib & BIT_012 ) != D32 ) {
                         break;  // out = 0
@@ -411,12 +427,13 @@ static ret_code match_phase_2( int *i )
 /*********************************
 - a routine used by match_phase_1() to determine whether both operands match
   with that in the assembly instructions table;
+- i: index into AsmOpTable
 - call by match_phase_1() only;
 - possible return codes: EMPTY, ERROR, NOT_ERROR
 */
 {
 //    DebugMsg(("match_phase_2(%u) enter\n", *i));
-    if( CodeInfo->info.opnd_type[OPND2] != OP_NONE ) {
+    if( CodeInfo->opnd_type[OPND2] != OP_NONE ) {
         // 2 opnds instruction
         return( match_phase_3( i, AsmOpTable[*i].opnd_type[OPND1] ) );
     } else {
@@ -428,7 +445,7 @@ static ret_code match_phase_2( int *i )
                 return( ERROR );
             }
             // output idata or disp ( if first opnd is OP_M / OP_I )
-            return( output_data( CodeInfo->info.opnd_type[OPND1], OPND1 ) );
+            return( output_data( CodeInfo->opnd_type[OPND1], OPND1 ) );
         } else {
             // still cannot find match
             return( EMPTY );
@@ -451,28 +468,15 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
     OPNDTYPE        pre_opnd;
     OPNDTYPE        asm_op1;
 
-    // if nothing inside, no need to output anything
-    if( CodeInfo->info.token == T_NULL ) {
-        if( CodeInfo->prefix.seg != EMPTY ) {
-            /* we have:     REG: on line */
-            AsmError( SYNTAX_ERROR );
-            return( ERROR );
-        } else if( CodeInfo->info.opnd_type[OPND1] == OP_NONE ) {
-            return( NOT_ERROR );
-        } else {
-            AsmError( SYNTAX_ERROR );
-            return( ERROR );
-        }
-    }
     // look up the hash table to get the real position of instruction
-    i = AsmResWord[CodeInfo->info.token].position;
+    i = AsmResWord[CodeInfo->token].position;
 
     // this "hack" makes the CALLF/JMPF hack obsolete. Just skip the
     // "near" entries for CALL/JMP if the transition is FAR.
     if (CodeInfo->isfar) {
-        if (CodeInfo->info.token == T_CALL)
+        if (CodeInfo->token == T_CALL)
             i = i + NUMCALLN;
-        else if (CodeInfo->info.token == T_JMP)
+        else if (CodeInfo->token == T_JMP)
             i = i + NUMJMPN;
     }
 
@@ -494,12 +498,16 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
             return( ERROR );
         }
     }
-    cur_opnd = CodeInfo->info.opnd_type[OPND1];
-
-    // if( cur_opnd & OP_M ) {
-
+    cur_opnd = CodeInfo->opnd_type[OPND1];
     pre_opnd = cur_opnd;
-    if( cur_opnd & OP_M_ANY ) {
+
+    //_asm int 3;
+    //if( cur_opnd & OP_M_ANY ) {
+    if( cur_opnd == OP_M ) {
+        if ( CodeInfo->mem_type == MT_EMPTY ) {
+            if ( CodeInfo->InsFixup[0] && CodeInfo->InsFixup[0]->sym )
+                CodeInfo->mem_type = CodeInfo->InsFixup[0]->sym->mem_type;
+        }
         DebugMsg(("match_phase_1 enter: codeinfo->mem_type=%u\n", CodeInfo->mem_type));
         switch (CodeInfo->mem_type) {
         case MT_BYTE:
@@ -532,21 +540,16 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
         case MT_NEAR:
             pre_opnd = ( CodeInfo->use32 ) ? OP_M_DW : OP_M_W ;
             break;
-        default:
-            /* if there's just one variation of the instruction
-             and no size has been specified, use it */
-            if (CodeInfo->mem_type == MT_EMPTY &&
-                AsmOpTable[i+1].token != CodeInfo->info.token &&
-                (AsmOpTable[i].opnd_type[OPND1] & OP_M_ANY) &&
-                AsmOpTable[i].opnd_type[OPND1] != OP_M )
+        case MT_EMPTY:
+            for (; AsmOpTable[i+1].token == CodeInfo->token; i++ )
+                if ( AsmOpTable[i].opnd_type[OPND1] & OP_M_ANY )
+                    break;
+            /* use the first variant with a memory operand1 */
+            if ( AsmOpTable[i].opnd_type[OPND1] & OP_M_ANY )
                 pre_opnd = AsmOpTable[i].opnd_type[OPND1];
-            else if ((Parse_Pass == PASS_1) && (cur_opnd == OP_M))
-                /* if no size has been specified (forward reference?) and
-                 first instruction has mem_operand, use this size */
-                if (CodeInfo->mem_type == MT_EMPTY && AsmOpTable[i].opnd_type[OPND1] & OP_M_ANY)
-                    pre_opnd = AsmOpTable[i].opnd_type[OPND1];
-                else
-                    pre_opnd = OP_M_B;
+            else
+                pre_opnd = OP_M_B;
+            break;
         }
     } else if( cur_opnd & OP_I ) {
 #if 0
@@ -569,10 +572,10 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
 
     DebugMsg(("match_phase_1: cur_opnd=%X, pre_opnd=%X, codeinfo->mem_type=%u\n", cur_opnd, pre_opnd, CodeInfo->mem_type));
 
-    while( AsmOpTable[i].token == CodeInfo->info.token ) {
-        // get the real opnd
+    for ( ; AsmOpTable[i].token == CodeInfo->token; i++ ) {
+        // get the operand type from the instruction table
         asm_op1 = AsmOpTable[i].opnd_type[OPND1];
-        cur_opnd = CodeInfo->info.opnd_type[OPND1];
+        cur_opnd = CodeInfo->opnd_type[OPND1];
 
         if( cur_opnd & OP_M_ANY ) {
             if( !( ( asm_op1 & cur_opnd ) && ( ( asm_op1 & OP_M_DFT ) == ( cur_opnd & OP_M_DFT ) ) ) )
@@ -617,7 +620,7 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
         case OP_I32:
         case OP_I16:
             if( cur_opnd & asm_op1 ) {
-                CodeInfo->info.opnd_type[OPND1] = asm_op1;
+                CodeInfo->opnd_type[OPND1] = asm_op1;
                 retcode = match_phase_2( &i );
                 if( retcode != EMPTY )
                     return( retcode );
@@ -627,7 +630,7 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
             if( cur_opnd & OP_I ) {
                 if( CodeInfo->data[OPND1] <= UCHAR_MAX ) {
                     temp_opsiz = CodeInfo->prefix.opsiz;
-                    CodeInfo->info.opnd_type[OPND1] = OP_I8;
+                    CodeInfo->opnd_type[OPND1] = OP_I8;
                     retcode = match_phase_2( &i );
                     if( retcode != EMPTY )
                         return( retcode );
@@ -637,20 +640,24 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
             break;
         case OP_I_3:                    // for INT only
             if( ( ( cur_opnd & OP_I8 ) && CodeInfo->data[OPND1] == 3 ) &&
-                                CodeInfo->info.opnd_type[OPND2] == OP_NONE ) {
+                                CodeInfo->opnd_type[OPND2] == OP_NONE ) {
                 return( output( i ) );
             }
             break;
         case OP_NONE:
             if( cur_opnd == OP_NONE &&
-                    CodeInfo->info.opnd_type[OPND2] == OP_NONE ) {
+                    CodeInfo->opnd_type[OPND2] == OP_NONE ) {
                 return( output( i ) );
             }
             break;
         default:
 //            DebugMsg(("match_phase_1: default case\n"));
-            /* this is the check to see if the operand we have matches
-             * the type of the one we need
+            /*
+             - if ( asm_op1 & cur_opnd ) then types of operand 1 do match.
+             - if ( cur_opnd & OP_M_ANY == 0 ) then current operand1 is NOT
+               a memory operand.
+               if ( asm_op1 & OP_M_DFT == cur_opnd & OP_M_DFT ) then ...
+
              */
             if( ( asm_op1 & cur_opnd )
                 && ( ( ( cur_opnd & OP_M_ANY ) == 0 )
@@ -662,8 +669,7 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
             }
             break;
         }
-        i++;
-    } /* end while */
+    } /* end for */
     AsmError( INVALID_INSTRUCTION_OPERANDS );
     return( ERROR );
 }
@@ -673,7 +679,7 @@ static ret_code check_3rd_operand( int i )
 {
     OPNDTYPE    cur_opnd;
 
-    cur_opnd = CodeInfo->info.opnd_type[OPND3];
+    cur_opnd = CodeInfo->opnd_type[OPND3];
     if( ( AsmOpTable[i].opnd_type_3rd == OP3_NONE )
         || ( AsmOpTable[i].opnd_type_3rd & OP3_HID ) ) {
         if( cur_opnd == OP_NONE ) {
@@ -694,7 +700,7 @@ static ret_code output_3rd_operand( int i )
     if( AsmOpTable[i].opnd_type_3rd == OP3_NONE ) {
         return( NOT_ERROR );
     } else if( AsmOpTable[i].opnd_type_3rd == OP3_I8_U ) {
-        if( CodeInfo->info.opnd_type[OPND3] & OP_I ) {
+        if( CodeInfo->opnd_type[OPND3] & OP_I ) {
             return( output_data( OP_I8, OPND3 ) );
         } else {
             return( ERROR );
@@ -714,6 +720,7 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
 - if second operand match then it will output code; if not, pass back to
   match_phase_1() and try again;
 - call by match_phase_2() only;
+- i: index into AsmOpTable
 - possible return codes: EMPTY, NOT_ERROR, ERROR
 */
 {
@@ -724,8 +731,8 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
 
     instruction = AsmOpTable[*i].token;
 
-    last_opnd = CodeInfo->info.opnd_type[OPND1];
-    cur_opnd  = CodeInfo->info.opnd_type[OPND2];
+    last_opnd = CodeInfo->opnd_type[OPND1];
+    cur_opnd  = CodeInfo->opnd_type[OPND2];
 
     DebugMsg(("match_phase_3 enter, op1=%X, op2=%X\n", last_opnd, cur_opnd));
 
@@ -738,8 +745,8 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
         case OP_TR:
         case OP_ST:
         case OP_STI:
-            DebugMsg(("match_phase_3: OP_CR/DR/TR/ST/STI\n"));
             if( cur_opnd & asm_op2 ) {
+                DebugMsg(("match_phase_3: OP_CR/DR/TR/ST/STI\n"));
                 return( output( *i ) );
             }
             break;
@@ -749,8 +756,8 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
         case OP_R:
         case OP_R1632:
         case OP_R32:
-            DebugMsg(("match_phase_3: OP_SR/DX/A/R/R1632/R32\n"));
             if( cur_opnd & asm_op2 ) {
+                DebugMsg(("match_phase_3: OP_SR/DX/A/R/R1632/R32\n"));
                 if( check_3rd_operand( *i ) == ERROR )
                     break;
                 if( output( *i ) == ERROR )
@@ -761,19 +768,19 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
             }
             break;
         case OP_CL:
-            DebugMsg(("match_phase_3: OP_CL\n"));
             if( cur_opnd & asm_op2 ) {
+                DebugMsg(("match_phase_3: OP_CL\n"));
                 // CL is encoded in bit 345 of rm_byte, but we don't need it
                 // so clear it here
-                CodeInfo->info.rm_byte &= NOT_BIT_345;
+                CodeInfo->rm_byte &= NOT_BIT_345;
                 if( output( *i ) == ERROR )
                     return( ERROR );
                 return( output_data( last_opnd, OPND1 ) );
             }
             break;
         case OP_R16:
-            DebugMsg(("match_phase_3: OP_R16\n"));
             if( cur_opnd & asm_op2 ) {
+                DebugMsg(("match_phase_3: OP_R16\n"));
                 CodeInfo->prefix.opsiz = FALSE;
                 if( output( *i ) == ERROR )
                     return( ERROR );
@@ -781,9 +788,9 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
             }
             break;
         case OP_I:
-            DebugMsg(("match_phase_3: OP_I\n"));
             if( cur_opnd & asm_op2 ) {
                 long operand = CodeInfo->data[OPND2];
+                DebugMsg(("match_phase_3: OP_I\n"));
                 if( last_opnd & OP_R8 ) {
                     // 8-bit register, so output 8-bit data
                     if( Parse_Pass == PASS_1 && !InRange( operand, 1 ) ) {
@@ -792,8 +799,8 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
                     }
                     CodeInfo->prefix.opsiz = FALSE;
                     cur_opnd = OP_I8;
-                    if( InsFixups[OPND2] != NULL ) {
-                        InsFixups[OPND2]->type = FIX_LOBYTE;
+                    if( CodeInfo->InsFixup[OPND2] != NULL ) {
+                        CodeInfo->InsFixup[OPND2]->type = FIX_LOBYTE;
                     }
                 } else if( last_opnd & OP_R16 ) {
                     // 16-bit register, so output 16-bit data
@@ -853,7 +860,7 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
             DebugMsg(("match_phase_3: OP_I8\n"));
             if( cur_opnd == OP_I8 ) {
                 /* do nothing yet */
-                if( InsFixups[OPND2] != NULL ) {
+                if( CodeInfo->InsFixup[OPND2] != NULL ) {
                     break;
                 }
             } else if( cur_opnd == OP_I16 || cur_opnd == OP_I32) {
@@ -863,23 +870,23 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
                  */
                 break;
             } else if( ( cur_opnd & OP_I )
-                && ( InsFixups[OPND2] == NULL )
+                && ( CodeInfo->InsFixup[OPND2] == NULL )
                 && ( ( last_opnd & OP_R16 )
                 || ( last_opnd & OP_M16 ) && ( MEM_TYPE( CodeInfo->mem_type, WORD ) ) ) ) {
                 if( (int_8)CodeInfo->data[OPND2] ==
                     (int_16)CodeInfo->data[OPND2] ) {
-                    CodeInfo->info.opnd_type[OPND2] = OP_I8;
+                    CodeInfo->opnd_type[OPND2] = OP_I8;
                     CodeInfo->data[OPND2] = (int_8)CodeInfo->data[OPND2];
                 } else {
                     break;
                 }
             } else if( ( cur_opnd & OP_I )
-                && ( InsFixups[OPND2] == NULL )
+                && ( CodeInfo->InsFixup[OPND2] == NULL )
                 && ( ( last_opnd & OP_R32 )
                 || ( last_opnd & OP_M32 ) && ( MEM_TYPE( CodeInfo->mem_type, DWORD ) ) ) ) {
                 if( (int_8)CodeInfo->data[OPND2] ==
                     (int_32)CodeInfo->data[OPND2] ) {
-                    CodeInfo->info.opnd_type[OPND2] = OP_I8;
+                    CodeInfo->opnd_type[OPND2] = OP_I8;
                     CodeInfo->data[OPND2] = (int_8)CodeInfo->data[OPND2];
                 } else {
                     break;
@@ -901,10 +908,10 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
             }
             break;
         case OP_M16:
-            DebugMsg(("match_phase_3: OP_M16\n"));
             if( cur_opnd & OP_M
                 && ( MEM_TYPE( CodeInfo->mem_type, WORD )
                 || CodeInfo->mem_type == MT_EMPTY ) ) {
+                DebugMsg(("match_phase_3: OP_M16\n"));
                 if( output( *i ) == ERROR )
                     return( ERROR );
                 if( output_data( last_opnd, OPND1 ) == ERROR )
@@ -913,8 +920,8 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
             }
             break;
         case OP_M:
-            DebugMsg(("match_phase_3: OP_M\n"));
             if( cur_opnd & asm_op2 ) {
+                DebugMsg(("match_phase_3: OP_M\n"));
                 if( check_3rd_operand( *i ) == ERROR )
                     break;
                 if( output( *i ) == ERROR )
@@ -929,9 +936,9 @@ static ret_code match_phase_3( int *i, OPNDTYPE determinant )
             }
             break;
         default:
-            DebugMsg(("match_phase_3: default\n"));
             if( ( asm_op2 & ( OP_MMX | OP_XMM ) )
                 && ( cur_opnd & asm_op2 ) ) {
+                DebugMsg(("match_phase_3: default\n"));
                 if( check_3rd_operand( *i ) == ERROR )
                     break;
                 if( output( *i ) == ERROR )

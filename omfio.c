@@ -36,6 +36,7 @@
 #include <stdio.h>      /* for SEEK_SET, SEEK_CUR, SEEK_END */
 #include <sys/stat.h>   /* _S_IREAD ... */
 #include <string.h>
+#include "globals.h"
 #include "memalloc.h"
 #include "omfrec.h"
 #include "myassert.h"

@@ -54,19 +54,14 @@ typedef enum {
 #define NUM_OS 2
 
 enum {
-    TAB_FIRST = 0,
-    TAB_SEG = TAB_FIRST,  // order seg, grp is important
+    TAB_SEG = 0,
     TAB_GRP,
-    TAB_PUB,
     TAB_LIB,
     TAB_EXT,
     TAB_PROC,
     TAB_ALIAS,
     TAB_LAST,
-    TAB_TYPE,
-    TAB_GLOBAL,  // TAB_GLOBAL and TAB_COMM are in fact TAB_EXT items
-    TAB_COMM
-};           
+};
 
 typedef enum {
     SEGTYPE_UNDEF,
@@ -83,10 +78,19 @@ typedef struct stacknode {
     void    *elt;
 } stacknode;
 
+enum stypeflags {
+    VOID_TYPE = 0,
+    INT_TYPE,
+    UINT_TYPE,
+    FLOAT_TYPE,
+    ADDR_TYPE
+};
+
 typedef struct {
-    int token;
+    enum asm_token token;
     memtype mem_type;
     int size;
+    enum stypeflags type;
     ofssize ofs_size;
 } simpletype;
 
@@ -94,11 +98,9 @@ extern simpletype SimpleType[];
 
 typedef struct {
       char      *string;        // the token string
-      uint      value;          // value connected to this token
-      uint      init;           // explained in direct.c ( look at SegDef() )
+      uint_16   value;          // value assigned to the token
+      uint_16   init;           // kind of token
 } typeinfo;
-
-extern typeinfo TypeInfo[];
 
 /*---------------------------------------------------------------------------*/
 /* Structures for grpdef, segdef, externdef, pubdef, included library,       */
@@ -148,6 +150,8 @@ typedef struct {
     };
     seg_type            segtype;        // segment is belonging to "CODE" or 'DATA' class
     direct_idx          lname_idx;      // LNAME index (OMF only)
+    unsigned            alignment:4;    // is value 2^x
+    unsigned            characteristics:8;
     unsigned            readonly:1;     // if the segment is readonly
     unsigned            Use32:1;
 #if BIN_SUPPORT
@@ -160,26 +164,29 @@ typedef struct regs_list {
     char                *reg;
 } regs_list;
 
-typedef struct label_list {
-    struct label_list   *next;
-    asm_sym             *sym;           // symbol for this param/local
+typedef struct local_sym {
+    asm_sym             sym;            // symbol for this param/local
     unsigned            is_vararg:1;    // if it is a VARARG param
     unsigned            is_ptr:1;       // if it is a PTR type
     unsigned            is_far:1;       // if ptr is FAR
     unsigned            is32:1;         // if offset is 32 bit (ptr only)
-} label_list;
+} local_sym;
 
 typedef struct {
-    regs_list           *regslist;      // list of registers to be saved
-    label_list          *paralist;      // list of parameters
-    label_list          *locallist;     // list of local variables
-    struct asm_sym      *labellist;     // list of local labels
+    regs_list           *regslist;      // PROC: list of registers to be saved
+    local_sym           *paralist;      // list of parameters
+    local_sym           *locallist;     // PROC: list of local variables
+    struct asm_sym      *labellist;     // PROC: list of local labels
     int                 parasize;       // total no. of bytes used by parameters
-    int                 localsize;      // total no. of bytes used by local variables
+    int                 localsize;      // PROC: total no. of bytes used by local variables
+    char                *prologuearg;   // PROC: prologuearg attribute
+    uint_32             list_pos;       // PROC: prologue list pos
     unsigned            is_vararg:1;    // if it has a vararg
     unsigned            pe_type:1;      // prolog/epilog code type 0:8086/186 1:286 and above
     unsigned            export:1;       // EXPORT procedure
     unsigned            init:1;         // has ExamineProc() been called?
+    unsigned            forceframe:1;   // FORCEFRAME prologuearg?
+    unsigned            loadds:1;       // LOADDS prologuearg?
 } proc_info;
 
 // macro parameter
@@ -203,13 +210,6 @@ typedef struct asmlines {
     char                parmcount;
 } asmlines;
 
-typedef struct  fname_list {
-        struct  fname_list *next;
-        time_t  mtime;
-        char    *name;
-        char    *fullname;
-} FNAME;
-
 typedef struct {
     uint_32             parmcnt;    /* no of params */
     mparm_list          *parmlist;  /* array of parameter items */
@@ -217,7 +217,6 @@ typedef struct {
     asmlines            *data;      // the guts of the macro - LL of strings
     const FNAME         *srcfile;
 } macro_info;
-
 
 typedef struct field_list {
     struct field_list   *next;
@@ -245,9 +244,14 @@ typedef struct {
         uint_8          indirection; /* TYPEDEF: level of indirection for PTR */
     };
     type_kind           typekind;
-    unsigned            isInline:1;
-    unsigned            isOpen:1;    /* set until the matching ENDS is found */
-    unsigned            OrgInside:1; /* struct contains an ORG */
+    union {
+        uint_8          flags;
+        struct {
+            unsigned    isInline:1;  /* STRUCT: inline */
+            unsigned    isOpen:1;    /* STRUCT: set until the matching ENDS is found */
+            unsigned    OrgInside:1; /* STRUCT: struct contains an ORG */
+        };
+    };
 } struct_info;
 
 union entry {
@@ -261,9 +265,9 @@ union entry {
 typedef struct dir_node {
     struct asm_sym      sym;
     union entry         e;
-    unsigned long       line_num;     // line number of the directive in source file
-    struct dir_node     *next, *prev; // linked list of this type of symbol
-} dir_node;         // List of grpdef, segdef, pubdef, externdef, included lib
+    struct dir_node     *next; // linked list of this type of symbol
+    struct dir_node     *prev; /* useful if item is likely to be removed */
+} dir_node;         // List of grpdef, segdef, pubdef, externs, included lib
                     // and symbolic integer constants.
 
 typedef struct {
@@ -271,6 +275,14 @@ typedef struct {
     dir_node            *tail;
 } symbol_queue;     // tables array - queues of symbols of 1 type ie: segments
                     // the data are actually part of the symbol table
+
+
+/* .NOLISTMACRO, .LISTMACRO and .LISTMACROALL directives setting */
+enum listmacro {
+    LM_NOLISTMACRO,
+    LM_LISTMACRO,
+    LM_LISTMACROALL
+};
 
 /*---------------------------------------------------------------------------*/
 
@@ -291,21 +303,29 @@ typedef struct {
     short               cpu;             // cpu setting (value @cpu symbol);
     enum asm_cpu        curr_cpu;        // cpu setting (OW stylex);
     unsigned char       radix;           // current .RADIX setting
-    unsigned            use32:1;         // If 32-bit segment is used
+    unsigned char       fieldalign;      // -Zp, OPTION:FIELDALIGN setting
+#if PROCALIGN
+    unsigned char       procalign;       // current OPTION:PROCALIGN setting
+#endif
+    enum listmacro      list_macro;      // current .LISTMACRO setting
     unsigned            cmdline:1;       // memory model set by cmdline opt?
     unsigned            defUse32:1;      // default segment size 32-bit
-    unsigned            mseg:1;          // mixed segments (16/32-bit)
-    unsigned            nocasemap:1;     // option casemap:none
+    unsigned            case_sensitive:1;     // option casemap
+    unsigned            convert_uppercase:1;  // option casemap
     unsigned            procs_private:1; // option proc:private
     unsigned            procs_export:1;  // option proc:export
+    unsigned            dotname:1;       // option dotname
     unsigned            ljmp:1;          // option ljmp
     unsigned            m510:1;          // option m510
     unsigned            scoped:1;        // option scoped
     unsigned            oldstructs:1;    // option oldstructs
     unsigned            emulator:1;      // option emulator
+    unsigned            setif2:1;        // option setif2
     unsigned            list:1;          // .list/.nolist
     unsigned            cref:1;          // .cref/.nocref
-    unsigned            setif2:1;        // option setif2
+    unsigned            listif:1;        // .listif/.nolistif
+    unsigned            list_generated_code:1; // .listall, -Sa, -Sg
+
     unsigned            flatgrp_idx;     // index of FLAT group
     char                name[_MAX_FNAME];// name of module
     const FNAME         *srcfile;
@@ -321,83 +341,31 @@ extern dir_node         *dir_insert( const char *, int );
 extern dir_node         *dir_insert_ex( const char *, int );
 extern void             dir_change( dir_node *, int );
 extern void             dir_free( dir_node *, bool );
+extern void             dir_add( dir_node * );
 
-extern int              SizeFromMemtype(memtype, bool );
+extern int              SizeFromMemtype( memtype, bool );
+extern ret_code         MemtypeFromSize( int, memtype * );
+extern ret_code         GetLangType( int *, lang_type * );
 
-extern uint             GetExtIdx( struct asm_sym * );
-/* Get the index of an extrn defn */
+//extern uint             GetExtIdx( struct asm_sym * ); /* Get the index of an extrn defn */
 
-extern int              token_cmp( char *token, int start, int end );
+extern typeinfo         *FindToken( char *token, typeinfo *, int );
 extern int              FindSimpleType( int );  // find simple type
 //extern int              RegisterValueToIndex( int, bool *);
 extern int              SizeFromRegister( int );
-extern struct asm_sym   *MakeExtern( char *name, memtype type, struct asm_sym * vartype, struct asm_sym *, bool );
 extern ret_code         EchoDef( int );         // handle ECHO directive
 extern ret_code         OptionDirective( int ); // handle OPTION directive
 
-extern void             ModuleInit( void );
-/* Initializes the information about the module, which are contained in
-   ModuleInfo */
-
-extern int              FixOverride( int );
-/* Get the correct frame and frame_datum for a label when there is a segment
-   or group override. */
 extern void             push( void *stack, void *elt );
 extern void             *pop( void *stack );
 extern void             *peek( void *stack, int );
-extern void             wipe_space( char *token );
 extern void             SetMasm510( bool );
-
-/*---------------------------------------------------------------------------
- *   included from segment.c
- *---------------------------------------------------------------------------*/
-
-extern seg_item         *CurrSeg;       // points to stack of opened segments
-
+extern ret_code         cpu_directive( int i );
 extern ret_code         directive( int , long );
-extern uint_32          GetCurrSegStart(void);
-/* Get offset of segment at the start of current LEDATA record */
-
-#define GetSeg( x )     (dir_node *)x->segment
-
-#define SEGISCODE( x )  ( x->seg->e.seginfo->segtype == SEGTYPE_CODE )
-
-extern void             SetSymSegOfs( struct asm_sym * );
-/* Store location information about a symbol */
-extern int              SymIs32( struct asm_sym * );
-extern int              SimplifiedSegDir( int );
+extern void             ModuleInit( void ); /* Initializes ModuleInfo structure */
 
 
-extern direct_idx       GetLnameIdx( char * );
-
-extern uint_32          GetCurrOffset( void );  // Get offset from current segment
-extern ret_code         SetCurrOffset( int_32, bool, bool );
-
-extern dir_node         *GetCurrSeg( void );
-/* Get current segment; NULL means none */
-
-extern int              GetCurrClass( void ); /* get curr segment's class index */
-
-extern uint             GetGrpIdx( struct asm_sym * );
-/* get symbol's group index, from the symbol itself or from the symbol's segment */
-
-extern uint             GetSegIdx( struct asm_sym * );
-/* get symbol's segment index, from the symbol itself */
-
-
-extern ret_code         GrpDef( int );          // define a group
-extern ret_code         SegDef( int );          // open or close a segment
-extern ret_code         SetCurrSeg( int );      // open or close a segment in
-                                                // the second pass
-extern void             SegmentInit( int );     // init segments
-extern asm_sym          *GetGrp( struct asm_sym * );
-
-extern uint_32          GetCurrSegAlign( void );
-extern int              SetUse32Def( bool );
-extern void             DefineFlatGroup( void );
-
-// input.c
-
-extern const FNAME      *get_curr_srcfile( void );
+// this isn't in parser.h because the dir_node type isn't known yet there
+extern ret_code         data_init( int, int, dir_node * );
 
 #endif

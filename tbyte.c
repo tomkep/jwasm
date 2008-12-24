@@ -37,11 +37,11 @@
 
 #include <string.h>
 #include <ctype.h>
+#include "globals.h"
 #include "tbyte.h"
-#include "watcom.h"
 
 typedef unsigned __int64 u64;
-typedef unsigned_32 u32;
+typedef uint_32 u32;
 
 typedef union {
     u64 m64[3];

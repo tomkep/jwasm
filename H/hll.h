@@ -32,29 +32,10 @@
 #ifndef _HLL_H_
 #define _HLL_H_
 
-typedef enum {
-    HLL_UNDEF,
-    HLL_IF,
-    HLL_WHILE,
-    HLL_REPEAT,
-    HLL_BREAK
-} hll_cmd;
-
-// item for .IF, .WHILE, .REPEAT, ...
-
-typedef struct hll_list {
-    char                *symfirst;      // symbol first (local) label
-    char                *symtest;       // continue, test for exit
-    char                *symexit;       // exit loop
-    char                *condlines;     // for .WHILE: lines to add after test
-    hll_cmd             cmd;            // start cmd (IF, WHILE, REPEAT)
-} hll_list;
-
-/*---------------------------------------------------------------------------*/
-
 extern void             HllInit( void );    // reset label counter for hll labels
 extern ret_code         HllStartDef( int ); // begin a .IF, .WHILE, .REPEAT
 extern ret_code         HllEndDef( int );   // end a .IF, .WHILE, .REPEAT
 extern ret_code         HllExitDef( int );  // exit a .IF, .WHILE, .REPEAT
+extern void             HllCheckOpen( void );
 
 #endif

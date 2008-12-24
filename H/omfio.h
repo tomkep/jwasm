@@ -32,7 +32,6 @@
 #ifndef OMFIO_H
 #define OMFIO_H 1
 #include <stddef.h>
-#include "watcom.h"
 #include "omfrec.h"
 
 typedef struct objread_buf objread_buf;

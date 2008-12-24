@@ -35,7 +35,6 @@
 
 #include <stddef.h>
 #include "omfrec.h"
-#include "watcom.h"
 #include "omfpc.h"
 #include "queue.h"
 #include "omfio.h"

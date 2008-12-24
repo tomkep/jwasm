@@ -31,12 +31,13 @@
 #ifndef _MACRO_H_
 #define _MACRO_H_
 
-extern void     AddTokens( int start, int count );
+//extern void     AddTokens( int start, int count );
 extern dir_node *CreateMacro( char * );     // create a macro symbol
 extern void     ReleaseMacroData( dir_node * );
 extern ret_code MacroDef( int );             // define a macro
-extern ret_code FillMacro( dir_node *, int, bool );  // set macro content
+extern ret_code StoreMacro( dir_node *, int, bool );  // store macro content
 extern ret_code PurgeMacro( int );           // remove a macro
+extern ret_code ExpandToken(int count, char * string, bool addbrackets, bool Equ_Mode);
 extern ret_code ExpandMacro( char * );
 extern int      RunMacro( dir_node *, char *, char *, bool, bool, bool );
 extern asm_sym  *SetTextMacro( asm_sym*, char *, char * );
@@ -46,6 +47,6 @@ extern ret_code SubStrDef( int, char *);     // SubStr directive
 extern ret_code SizeStrDef( int );           // SizeStr directive
 extern ret_code InStrDef( int, char *);      // InStr directive
 extern ret_code LoopDirective( int, int );   // FOR,FORC,IRP,IRPC,REPT,...
-extern int      MacroInit( int );
+extern ret_code MacroInit( int );
 
 #endif

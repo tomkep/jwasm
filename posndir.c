@@ -33,9 +33,11 @@
 
 #include "parser.h"
 #include "directiv.h"
+#include "segment.h"
 #include "expreval.h"
 #include "types.h"
 #include "listing.h"
+#include "posndir.h"
 
 #include "myassert.h"
 
@@ -70,7 +72,7 @@ static uint_8 NopList32[] = {
 
 static uint_8 *NopLists[] = { NopList16, NopList32 };
 
-int OrgDirective( int i )
+ret_code OrgDirective( int i )
 /***********************/
 {
     struct asm_sym  *sym;
@@ -93,7 +95,7 @@ int OrgDirective( int i )
 
         return( SetCurrOffset( opndx.value, FALSE, FALSE ) );
     case EXPR_ADDR:
-        if (opndx.indirect || opndx.stackbased)
+        if (opndx.indirect || (opndx.sym && opndx.sym->state == SYM_STACK))
             break;
         if (AsmBuffer[i]->token != T_FINAL) {
             AsmError(SYNTAX_ERROR);
@@ -145,7 +147,23 @@ static void fill_in_objfile_space( uint size )
     }
 }
 
-int AlignDirective( int directive, int i )
+// align current offset to value ( alignment is 2^value )
+
+void AlignCurrOffset( int value )
+{
+    int seg_align;
+    int alignment = (1 << value);
+    unsigned int CurrAddr;
+
+    CurrAddr = GetCurrOffset();
+    seg_align = CurrAddr % alignment;
+    if( seg_align ) {
+        alignment -= seg_align;
+        fill_in_objfile_space( alignment );
+    }
+}
+
+ret_code AlignDirective( int directive, int i )
 /********************************************/
 {
     int_32 align_val;
@@ -202,9 +220,8 @@ int AlignDirective( int directive, int i )
         align_val -= seg_align;
         fill_in_objfile_space( align_val );
     }
-    if (AsmFiles.file[LST]) {
-        LstWriteFile(LSTTYPE_LIDATA, CurrAddr, NULL );
-        directive_listed = TRUE;
+    if ( FileInfo.file[LST] ) {
+        LstWrite( LSTTYPE_LIDATA, CurrAddr, NULL );
     }
     DebugMsg(("AlignDirective exit\n"));
     return( NOT_ERROR );

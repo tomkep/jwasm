@@ -38,38 +38,34 @@
 #include <ctype.h>
 
 #include "codegen.h"
+#include "insthash.h"
 #include "parser.h"
 #include "condasm.h"
 #include "directiv.h"
 #include "input.h"
 
-#define BACKQUOTES 1  /* allow IDs enclosed in ` */
-
-extern int              get_instruction_position( char *string );
-
 char                    *CurrSource;      // Current Input Line
 char                    *StringBufferEnd; // start free space in string buffer
 
-// token_stringbuf - buffer in which to store token strings
-// must be larger than a line since it is used for string expansion
+// string buffer - token strings and other stuff are stored here.
+// must be a multiple of MAX_LINE_LEN since it is used for string expansion.
 
-static char             token_stringbuf[8192];
+static char             token_stringbuf[MAX_LINE_LEN*MAX_SYNC_MACRO_NESTING];
 
 
 static uint_8 g_opcode; /* directive flags for current line */
 
-bool expansion;
+bool expansion; /* TRUE if a % has been found as first line character */
 
-#define is_valid_id_char( ch ) \
-    ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
-
-static struct asm_tok   tokens[MAX_TOKEN];
-struct asm_tok          *AsmBuffer[MAX_TOKEN];  // buffer to store tokens
+static struct asm_tok   tokens[MAX_TOKEN];      /* token buffer */
+struct asm_tok          *AsmBuffer[MAX_TOKEN];  /* token array */
 
 typedef struct {
     char *input;
     char *output;
 } ioptrs;
+
+// initialize the token buffer array
 
 void InitTokenBuffer( )
 {
@@ -205,7 +201,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
         symbol_c = '}';
         break;
     default:
-        if (g_opcode & OPCF_CEXPR) {
+        if (g_opcode & DF_CEXPR) {
             /* a C expression is likely to occur. check for &&,||,... */
             char c = *iptr;
             *optr++ = *iptr++;
@@ -292,7 +288,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
              directive-dependant!
              see: IFIDN <">,<">
              */
-        } else if( *iptr == '"' && symbol_c != 0 && (g_opcode & OPCF_STRPARM) == 0) {
+        } else if( *iptr == '"' && symbol_c != 0 && (g_opcode & DF_STRPARM) == 0) {
             char *toptr;
             char *tiptr;
             int tcount;
@@ -566,7 +562,7 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
         return( NOT_ERROR );
     }
     count = get_instruction_position( buf->string_ptr );
-    if( count == EMPTY ) {
+    if( count == EMPTY || AsmOpTable[count].disabled == TRUE ) {
         buf->token = T_ID;
         return( NOT_ERROR );
     }
@@ -577,15 +573,16 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
      with current cpu settings (example: MONITOR is an instruction if .XMM is
      set, else it is an ID)
      */
-    if( AsmOpTable[count].opnd_type[OPND1] != OP_SPECIAL ) {
+    if( !( AsmOpTable[count].opnd_type[OPND1] & OP_SPECIAL ) ) {
         buf->token = T_INSTRUCTION;
         return( NOT_ERROR );
     }
 
     /* for OP_SPECIAL, field <opcode> contains further infos:
      - OP_REGISTER:       register number
-     - OP_DIRECTIVE:      OPCF_xxx flags
+     - OP_DIRECTIVE:      DF_xxx flags
      - OP_UNARY_OPERATOR: operator precedence
+     - OP_TYPE:           index into SimpleType table
      ...
      */
     buf->opcode = AsmOpTable[count].opcode;
@@ -594,12 +591,15 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
     case OP_REGISTER:
         buf->token = T_REG;
         break;
-    case OP_RES_ID: /* DB, DD, DF, DQ, DT, DW, DUP, PTR, ADDR, FLAT, C, BASIC, PASCAL, ... */
-    case OP_TYPE:   /* BYTE, WORD, FAR, NEAR, FAR16, NEAR32,    ... */
+    case OP_RES_ID:
+        /* DUP, PTR, ADDR, FLAT, VARARG */
+        /* BASIC, C, FORTRAN, PASCAL, STDCALL, SYSCALL, WATCOM_C */
+        /* fall through */
+    case OP_TYPE:   /* BYTE, WORD, FAR, NEAR, FAR16, NEAR32 ... */
         buf->token = T_RES_ID;
         buf->rm_byte = AsmOpTable[count].rm_byte;
         break;
-    case OP_UNARY_OPERATOR: /* OFFSET, LOW, HIGH, LOWWORD, HIGHWORD, ... */
+    case OP_UNARY_OPERATOR: /* OFFSET, LOW, HIGH, LOWWORD, HIGHWORD, SHORT, ... */
         buf->token  = T_UNARY_OPERATOR;
         break;
     case OP_DIRECTIVE:
@@ -609,11 +609,11 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
         }
         break;
     case OP_ARITHOP: /* GE, GT, LE, LT, EQ, NE, MOD */
-        buf->token = T_INSTRUCTION;
+        buf->token = T_BINARY_OPERATOR;
         break;
     default:
-        /* OP_UNUSED, the keyword has been removed by OPTION NOKEYWORD */
-        buf->token = T_ID;
+        DebugMsg(("get_id: found unknown specialtype=%u\n", AsmOpTable[count].specialtype ));
+        buf->token = T_ID; /* shouldn't happen */
         break;
     }
     return( NOT_ERROR );
@@ -663,7 +663,7 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
         /* no_str_delim is TRUE if .IF, .WHILE, .ELSEIF or .UNTIL */
         /* has been detected in the current line */
         /* it will also store "<=" as a string, not as 2 tokens */
-        if (g_opcode & OPCF_CEXPR) {
+        if (g_opcode & DF_CEXPR) {
             *(p->output)++ = *(p->input)++;
             buf->value = 1;
             if (*p->input == '=') {
@@ -683,7 +683,7 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
     default:
         /* a '<' in the source will prevent comments to be removed */
         /* so they might appear here. Remove! */
-        if ((g_opcode & OPCF_CEXPR) && symbol == ';') {
+        if ((g_opcode & DF_CEXPR) && symbol == ';') {
             while (*p->input) *(p->input)++;
             return( EMPTY );
         }
@@ -723,7 +723,7 @@ static ret_code GetToken(unsigned int buf_index, ioptrs *p )
             return( ERROR );
         }
 #if BACKQUOTES
-    } else if( *p->input == '`' ) {
+    } else if( *p->input == '`' && Options.strict_masm_compat == FALSE ) {
         if( get_id_in_backquotes( AsmBuffer[buf_index], p ) == ERROR ) {
             return( ERROR );
         }

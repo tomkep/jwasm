@@ -45,14 +45,14 @@ enum prefix_reg {
     PREFIX_GS = 0x65
 };
 
-enum asm_token {
-#define resword( token, string, len) token ,
-#include "reswords.h"
-#undef resword
-    T_NULL
+enum asm_stypes {
+#undef pick
+#define pick( name, memtype, size, type, ofssize ) ST_ ## name ,
+#include "stypes.h"
 };
 
-// structure of an entry in the "reserved names" table
+// structure of items in the "reserved names" table AsmResWord
+// (file reswords.h)
 
 struct ReservedWord {
     struct ReservedWord *next;
@@ -61,105 +61,110 @@ struct ReservedWord {
     unsigned short position; // starting position in AsmOpTable
 };
 
-// asm_ins is the structure used to store instructions, directives and
-// other reserved words
-
-    struct asm_ins {
-        unsigned short      token;                  /* T_ADD, etc */
-        unsigned            allowed_prefix  : 3;    /* allowed prefix */
-        unsigned            byte1_info      : 4;    /* flags for 1st byte */
-        unsigned            rm_info         : 3;    /* info on r/m byte */
-        unsigned            opnd_type_3rd   : 4;    /* info on 3rd operand */
-        unsigned            opnd_dir        : 1;    /* operand direction */
-        enum asm_cpu        cpu;                    /* CPU type */
-        OPNDTYPE            opnd_type[2];           /* asm_opnds */
-        unsigned char       opcode;                 /* opcode byte */
-        union {
-            unsigned char   rm_byte;                /* mod_rm_byte */
-            enum special_type specialtype;          /* for OP_SPECIAL */
-        };
-    };
-
-struct asm_code {
-    struct {
-        signed short    ins;           // prefix before instruction, e.g. lock
-        enum prefix_reg seg;           // segment register override
-        unsigned        adrsiz:1;      // address size prefix
-        unsigned        opsiz:1;       // operand size prefix
-    } prefix;
-    memtype         mem_type;       // byte / word / etc. NOT near/far
-    long            data[3];
-    struct {
-        unsigned short      token;
-        OPNDTYPE            opnd_type[3];
-        unsigned char       opcode;
-        unsigned char       rm_byte;
-    } info;
-    signed char     extended_ins;
-    unsigned char   sib;
-    unsigned        use32:1;
-    unsigned        indirect:1;     // CALL/JMP indirect jump
-    unsigned        mem_type_fixed:1;
-    unsigned        isfar:1;        // CALL/JMP far
+/*
+ values for <byte1_info>
+ 000  : the first byte is opcode, follow by rm_byte
+ F_16 : the first byte is OPSIZ prefix if in use32 segment
+ F_32 : the first byte is OPSIZ prefix if in use16 segment
+ F_0F : the first byte is 0x0F, follow by opcode and rm_byte
+*/
+enum BYTE1_INFO {
+    F_16   = 0x1,   // 16bit variant
+    F_32   = 0x2,   // 32bit variant
+    F_0F   = 0x3,   // 0F prefix
+    F_F3   = 0x4,   // F3 prefix (pause: F3 90)
+    F_0F0F = 0x5,   // AMD 3DNow prefix
+    F_660F = 0x6,   // SSEx prefix 1
+    F_F20F = 0x7,   // SSEx prefix 2
+    F_F30F = 0x8    // SSEx prefix 3
 };
 
-// values for <allowed_prefix> if item is an instruction
-#define NO_PREFIX   0x00
-#define LOCK        0x01
-#define REP         0x02
-#define REPxx       0x03
-#define FWAIT       0x04
-#define NO_FWAIT    0x05
-//#define K3D_SET     0x06   // AMD 3DNow instruction set
-//#define MMX_SET     0x07   // MMX instruction set
-//#define SSE_SET     0x08   // XMM instruction set
-//#define SSE2_SET    0x09   // XMM instruction set
-//#define SSE3_SET    0x0A   // XMM instruction set
-
-// values for <allowed_prefix> if item is a register
-#define IREG    1       /* indicates INDEX register */
-
-
-// values for <opcode> flags (OP_DIRECTIVE)
-// don't change these values, they are hard-coded in instruct.h!
-#define OPCF_CEXPR    0x01 /* avoid '<' being used as string delimiter (.IF, ...) */
-#define OPCF_CONDDIR  0x02 /* conditional assembly directive (IF, ELSE, ...) */
-#define OPCF_ERRDIR   0x04 /* error directive (.ERR, .ERRNZ, ...) */
-#define OPCF_LOOPDIR  0x08 /* loop directive (FOR, REPEAT, WHILE, ...) */
-#define OPCF_STRPARM  0x10 /* directive expects string param(s) (IFB, IFDIF, ...) */
-                           /* enclose strings in <> in macro expansion step */
-#define OPCF_NOEXPAND 0x20 /* don't expand params for directive (PURGE, FOR, IFDEF, ...) */
-
-// values for <byte1_info>
-#define F_16        0x1
-#define F_32        0x2
-#define F_0F        0x3
-#define F_F3        0x4
-#define F_0F0F      0x5    // AMD 3DNow prefix
-#define F_660F      0x6    // SSEx prefix 1
-#define F_F20F      0x7    // SSEx prefix 2
-#define F_F30F      0x8    // SSEx prefix 3
-
-// values for <rm_info>
+/*
+ values for <rm_info>
+ 000              -> has rm_byte with w-, d- and/or s-bit in opcode
+ 001( + no_RM   ) -> no rm_byte
+ 010( + no_WDS  ) -> has rm_byte, but w-bit, d-bit, s-bit of opcode are absent
+ 011( + R_in_OP ) -> no rm_byte, reg field is included in opcode
+ 100( + no_WDSx ) -> similar to no_WDS, + "instruction rm_byte" is additional opcode byte
+ */
 enum RM_INFO {
-    no_RM = 0x1,
-    no_WDS = 0x2,
+    no_RM   = 0x1,
+    no_WDS  = 0x2,
     R_in_OP = 0x3,
     no_WDSx = 0x4
 };
 
-/* Note on the byte_1_info
-   10 ( + F_0F ) -> the first byte is 0x0F, follow by opcode and rm_byte
-   01 ( + F_16 ) -> the first byte is OPSIZ prefix if in use32 segment
-   11 ( + F_32 ) -> the first byte is OPSIZ prefix if in use16 segment
-   00            -> the first byte is opcode, follow by rm_byte      */
+// values for <allowed_prefix>
+enum ALLOWED_PREFIX {
+ AP_NO_PREFIX= 0x00,
+ AP_LOCK     = 0x01,
+ AP_IREG     = 0x01,   /* for OP_REGISTER indicates an INDEX register */
+ AP_REP      = 0x02,
+ AP_REPxx    = 0x03,
+ AP_FWAIT    = 0x04,
+ AP_NO_FWAIT = 0x05,
+ AP_NO_OPPRF = 0x06    /* no operand prefix (SMSW, LMSW, STR, ...) */
+};
 
-/* Note on the rm_info:
-   001( + no_RM   ) -> no rm_byte
-   010( + no_WDS  ) -> has rm_byte, but w-bit, d-bit, s-bit of opcode are absent
-   011( + R_in_OP ) -> no rm_byte, reg field is included in opcode
-   100( + no_WDSx ) -> similar to no_WDS, + "instruction rm_byte" is additional opcode byte
-   00               -> has rm_byte with w-, d- and/or s-bit in opcode  */
+// asm_ins is the structure used to store instructions, directives and
+// other reserved words in AsmOpTable (instruct.h).
+// <token> is stored to detect group changes.
+
+struct asm_ins {
+    //enum asm_token      token;                  /* T_ADD, etc */
+    unsigned            token           :16;    /* this format is shorter */
+    unsigned            allowed_prefix  : 3;    /* allowed prefix */
+    unsigned            disabled        : 1;    /* keyword is disabled */
+    unsigned            byte1_info      : 4;    /* flags for 1st byte */
+    unsigned            rm_info         : 3;    /* info on r/m byte */
+    unsigned            opnd_type_3rd   : 4;    /* info on 3rd operand */
+    unsigned            opnd_dir        : 1;    /* operand direction */
+    OPNDTYPE            opnd_type[2];           /* asm_opnds */
+    enum asm_cpu        cpu;                    /* CPU type */
+    unsigned char       opcode;                 /* opcode byte */
+    union {
+        unsigned char   rm_byte;                /* mod_rm_byte */
+        enum special_type specialtype;          /* for OP_SPECIAL */
+    };
+};
+
+// asm_code is used by the code generator
+
+struct asm_code {
+    struct {
+        struct asm_sym  *SegOverride;  // segment override if symbol
+        signed short    ins;           // prefix before instruction, e.g. lock
+        enum prefix_reg RegOverride;   // segment override if register
+        unsigned        adrsiz:1;      // address size prefix
+        unsigned        opsiz:1;       // operand size prefix
+    } prefix;
+    enum asm_token  token;
+    memtype         mem_type;       // byte / word / etc. NOT near/far
+    OPNDTYPE        opnd_type[3];
+    long            data[3];
+    struct asmfixup *InsFixup[3];
+    unsigned char   opcode;
+    unsigned char   rm_byte;
+    //signed char     extended_ins;
+    unsigned char   sib;
+    unsigned        use32:1;
+    //unsigned        indirect:1;     // CALL/JMP indirect jump
+    unsigned        mem_type_fixed:1;
+    unsigned        isfar:1;        // CALL/JMP far
+};
+
+// values for <opcode> flags (OP_DIRECTIVE)
+enum directive_flags {
+ DF_CEXPR    = 0x01, /* avoid '<' being used as string delimiter (.IF, ...) */
+ DF_CONDDIR  = 0x02, /* conditional assembly directive (IF, ELSE, ...) */
+ DF_ERRDIR   = 0x04, /* error directive (.ERR, .ERRNZ, ...) */
+ DF_LOOPDIR  = 0x08, /* loop directive (FOR, REPEAT, WHILE, ...) */
+ DF_STRPARM  = 0x10, /* directive expects string param(s) (IFB, IFDIF, ...) */
+                     /* enclose strings in <> in macro expansion step */
+ DF_NOEXPAND = 0x20, /* don't expand params for directive (PURGE, FOR, IFDEF, ...) */
+ DF_DATADIR  = 0x40, /* data definition directive */
+ DF_PREPROC  = DF_ERRDIR /* special preprocessor directive */
+};
 
 /* NOTE: The order of table is IMPORTANT !! */
 /* OP_A should put before OP_R16 & OP_R
@@ -169,17 +174,14 @@ enum RM_INFO {
    OP_R ( without extension ) should follow OP_Rx
    OP_I ( without extension ) should follow OP_Ix  */
 
-extern const struct asm_ins   AsmOpTable[];
-extern struct ReservedWord    AsmResWord[];
-extern bool directive_listed;
+extern struct asm_ins      AsmOpTable[];
+extern struct ReservedWord AsmResWord[];
+extern bool   line_listed;
 
-extern int      check_override( int *i );
 extern int      OperandSize( OPNDTYPE opnd );
 extern int      InRange( long val, unsigned bytes );
-extern ret_code cpu_directive( int i );
+extern void     find_frame( struct asm_sym *sym );
 extern ret_code ParseItems( void );
-extern int      NextArrayElement( void );
-extern ret_code data_init( int, int, asm_sym * );
-extern void     ParseInit( void );
+extern ret_code ParseInit( void );
 
 #endif

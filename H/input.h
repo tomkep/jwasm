@@ -33,14 +33,31 @@
 #define _INPUT_H_INCLUDED
 
 extern void     PushLineQueue( void );
-extern bool     PopLineQueue( void );
-extern void     InputQueueLine( char *line );
-extern int      InputQueueFile( char *path );
+extern void     AddLineQueue( char *line );
+extern void     AddMacroLineQueue( char *line );
+extern ret_code InputQueueFile( char *path, FILE * *pfile );
 extern char     *ReadTextLine( char *string, int max );
-extern void     PushMacro( struct asm_sym *sym, bool hidden);
+extern void     PushMacro( struct asm_sym *sym );
 extern void     AddStringToIncludePath( char *string );
 extern void     InputInit( void );
 extern void     InputFini( void );
-extern int      AsmLine( char * );
+extern int      GetPreprocessedLine( char * );
+extern int      GetCurrSrcPos( char * );
+extern void     ClearFileStack( void );
+extern const FNAME      *get_curr_srcfile( void );
+
+typedef struct line_list {
+    struct line_list    *next;
+    uint_8 macrolevel;
+    char line[1];
+} line_list;
+
+typedef struct input_queue {
+    struct line_list    *head;
+    struct line_list    *tail;
+} input_queue;
+
+extern input_queue *line_queue;
+extern int queue_level;
 
 #endif

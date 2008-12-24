@@ -40,20 +40,13 @@ enum state {
         T_REG,
         T_STRING,
         T_DIRECTIVE,
-        T_DIRECT_EXPR,
-//        T_DEC_NUM,
-//        T_OCT_NUM,
-//        T_HEX_NUM_0,
-//        T_HEX_NUM,
-//        T_BIN_NUM,
+        T_UNARY_OPERATOR,
+        T_BINARY_OPERATOR,
         T_NUM,
         T_FLOAT,
-        T_NOOP,                 /* No operation */
-
         T_POSITIVE,
         T_NEGATIVE,
-        T_ID_IN_BACKQUOTES,
-        T_UNARY_OPERATOR,
+//        T_ID_IN_BACKQUOTES,
         T_BAD_NUM,
 
         T_OP_BRACKET    = '(',
@@ -62,8 +55,6 @@ enum state {
         T_CL_SQ_BRACKET = ']',
         T_COMMA         = ',',
         T_COLON         = ':',
-        T_SEMI_COLON    = ';',
-        T_TIMES         = '*',
         T_PLUS          = '+',
         T_MINUS         = '-',
         T_DOT           = '.',
@@ -84,7 +75,8 @@ struct asm_tok {
                 short     xvalue; /* for T_NUM only */
                 char      rm_byte;/* for T_RES_ID only */
                 union {
-                    char  opcode; /* for T_DIRECTIVE, T_RES_ID, T_UNARY_OPERATOR */
+                    unsigned char  opcode; /* for T_DIRECTIVE, T_RES_ID */
+                    unsigned char  precedence; /* for T_UNARY_OPERATOR */
                     char  string_delim; /* for T_STRING only */
                 };
             };

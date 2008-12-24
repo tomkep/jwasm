@@ -35,17 +35,17 @@
 #include "globals.h"
 #include "symbols.h"
 #include "directiv.h"
+#include "input.h"
 #include "tokenize.h"
 #include "symbols.h"
 #include "queues.h"
 #include "macro.h"
 #include "fatal.h"
+#include "msgtext.h"
+#include "listing.h"
+#include "segment.h"
 
-#define MAXMSGSIZE 128
-
-extern void             MsgPrintf( int resourceid ); // don't use this
 extern char             *MsgGet( int resourceid, char *buffer );
-extern int              trademark( void );
 extern char             banner_printed;
 extern bool             EndDirectiveFound;
 
@@ -54,12 +54,6 @@ void                    print_include_file_nesting_structure( void );
 
 //    WngLvls[level] // warning levels associated with warning messages
 //    CompFlags.errout_redirected
-
-#ifdef __UNIX__
-#define errout stderr
-#else
-#define errout stdout
-#endif
 
 /* globals to this module */
 #define ErrLimit Options.error_limit
@@ -70,8 +64,8 @@ void                    print_include_file_nesting_structure( void );
 static FILE             *ErrFile;
 static bool             Errfile_Written;
 
-static void             PutMsg( FILE *fp, char *prefix, int msgnum, va_list args );
 static void             PrtMsg1( char *prefix, int msgnum, va_list args1, va_list args2 );
+void                    PutMsg( FILE *fp, char *prefix, int msgnum, va_list args );
 
 void AsmError( int msgnum )
 /*************************/
@@ -94,7 +88,7 @@ void DoDebugMsg( const char *format, ... )
 }
 #endif
 
-void AsmNote( int msgnum, ... )
+void PrintNote( int msgnum, ... )
 /*****************************/
 {
     va_list args1, args2;
@@ -102,7 +96,7 @@ void AsmNote( int msgnum, ... )
     va_start( args1, msgnum );
     va_start( args2, msgnum );
 
-    PrtMsg1( "Note!", msgnum, args1, args2 );
+    PrtMsg1( NULL, msgnum, args1, args2 );
     va_end( args1 );
     va_end( args2 );
 }
@@ -117,14 +111,17 @@ void AsmErr( int msgnum, ... )
 #endif
     va_start( args1, msgnum );
     va_start( args2, msgnum );
-    PrtMsg1( "Error!", msgnum, args1, args2 );
+    PrtMsg1( MsgGetPrefix( MSG_ERROR_PREFIX ), msgnum, args1, args2 );
     va_end( args1 );
     va_end( args2 );
     ++ErrCount;
     write_to_file = FALSE;
     print_include_file_nesting_structure();
     if( ErrLimit != -1  &&  ErrCount >= ErrLimit ) {
-        PrtMsg1( "", ERR_TOO_MANY_ERRORS, args1, args2 );
+        PrtMsg1( MsgGetPrefix( MSG_FATAL_PREFIX ), TOO_MANY_ERRORS, args1, args2 );
+        /* Just simulate the END directive, don't do a fatal exit!
+         This allows to continue to assemble further modules.
+         */
         EndDirectiveFound = TRUE;
     }
 }
@@ -141,10 +138,10 @@ void AsmWarn( int level, int msgnum, ... )
         va_start( args1, msgnum );
         va_start( args2, msgnum );
         if( !Options.warning_error ) {
-            PrtMsg1( "Warning!", msgnum, args1, args2 );
+            PrtMsg1( MsgGetPrefix( MSG_WARNING_PREFIX ), msgnum, args1, args2 );
             ++WngCount;
         } else {
-            PrtMsg1( "Error!", msgnum, args1, args2 );
+            PrtMsg1( MsgGetPrefix( MSG_ERROR_PREFIX ), msgnum, args1, args2 );
             ++ErrCount;
         }
         va_end( args1 );
@@ -180,7 +177,7 @@ void PrtMsg( int msgnum, ... )
     if( ErrFile == NULL )
         OpenErrFile();
     va_start( args1, msgnum );
-    PutMsg( errout, "Warning!", msgnum, args1 );
+    PutMsg( errout, MsgGetPrefix( MSG_WARNING_PREFIX ), msgnum, args1 );
     fflush( errout );
 }
 
@@ -188,7 +185,7 @@ void InitErrFile( void )
 /*********************/
 {
     // fixme if( CompFlags.errout_redirected ) return;
-    remove( AsmFiles.fname[ERR] );
+    remove( FileInfo.fname[ERR] );
     ErrFile = NULL;
     Errfile_Written = FALSE;
 }
@@ -197,42 +194,43 @@ void OpenErrFile( void )
 /**********************/
 {
 //    if( !isatty( fileno( errout ) ) ) return;
-    if( AsmFiles.fname[ERR] != NULL ) {
-        ErrFile = fopen( AsmFiles.fname[ERR], "w" );
+    if( FileInfo.fname[ERR] != NULL ) {
+        ErrFile = fopen( FileInfo.fname[ERR], "w" );
     }
 }
 
-static void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args )
+void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args )
 /********************************************************************/
 {
-    const FNAME     *fname;
-    int             i;
+    int             i,j;
     char            msgbuf[MAXMSGSIZE];
     char            buffer[MAX_LINE_LEN];
 
     if( fp != NULL ) {
 
-        i = sprintf( buffer, "%s %c%03d: ", prefix, *prefix, msgnum );
-        // CGetMsg( msgbuf, msgnum );
         MsgGet( msgnum, msgbuf );
+        i = 0;
+        if ( prefix != NULL ) {
+            i = sprintf( buffer, "%s %c%03d: ", prefix, *prefix, msgnum );
+        }
         i += vsprintf( buffer+i, msgbuf, args );
-        buffer[i] = '\n';
-        i++;
         buffer[i] = NULLC;
 
-        fname = get_curr_srcfile();
-        if( LineNumber != 0 && fname != NULL ) {
-            fprintf( fp, "%s(%lu): ", fname->name, LineNumber );
-        }
+        if ( prefix && (j = GetCurrSrcPos( msgbuf ))) {
+            fwrite( msgbuf, 1, j, fp );
+        } else
+            j = 0;
         fwrite( buffer, 1, i, fp );
-        if (AsmFiles.file[LST] && fp == ErrFile) {
-            fwrite( "                           ", 1, 26+1, AsmFiles.file[LST] );
-            fwrite( CurrSource, 1, strlen( CurrSource ), AsmFiles.file[LST] );
-            fwrite( "\n", 1, 1, AsmFiles.file[LST] );
-            if( LineNumber != 0 && fname != NULL ) {
-                fprintf( AsmFiles.file[LST], "%s(%lu): ", fname->name, LineNumber );
-            }
-            fwrite( buffer, 1, i, AsmFiles.file[LST] );
+        fwrite( "\n", 1, 1, fp );
+
+        /* if in Pass 1, add the error msg to the listing */
+        if ( FileInfo.file[LST] &&
+             prefix &&
+             Parse_Pass == PASS_1 &&
+             fp == ErrFile ) {
+            LstWrite( LSTTYPE_DIRECTIVE, GetCurrOffset(), 0 );
+            LstPrintf( "                           %s", buffer );
+            LstNL();
         }
     }
 }
@@ -244,7 +242,7 @@ int InternalError( const char *file, unsigned line )
 // it's used by myassert() function in debug version
 {
 
-    char msgbuf[128];
+    char msgbuf[MAXMSGSIZE];
 
     DebugMsg(("InternalError enter\n"));
     MsgGet( MSG_INTERNAL_ERROR, msgbuf );

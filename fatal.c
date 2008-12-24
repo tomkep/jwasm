@@ -37,6 +37,10 @@
 #include "fatal.h"
 #include "symbols.h"
 #include "directiv.h"
+#include "input.h"
+#include "msgtext.h"
+
+extern void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args );
 
 typedef void (*err_act)( void );
 
@@ -49,12 +53,11 @@ typedef struct {
 
 static const Msg_Struct Fatal_Msg[] = {
 #undef fix
-#define fix( cmd, number, msg, act, ret )     { number, msg, act, ret }
-#include "fatald.h"
+#define fix( cmd, number, act, ret )     { number, cmd, act, ret }
+#include "fatalmsg.h"
 };
 
 extern void             ObjRecFini( void );
-extern void             MsgPrintf( int resourceid );
 extern pobj_state       pobjState;      // object file information
 
 // fatal error (out of memory, unable to open files for write, ...)
@@ -63,26 +66,24 @@ extern pobj_state       pobjState;      // object file information
 void Fatal( unsigned msg, ... )
 /******************************/
 {
-    va_list     arg;
+    va_list     args;
     int         i;
     const FNAME *fname;
 
-    MsgPrintf( MSG_ERROR );
-    fname = get_curr_srcfile();
-    if (fname)
-        printf(" (%s,%u)", fname->name, LineNumber);
+    MsgPrintf( MSG_FATAL_ERROR );
+    if ( fname = get_curr_srcfile() )
+        printf(" (%s,%d)", fname->name, LineNumber);
     printf(": ");
-    MsgPrintf( Fatal_Msg[msg].message );
-    if( Fatal_Msg[msg].num > 0 ) {
-        va_start( arg, msg );
-        for( i=Fatal_Msg[msg].num; i > 0; i-- ) {
-            printf( "%s", va_arg( arg, char * ) );
-        }
-        va_end( arg );
-    }
-    printf("\n");
-    /* make sure the object file is deleted before exit */
+
+    va_start( args, msg );
+
+    PutMsg( stdout, NULL, Fatal_Msg[msg].message, args );
+
+    va_end( args );
+
     ModuleInfo.error_count++;
+
+    /* run exit code */
     if( Fatal_Msg[msg].action != NULL ) {
         Fatal_Msg[msg].action();
     }
@@ -92,12 +93,12 @@ void Fatal( unsigned msg, ... )
 void SeekError( void )
 /************************/
 {
-    Fatal( FILE_LSEEK_ERROR, AsmFiles.fname[OBJ] );
+    Fatal( FILE_LSEEK_ERROR, FileInfo.fname[OBJ] );
 };
 
 void WriteError( void )
 /************************/
 {
-    Fatal( FILE_WRITE_ERROR, AsmFiles.fname[OBJ] );
+    Fatal( FILE_WRITE_ERROR, FileInfo.fname[OBJ] );
 };
 

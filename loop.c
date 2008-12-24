@@ -35,15 +35,13 @@
 #include "memalloc.h"
 #include "parser.h"
 #include "directiv.h"
+#include "input.h"
 #include "equate.h"
 #include "expreval.h"
 #include "tokenize.h"
 #include "labels.h"
 #include "macro.h"
 #include "listing.h"
-
-#define is_valid_id_char( ch ) \
-    ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
 ret_code LoopDirective( int i, int directive )
 /*************************************/
@@ -54,6 +52,7 @@ ret_code LoopDirective( int i, int directive )
     bool first = TRUE;
     char c;
     char *parmstring;
+    char *oldbufferend;
     char *ptr;
     dir_node * macro;
     expr_list opndx;
@@ -61,15 +60,17 @@ ret_code LoopDirective( int i, int directive )
 
     DebugMsg(("LoopDirective(%u, %u) enter\n", i, directive));
 
-    if (ModuleInfo.list == TRUE)
-        LstWriteFile(LSTTYPE_MACRO, 0, NULL);
+    if ( ModuleInfo.list == TRUE )
+        LstWrite( LSTTYPE_MACRO, 0, NULL );
 
     switch (directive) {
     case T_REPT:
     case T_REPEAT:
-        if ((ERROR == EvalOperand( &i, Token_Count, &opndx, TRUE )) || opndx.type != EXPR_CONST) {
-            AsmError( CONSTANT_EXPECTED );
+        if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
             return( ERROR );
+        if ( opndx.type != EXPR_CONST ) { /* syntax <REPEAT 'A'> is valid! */
+            AsmError( CONSTANT_EXPECTED );
+            opndx.value = 0;
         }
         len = opndx.value;
         if( AsmBuffer[i]->token != T_FINAL ) {
@@ -78,10 +79,13 @@ ret_code LoopDirective( int i, int directive )
         }
         break;
     case T_WHILE:
-        if (EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR)
+        if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
             return( ERROR );
-        if (opndx.type != EXPR_CONST || opndx.string != NULL)
+        if ( opndx.type != EXPR_CONST ) { /* syntax <WHILE 'A'> is valid! */
             AsmError( CONSTANT_EXPECTED );
+            opndx.type = EXPR_CONST;
+            opndx.value = 0;
+        }
         /* the expression must be saved, since AsmBuffer will be destroyed */
         ptr = AsmBuffer[start]->pos + 5;  /* 5 = strlen("WHILE") */
         while (isspace(*ptr)) ptr++;
@@ -137,16 +141,20 @@ ret_code LoopDirective( int i, int directive )
                 *(parmstring+len) = '\0';
             }
         } else {
-            /* FOR/IRP accepts a string only */
-            if( AsmBuffer[i]->token != T_STRING) {
+            if( AsmBuffer[i]->token == T_FINAL ) {
                 AsmError( PARM_REQUIRED );
+                return( ERROR );
+            }
+            /* FOR/IRP accepts a literal enclosed in <> only */
+            if( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
                 return( ERROR );
             }
             parmstring = AsmTmpAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1 );
             strcpy( parmstring, AsmBuffer[i]->string_ptr );
             DebugMsg(("LoopDirective(FOR): param string >%s<\n", parmstring));
         }
-        /* to run FillMacro(), AsmBuffer must be setup correctly. */
+        /* to run StoreMacro(), AsmBuffer must be setup correctly. */
         /* the comma and the string must be made invisible */
         i--;
         AsmBuffer[i]->token = T_FINAL;
@@ -158,8 +166,8 @@ ret_code LoopDirective( int i, int directive )
     macro = CreateMacro( "" );
     macro->e.macroinfo->srcfile = get_curr_srcfile();
 
-    DebugMsg(("LoopDirective: calling FillMacro\n"));
-    if( FillMacro( macro, i, TRUE ) == ERROR ) {
+    DebugMsg(("LoopDirective: calling StoreMacro\n"));
+    if( StoreMacro( macro, i, TRUE ) == ERROR ) {
         dir_free(macro, FALSE);
         return( ERROR );
     }
@@ -178,13 +186,20 @@ ret_code LoopDirective( int i, int directive )
         }
         break;
     case T_WHILE:
+        oldbufferend = StringBufferEnd;
         while (opndx.type == EXPR_CONST && opndx.value != 0) {
             RunMacro( macro, "", NULL, TRUE, TRUE, FALSE );
             if (AsmBuffer[0]->value == T_EXITM)
                 break;
-            Token_Count = Tokenize(buffer,0);
-            i = 0;
-            EvalOperand( &i, Token_Count, &opndx, TRUE );
+            /* Don't use the first item in AsmBuffer! This ensures
+             that the line buffer isn't set to our local buffer.
+             And restore StringBufferEnd so it won't increase
+             with each iteration! */
+            i = 1;
+            StringBufferEnd = oldbufferend;
+            Token_Count = Tokenize( buffer, i );
+            if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+                break;
         }
         break;
     case T_FORC:
@@ -192,7 +207,8 @@ ret_code LoopDirective( int i, int directive )
         for( ptr = parmstring; *ptr; ) {
             char * ptr2 = buffer;
             *ptr2++ = '<';
-            if (*ptr == '!' || *ptr == '<' || *ptr == '>')
+            //if (*ptr == '!' || *ptr == '<' || *ptr == '>')
+            if (*ptr == '!' || *ptr == '<' || *ptr == '>' || *ptr == '%')
                 *ptr2++ = '!';
             *ptr2++ = *ptr++;
             *ptr2++ = '>';
@@ -224,7 +240,7 @@ ret_code LoopDirective( int i, int directive )
     /* free the temporary macro. dir_free() doesn't really free the whole
      thing, but with FASTMEM=1 this is pretty irrelevant.
      */
-    dir_free(macro, FALSE);
+    dir_free( macro, FALSE );
     DebugMsg(("LoopDirective exit\n"));
     return( NOT_ERROR );
 }

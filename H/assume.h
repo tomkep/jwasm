@@ -64,18 +64,19 @@ enum assume_stdreg {
 };
 
 #define ASSUME_NOTHING -2
-#define ASSUME_ERROR   -1
+//#define ASSUME_ERROR   -1
 
 extern void             AssumeInit( void );     // init assume tables
 
-extern enum assume_segreg  GetAssume( struct asm_sym*, enum assume_segreg );
-/* Return the assumed register of the symbol, and determine the frame and
-   frame_datum of its fixup */
+extern enum assume_segreg search_assume( struct asm_sym *sym,
+                                         enum assume_segreg def, bool search_grps );
 
-extern enum assume_segreg  GetPrefixAssume( struct asm_sym*, enum assume_segreg );
-/* Determine the frame and frame_datum of a symbol with a register prefix */
+extern enum assume_segreg  GetAssume( struct asm_sym*, enum assume_segreg, asm_sym * * );
+extern struct asm_sym   *GetOverrideAssume( enum assume_segreg );
 
 extern struct asm_sym   *GetStdAssume( int );
+
+extern ret_code         SetAssumeCSCurrSeg( void );
 
 extern ret_code         AssumeDirective( int );
 extern void             ModelAssumeInit( void );

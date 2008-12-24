@@ -28,11 +28,10 @@
 *
 ****************************************************************************/
 
-fix( MSG_OUT_OF_MEMORY, 0, OUT_OF_MEMORY, CloseFiles, 1 ),
-fix( MSG_CANNOT_OPEN_FILE, 1, CANNOT_OPEN_FILE, NULL, 1 ),
-fix( MSG_CANNOT_CLOSE_FILE, 1, CANNOT_CLOSE_FILE, NULL, 1 ),
-fix( MSG_CANNOT_GET_START_OF_SOURCE_FILE, 0, CANNOT_GET_FILE, CloseFiles, 1 ),
-fix( MSG_CANNOT_SET_TO_START_OF_SOURCE_FILE, 0, CANNOT_SET_FILE, CloseFiles, 1 ),
-fix( MSG_FILE_WRITE_ERROR, 1, FILE_WRITE_ERROR, CloseFiles, 1 ),
-fix( MSG_FILE_LSEEK_ERROR, 1, FILE_LSEEK_ERROR, CloseFiles, 1 ),
-fix( MSG_EXPANDED_LINE_TOO_LONG, 1, EXPANDED_LINE_TOO_LONG, CloseFiles, 1 ),
+fix( OUT_OF_MEMORY,          0, CloseFiles, 1 ),
+fix( CANNOT_OPEN_FILE,       1, NULL,       1 ),
+fix( CANNOT_CLOSE_FILE,      1, NULL,       1 ),
+fix( FILE_WRITE_ERROR,       1, CloseFiles, 1 ),
+fix( FILE_LSEEK_ERROR,       1, CloseFiles, 1 ),
+fix( EXPANDED_LINE_TOO_LONG, 1, CloseFiles, 1 ),
+fix( NESTING_LEVEL_TOO_DEEP, 0, CloseFiles, 1 ),

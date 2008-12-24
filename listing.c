@@ -36,79 +36,105 @@
 #include "symbols.h"
 #include "memalloc.h"
 #include "directiv.h"
+#include "segment.h"
 #include "tokenize.h"
 #include "symbols.h"
 #include "macro.h"
+#include "queue.h"
 #include "queues.h"
 #include "fatal.h"
+#include "fastpass.h"
 #include "listing.h"
+#include "input.h"
+#include "msgtext.h"
 
 #define CODEBYTES 8
 #define OFSSIZE 8
+#define PREFFMT OFSSIZE + 2 + 2 * CODEBYTES + 1
 #define PREFFMTSTR "23"  /* OFSSIZE + 2 * CODEBYTES - 3 */
 
-extern uint_32          LastCodeBufSize;
+#ifdef __UNIX__
+#define NLSIZ 1
+#define NLSTR "\n"
+#else
+#define NLSIZ 2
+#define NLSTR "\r\n"
+#endif
 
-#define DOTSMAX 32
+extern uint_32  LastCodeBufSize;
+extern bool     line_listed;
+
+uint_32 list_pos; /* current pos in LST file */
+uint_32 list_pos_start;
 
 static unsigned         SymCount;
 
-static char             dots[] = " . . . . . . . . . . . . . . . .";
+#define DOTSMAX 32
+static char  dots[] = " . . . . . . . . . . . . . . . .";
+static char  stdprefix[] = "%08X                  ";
 
-void LstOpenFile( void )
-/**********************/
-{
-    if( AsmFiles.fname[LST] != NULL && Options.write_listing ) {
-        AsmFiles.file[LST] = fopen( AsmFiles.fname[LST], "w" );
-        if ( AsmFiles.file[LST] == NULL )
-            Fatal( MSG_CANNOT_OPEN_FILE, AsmFiles.fname[LST] );
-    }
-}
-
-void LstCloseFile( void )
-/**********************/
-{
-    if( AsmFiles.file[LST] != NULL ) {
-        fclose( AsmFiles.file[LST] );
-        AsmFiles.file[LST] = NULL;
-    }
-}
-
-void LstWriteFile( int type, unsigned int oldofs, void * value )
+void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
 {
     unsigned int newofs;
     asm_sym * sym = value;
     int len;
     int idx;
     char * p;
+    char * p2;
     char buffer[128];
 
-    if (ModuleInfo.list == FALSE || AsmFiles.file[LST] == NULL)
+    if (ModuleInfo.list == FALSE || FileInfo.file[LST] == NULL)
         return;
+    if ( GeneratedCode && ( ModuleInfo.list_generated_code == FALSE ) )
+        return;
+    if ( MacroLevel ) {
+        switch ( ModuleInfo.list_macro ) {
+        case LM_NOLISTMACRO:
+            return;
+        case LM_LISTMACRO:
+            /* todo: filter certain macro lines */
+            break;
+        }
+    }
+
+    line_listed = TRUE;
+
+    DebugMsg(("LstWrite: enter, lineno=%u, pos=%u\n", LineNumber, list_pos ));
+#if FASTPASS
+    if ( ( Parse_Pass > PASS_1 ) && UseSavedState ) {
+        if ( GeneratedCode == 0 ) {
+            list_pos = LineStoreCurr->list_pos;
+            DebugMsg(("LstWrite: Pass=%u, pos=%u\n", Parse_Pass+1, list_pos ));
+        }
+        fseek( FileInfo.file[LST], list_pos, SEEK_SET );
+    }
+#endif
+
+    p = buffer + OFSSIZE+2*CODEBYTES+2;
+
     switch ( type ) {
     case LSTTYPE_LIDATA:
         newofs = GetCurrOffset();
-        len = sprintf( buffer, "%08X: ", oldofs );
-        fwrite( buffer, 1, len, AsmFiles.file[LST] );
-
-        len = CODEBYTES;
+        len = sprintf( buffer, stdprefix, oldofs );
+        p = buffer + len;
 
         if (CurrSeg == NULL)
-            return;
+            break;
+        if ( write_to_file == FALSE )
+            break;
+
+        len = CODEBYTES;
+        p2 = buffer + 8 + 2;
 
         if ( CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS ) {
             while (oldofs < newofs && len) {
-                sprintf( buffer, "%02X", 0 );
-                // sprintf(buffer, "??");
-                fwrite( buffer, 1, 2, AsmFiles.file[LST] );
+                *p2++ = '0';
+                *p2++ = '0';
                 oldofs++;
                 len--;
             }
-            goto nodump;
+            break;
         }
-
-        if ( write_to_file == FALSE )
-            goto nodump;
 
         /* OMF hold just a small buffer for one LEDATA record */
         /* if it has been flushed, use LastCodeBufSize */
@@ -116,8 +142,8 @@ void LstWriteFile( int type, unsigned int oldofs, void * value )
             - (newofs - oldofs);
         if (Options.output_format == OFORMAT_OMF) {
             while (idx < 0 && len) {
-                sprintf( buffer, "%02X", CurrSeg->seg->e.seginfo->CodeBuffer[idx+LastCodeBufSize] );
-                fwrite( buffer, 1, 2, AsmFiles.file[LST] );
+                sprintf( p2, "%02X", CurrSeg->seg->e.seginfo->CodeBuffer[idx+LastCodeBufSize] );
+                p2 += 2;
                 idx++;
                 oldofs++;
                 len--;
@@ -126,74 +152,125 @@ void LstWriteFile( int type, unsigned int oldofs, void * value )
             idx = 0;
 
         while ( oldofs < newofs && len ) {
-            sprintf( buffer, "%02X", CurrSeg->seg->e.seginfo->CodeBuffer[idx] );
-            fwrite( buffer, 1, 2, AsmFiles.file[LST] );
+            sprintf( p2, "%02X", CurrSeg->seg->e.seginfo->CodeBuffer[idx] );
+            p2 += 2;
             idx++;
             oldofs++;
             len--;
         }
-    nodump:
-        for ( ; len ; len-- )
-            fwrite( "  ", 1, 2, AsmFiles.file[LST] );
+        *p2 = ' ';
         break;
     case LSTTYPE_EQUATE:
         if ( sym->state == SYM_INTERNAL ) {
             sprintf( buffer, " = %-" PREFFMTSTR "X", sym->value );
-            fwrite( buffer, 1, strlen(buffer), AsmFiles.file[LST] );
+            p = buffer + strlen(buffer);
         } else if ( sym->state == SYM_TMACRO ) {
             char buffer2[MAX_LINE_LEN];
             GetTextMacroValue( sym->string_ptr, buffer2 );
             sprintf( buffer, " = %-" PREFFMTSTR ".80s", buffer2 );
-            fwrite( buffer, 1, strlen(buffer), AsmFiles.file[LST] );
+            p = buffer + strlen( buffer );
         }
         break;
+    case LSTTYPE_STRUCT:
+        len = sprintf(buffer, stdprefix, oldofs);
+        break;
+    case LSTTYPE_LABEL:
+        oldofs = GetCurrOffset();
     default:
         if ( type != LSTTYPE_MACRO && (CurrSeg || value) )
-            len = sprintf(buffer, "%08X:                 ", oldofs);
+            len = sprintf(buffer, stdprefix, oldofs);
         else
             memset( buffer, ' ', OFSSIZE+2*CODEBYTES+2 );
-        fwrite( buffer, 1, OFSSIZE+2*CODEBYTES+2, AsmFiles.file[LST] );
     }
 
-    fwrite( " ", 1, 1, AsmFiles.file[LST] );
+    *p = ' ';
+    p++;
+    fwrite( buffer, 1, p - buffer, FileInfo.file[LST] );
+#ifdef DEBUG_OUT
+    *p = NULLC;
+    DebugMsg(("LstWrite: writing >%s<\n", buffer ));
+#endif
+
+    list_pos += p - buffer;
+
     p = CurrSource;
-    while( isspace( *p ) ) p++;
-    fwrite( p, 1, strlen(p), AsmFiles.file[LST] );
-    fwrite( "\n", 1, 1, AsmFiles.file[LST] );
+    //while( isspace( *p ) ) p++;
+    len = strlen(p);
+
+    /* calc new list position */
+    if ( MacroLevel ) {
+        list_pos += sprintf( buffer, "%u ", MacroLevel );
+    }
+    if ( GeneratedCode )
+        list_pos++;
+
+    list_pos += len + NLSIZ;
+
+#if FASTPASS
+    if ( (Parse_Pass > PASS_1) && UseSavedState ) {
+        DebugMsg(("LstWrite: new pos=%u\n", list_pos ));
+        return;
+    }
+#endif
+    /* if it's macro code, write the macro level before the line */
+    if ( MacroLevel )
+        fwrite( buffer, 1, strlen(buffer), FileInfo.file[LST] );
+
+    /* if it's generated code, write a '*' before the line */
+    if ( GeneratedCode )
+        fwrite( "*", 1, 1, FileInfo.file[LST] );
+
+    fwrite( p, 1, len, FileInfo.file[LST] );
+    fwrite( NLSTR, 1, NLSIZ, FileInfo.file[LST] );
+
+    DebugMsg(("LstWrite: writing >%s<, new pos=%u\n", p, list_pos ));
     return;
 }
 
-static void LstMsg( const char *format, ... )
+void LstWriteSrcLine( void )
+{
+    LstWrite( LSTTYPE_MACRO, 0, NULL );
+}
+
+void LstPrintf( const char *format, ... )
 /************************************/
 {
     va_list     args;
 
-    if( AsmFiles.file[LST] ) {
+    if( FileInfo.file[LST] ) {
         va_start( args, format );
-        vfprintf( AsmFiles.file[LST], format, args );
+        list_pos += vfprintf( FileInfo.file[LST], format, args );
         va_end( args );
     }
 }
+void LstNL( void )
+/************************************/
+{
+    if( FileInfo.file[LST] ) {
+        fwrite( NLSTR, 1, NLSIZ, FileInfo.file[LST] );
+        list_pos += NLSIZ;
+    }
+}
 
-static const char *get_seg_align( seg_info *seg )
+static char *get_seg_align( seg_info *seg, char * buffer )
 /****************************************/
 {
-    switch( seg->segrec->d.segdef.align ) {
-    case ALIGN_ABS:
-    case ALIGN_BYTE:
+    switch( seg->alignment ) {
+    case 0:
         return( "Byte " );
-    case ALIGN_WORD:
+    case 1:
         return( "Word " );
-    case ALIGN_DWORD:
+    case 2:
         return( "DWord" );
-    case ALIGN_PARA:
+    case 3:
+        return( "QWord" );
+    case 4:
         return( "Para " );
-    case ALIGN_PAGE:
+    case 8:
         return( "Page " );
-    case ALIGN_4KPAGE:
-        return( "4K   " );
     default:
-        return( "?    " );
+        sprintf( buffer, "%.5u", 1 << seg->alignment );
+        return( buffer );
     }
 }
 
@@ -212,34 +289,6 @@ static const char *get_seg_combine( seg_info *seg )
     }
 }
 
-static void log_segment( struct asm_sym *sym, struct asm_sym *group )
-/*******************************************************************/
-{
-    seg_info *seg = ((dir_node *)sym)->e.seginfo;
-
-    if( seg->group == group ) {
-        int i = strlen( sym->name );
-        char *pdots = dots + i + 1;
-        if (i >= DOTSMAX)
-            pdots = "";
-        LstMsg( "%s %s        ", sym->name, pdots );
-        if( seg->Use32 ) {
-            //LstMsg( "32 Bit   %08lX ", seg->current_loc );
-            LstMsg( "32 Bit   %08lX ", seg->segrec->d.segdef.seg_length );
-        } else {
-            //LstMsg( "16 Bit   %04lX     ", seg->current_loc );
-            LstMsg( "16 Bit   %04lX     ", seg->segrec->d.segdef.seg_length );
-        }
-        LstMsg( "%s   %s", get_seg_align( seg ), get_seg_combine( seg ) );
-        LstMsg( "'%s'", GetLname( seg->segrec->d.segdef.class_name_idx ) );
-#if 0
-        if ( group != NULL )
-            LstMsg( " %s", group->name );
-#endif
-        LstMsg( "\n" );
-    }
-}
-
 static void log_macro( struct asm_sym *sym )
 {
     int i = strlen ( sym->name);
@@ -248,11 +297,15 @@ static void log_macro( struct asm_sym *sym )
 
     if (i >= DOTSMAX)
         pdots = "";
-    LstMsg( "%s %s        %s\n", sym->name, pdots ,type);
+    LstPrintf( "%s %s        %s", sym->name, pdots ,type);
+    LstNL();
     return;
 }
 
-static char * GetMemTypeString(asm_sym * sym, char * buffer)
+// called by log_struct and log_typedef
+// that is, the symbol is ensured to be a TYPE!
+
+static char * GetMemtypeString(asm_sym * sym, char * buffer)
 {
     switch (sym->mem_type) {
     case MT_BYTE:
@@ -273,26 +326,70 @@ static char * GetMemTypeString(asm_sym * sym, char * buffer)
     case MT_OWORD:
         return( "Oword");
     case MT_PTR:
-    case MT_FAR:
-    case MT_NEAR:
-        if (sym->type && buffer) {
-            strcat(buffer,"Ptr ");
-            strcat(buffer, sym->type->name);
+        if ( buffer ) {
+            if ( sym->isfar )
+                strcat(buffer,"Far");
+            else
+                strcat(buffer,"Near");
+            if ( sym->use32 )
+                strcat(buffer,"32");
+            else
+                strcat(buffer,"16");
+            strcat(buffer," Ptr");
             return(buffer);
         }
         return( "Ptr");
+    case MT_FAR:
+    is_far:
+        if ( sym->segment )
+            return( "L Far");
+        if ( SymIs32( sym ) )
+            return( "L Far32");
+        return( "L Far16");
     case MT_PROC:
-        if (sym->type && buffer) { /* typedef PROTO? */
-            strcat(buffer,"Proc ");
-            strcat(buffer, sym->type->name);
-            return(buffer);
-        }
-        return( "Proc");
+        if ( ModuleInfo.model == MOD_MEDIUM ||
+             ModuleInfo.model == MOD_LARGE ||
+             ModuleInfo.model == MOD_HUGE)
+            goto is_far;
+        /* fall through */
+    case MT_NEAR:
+        if ( sym->segment )
+            return( "L Near");
+        if ( SymIs32( sym ) )
+            return( "L Near32");
+        return( "L Near16");
     case MT_TYPE:
-        if (sym->type)  /* it must be set, but to be safe ... */
+        if (*(sym->type->name))  /* it must be set, but to be safe ... */
             return(sym->type->name);
+        return( "Ptr");
+    case MT_ABS:
+    case MT_EMPTY: /* relocatable number, assigned with '=' directive */
+        return( "Number" );
     }
     return("?");
+}
+
+static const char *GetLanguage( struct asm_sym *sym )
+/****************************************************/
+{
+    switch( sym->langtype ) {
+    case LANG_C:
+        return( "C" );
+    case LANG_BASIC:
+        return( "BASIC" );
+    case LANG_FORTRAN:
+        return( "FORTRAN" );
+    case LANG_PASCAL:
+        return( "PASCAL" );
+    case LANG_STDCALL:
+        return( "STDCALL" );
+    case LANG_SYSCALL:
+        return( "SYSCALL" );
+    case LANG_WATCOM_C:
+        return( "WATCOM_C" );
+    default:
+        return( "" );
+    }
 }
 
 // display STRUCTs and UNIONs
@@ -323,11 +420,12 @@ static void log_struct( char * name, struct asm_sym *sym, int ofs )
     if (i >= DOTSMAX)
         pdots = "";
     for (i=0;i<prefix;i++)
-        LstMsg(" ");
+        LstPrintf(" ");
     if (prefix == 0)
-        LstMsg( "%s %s        %8X\n", name, pdots, sym->total_size );
+        LstPrintf( "%s %s        %8X", name, pdots, sym->total_size );
     else
-        LstMsg( "%s %s        %8X\n", name, pdots, sym->offset + ofs);
+        LstPrintf( "%s %s        %8X", name, pdots, sym->offset + ofs);
+    LstNL();
     prefix += 2;
     for( f = si->head; f; f = f->next ) {
         /* recursion if an embedded struct occurs */
@@ -342,12 +440,12 @@ static void log_struct( char * name, struct asm_sym *sym, int ofs )
                 if (i >= DOTSMAX)
                     pdots = "";
                 for (i=0;i<prefix;i++)
-                    LstMsg(" ");
-                LstMsg( "%s %s        %8X   ", f->sym->name, pdots, f->sym->offset + sym->offset + ofs);
-                LstMsg("%s", GetMemTypeString(f->sym, NULL));
-                if (f->sym->total_length > 1)
-                    LstMsg("[%u]",f->sym->total_length);
-                LstMsg( "\n");
+                    LstPrintf(" ");
+                LstPrintf( "%s %s        %8X   ", f->sym->name, pdots, f->sym->offset + sym->offset + ofs);
+                LstPrintf("%s", GetMemtypeString(f->sym, NULL));
+                if ( f->sym->isarray )
+                    LstPrintf( "[%u]",f->sym->total_length );
+                LstNL();
             }
         }
     }
@@ -368,7 +466,8 @@ static void log_record( struct asm_sym **syms, struct asm_sym *sym )
         if (i >= DOTSMAX)
             pdots = "";
         for( i = 0,f = si->head; f; f = f->next,i++ );
-        LstMsg( "%s %s      %6X  %7X\n", sym->name, pdots, sym->total_size*8, i );
+        LstPrintf( "%s %s      %6X  %7X", sym->name, pdots, sym->total_size*8, i );
+        LstNL();
         for( f = si->head; f; f = f->next ) {
             i = strlen ( f->sym->name ) + 2;
             pdots = dots + i + 1 ;
@@ -376,7 +475,8 @@ static void log_record( struct asm_sym **syms, struct asm_sym *sym )
                 pdots = "";
             for (i=f->sym->offset, mask=0;i < f->sym->offset+f->sym->total_size;i++)
                 mask |= 1 << i;
-            LstMsg( "  %s %s      %6X  %7X  %08X\n", f->sym->name, pdots, f->sym->offset, f->sym->total_size, mask);
+            LstPrintf( "  %s %s      %6X  %7X  %08X", f->sym->name, pdots, f->sym->offset, f->sym->total_size, mask);
+            LstNL();
         }
     }
 }
@@ -387,7 +487,8 @@ static void log_typedef( struct asm_sym **syms, struct asm_sym *sym )
 {
     dir_node    *dir = (dir_node *)sym;
     struct_info  *si = dir->e.structinfo;
-    char buffer[128];
+    char *p;
+    char buffer[256];
 
     if( si->typekind == TYPE_TYPEDEF ) {
         int i = strlen ( sym->name );
@@ -395,11 +496,54 @@ static void log_typedef( struct asm_sym **syms, struct asm_sym *sym )
         if (i >= DOTSMAX)
             pdots = "";
         buffer[0] = '\0';
-        LstMsg( "%s %s    %8u %s\n", sym->name, pdots, sym->total_size, GetMemTypeString(sym, buffer));
+        if (sym->mem_type == MT_PROC && si->target ) { /* typedef proto? */
+            strcat(buffer,"Proc ");
+            if ( *si->target->name ) {  /* the name may be "" */
+                strcat(buffer, si->target->name);
+                strcat(buffer," ");
+            }
+            strcat(buffer, GetMemtypeString( si->target, NULL ) );
+            strcat(buffer," ");
+            strcat(buffer, GetLanguage( si->target ) );
+            p = buffer;
+        } else
+            p = GetMemtypeString(sym, buffer);
+        LstPrintf( "%s %s    %8u %s", sym->name, pdots, sym->total_size, p );
+        LstNL();
     }
 }
 
-static void log_group( struct asm_sym **syms, struct asm_sym *grp )
+static void log_segment( struct asm_sym *sym, struct asm_sym *group )
+/*******************************************************************/
+{
+    char buffer[32];
+
+    seg_info *seg = ((dir_node *)sym)->e.seginfo;
+
+    if( seg->group == group ) {
+        int i = strlen( sym->name );
+        char *pdots = dots + i + 1;
+        if (i >= DOTSMAX)
+            pdots = "";
+        LstPrintf( "%s %s        ", sym->name, pdots );
+        if( seg->Use32 ) {
+            //LstPrintf( "32 Bit   %08lX ", seg->current_loc );
+            LstPrintf( "32 Bit   %08lX ", seg->segrec->d.segdef.seg_length );
+        } else {
+            //LstPrintf( "16 Bit   %04lX     ", seg->current_loc );
+            LstPrintf( "16 Bit   %04lX     ", seg->segrec->d.segdef.seg_length );
+        }
+        LstPrintf( "%s   %s", get_seg_align( seg, buffer ), get_seg_combine( seg ) );
+        LstPrintf( "'%s'", GetLname( seg->segrec->d.segdef.class_name_idx ) );
+#if 0
+        if ( group != NULL )
+            LstPrintf( " %s", group->name );
+#endif
+        LstNL();
+    }
+}
+
+static void log_group( struct asm_sym *grp )
 /*****************************************************************/
 {
     unsigned i;
@@ -409,86 +553,26 @@ static void log_group( struct asm_sym **syms, struct asm_sym *grp )
     pdots = dots + i + 1;
     if (i >= DOTSMAX)
         pdots = "";
-    LstMsg( "%s %s        ", grp->name, pdots );
-    LstMsg( "GROUP\n" );
-    for( i = 0; i < SymCount; ++i ) {
-        if( syms[i]->state == SYM_SEG )
-            log_segment( syms[i], grp );
-    }
-}
-
-static const char *get_sym_type( struct asm_sym *sym )
-/****************************************************/
-{
-    switch( sym->mem_type ) {
-    case MT_BYTE:
-    case MT_SBYTE:
-        return( "Byte" );
-    case MT_WORD:
-    case MT_SWORD:
-        return( "Word" );
-    case MT_DWORD:
-    case MT_SDWORD:
-        return( "DWord" );
-    case MT_FWORD:
-        return( "FWord" );
-    case MT_QWORD:
-        return( "QWord" );
-    case MT_OWORD:
-        return( "OWord" );
-    case MT_NEAR:
-        return( "L Near" );
-    case MT_FAR:
-        return( "L Far" );
-    case MT_PTR:
-        return( "Ptr" );
-    case MT_PROC:
-        return( "Proc" );
-    case MT_ABS:
-    case MT_EMPTY: /* relocatable number, assigned with '=' directive */
-        return( "Number" );
-    case MT_TYPE:
-        if (*(sym->type->name))
-            return( sym->type->name );
-        return( "Ptr");
-    default:
-        return( "?" );
-    }
+    LstPrintf( "%s %s        GROUP", grp->name, pdots );
+    LstNL();
 }
 
 static const char *get_proc_type( struct asm_sym *sym )
 /*****************************************************/
 {
+    /* if there's no segment associated with the symbol,
+     add the symbol's offset size to the distance */
     switch( sym->mem_type ) {
     case MT_NEAR:
-        return( "Near " );
+        if ( sym->segment == NULL )
+            return( SymIs32( sym ) ? "Near32" : "Near16");
+        return( "Near  " );
     case MT_FAR:
-        return( "Far  " );
+        if ( sym->segment == NULL )
+            return( SymIs32( sym ) ? "Far32 " : "Far16 ");
+        return( "Far   " );
     default:
-        return( "     " );
-    }
-}
-
-static const char *get_sym_lang( struct asm_sym *sym )
-/****************************************************/
-{
-    switch( sym->langtype ) {
-    case LANG_C:
-        return( "C" );
-    case LANG_BASIC:
-        return( "BASIC" );
-    case LANG_FORTRAN:
-        return( "FORTRAN" );
-    case LANG_PASCAL:
-        return( "PASCAL" );
-    case LANG_WATCOM_C:
-        return( "WATCOM_C" );
-    case LANG_STDCALL:
-        return( "STDCALL" );
-    case LANG_SYSCALL:
-        return( "SYSCALL" );
-    default:
-        return( "" );
+        return( "      " );
     }
 }
 
@@ -515,42 +599,48 @@ static void log_symbol( struct asm_sym *sym )
         pdots = "";
 
     switch (sym->state) {
+    case SYM_UNDEFINED:
     case SYM_INTERNAL:
     case SYM_EXTERNAL:
-        LstMsg( "%s %s        ", sym->name, pdots );
+        LstPrintf( "%s %s        ", sym->name, pdots );
 
-        if (sym->total_length > 1) {
-            i = sprintf( buffer, "%s[%u]", get_sym_type( sym ), sym->total_length );
-            LstMsg( "%-10s ", buffer );
+        if ( sym->isarray ) {
+            i = sprintf( buffer, "%s[%u]", GetMemtypeString( sym, NULL ), sym->total_length );
+            LstPrintf( "%-10s ", buffer );
         } else
-            LstMsg( "%-10s ", get_sym_type( sym ) );
+            LstPrintf( "%-10s ", GetMemtypeString( sym, NULL ) );
 
-        LstMsg( "%8X  ", sym->offset );
+        LstPrintf( "%8X  ", sym->offset );
 
         if (sym->mem_type == MT_ABS)
             ;
         else
-            LstMsg( "%s\t", get_sym_seg_name( sym ) );
+            LstPrintf( "%s\t", get_sym_seg_name( sym ) );
 
         if( sym->public )
-            LstMsg( "Public " );
+            LstPrintf( "Public " );
 
-        if (sym->state == SYM_EXTERNAL) {
+        if ( sym->state == SYM_EXTERNAL ) {
 
             if (sym->weak == 1)
-                LstMsg( "*External " );
+                LstPrintf( "*External " );
             else
-                LstMsg( "External  " );
+                LstPrintf( "External  " );
+        } else if ( sym->state == SYM_UNDEFINED ) {
+            LstPrintf( "Undefined! " );
         }
 
-        LstMsg( "%s\n", get_sym_lang( sym ) );
+        LstPrintf( "%s", GetLanguage( sym ) );
+        LstNL();
         break;
     case SYM_TMACRO:
         GetTextMacroValue(sym->string_ptr, buffer);
-        LstMsg( "%s %s        Text   %s\n", sym->name, pdots, buffer );
+        LstPrintf( "%s %s        Text   %s", sym->name, pdots, buffer );
+        LstNL();
         break;
     case SYM_ALIAS:
-        LstMsg( "%s %s        Alias  %s\n", sym->name, pdots, sym->string_ptr );
+        LstPrintf( "%s %s        Alias  %s", sym->name, pdots, sym->string_ptr );
+        LstNL();
         break;
     }
 }
@@ -560,7 +650,7 @@ static void log_symbol( struct asm_sym *sym )
 static void log_proc( struct asm_sym *sym )
 /*****************************************/
 {
-    label_list *f;
+    local_sym *f;
     struct asm_sym *l;
     char * p;
     dir_node *dir = (dir_node *)sym;
@@ -570,60 +660,63 @@ static void log_proc( struct asm_sym *sym )
     if (i >= DOTSMAX)
         pdots = "";
     if (sym->use32)
-        p = "%s %s        P %s  %08X %s\t";
+        p = "%s %s        P %s %08X %-8s ";
     else
-        p = "%s %s        P %s  %04X     %s\t";
-    LstMsg( p,
+        p = "%s %s        P %s %04X     %-8s ";
+    LstPrintf( p,
             sym->name,
             pdots,
             get_proc_type( sym ),
             sym->offset,
             get_sym_seg_name( sym ));
     if (sym->use32)
-        LstMsg( "Length= %08X ", sym->total_size );
+        LstPrintf( "%08X ", sym->total_size );
     else
-        LstMsg( "Length= %04X ", sym->total_size );
+        LstPrintf( "%04X     ", sym->total_size );
     if( sym->public ) {
-        LstMsg( "Public " );
+        LstPrintf( "Public " );
     } else if ( dir->sym.isproc == TRUE ) {
-        LstMsg( "Private " );
+        LstPrintf( "Private " );
     } else
-        LstMsg( "External " );
+        LstPrintf( "External " );
 
-    LstMsg( "%s", get_sym_lang( sym ) );
-    LstMsg( "\n" );
+    LstPrintf( "%s", GetLanguage( sym ) );
+    LstNL();
     if ( dir->sym.isproc == TRUE ) {
         if (dir->sym.langtype == LANG_C ||
             dir->sym.langtype == LANG_SYSCALL ||
             dir->sym.langtype == LANG_STDCALL) {
             int cnt;
             /* position f2 to last param */
-            for (cnt = 0,f = dir->e.procinfo->paralist;f;f = f->next)
+            for (cnt = 0,f = dir->e.procinfo->paralist; f; f = (local_sym *)f->sym.next)
                 cnt++;
             for (;cnt;cnt--) {
                 int curr;
-                for (curr = 1,f = dir->e.procinfo->paralist;curr < cnt;f = f->next,curr++);
-                i = strlen ( f->sym->name);
+                for (curr = 1,f = dir->e.procinfo->paralist; curr < cnt;f = (local_sym *)f->sym.next,curr++);
+                i = strlen ( f->sym.name);
                 pdots = dots + i + 1 + 2;
                 if (i >= DOTSMAX)
                     pdots = "";
-                LstMsg( "  %s %s        %-17s bp +%04X\n", f->sym->name, pdots, get_sym_type(f->sym), f->sym->offset);
+                LstPrintf( "  %s %s        %-17s bp +%04X", f->sym.name, pdots, GetMemtypeString( &f->sym, NULL), f->sym.offset);
+                LstNL();
             }
         } else {
-            for (f = dir->e.procinfo->paralist;f;f = f->next) {
-                i = strlen ( f->sym->name);
+            for ( f = dir->e.procinfo->paralist; f; f = (local_sym *)f->sym.next) {
+                i = strlen ( f->sym.name);
                 pdots = dots + i + 1 + 2;
                 if (i >= DOTSMAX)
                     pdots = "";
-                LstMsg( "  %s %s        %-17s bp +%04X\n", f->sym->name, pdots, get_sym_type(f->sym), f->sym->offset);
+                LstPrintf( "  %s %s        %-17s bp +%04X", f->sym.name, pdots, GetMemtypeString( &f->sym, NULL), f->sym.offset);
+                LstNL();
             }
         }
-        for (f = dir->e.procinfo->locallist;f;f = f->next) {
-            i = strlen ( f->sym->name);
+        for ( f = dir->e.procinfo->locallist; f; f = (local_sym *)f->sym.next) {
+            i = strlen ( f->sym.name);
             pdots = dots + i + 1 + 2;
             if (i >= DOTSMAX)
                 pdots = "";
-            LstMsg( "  %s %s        %-17s bp -%04X\n", f->sym->name, pdots, get_sym_type(f->sym), -f->sym->offset);
+            LstPrintf( "  %s %s        %-17s bp -%04X", f->sym.name, pdots, GetMemtypeString(&f->sym, NULL), - f->sym.offset);
+            LstNL();
         }
         for (l = dir->e.procinfo->labellist;l;l = l->next) {
             i = strlen ( l->name);
@@ -631,139 +724,200 @@ static void log_proc( struct asm_sym *sym )
             if (i >= DOTSMAX)
                 pdots = "";
             if (sym->use32)
-                p = "  %s %s        L %s  %08X %s\n";
+                p = "  %s %s        L %s %08X %s";
             else
-                p = "  %s %s        L %s  %04X     %s\n";
-            LstMsg( p,
+                p = "  %s %s        L %s %04X     %s";
+            LstPrintf( p,
                     l->name,
                     pdots,
                     get_proc_type( l ),
                     l->offset,
                     get_sym_seg_name( l ));
+            LstNL();
         }
     }
 }
 
-/* output the symbol table listing */
+static void LstCaption( char *caption, int prefNL )
+{
+    for (; prefNL; prefNL--)
+        LstNL();
+    LstPrintf( caption );
+    LstNL();
+    LstNL();
+}
+
+/* write symbol table listing */
+/* todo: move the text strings to msgdef.h */
 
 void LstWriteCRef( void )
 /***********************/
 {
     struct asm_sym  **syms;
+    dir_node        *dir;
     struct_info     *si;
     unsigned        i;
-    unsigned cntStructs = 0;
-    unsigned cntRecords = 0;
-    unsigned cntTypedefs = 0;
-    unsigned cntProcs = 0;
-    unsigned cntMacros = 0;
+    qdesc           Structs  = { NULL, NULL };
+    qdesc           Records  = { NULL, NULL };
+    qdesc           Typedefs = { NULL, NULL };
+    qdesc           Procs    = { NULL, NULL };
+    qdesc           Macros   = { NULL, NULL };
+    qdesc           Segs     = { NULL, NULL };
+    qdesc           Grps     = { NULL, NULL };
 
-    if( AsmFiles.file[LST] == NULL || Options.no_symbol_listing == TRUE) {
+    if( FileInfo.file[LST] == NULL || Options.no_symbol_listing == TRUE) {
         return; // no point going through the motions if lst file isn't open
     }
+
+    /* go to EOF */
+    fseek( FileInfo.file[LST], 0, SEEK_END );
 
     DebugMsg(("LstWriteCRef: calling SymSort\n"));
 
     syms = SymSort( &SymCount );
-    if( syms ) {
-        for( i = 0; i < SymCount; ++i ) {
-            if (syms[i]->list == FALSE)
-                continue;
-            switch (syms[i]->state) {
-            case SYM_TYPE:
-                si = ((dir_node *)syms[i])->e.structinfo;
-                if (si->typekind == TYPE_RECORD)
-                    cntRecords++;
-                else if (si->typekind == TYPE_TYPEDEF)
-                    cntTypedefs++;
-                else
-                    cntStructs++;
-                break;
-            case SYM_PROC:
-                cntProcs++;
-                break;
-            case SYM_MACRO:
-                cntMacros++;
-                break;
-            }
-        }
-        if (cntMacros) {
-            LstMsg( "\n\nMacros:\n\n" );
-            LstMsg( "                N a m e                 Type\n\n" );
-            /* write out structures */
-            for( i = 0; i < SymCount; ++i ) {
-                if ( syms[i]->list == TRUE && syms[i]->state == SYM_MACRO )
-                    log_macro( syms[i] );
-            }
-        }
-        if (cntStructs) {
-            LstMsg( "\n\nStructures and Unions:\n\n" );
-            LstMsg( "                N a m e                 Size/Ofs   Type\n\n" );
-            /* write out structures */
-            for( i = 0; i < SymCount; ++i ) {
-                if ( syms[i]->list == TRUE && syms[i]->state == SYM_TYPE )
-                    log_struct( NULL, syms[i], 0 );
-            }
-        }
-        if (cntRecords) {
-            LstMsg( "\n\nRecords:\n\n" );
-            LstMsg( "                N a m e                 Width   # fields\n" );
-            LstMsg( "                                        Shift   Width    Mask   Initial\n\n" );
-            for( i = 0; i < SymCount; ++i ) {
-                if ( syms[i]->list == TRUE && syms[i]->state == SYM_TYPE )
-                    log_record( syms, syms[i] );
-            }
-        }
-        if (cntTypedefs) {
-            LstMsg( "\n\nTypes:\n\n" );
-            LstMsg( "                N a m e              Size    Attr\n\n" );
-            for( i = 0; i < SymCount; ++i ) {
-                if ( syms[i]->list == TRUE && syms[i]->state == SYM_TYPE )
-                    log_typedef( syms, syms[i] );
-            }
-        }
-        /* write out the segments */
-        LstMsg( "\n\nSegments and Groups:\n\n" );
-        LstMsg( "                N a m e                 Size" );
-        LstMsg( "     Length   Align   Combine Class\n\n" );
-        /* write out groups with associated segments */
-        for( i = 0; i < SymCount; ++i ) {
-            if( syms[i]->state == SYM_GRP )
-                log_group( syms, syms[i] );
-        }
-        /* write out remaining segments, outside any group */
-        for( i = 0; i < SymCount; ++i ) {
-            if( syms[i]->state == SYM_SEG )
-                log_segment( syms[i], NULL );
-        }
-        LstMsg( "\n" );
+    if( !syms )
+        return;
 
-        if (cntProcs) {
-            /* next write out procedures and stuff */
-            LstMsg( "\n\nProcedures, parameters and locals:\n\n" );
-            LstMsg( "                N a m e                 Type" );
-            LstMsg( "     Value    Attr\n\n" );
-            for( i = 0; i < SymCount; ++i ) {
-                if (syms[i]->list == TRUE && syms[i]->state == SYM_PROC )
-                    log_proc( syms[i] );
-            }
-            LstMsg( "\n" );
+    for( i = 0; i < SymCount; ++i ) {
+        qdesc *q;
+        if (syms[i]->list == FALSE)
+            continue;
+        switch (syms[i]->state) {
+        case SYM_TYPE:
+            si = ((dir_node *)syms[i])->e.structinfo;
+            if (si->typekind == TYPE_RECORD)
+                q = &Records;
+            else if (si->typekind == TYPE_TYPEDEF)
+                q = &Typedefs;
+            else
+                q = &Structs;
+            break;
+        case SYM_PROC:
+            q = &Procs;
+            break;
+        case SYM_MACRO:
+            q = &Macros;
+            break;
+        case SYM_SEG:
+            q = &Segs;
+            break;
+        case SYM_GRP:
+            q = &Grps;
+            break;
+        default:
+            continue;
         }
-
-        /* next write out symbols */
-        LstMsg( "\n\nSymbols:\n\n" );
-        LstMsg( "                N a m e                 Type" );
-        LstMsg( "       Value     Attr\n\n" );
-        for( i = 0; i < SymCount; ++i ) {
-            if (syms[i]->list == TRUE)
-                log_symbol( syms[i] );
+        if( q->head == NULL ) {
+            q->head = syms[i];
+        } else {
+            ((dir_node *)q->tail)->next = (dir_node *)syms[i];
         }
-        LstMsg( "\n" );
+        q->tail = syms[i];
+        ((dir_node *)syms[i])->next = NULL;
+    }
+    if ( Macros.head ) {
+        LstCaption( "Macros:", 2 );
+        LstCaption( "                N a m e                 Type", 0 );
+        /* write out macros */
+        for( dir = Macros.head; dir ; dir = dir->next ) {
+            log_macro( &dir->sym );
+        }
+    }
+    if ( Structs.head ) {
+        LstCaption( "Structures and Unions:", 2 );
+        LstCaption( "                N a m e                 Size/Ofs   Type", 0 );
+        /* write out structures */
+        for( dir = Structs.head; dir; dir = dir->next ) {
+            log_struct( NULL, &dir->sym, 0 );
+        }
+    }
+    if ( Records.head ) {
+        LstCaption( "Records:", 2 );
+        LstPrintf( "                N a m e                 Width   # fields" );
+        LstNL();
+        LstCaption( "                                        Shift   Width    Mask   Initial", 0 );
+        for( dir = Records.head; dir; dir = dir->next ) {
+            log_record( syms, &dir->sym );
+        }
+    }
+    if ( Typedefs.head ) {
+        LstCaption( "Types:", 2 );
+        LstCaption( "                N a m e              Size    Attr", 0 );
+        for( dir = Typedefs.head; dir; dir = dir->next ) {
+            log_typedef( syms, &dir->sym );
+        }
+    }
+    /* write out segments & groups */
+    LstCaption( "Segments and Groups:", 2 );
+    LstCaption( "                N a m e                 Size     Length   Align   Combine Class", 0 );
+    /* write out segments not within a group */
+    for( dir = Segs.head; dir; dir = dir->next ) {
+        log_segment( &dir->sym, NULL );
+    }
+    /* write out groups with associated segments */
+    for( dir = Grps.head; dir; dir = dir->next ) {
+        dir_node *dir2;
+        log_group( &dir->sym );
+        for( dir2 = Segs.head; dir2; dir2 = dir2->next ) {
+            log_segment( &dir2->sym, &dir->sym );
+        }
+    }
+    LstNL();
 
-        DebugMsg(("LstWriteCRef: free sorted symbols\n"));
+    if ( Procs.head ) {
+        /* write out procedures and stuff */
+        LstCaption( "Procedures, parameters and locals:", 2 );
+        LstCaption( "                N a m e                 Type     Value    Segment  Length", 0 );
+        for( dir = Procs.head; dir; dir = dir->next ) {
+            log_proc( &dir->sym );
+        }
+        LstNL();
+    }
 
-        /* free the sorted symbols */
-        MemFree( syms );
+    /* write out symbols */
+    LstCaption( "Symbols:", 2 );
+    LstCaption( "                N a m e                 Type       Value     Attr", 0 );
+    for( i = 0; i < SymCount; ++i ) {
+        if ( syms[i]->list == TRUE )
+            log_symbol( syms[i] );
+    }
+    LstNL();
+
+    /* free the sorted symbols */
+    DebugMsg(("LstWriteCRef: free sorted symbols\n"));
+    MemFree( syms );
+}
+
+void LstOpenFile( void )
+/**********************/
+{
+    char buffer[128];
+
+    list_pos = 0;
+    if( FileInfo.fname[LST] != NULL && Options.write_listing ) {
+        int namelen;
+        FileInfo.file[LST] = fopen( FileInfo.fname[LST], "wb" );
+        if ( FileInfo.file[LST] == NULL )
+            Fatal( MSG_CANNOT_OPEN_FILE, FileInfo.fname[LST] );
+
+        MsgGetJWasmName( buffer );
+        list_pos = strlen( buffer );
+        fwrite( buffer, 1, list_pos, FileInfo.file[LST] );
+        LstNL();
+        namelen = strlen( ModuleInfo.srcfile->name );
+        fwrite( ModuleInfo.srcfile->name, 1, namelen, FileInfo.file[LST] );
+        list_pos += namelen;
+        LstNL();
+    }
+
+}
+
+void LstCloseFile( void )
+/**********************/
+{
+    if( FileInfo.file[LST] != NULL ) {
+        fclose( FileInfo.file[LST] );
+        FileInfo.file[LST] = NULL;
     }
 }
 

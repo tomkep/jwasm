@@ -33,9 +33,13 @@
     memory usage.
 */
 
-#include <stdlib.h>
-#include <fcntl.h>
-//#include <unistd.h>
+#ifdef __WATCOMC__
+    #include <malloc.h>
+#else
+    #include <stdlib.h>
+#endif
+
+//#include <stdlib.h>
 #ifdef DEBUG_OUT
 #include <stdio.h>
 #endif
@@ -51,18 +55,23 @@
 #endif
 #endif
 
-#include "watcom.h"
 #include "memalloc.h"
 #include "fatal.h"
 
 #ifdef TRMEM
+#include <fcntl.h>
 #include "trmem.h"
-
+#include "sys/stat.h"
+#ifdef __WATCOMC__
+#include <unistd.h>
+#else
+#include <io.h>
+#endif
 static _trmem_hdl   memHandle;
 static int          memFile;     /* file handle we'll write() to */
 #endif
 
-#if TRMEM
+#ifdef TRMEM
 static void memLine( int *fh, const char *buf, unsigned size )
 {
     write( 2, "***", 3 );
@@ -111,7 +120,7 @@ int currfree;
 void MemInit( void )
 {
 #ifdef TRMEM
-    memFile = open( "mem.trk", O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR );
+    memFile = open( "~jwasm.trk", O_WRONLY | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE );
     memHandle = _trmem_open( malloc, free, realloc, _expand, &memFile, memLine,
         _TRMEM_ALLOC_SIZE_0 |
         _TRMEM_FREE_NULL |
@@ -141,9 +150,11 @@ void MemFini( void )
         memHandle = NULL;
     }
 #endif
+
 #if FASTMEM
 #ifdef DEBUG_OUT
-    printf("memory used: %u kB\n", (blocks * BLKSIZE - currfree) / 1024);
+    if ( Options.quiet == FALSE )
+        printf("memory used: %u kB\n", (blocks * BLKSIZE - currfree) / 1024);
 #endif
     while (pBase) {
         uint_8 * pNext = *((uint_8 * *)pBase);
@@ -206,11 +217,9 @@ void *AsmAlloc( size_t size )
     return( ptr );
 }
 
+#if FASTMEM==0
 void AsmFree( void *ptr )
 {
-#if FASTMEM
-    return;
-#endif
     if( ptr != NULL ) {
 #ifdef TRMEM
         _trmem_free( ptr, _trmem_guess_who(), memHandle );
@@ -219,7 +228,7 @@ void AsmFree( void *ptr )
 #endif
     }
 }
-
+#endif
 
 void *MemAlloc( size_t size )
 {

@@ -34,6 +34,7 @@
 #include "globals.h"
 #include "parser.h"
 #include "directiv.h"
+#include "extern.h"
 #include "fixup.h"
 #include "mangle.h"
 
@@ -76,7 +77,7 @@ static char *FPPatchAltName[] = {
     "FJGRQQ"
 };
 
-int AddFloatingPointEmulationFixup( const struct asm_ins *ins, bool secondary )
+ret_code AddFloatingPointEmulationFixup( const struct asm_ins *ins, bool secondary )
 /************************************************************************************/
 {
     fp_patches patch;
@@ -88,7 +89,7 @@ int AddFloatingPointEmulationFixup( const struct asm_ins *ins, bool secondary )
     if( ins->token == T_FWAIT ) {
         patch = FPP_WAIT;
     } else {
-        switch( CodeInfo->prefix.seg ) {
+        switch( CodeInfo->prefix.RegOverride ) {
         case EMPTY:
             patch = FPP_NORMAL;
             break;
@@ -116,13 +117,15 @@ int AddFloatingPointEmulationFixup( const struct asm_ins *ins, bool secondary )
     }
 
     /* put out an extern def for the patch */
-    if( patch_name_array[patch] == NULL ) return( NOT_ERROR );
+    if( patch_name_array[patch] == NULL )
+        return( NOT_ERROR );
     sym = SymSearch( patch_name_array[patch] );
     if( sym == NULL ) {
         sym = MakeExtern( patch_name_array[patch], MT_FAR, NULL, NULL, FALSE );
-        SetMangler( sym, "N", LANG_NONE );
+        SetMangler( sym, NULL, LANG_NONE );
     }
-    if( MakeFpFixup( sym ) == ERROR ) return( ERROR );
+    if( MakeFpFixup( sym ) == ERROR )
+        return( ERROR );
 
     return( NOT_ERROR );
 }

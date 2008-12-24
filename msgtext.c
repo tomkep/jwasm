@@ -31,20 +31,21 @@
 #include <fcntl.h>
 
 #include "globals.h"
-#include "banner.h"
 #include "tokenize.h"
+#include "msgtext.h"
 
-//#ifdef __WATCOMC__
-//  #include <unistd.h>
-//  #include <conio.h>
-//  #include <process.h>
-//#endif
+#define USERESOURCES 0 /* 1=use Win string resources, won't work for Linux! */
 
-#define USERESOURCES 0
-
-#define MAXMSGSIZE 128
+char banner_printed = FALSE;
 
 #if USERESOURCES
+
+/*
+ If Win32 resource strings are to be used, the
+ makefiles must contain a call of the resource compiler!
+ Resource file is H/JWasm.rc.
+ */
+
 #include "win32.h"
 typedef void * HRSRC;
 typedef void * HGLOBAL;
@@ -57,116 +58,104 @@ WINBASEAPI void    WINAPI WideCharToMultiByte( uint_32, uint_32, uint_16 *, uint
 
 #include "errmsg.h"
 
-static const char usagex[] = {
-#include "usage.h"
-};
-
 #undef pick
 #define pick( code, string_eng, string_jap )  string_eng,
-
-static const char * msgtexts[] = { usagex,
-#include "msgtext.h"
+static const char * msgtexts[] = {
+#include "msgdef.h"
 };
 
 #endif
 
 static const char usage[] = {
-"\nusage: JWasm [options] asm-file [options] [asm-file] ... [@env_var]\n"
-"Run \"JWasm -?\" or \"JWasm -h\" for more info\n"
+#include "usage.h"
 };
 
-const char *FingerMsg[] = {
-    banner1w( "Assembler", _JWASM_VERSION_ ),
-    banner2( "1992" ),
-    banner3,
-    0
-};
-
-extern  int             trademark( void );
-
-#ifdef __OSI__
-
-extern char             *_Copyright;
-
-#endif
-
-#if 0 // ndef __UNIX__
-
-static void con_output( const unsigned char *text )
+ret_code MsgInit( void )
 {
-    char c;
-
-    do {
-        c = *text;
-        putchar( c );
-        ++text;
-    } while( *text );
-    putchar( '\n' );
-}
-#endif
-
-int MsgInit( void )
-{
-    return( 1 );
+    return( NOT_ERROR );
 }
 
 void MsgFini( void )
 {
 }
 
-char * MsgGet( int resourceid, char *buffer )
+char * MsgGet( int msgid, char *buffer )
 {
 #if USERESOURCES
-    static char sbuffer[MAXMSGSIZE];
     HRSRC hRsrc;
     HGLOBAL hRes;
     WORD * pId;
     int i;
-    hRsrc = FindResource( NULL, MAKEINTRESOURCE(1 + (resourceid >> 4)), RT_STRING );
+
+    hRsrc = FindResource( NULL, MAKEINTRESOURCE(1 + (msgid >> 4)), RT_STRING );
     if (hRsrc) {
         hRes = LoadResource( NULL, hRsrc );
         if (hRes) {
             pId = LockResource( hRes );
-            for (i = resourceid % 16;i;i--)
+            for (i = msgid % 16;i;i--)
                 pId += *pId + 1;
             i = *pId++;
             if (buffer == NULL)
-                buffer = sbuffer;
-            WideCharToMultiByte( CP_ACP, 0, pId, i, buffer, MAXMSGSIZE, 0, 0 );
-            if (i < MAXMSGSIZE)
-                buffer[i] = 0;
+                buffer = StringBufferEnd;
+            WideCharToMultiByte( CP_ACP, 0, pId, i, buffer, -1, 0, 0 );
+            buffer[i] = NULLC;
             return( buffer );
         }
     }
 #else
-    if (resourceid < MSG_LAST) {
+    if ( msgid < MSG_LAST ) {
         if (buffer) {
-            strncpy( buffer, msgtexts[resourceid], MAXMSGSIZE );
+            strncpy( buffer, msgtexts[msgid], MAXMSGSIZE );
             return( buffer );
         } else
-            return( (char *)msgtexts[resourceid] );
+            return( (char *)msgtexts[msgid] );
     }
 #endif
-    DebugMsg(("MsgGet(%u): Msg not found!!!\n", resourceid));
+    DebugMsg(("MsgGet(%u): Msg not found!!!\n", msgid));
     if ( buffer == NULL )
         buffer = StringBufferEnd;
-    sprintf(buffer, "Msg %u", resourceid);
+    sprintf(buffer, "Msg %u", msgid);
     return( buffer );
 }
 
-void MsgPrintf( int resourceid )
+char *MsgGetPrefix( int msgid )
 {
-    trademark();
-    printf( MsgGet( resourceid, NULL ));
+    return( MsgGet( msgid, NULL ) );
 }
 
-void MsgPrintf1( int resourceid, char *token )
+void MsgPrintf( int msgid )
 {
     trademark();
-    printf( MsgGet( resourceid, NULL ), token );
+    printf( MsgGet( msgid, NULL ));
 }
+
+void MsgPrintf1( int msgid, char *token )
+{
+    trademark();
+    printf( MsgGet( msgid, NULL ), token );
+}
+
 void MsgPrintUsage( void )
 {
     trademark();
-    printf("%s", usage);
+    printf( "%s", usage );
 }
+
+char *MsgGetJWasmName( char * buffer )
+{
+    sprintf( buffer, MsgGet( MSG_JWASM, NULL ), _JWASM_VERSION_, __DATE__ );
+    return( buffer );
+}
+
+int trademark( void )
+/*******************/
+{
+    char buffer[128];
+    if( banner_printed == FALSE ) {
+        banner_printed = TRUE;
+        printf( MsgGet( MSG_BANNER, NULL ), MsgGetJWasmName( buffer ) );
+        return( 4 ); /* return number of lines printed */
+    }
+    return( 0 );
+}
+

@@ -25,6 +25,7 @@
 #include "memalloc.h"
 #include "fixup.h"
 #include "directiv.h"
+#include "segment.h"
 #include "queues.h"
 #include "coff.h"
 #include "myassert.h"
@@ -72,7 +73,7 @@ static uint_32 data_pos;
 
 static char * CoffConvertSectionName(asm_sym * sym)
 {
-    static char coffname[MAX_LINE_LEN];
+    static char coffname[MAX_ID_LEN+1];
 
     if (memcmp(sym->name, "_TEXT", 5) == 0) {
         if (sym->name[5] == NULLC)
@@ -173,31 +174,13 @@ ret_code coff_write_section_table( int fh )
         else
             ish.PointerToRawData = 0;
 
-        /* set Characteristics in section header */
-
         ish.Characteristics = 0;
 
-        switch (curr->e.seginfo->segrec->d.segdef.align) {
-        case SEGDEF_ALIGN_ABS:
-        case SEGDEF_ALIGN_BYTE:
+        if ( curr->e.seginfo->alignment == -1 ) // ABS not possible
             ish.Characteristics |= IMAGE_SCN_ALIGN_1BYTES;
-            break;
-        case SEGDEF_ALIGN_WORD:
-            ish.Characteristics |= IMAGE_SCN_ALIGN_2BYTES;
-            break;
-        case SEGDEF_ALIGN_DWORD:
-            ish.Characteristics |= IMAGE_SCN_ALIGN_4BYTES;
-            break;
-        case SEGDEF_ALIGN_PARA:
-            ish.Characteristics |= IMAGE_SCN_ALIGN_16BYTES;
-            break;
-        case SEGDEF_ALIGN_PAGE:
-            ish.Characteristics |= IMAGE_SCN_ALIGN_512BYTES;
-            break;
-        case SEGDEF_ALIGN_4KPAGE:
-            ish.Characteristics |= IMAGE_SCN_ALIGN_4096BYTES;
-            break;
-        }
+        else
+            ish.Characteristics |= (curr->e.seginfo->alignment + 1) << 20;
+
         if (curr->e.seginfo->segtype == SEGTYPE_CODE)
             ish.Characteristics |= IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
         else if (curr->e.seginfo->segtype == SEGTYPE_BSS) {
@@ -217,6 +200,15 @@ ret_code coff_write_section_table( int fh )
             ish.Characteristics |= IMAGE_SCN_LNK_INFO | IMAGE_SCN_LNK_REMOVE;
         } else
             ish.Characteristics |= IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE;
+
+        /* manual characteristics set? */
+        if ( curr->e.seginfo->characteristics ) {
+            ish.Characteristics &= 0x1FFFFFF; /* clear the IMAGE_SCN_MEM flags */
+            ish.Characteristics |= (curr->e.seginfo->characteristics & 0xFE) << 24;
+            /* the INFO bit (bit 0) needs special handling! */
+            if ( curr->e.seginfo->characteristics & 1 )
+                ish.Characteristics |= IMAGE_SCN_LNK_INFO;
+        }
 
         if (ish.PointerToRawData)
             offset += ish.SizeOfRawData;
@@ -326,7 +318,7 @@ ret_code coff_write_symbols(int fh )
     stringitem  *pName;
     IMAGE_SYMBOL is;
     IMAGE_AUX_SYMBOL ias;
-    char        buffer[MAX_LINE_LEN];
+    char        buffer[MAX_ID_LEN+1];
 
     DebugMsg(("coff_write_symbols: enter\n"));
     ifh.NumberOfSymbols = 0;
@@ -549,9 +541,12 @@ ret_code coff_write_symbols(int fh )
 static int GetStartLabel(char * buffer, bool msg)
 {
     int size = 0;
+    char temp[ MAX_ID_LEN+1 ];
+
     if ( start_label ) {
-        if (Options.entry_decorated)
-            Mangle(start_label, buffer);
+        Mangle( start_label, temp );
+        if ( Options.entry_decorated )
+            strcpy( buffer, temp );
         else {
             if (start_label->langtype != LANG_C &&
                 start_label->langtype != LANG_STDCALL &&
@@ -559,12 +554,12 @@ static int GetStartLabel(char * buffer, bool msg)
                 if (*start_label->name != '_') {
                     if (msg)
                         AsmWarn( 2, LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL, start_label->name );
-                    strcpy(buffer, start_label->name);
+                    strcpy( buffer, temp );
                 } else {
-                    strcpy(buffer, start_label->name+1);
+                    strcpy( buffer, temp+1 );
                 }
             } else
-                strcpy(buffer, start_label->name);
+                strcpy(buffer, temp+1 );
         }
         size = strlen(buffer) + sizeof(" -entry:");
     }
@@ -578,16 +573,16 @@ static int GetStartLabel(char * buffer, bool msg)
 ret_code coff_write_header( int fh )
 {
     dir_node *dir;
-    char buffer[MAX_LINE_LEN];
+    char buffer[MAX_ID_LEN + 1];
 
     DebugMsg(("coff_write_header: enter\n"));
 
     LongNamesHead = NULL;
     SizeLongNames = sizeof(uint_32);
 
-    srcname = AsmFiles.fname[ASM];
+    srcname = FileInfo.fname[ASM];
     srcname += strlen(srcname);
-    while (srcname > AsmFiles.fname[ASM] &&
+    while (srcname > FileInfo.fname[ASM] &&
            *(srcname-1) != '/' &&
            *(srcname-1) != '\\') srcname--;
 
@@ -603,10 +598,10 @@ ret_code coff_write_header( int fh )
     if (start_label != NULL ||
         Tables[TAB_LIB].head != NULL ||
         dir != NULL) {
-        directives = dir_insert(".drectve", TAB_SEG);
+        directives = dir_insert(".drectve", SYM_SEG);
         if (directives) {
             int size = 0;
-            char * p;
+            uint_8 *p;
             directives->e.seginfo->segrec->d.segdef.idx = ++segdefidx;
             directives->sym.segment = &directives->sym;
             directives->e.seginfo->segtype = SEGTYPE_DATA;
@@ -801,12 +796,6 @@ ret_code coff_write_data(int fh)
                 WriteError();
             for (fix = section->e.seginfo->FixupListHeadCoff; fix ; fix = fix->next2) {
                 switch (fix->type) {
-                case FIX_LOBYTE:
-                case FIX_HIBYTE:
-                case FIX_RELOFF8:
-                    /* not supported by COFF! */
-                    ir.Type = IMAGE_REL_I386_ABSOLUTE; /* ??? */
-                    break;
                 case FIX_RELOFF16: /* 16bit offset */
                     ir.Type = IMAGE_REL_I386_REL16;
                     break;
@@ -832,12 +821,14 @@ ret_code coff_write_data(int fh)
                 case FIX_SEG: /* segment fixup */
                     ir.Type = IMAGE_REL_I386_SECTION; /* ??? */
                     break;
+                case FIX_LOBYTE:
+                case FIX_HIBYTE:
+                case FIX_RELOFF8:
                 case FIX_PTR16: /* 16bit far pointer */
-                    ir.Type = IMAGE_REL_I386_ABSOLUTE; /* ??? */
-                    break;
                 case FIX_PTR32: /* 32bit far pointer */
-                    ir.Type = IMAGE_REL_I386_ABSOLUTE; /* ??? */
-                    break;
+                    /* not supported by COFF! shouldn't reach this point */
+                    // ir.Type = IMAGE_REL_I386_ABSOLUTE; /* ??? */
+                    // break;
                 default:
                     AsmErr( UNKNOWN_FIXUP_TYPE, fix->type );
                     break;
@@ -856,7 +847,7 @@ ret_code coff_write_data(int fh)
                     sym->segment = fix->segment;
                     sym->variable = TRUE; /* storage class LABEL */
                     fix->sym = sym;
-                    AddPublicData((dir_node *)(fix->sym));
+                    AddPublicData( fix->sym );
                     fix->sym->idx = index++;
 #else
                     /* just use the segment entry. This approach requires
@@ -870,7 +861,7 @@ ret_code coff_write_data(int fh)
                     fix->sym->included == FALSE &&
                     fix->sym->public == FALSE) {
                     fix->sym->included = TRUE;
-                    AddPublicData((dir_node *)(fix->sym));
+                    AddPublicData( fix->sym );
                     fix->sym->idx = index++;
                 }
                 ir.VirtualAddress = fix->fixup_loc;
@@ -888,7 +879,7 @@ ret_code coff_write_data(int fh)
                     DebugMsg(("coff_write_data(%s): linnum, &data=%X\n", section->sym.name, &lni));
                     il.Linenumber = lni->number;
                     if (lni->number == 0) {
-                        AddPublicData((dir_node *)(lni->sym));
+                        AddPublicData( lni->sym );
                         il.Type.SymbolTableIndex = index++;
                     } else
                         il.Type.VirtualAddress = lni->offset;

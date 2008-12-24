@@ -1,5 +1,5 @@
 
-# the makefile creates JWASM.EXE (Win32) and optionally JWASMD.EXE (DOS).
+# this makefile creates JWASM.EXE (Win32) and optionally JWASMD.EXE (DOS).
 # tools used:
 # - Open Watcom v1.7
 # - HXDEV (optionally, only if DOS=1 is set below to create JWASMD.EXE)
@@ -31,8 +31,11 @@ CCV=r
 inc_dirs  = -IH
 
 # to track memory leaks, the Open Watcom TRMEM module can be included.
-# it's not very useful, though, since most allocs won't use the C heap.
+# it's useful only if FASTMEM=0 is set, though, otherwise most allocs 
+# won't use the C heap.
+!ifndef TRMEM
 TRMEM=0
+!endif
 
 linker = wlink.exe
 
@@ -41,7 +44,7 @@ linker = wlink.exe
 extra_c_flags =
 !if $(DEBUG)
 !if $(TRMEM)
-extra_c_flags += -od -d2 -DDEBUG_OUT -DTRMEM
+extra_c_flags += -od -d2 -DDEBUG_OUT -DTRMEM -DFASTMEM=0
 !else
 extra_c_flags += -od -d2 -DDEBUG_OUT
 !endif
@@ -53,7 +56,7 @@ extra_c_flags += -obmilrt -s -DNDEBUG
 
 LOPT = op quiet
 !if $(DEBUG)
-LOPTD = debug dwarf op symfile 
+LOPTD = debug dwarf op symfile
 !endif
 
 lflagsd = $(LOPTD) format windows nt runtime console Libpath $(HXDIR)\Lib Libpath $(WATCOM)\lib386 Libpath $(WATCOM)\lib386\nt library dkrnl32s.lib libfile cstrtwhx.obj $(LOPT) op map=$^* op stub=$(HXDIR)\Bin\loadpex.bin, stack=0x40000
@@ -79,10 +82,12 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   &
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
            $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   &
+!if $(DEBUG)
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif
-           $(OUTD)/autodept.obj $(OUTD)/context.obj
+!endif
+           $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj
 ######
 
 !if $(WIN)
@@ -99,12 +104,12 @@ $(OUTD):
 
 $(OUTD)/$(name).exe: $(proj_obj)
 	$(linker) @<<
-$(lflagsw) file { $(proj_obj) } name $@ op stack=0x20000 op norelocs com stack=0x1000 
+$(lflagsw) file { $(proj_obj) } name $@ op stack=0x20000 op norelocs com stack=0x1000
 <<
-!if $(DEBUG)        
+!if $(DEBUG)
 	@copy $(OUTD)\$(name).exe TEST\*.* >NUL
 	@copy $(OUTD)\$(name).sym TEST\*.* >NUL
-!endif        
+!endif
 
 $(OUTD)/$(name)d.exe: $(proj_obj)
 	$(linker) @<<
@@ -112,7 +117,7 @@ $(lflagsd) file { $(proj_obj) } name $@
 <<
 	@$(HXDIR)\Bin\patchpe.exe $@
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgtext.h H/usage.h H/banner.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) msgtext.c
 
 $(OUTD)/parser.obj: parser.c H/instruct.h H/reswords.h

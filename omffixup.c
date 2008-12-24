@@ -30,7 +30,7 @@
 
 
 #include <stddef.h>
-#include "watcom.h"
+#include "globals.h"
 #include "memalloc.h"
 #include "omfpc.h"
 #include "omffixup.h"

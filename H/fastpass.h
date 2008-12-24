@@ -7,10 +7,6 @@
  then scanned in pass one only.
  */
 
-#ifndef FASTPASS
-#define FASTPASS 1
-#endif
-
 #if FASTPASS
 
 /* equ_item: used for a linked list of assembly time variables. Any variable
@@ -30,9 +26,13 @@ typedef struct equ_item {
 
 typedef struct line_item {
     struct line_item *next;
-    unsigned lineno;  /* bits 0-19: line, 20-31: file index */
+    uint_32 lineno;
+    uint_32 list_pos; /* position .LST file */
+    uint_8 macrolevel; /* just a bit (macrolevel > 0?) is needed */
     char line[];
 } line_item;
+
+extern line_item *LineStoreCurr;
 
 /* mod_state: used to store the module state within SaveState()
  */
@@ -54,7 +54,6 @@ void AssumeSaveState( void );
 void ContextSaveState( void );
 void StoreLine( char * );
 void SkipSavedState( void );
-void InputQueueLineEx( char *, bool );
 
 #endif
 

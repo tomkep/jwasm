@@ -29,43 +29,47 @@
 ****************************************************************************/
 
 
+#include <stdarg.h>
 #include "globals.h"
 #include <fcntl.h>
 #ifdef __WATCOMC__
   #include <unistd.h>
   #include <process.h>
+#else
+  #include <io.h>
 #endif
 #include <ctype.h>
 #include <signal.h>
 
 #include "memalloc.h"
-#include "banner.h"
 #include "parser.h"
+#include "directiv.h"
 #include "fatal.h"
 #include "equate.h"
 #include "omfprs.h"
 #include "omfgenms.h"
-#include "directiv.h"
 #include "input.h"
 #include "errmsg.h"
 #include "macro.h"
 #include "listing.h"
+#include "msgtext.h"
 
 #ifdef __OSI__
   #include "ostype.h"
 #endif
 
-extern void             InitErrFile( void );
-//extern void             PrintfUsage( int first_ln );
-extern void             MsgPrintf( int resourceid );
-extern void             MsgPrintf1( int resourceid, char *token );
-extern void             MsgPrintUsage( );
-extern void             *InstrRemove( char * );
+#if !defined(__UNIX__)
+#define WILDCARDS 1
+#else
+#define WILDCARDS 0
+#endif
 
-extern const char       *FingerMsg[];
+extern char     banner_printed;
 
-File_Info               AsmFiles;       // files information
-pobj_state              pobjState;      // object file information
+File_Info       FileInfo;       // files information
+pobj_state      pobjState;      // object file information
+static int      numArgs = 0;
+static int      numFiles = 0;
 
 struct  option {
     char        *option;
@@ -76,26 +80,27 @@ struct  option {
 #define MAX_NESTING 15
 #define BUF_SIZE 512
 
+#define DisableKeyword( x )  AsmOpTable[AsmResWord[ x ].position].disabled = TRUE;
+
 static char             ParamBuf[ BUF_SIZE ];
 static unsigned char    SwitchChar;
 static unsigned         OptValue;
 static char             *OptScanPtr;
 static char             *OptParm;
-static char             *ForceInclude = NULL;
-char                    banner_printed = FALSE;
 
 global_options Options = {
     /* sign_value       */          FALSE,
     /* quiet            */          FALSE,
     /* line_numbers     */          FALSE,
-    /* naming_convention*/          DO_NOTHING,
-    /* floating_point   */          NO_FP_EMULATION,
+    /* naming_convention*/          NC_DO_NOTHING,
+    /* floating_point   */          FPO_NO_EMULATION,
 
     /* error_limit      */          50,
     /* warning_level    */          2,
     /* warning_error    */          FALSE,
 #ifdef DEBUG_OUT
     /* debug            */          FALSE,
+    /* max_passes       */          0,
 #endif
 #if BUILD_TARGET
     /* build_target     */          NULL,
@@ -104,8 +109,12 @@ global_options Options = {
     /* data_seg         */          NULL,
     /* text_seg         */          NULL,
     /* module_name      */          NULL,
-
+#if MANGLERSUPP
     /* default_name_mangler  */     NULL,
+#endif
+    /* forced include  */           NULL,
+    /* symbol queue  */             NULL,
+    /* include path queue */        NULL,
 #if COCTALS
     /* allow_c_octals        */     FALSE,
 #endif
@@ -118,11 +127,17 @@ global_options Options = {
     /* no_stdcall_suffix     */     FALSE,
     /* entry_decorated       */     FALSE,
     /* write_listing         */     FALSE,
-    /* nocasemap             */     FALSE,
+    /* case_sensitive        */     FALSE,
+    /* convert_uppercase     */     FALSE,
     /* preprocessor_stdout   */     FALSE,
     /* masm51_compat         */     FALSE,
+    /* strict_masm_compat    */     FALSE,
+
+    /* listif                */     FALSE,
+    /* list_generated_code   */     FALSE,
     /* no_symbol_listing     */     FALSE,
-    /* list_generated_code   */     TRUE,
+
+    /* all_symbols_public    */     FALSE,
     /* output_format         */     OFORMAT_OMF,
     /* alignment_default     */     0,
     /* langtype              */     LANG_NONE,
@@ -134,17 +149,6 @@ global_options Options = {
 #endif
     /* privileged mode       */     FALSE
 };
-
-struct qitem {
-    void * next;
-    char * value;
-};
-
-struct qitem * SymQueue = NULL;
-struct qitem * IncQueue = NULL;
-
-#define is_valid_id_char( ch ) \
-    ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
 #if !defined(__UNIX__)
 #ifdef __WATCOMC__
@@ -241,12 +245,14 @@ static void SetTargName( char *name, unsigned len )
 }
 #endif
 
-static void SetCPUPMC( void )
-/***************************/
+static void SetCPU( void )
+/************************/
 {
-    char                *tmp;
+    char  *tmp;
 
-    for( tmp=OptParm; tmp < OptScanPtr; tmp++ ) {
+    Options.cpu = OptValue;
+
+    for( tmp = OptParm; tmp < OptScanPtr; tmp++ ) {
         if( *tmp == 'p' ) {
             if( Options.cpu >= 2 ) {         // set privileged mode
                 Options.privileged_mode = TRUE;
@@ -267,7 +273,8 @@ static void SetCPUPMC( void )
                 MsgPrintf1( MSG_CPU_OPTION_INVALID, CopyOfParm() );
             }
 #endif
-        } else if( *tmp == '"' ) {                             // set default mangler
+#if MANGLERSUPP
+        } else if( *tmp == '"' ) {       // set default mangler
             char *dest;
             tmp++;
             dest = strchr(tmp, '"');
@@ -280,6 +287,7 @@ static void SetCPUPMC( void )
                 *dest = *tmp;
             }
             *dest = NULLC;
+#endif
         } else {
             MsgPrintf1( MSG_UNKNOWN_OPTION, CopyOfParm() );
             exit( 1 );
@@ -295,25 +303,18 @@ static void SetCPUPMC( void )
 #endif
 }
 
-static void SetCPU( void )
-/************************/
-{
-    Options.cpu = OptValue;
-    SetCPUPMC();
-}
-
 static void SetFPU( void )
 /************************/
 {
     switch( OptValue ) {
     case 'i':
-        Options.floating_point = DO_FP_EMULATION;
+        Options.floating_point = FPO_EMULATION;
         break;
     case '7':
-        Options.floating_point = NO_FP_EMULATION;
+        Options.floating_point = FPO_NO_EMULATION;
         break;
     case 'c':
-        Options.floating_point = NO_FP_ALLOWED;
+        Options.floating_point = FPO_DISABLED;
         break;
     case 0:
     case 2:
@@ -327,68 +328,8 @@ static void SetFPU( void )
     }
 }
 
-static void SetMemoryModel( void )
-/********************************/
-{
-    char *model;
-    char buffer[20];
-
-    switch( Options.model ) {
-    case MOD_FLAT:
-        model = "FLAT";
-        if (Options.cpu < 3) /* ensure that a 386 cpu is set */
-            Options.cpu = 3;
-        break;
-    case MOD_COMPACT:  model = "COMPACT";   break;
-    case MOD_HUGE:     model = "HUGE";      break;
-    case MOD_LARGE:    model = "LARGE";     break;
-    case MOD_MEDIUM:   model = "MEDIUM";    break;
-    case MOD_SMALL:    model = "SMALL";     break;
-    case MOD_TINY:     model = "TINY";      break;
-    default: return;
-    }
-    strcpy( buffer, ".MODEL " );
-    strcat( buffer, model );
-    InputQueueLine( buffer );
-}
-
-static int is_valid_identifier( char *id )
-/*********************************/
-{
-    if( isdigit( *id ) )
-        return( ERROR ); /* can't start with a number */
-    if (*id == '.') id++; /* allow name to start with a '.' */
-    for( ; *id != '\0'; id++ ) {
-        if (is_valid_id_char(*id) == 0)
-            return( ERROR );
-    }
-    return( NOT_ERROR );
-}
-
-/* define a numeric constant with value 1.
- */
-
-#if 0
-static struct asm_sym * add_constant( char *string )
-/**************************************/
-{
-    asm_sym *sym;
-
-    DebugMsg(("add_constant(%s) enter\n", string));
-
-    if( is_valid_identifier( string ) == ERROR ) {
-        AsmError( SYNTAX_ERROR );
-        return(NULL);
-    }
-    if (sym = CreateConstant( string, 1, -1, FALSE))
-        sym->predefined = TRUE;
-
-    return(sym);
-}
-#endif
-
-/* queue a text macro.
-   this is called for cmdline option -D
+/* queue a text macro or an include path.
+   this is called for cmdline options -D and -I
  */
 
 static void queue_item( struct qitem * *start, char *string )
@@ -398,10 +339,9 @@ static void queue_item( struct qitem * *start, char *string )
     struct qitem *q;
 
     DebugMsg(("queue_item(%s) enter\n", string));
-    p = MemAlloc(sizeof(struct qitem));
-    p->value = MemAlloc(strlen(string)+1);
-    strcpy(p->value, string);
+    p = MemAlloc( sizeof(struct qitem) + strlen( string) + 1 );
     p->next = NULL;
+    strcpy( p->value, string );
     q = *start;
     if (q) {
         for (;q->next;q = q->next);
@@ -411,69 +351,82 @@ static void queue_item( struct qitem * *start, char *string )
     return;
 }
 
-static void add_predefined_tmacros(  )
-/**************************************/
+static void GetDefaultFnames( char *name )
 {
-    struct qitem *p;
-    char * name;
-    char * value;
-    int len;
-    struct asm_sym *sym;
+    char        drive[_MAX_DRIVE];
+    char        dir[_MAX_DIR];
+    char        fname[_MAX_FNAME];
+    char        ext[_MAX_EXT];
+    char        path[ _MAX_PATH  ];
 
-    DebugMsg(("add_predefined_tmacros enter\n"));
-    for (p = SymQueue;p;p = p->next) {
-        DebugMsg(("add_predefined_tmacros: found >%s<\n", p->value));
-        name = p->value;
-        value = strchr( name, '=' );
-        if( value == NULL ) {
-            value = "";
-        } else {
-            len = value - name;
-            name = AsmTmpAlloc(len + 1);
-            memcpy(name, p->value, len);
-            *(name + len) = NULLC;
-            value++;
-        }
+    if( FileInfo.fname[OBJ] == NULL ) {
+        _splitpath( name, drive,
+                    dir, fname, ext );
+#if BIN_SUPPORT
+        if ( Options.output_format == OFORMAT_BIN )
+            _makepath( path, NULL, NULL, fname, "BIN" );
+        else
+#endif
+            _makepath( path, NULL, NULL, fname, OBJ_EXT );
+    } else {
+        _splitpath( FileInfo.fname[OBJ], drive,
+                    dir, fname, ext );
+        if( fname[0] == NULLC )
+            _splitpath( name, NULL, NULL, fname, NULL );
+        if( ext[0] == NULLC )
+            strcpy(ext, OBJ_EXT);
 
-        if( is_valid_identifier( name ) == ERROR ) {
-            DebugMsg(("add_predefined_tmacros: name >%s< invalid\n", name));
-            AsmError( SYNTAX_ERROR ); // fixme
-        } else {
-            sym = SymSearch( name );
-            if (sym == NULL) {
-                sym = SymCreate( name, TRUE);
-                sym->state = SYM_TMACRO;
-            }
-            if (sym->state == SYM_TMACRO) {
-                sym->defined = TRUE;
-                sym->predefined = TRUE;
-                sym->string_ptr = value;
-            } else
-                AsmErr( SYMBOL_ALREADY_DEFINED, name );
-        }
+        _makepath( path, drive, dir, fname, ext );
+        MemFree( FileInfo.fname[OBJ] );
     }
+    FileInfo.fname[OBJ] = MemAlloc( strlen( path ) + 1 );
+    strcpy( FileInfo.fname[OBJ], path );
+
+    if( FileInfo.fname[ERR] == NULL ) {
+        _makepath( path, NULL, NULL, fname, ERR_EXT );
+    } else {
+        _splitpath( FileInfo.fname[ERR], drive,
+                    dir, fname, ext );
+        if( fname[0] == NULLC )
+            _splitpath( name, NULL, NULL, fname, NULL );
+        if( ext[0] == NULLC )
+            strcpy(ext, ERR_EXT);
+
+        _makepath( path, drive, dir, fname, ext );
+        MemFree( FileInfo.fname[ERR] );
+    }
+    FileInfo.fname[ERR] = MemAlloc( strlen( path ) + 1 );
+    strcpy( FileInfo.fname[ERR], path );
+
+    if( FileInfo.fname[LST] == NULL ) {
+        _makepath( path, NULL, NULL, fname, LST_EXT );
+    } else {
+        _splitpath( FileInfo.fname[LST], drive,
+                    dir, fname, ext );
+        if( fname[0] == NULLC )
+            _splitpath( name, NULL, NULL, fname, NULL );
+        if( ext[0] == NULLC )
+            strcpy(ext, LST_EXT);
+
+        _makepath( path, drive, dir, fname, ext );
+        MemFree( FileInfo.fname[LST] );
+    }
+    FileInfo.fname[LST] = MemAlloc( strlen( path ) + 1 );
+    strcpy( FileInfo.fname[LST], path );
     return;
 }
 
-static void add_incpaths( )
-/**************************************/
-{
-    struct qitem *p;
-    DebugMsg(("add_incpaths enter\n"));
-    for (p = IncQueue;p;p = p->next) {
-        AddStringToIncludePath(p->value);
-    }
-}
 
 static void get_fname( char *token, int type )
 /********************************************/
 /*
- * figure out the source file name & store it in AsmFiles
- * fill in default object file name if it is null
+ * called for .OBJ, .ERR, .LST and .ASM filenames.
+ * for ASM, figure out the source file name & store it in FileInfo
+ * and fill in default object file name if it is null.
+ * AddStringToIncludePath() is called for ASM files.
  */
 {
     char        name [ _MAX_PATH  ];
-    char        msgbuf[80];
     char        *pExt;
     char        drive[_MAX_DRIVE];
     char        dir[_MAX_DIR];
@@ -483,6 +436,7 @@ static void get_fname( char *token, int type )
     char        dir2[_MAX_DIR];
     char        fname2[_MAX_FNAME];
     char        ext2[_MAX_EXT];
+    char        msgbuf[MAXMSGSIZE];
 
     /* get filename for source file */
 
@@ -492,76 +446,22 @@ static void get_fname( char *token, int type )
             Fatal( MSG_CANNOT_OPEN_FILE, msgbuf );
         }
         _splitpath( token, drive, dir, fname, ext );
-        if( ext[0] == '\0' ) {
-            strcpy(ext, ASM_EXT);
-        }
-        _makepath( name, drive, dir, fname, ext );
-        AsmFiles.fname[ASM] = MemAlloc( strlen( name ) + 1 );
-        strcpy( AsmFiles.fname[ASM], name );
 
         _makepath( name, drive, dir, NULL, NULL );
         /* add the source path to the include path */
         AddStringToIncludePath( name );
 
-        /* set up default object and error filename */
+        _makepath( name, drive, dir, fname, ext );
+        FileInfo.fname[ASM] = MemAlloc( strlen( name ) + 1 );
+        strcpy( FileInfo.fname[ASM], name );
 
-        if( AsmFiles.fname[OBJ] == NULL ) {
-#if BIN_SUPPORT
-            if (Options.output_format == OFORMAT_BIN)
-                _makepath( name, NULL, NULL, fname, "BIN" );
-            else
-#endif
-                _makepath( name, NULL, NULL, fname, OBJ_EXT );
-        } else {
-            _splitpath( AsmFiles.fname[OBJ], drive2,
-                         dir2, fname2, ext2 );
-            if( fname2[0] == NULLC )
-                strcpy(fname2, fname);
-            if( ext2[0] == NULLC )
-                strcpy(ext2, OBJ_EXT);
-
-            _makepath( name, drive2, dir2, fname2, ext2 );
-            MemFree( AsmFiles.fname[OBJ] );
-        }
-        AsmFiles.fname[OBJ] = MemAlloc( strlen( name ) + 1 );
-        strcpy( AsmFiles.fname[OBJ], name );
-
-        if( AsmFiles.fname[ERR] == NULL ) {
-            _makepath( name, NULL, NULL, fname, ERR_EXT );
-        } else {
-            _splitpath( AsmFiles.fname[ERR], drive2,
-                         dir2, fname2, ext2 );
-            if( fname2[0] == NULLC )
-                strcpy(fname2, fname);
-            if( ext2[0] == NULLC )
-                strcpy(ext2, ERR_EXT);
-
-            _makepath( name, drive2, dir2, fname2, ext2 );
-            MemFree( AsmFiles.fname[ERR] );
-        }
-        AsmFiles.fname[ERR] = MemAlloc( strlen( name ) + 1 );
-        strcpy( AsmFiles.fname[ERR], name );
-
-        if( AsmFiles.fname[LST] == NULL ) {
-            _makepath( name, NULL, NULL, fname, LST_EXT );
-        } else {
-            _splitpath( AsmFiles.fname[LST], drive2,
-                         dir2, fname2, ext2 );
-            if( fname2[0] == NULLC )
-                strcpy(fname2, fname);
-            if( ext2[0] == NULLC )
-                strcpy(ext2, LST_EXT);
-            _makepath( name, drive2, dir2, fname2, ext2 );
-            MemFree( AsmFiles.fname[LST] );
-        }
-        AsmFiles.fname[LST] = MemAlloc( strlen( name ) + 1 );
-        strcpy( AsmFiles.fname[LST], name );
+        /* set up default OBF, LST and ERR filenames */
 
     } else {
         /* get filename for object, error, or listing file */
         _splitpath( token, drive, dir, fname, ext );
-        if( AsmFiles.fname[ASM] != NULL ) {
-            _splitpath( AsmFiles.fname[ASM], drive2,
+        if( FileInfo.fname[ASM] != NULL ) {
+            _splitpath( FileInfo.fname[ASM], drive2,
                          dir2, fname2, ext2 );
             if( fname[0] == NULLC ) {
                 strcpy(fname, fname2);
@@ -576,11 +476,11 @@ static void get_fname( char *token, int type )
             }
         }
         _makepath( name, drive, dir, fname, pExt );
-        if( AsmFiles.fname[type] != NULL ) {
-            MemFree( AsmFiles.fname[type] );
+        if( FileInfo.fname[type] != NULL ) {
+            MemFree( FileInfo.fname[type] );
         }
-        AsmFiles.fname[type] = MemAlloc( strlen( name ) + 1 );
-        strcpy( AsmFiles.fname[type], name );
+        FileInfo.fname[type] = MemAlloc( strlen( name ) + 1 );
+        strcpy( FileInfo.fname[type], name );
     }
 }
 
@@ -588,10 +488,13 @@ static void set_some_kinda_name( char token, char *name )
 /*******************************************************/
 /* set:  code class / data seg. / module name / text seg */
 {
-    int len;
     char **tmp;
 
-    len = strlen( name ) + 1;
+    if ( *name != '.' && !is_valid_id_char( *name ) ) {
+        AsmError( N_OPTION_NEEDS_A_NAME_PARAMETER );
+        exit( 1 );
+    }
+
     switch( token ) {
     case 'c':
         tmp = &Options.code_class;
@@ -608,17 +511,20 @@ static void set_some_kinda_name( char token, char *name )
     default:
         return;
     }
+
+    /* these params are valid for ONE module only */
+
     if( *tmp != NULL ) {
         AsmFree(*tmp);
     }
-    *tmp = AsmAlloc( len );
+    *tmp = AsmAlloc( strlen( name ) + 1 );
     strcpy( *tmp, name );
 }
 
 static void usagex_msg( void )
 /***************************/
 {
-    MsgPrintf(0);
+    MsgPrintUsage();
     exit(1);
 }
 
@@ -643,11 +549,17 @@ static void Set_BIN( void ) {
     Options.output_format = OFORMAT_BIN;
 }
 #endif
-static void Set_CP( void ) { Options.nocasemap = TRUE; }
+static void Set_Cp( void ) { Options.case_sensitive = TRUE;   Options.convert_uppercase = FALSE; }
+static void Set_Cu( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = TRUE;  }
+static void Set_Cx( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = FALSE; }
 
 static void Set_ZD( void ) { Options.line_numbers = TRUE; }
 
 static void Set_ZM( void ) { Options.masm51_compat = TRUE; }
+
+static void Set_ZNE( void ) { Options.strict_masm_compat = TRUE; }
+
+static void Set_ZF( void ) { Options.all_symbols_public = TRUE; }
 
 static void Set_ZP( void ) {
     uint_8 power;
@@ -659,15 +571,17 @@ static void Set_ZP( void ) {
     }
 }
 
-static void DefineMacro( void ) { queue_item( &SymQueue, CopyOfParm() ); }
+static void DefineMacro( void ) { queue_item( &Options.SymQueue, CopyOfParm() ); }
 
 static void SetErrorLimit( void ) { Options.error_limit = OptValue; }
 
-static void Set_EP( void ) { Options.preprocessor_stdout = TRUE; }
+static void Set_NOLOGO( void ) { banner_printed = TRUE; }
+static void Set_Q( void )      { Set_NOLOGO(); Options.quiet = TRUE; }
+static void Set_EP( void ) { Options.preprocessor_stdout = TRUE; Set_Q(); }
 
 static void Set_FR( void ) { get_fname( GetAFileName(), ERR ); }
 
-static void Set_FI( void ) { ForceInclude = GetAFileName(); }
+static void Set_FI( void ) { Options.ForceInclude = GetAFileName(); }
 
 static void Set_FL( void ) { get_fname( GetAFileName(), LST ); Options.write_listing = TRUE;}
 
@@ -677,13 +591,14 @@ static void Set_Gc( void ) { Options.langtype = LANG_PASCAL; }
 static void Set_Gd( void ) { Options.langtype = LANG_C; }
 static void Set_Gz( void ) { Options.langtype = LANG_STDCALL; }
 
-static void SetInclude( void ) { queue_item( &IncQueue, GetAFileName() ); }
+static void SetInclude( void ) { queue_item( &Options.IncQueue, GetAFileName() ); }
 
 static void Set_J( void ) { Options.sign_value = TRUE; }
 
-static void Set_SG( void ) { }
-
-static void Set_SN( void ) { Options.no_symbol_listing = TRUE; }
+static void Set_Sa( void ) { Options.listif = TRUE; Options.list_generated_code = TRUE; }
+static void Set_Sg( void ) { Options.list_generated_code = TRUE; }
+static void Set_Sn( void ) { Options.no_symbol_listing = TRUE; }
+static void Set_Sx( void ) { Options.listif = TRUE; }
 
 static void Set_Mt( void ) { Options.model = MOD_TINY; }
 static void Set_Ms( void ) { Options.model = MOD_SMALL; }
@@ -698,7 +613,9 @@ static void Set_N( void ) { set_some_kinda_name( OptValue, CopyOfParm() ); }
 #if COCTALS
 static void Set_O( void ) { Options.allow_c_octals = TRUE; }
 #endif
-
+#ifdef DEBUG_OUT
+static void Set_PM( void ) { Options.max_passes = OptValue; };
+#endif
 static void Set_OMF( void ) { Options.output_format = OFORMAT_OMF;}
 
 static void Set_WX( void ) { Options.warning_error = TRUE; }
@@ -717,9 +634,6 @@ static void Set_ZLC( void ) { Options.no_comment_data_in_code_records = TRUE; }
 static void Set_ZLD( void ) { Options.no_dependencies       = TRUE; }
 static void Set_ZLF( void ) { Options.no_file_entry         = TRUE; }
 static void Set_ZLS( void ) { Options.no_section_aux_entry  = TRUE; }
-
-static void Set_NOLOGO( void ) { banner_printed = TRUE; }
-static void Set_Q( void )      { Set_NOLOGO(); Options.quiet = TRUE; }
 
 static void Set_ZZO( void ) { Options.no_stdcall_decoration = TRUE; }
 static void Set_ZZP( void ) { Options.no_stdcall_suffix     = TRUE; }
@@ -753,7 +667,9 @@ static struct option const cmdl_options[] = {
 #endif
     { "c",      0,        Set_C },
     { "coff",   0,        Set_COFF },
-    { "Cp",     0,        Set_CP },
+    { "Cp",     0,        Set_Cp },
+    { "Cu",     0,        Set_Cu },
+    { "Cx",     0,        Set_Cx },
 #ifdef DEBUG_OUT
     { "d6",     6,        Set_D6 },
 #endif
@@ -801,9 +717,14 @@ static struct option const cmdl_options[] = {
     { "o",      0,        Set_O },
 #endif
     { "omf",    0,        Set_OMF },
+#ifdef DEBUG_OUT
+    { "pm=#",   0,        Set_PM },
+#endif
     { "q",      0,        Set_Q },
-    { "Sg",     0,        Set_SG },
-    { "Sn",     0,        Set_SN },
+    { "Sa",     0,        Set_Sa },
+    { "Sg",     0,        Set_Sg },
+    { "Sn",     0,        Set_Sn },
+    { "Sx",     0,        Set_Sx },
     { "u",      0,        Ignore },
     { "w",      0,        Set_w },
     { "WX",     0,        Set_WX },
@@ -811,12 +732,14 @@ static struct option const cmdl_options[] = {
     { "zcm",    0,        Set_ZCM },
     { "zcw",    0,        Set_ZCW },
     { "Zd",     0,        Set_ZD },
+    { "Zf",     0,        Set_ZF },
     { "Zi",     0,        Set_ZI },
     { "zlc",    0,        Set_ZLC },
     { "zld",    0,        Set_ZLD },
     { "zlf",    0,        Set_ZLF },
     { "zls",    0,        Set_ZLS },
     { "Zm",     0,        Set_ZM },
+    { "Zne",    0,        Set_ZNE },
     { "Zp=#",   0,        Set_ZP },
     { "zzo",    0,        Set_ZZO },
     { "zzp",    0,        Set_ZZP },
@@ -853,20 +776,6 @@ static void get_os_include( void )
 }
 #endif
 
-int trademark( void )
-/*******************/
-{
-    int         count = 0;
-
-    if( banner_printed == FALSE ) {
-        banner_printed = TRUE;
-        while( FingerMsg[count] != NULL ) {
-            printf( "%s\n", FingerMsg[count++] );
-        }
-    }
-    return( count );
-}
-
 static void free_names( void )
 /****************************/
 /* Free names set as cmdline options */
@@ -895,28 +804,14 @@ static void free_names( void )
     }
 }
 
-static void main_init( void )
-/***************************/
-{
-    int         i;
-
-    MemInit();
-    for( i = 0; i <= NUM_FILE_TYPES; i++ ) {
-        AsmFiles.file[i] = NULL;
-        AsmFiles.fname[i] = NULL;
-    }
-    OmfRecInit();
-    omf_GenMSInit();
-}
-
 void CloseFiles( void )
 /**********************/
 {
     /* close ASM file */
-    if( AsmFiles.file[ASM] != NULL ) {
-        if( fclose( AsmFiles.file[ASM] ) != 0 ) {
-            AsmFiles.file[ASM] = NULL;
-            Fatal( MSG_CANNOT_CLOSE_FILE, AsmFiles.fname[ASM] );
+    if( FileInfo.file[ASM] != NULL ) {
+        if( fclose( FileInfo.file[ASM] ) != 0 ) {
+            FileInfo.file[ASM] = NULL;
+            Fatal( MSG_CANNOT_CLOSE_FILE, FileInfo.fname[ASM] );
         }
     }
     LstCloseFile();
@@ -927,38 +822,30 @@ void CloseFiles( void )
 
     OmfRecFini();
     if( ModuleInfo.error_count > 0 ) {
-        remove( AsmFiles.fname[OBJ] );
+        remove( FileInfo.fname[OBJ] );
     }
-    MemFree( AsmFiles.fname[ASM] );
-    MemFree( AsmFiles.fname[ERR] );
-    MemFree( AsmFiles.fname[LST] );
-    MemFree( AsmFiles.fname[OBJ] );
+    MemFree( FileInfo.fname[ASM] );
+    MemFree( FileInfo.fname[ERR] );
+    MemFree( FileInfo.fname[LST] );
+    MemFree( FileInfo.fname[OBJ] );
     MemFini();
-}
-
-static void main_fini( void )
-/***************************/
-{
-    free_names();
-    omf_GenMSFini();
-    CloseFiles();
 }
 
 static void open_files( void )
 /****************************/
 {
     /* open ASM file */
-//    AsmFiles.file[ASM] = fopen( AsmFiles.fname[ASM], "r" );
-    AsmFiles.file[ASM] = fopen( AsmFiles.fname[ASM], "rb" );
+//    FileInfo.file[ASM] = fopen( FileInfo.fname[ASM], "r" );
+    FileInfo.file[ASM] = fopen( FileInfo.fname[ASM], "rb" );
 
-    if( AsmFiles.file[ASM] == NULL ) {
-        Fatal( MSG_CANNOT_OPEN_FILE, AsmFiles.fname[ASM] );
+    if( FileInfo.file[ASM] == NULL ) {
+        Fatal( MSG_CANNOT_OPEN_FILE, FileInfo.fname[ASM] );
     }
 
     /* open OBJ file */
-    pobjState.file_out = ObjWriteOpen( AsmFiles.fname[OBJ] );
+    pobjState.file_out = ObjWriteOpen( FileInfo.fname[OBJ] );
     if( pobjState.file_out == NULL ) {
-        Fatal( MSG_CANNOT_OPEN_FILE, AsmFiles.fname[OBJ] );
+        Fatal( MSG_CANNOT_OPEN_FILE, FileInfo.fname[OBJ] );
     }
     pobjState.pass = POBJ_WRITE_PASS;
 
@@ -966,15 +853,13 @@ static void open_files( void )
     InitErrFile();
 }
 
-static char *CollectEnvOrFileName( char *str )
+static char *CollectEnvOrFileName( char *str, char *buffer )
 /********************************************/
 {
-    char        *env;
     char        ch;
 
     while( *str == ' ' || *str == '\t' )
         ++str;
-    env = ParamBuf;
     for( ;; ) {
         ch = *str;
         if( ch == '\0' )
@@ -990,13 +875,18 @@ static char *CollectEnvOrFileName( char *str )
         if( ch == SwitchChar )
             break;
 #endif
-        *env++ = ch;
+        *buffer++ = ch;
     }
-    *env = '\0';
+    *buffer = NULLC;
     return( str );
 }
 
-static char *ReadIndirectFile( void )
+/*
+ A '@' was found in the cmdline. It's not an environment variable,
+ so check if it is a file and, if yes, read it.
+ */
+
+static char *ReadParamFile( char *name )
 /***********************************/
 {
     char        *env;
@@ -1006,28 +896,30 @@ static char *ReadIndirectFile( void )
     char        ch;
 
     env = NULL;
-    handle = open( ParamBuf, O_RDONLY | O_BINARY );
-    if( handle != -1 ) {
-        len = filelength( handle );
-        env = AsmAlloc( len + 1 );
-        read( handle, env, len );
-        env[len] = '\0';
-        close( handle );
-        // zip through characters changing \r, \n etc into ' '
-        str = env;
-        while( *str ) {
-            ch = *str;
-            if( ch == '\r' || ch == '\n' ) {
-                *str = ' ';
-            }
-#if !defined(__UNIX__)
-            if( ch == 0x1A ) {      // if end of file
-                *str = '\0';        // - mark end of str
-                break;
-            }
-#endif
-            ++str;
+    handle = open( name, O_RDONLY | O_BINARY );
+    if( handle == -1 ) {
+        Fatal( MSG_CANNOT_OPEN_FILE, name );
+        return( NULL );
+    }
+    len = filelength( handle );
+    env = MemAlloc( len + 1 );
+    read( handle, env, len );
+    env[len] = NULLC;
+    close( handle );
+    // zip through characters changing \r, \n etc into ' '
+    str = env;
+    while( *str ) {
+        ch = *str;
+        if( ch == '\r' || ch == '\n' ) {
+            *str = ' ';
         }
+#if !defined(__UNIX__)
+        if( ch == 0x1A ) {      // if end of file
+            *str = '\0';        // - mark end of str
+            break;
+        }
+#endif
+        ++str;
     }
     return( env );
 }
@@ -1043,6 +935,7 @@ static char *ProcessOption( char *p, char *option_start )
     char        ident_value;
     char        c;
 
+    numArgs++;
     for( i = 0; ; i++ ) {
         opt = cmdl_options[i].option;
         if( opt == NULL )
@@ -1147,101 +1040,6 @@ static char *ProcessOption( char *p, char *option_start )
     return( NULL );
 }
 
-static char * ProcessOptions( char *str, int *level )
-/*********************************************/
-{
-    char *save[MAX_NESTING];
-    char *buffers[MAX_NESTING];
-
-    if( str != NULL ) {
-        for( ;; ) {
-            while( *str == ' ' || *str == '\t' )
-                ++str;
-            if( *str == '@' && *level < MAX_NESTING ) {
-                save[(*level)++] = CollectEnvOrFileName( str + 1 );
-                buffers[*level] = NULL;
-                str = getenv( ParamBuf );
-                if( str == NULL ) {
-                    str = ReadIndirectFile();
-                    buffers[*level] = str;
-                }
-                if( str != NULL )
-                    continue;
-                str = save[--(*level)];
-            }
-            if( *str == '\0' ) {
-                if( *level == 0 )
-                    break;
-                if( buffers[*level] != NULL ) {
-                    AsmFree( buffers[*level] );
-                    buffers[*level] = NULL;
-                }
-                str = save[--(*level)];
-                continue;
-            }
-            if( *str == '-'  ||  *str == SwitchChar ) {
-                str = ProcessOption(str+1, str);
-            } else {  /* collect  file name */
-                char *beg, *p;
-                int len;
-
-                beg = str;
-                if( *str == '"' ) {
-                    for( ;; ) {
-                        ++str;
-                        if( *str == '"' ) {
-                            ++str;
-                            break;
-                        }
-                        if( *str == '\0' )
-                            break;
-                        if( *str == '\\' ) {
-                            ++str;
-                        }
-                    }
-                } else {
-                    for( ;; ) {
-                        if( *str == '\0' )
-                            break;
-                        if( *str == ' ' )
-                            break;
-                        if( *str == '\t' )
-                            break;
-#if !defined(__UNIX__)
-                        if( *str == SwitchChar )
-                            break;
-#endif
-                        ++str;
-                    }
-                }
-                len = str-beg;
-                p = (char *) AsmAlloc( len + 1 );
-                memcpy( p, beg, len );
-                p[ len ] = '\0';
-                StripQuotes( p );
-                get_fname( p, ASM );
-                AsmFree(p);
-                break;
-            }
-        }
-    }
-    return( str );
-}
-
-/* get cmdline options from environment variable JWASM */
-
-static void do_envvar_cmdline( char *envvar )
-/*******************************************/
-{
-    char *cmdline;
-    int  level = 0;
-
-    cmdline = getenv( envvar );
-    if( cmdline != NULL ) {
-        ProcessOptions( cmdline, &level );
-    }
-}
-
 #define MAX_OS_NAME_SIZE 7
 
 #if BUILD_TARGET
@@ -1285,54 +1083,141 @@ static int set_build_target( void )
 }
 #endif
 
+
+static char * ProcessOptions( char *str, int *level )
+/*********************************************/
+{
+    char *save[MAX_NESTING];
+    char *buffers[MAX_NESTING];
+    char paramfile[_MAX_PATH];
+
+    for( ; str; ) {
+        while( *str == ' ' || *str == '\t' )
+            ++str;
+        if( *str == '@' && *level < MAX_NESTING ) {
+            save[(*level)++] = CollectEnvOrFileName( str + 1, paramfile );
+            buffers[*level] = NULL;
+            str = getenv( paramfile );
+            if( str == NULL ) {
+                str = ReadParamFile( paramfile );
+                buffers[*level] = str;
+            }
+            if( str != NULL )
+                continue;
+            str = save[--(*level)];
+        }
+        if( *str == NULLC ) {
+            if( *level == 0 )
+                break;
+            if( buffers[*level] != NULL ) {
+                AsmFree( buffers[*level] );
+                buffers[*level] = NULL;
+            }
+            str = save[--(*level)];
+            continue;
+        }
+        if( *str == '-'  ||  *str == SwitchChar ) {
+            str = ProcessOption(str+1, str);
+        } else {  /* collect  file name */
+            char *beg, *p;
+            int len;
+
+            beg = str;
+            if( *str == '"' ) {
+                for( ;; ) {
+                    ++str;
+                    if( *str == '"' ) {
+                        ++str;
+                        break;
+                    }
+                    if( *str == '\0' )
+                        break;
+                    if( *str == '\\' ) {
+                        ++str;
+                    }
+                }
+            } else {
+                for( ;; ) {
+                    if( *str == '\0' )
+                        break;
+                    if( *str == ' ' )
+                        break;
+                    if( *str == '\t' )
+                        break;
+#if !defined(__UNIX__)
+                    if( *str == SwitchChar )
+                        break;
+#endif
+                    ++str;
+                }
+            }
+            len = str-beg;
+            p = (char *) AsmAlloc( len + 1 );
+            memcpy( p, beg, len );
+            p[ len ] = '\0';
+            StripQuotes( p );
+            get_fname( p, ASM ); /* try to open .asm file */
+            AsmFree(p);
+            numArgs++;
+            numFiles++;
+            break;
+        }
+    }
+    return( str );
+}
+
 static int parse_cmdline( char **cmdline )
 /*****************************************/
 {
-    char msgbuf[128];
     int  level = 0;
 
-    if( cmdline == NULL || *cmdline == NULL || **cmdline == 0 )
-        return( FALSE );
-
-    for( ;*cmdline != NULL; ++cmdline ) {
+    for( ; *cmdline != NULL && FileInfo.fname[ASM] == NULL; ++cmdline ) {
         *cmdline = ProcessOptions( *cmdline, &level );
     }
-    if( AsmFiles.fname[ASM] == NULL ) {
-        MsgGet( NO_FILENAME_SPECIFIED, msgbuf );
-        Fatal( MSG_CANNOT_OPEN_FILE, msgbuf );
+    if( FileInfo.fname[ASM] == NULL ) {
+        return( FALSE );
     }
     return( TRUE );
 }
 
-static int do_init_stuff( char **cmdline, bool first )
+/* called once for each source module */
+
+static int do_init_stuff( char **cmdline, bool parse )
 /*****************************************/
 {
-    char        *env;
-
-    if (first) {
-        MsgInit();
-        do_envvar_cmdline( "JWASM" );
-    }
 #ifdef DEBUG_OUT
     ModuleInfo.cref = TRUE; /* enable debug displays */
 #endif
 
+    /* InputInit() resets the list of include paths! This must be done
+     before parse_cmdline() is called! Otherwise one risks a GPF if more
+     than one file is to be assembled.
+     */
+    InputInit();
+
     /* no debug displays possible before cmdline has been parsed! */
-    if (parse_cmdline( cmdline ) == 0)
+    if ( parse && parse_cmdline( cmdline ) == 0 )
         return( FALSE );
 
-    ParseInit();   // initialize hash table
-    InputInit();
+    if (ParseInit() == ERROR)   // initialize hash table
+        exit( -1 );             // tables wrong, internal error
+
     trademark();
 
     /* for OMF, IMAGEREL and SECTIONREL make no sense */
-    if (first && Options.output_format == OFORMAT_OMF) {
+    /* this must be done AFTER ParseInit */
+    if ( Options.output_format == OFORMAT_OMF ) {
 #if IMAGERELSUPP
-        InstrRemove("IMAGEREL");
+        DisableKeyword( T_IMAGEREL );
 #endif
 #if SECRELSUPP
-        InstrRemove("SECTIONREL");
+        DisableKeyword( T_SECTIONREL );
 #endif
+    }
+
+    if ( Options.strict_masm_compat == TRUE ) {
+        DisableKeyword( T_INCBIN );
+        DisableKeyword( T_WATCOM_C );
     }
 
 #if BUILD_TARGET
@@ -1340,13 +1225,6 @@ static int do_init_stuff( char **cmdline, bool first )
     /* search for <os>_INCLUDE and add it to the include search path */
     get_os_include();
 #endif
-
-    /* search for INCLUDE and add it to the include search path */
-    env = getenv( "INCLUDE" );
-    if( env != NULL )
-        AddStringToIncludePath( env );
-
-    open_files();
 
     return( TRUE );
 }
@@ -1363,6 +1241,28 @@ void genfailure(int signo)
     exit ( EXIT_FAILURE );
 }
 
+/* main_init is called once per module */
+
+static void main_init( void )
+/***************************/
+{
+    int         i;
+
+    MemInit();
+    for( i = 0; i < NUM_FILE_TYPES; i++ ) {
+        FileInfo.file[i] = NULL;
+        FileInfo.fname[i] = NULL;
+    }
+    ModuleInfo.srcfile = NULL; /* remove any old value, to be sure */
+}
+
+static void main_fini( void )
+/***************************/
+{
+    free_names();
+    CloseFiles();
+}
+
 #ifdef __UNIX__
 
 int main( int argc, char **argv )
@@ -1376,37 +1276,37 @@ int main( int argc, char **argv )
 int main( void )
 /**************/
 {
-    char       *argv[2];
+    char       *argv[3];
 #endif
-    int        len;
-    bool       first = TRUE;
-    char       *buff;
     char       *pCmd;
+    char       *pEnv;
+#if WILDCARDS
+    int        fh;
+    struct     _finddata_t finfo;
+    char       drv[_MAX_DRIVE];
+    char       dir[_MAX_DIR];
+#endif
 
+    pEnv = getenv( "JWASM" );
+    if ( pEnv == NULL )
+        pEnv = "";
+    argv[0] = pEnv;
 #ifndef __UNIX__
 //    SwitchChar = _dos_switch_char();
     SwitchChar = '/';
     pCmd = (char *)GetCommandLineA();
+    /* skip the JWasm program name */
     if (*pCmd == '"') {
         pCmd++;
-        while (*pCmd != NULLC && *pCmd != '"')
+        while ( *pCmd != NULLC && *pCmd != '"' )
             pCmd++;
-        if (*pCmd == '"')
+        if ( *pCmd == '"' )
             pCmd++;
     } else {
-        while (!isspace(*pCmd)) pCmd++;
+        while ( *pCmd && !isspace(*pCmd) ) pCmd++;
     }
-    while (isspace(*pCmd)) pCmd++;
-
-    len = strlen(pCmd) +1;
-    buff = malloc( len );
-    if( buff != NULL ) {
-        argv[0] = buff;
-        argv[1] = NULL;
-        strcpy( buff, pCmd );
-    } else {
-        return( -1 );
-    }
+    argv[1] = pCmd;
+    argv[2] = NULL;
 #endif
 
 #ifndef DEBUG_OUT
@@ -1417,191 +1317,52 @@ int main( void )
 #else
     signal(SIGTERM, genfailure);
 #endif
-    while (1) {
-        ModuleInfo.srcfile = NULL; /* remove any old value, to be sure */
+
+    MsgInit();
+
+    while ( 1 ) {
         main_init();
-#ifndef __UNIX__
-        if (do_init_stuff( argv , first) == 0) {
-#else
-        if (do_init_stuff( &argv[1] , first) == 0) {
-#endif
-            if (first == TRUE) {
-                MsgPrintUsage();
-                return(1);
+        if ( do_init_stuff( argv, TRUE ) == 0 )
+            break;
+#if WILDCARDS
+        finfo.name[0] = NULLC;
+        while ( 1 ) {
+            if ( finfo.name[0] == NULLC ) {
+                if ((fh = _findfirst( FileInfo.fname[ASM], &finfo )) == -1 ) {
+                    AsmErr( CANNOT_OPEN_FILE, FileInfo.fname[ASM] );
+                    break;
+                }
+                _splitpath( FileInfo.fname[ASM], drv, dir, NULL, NULL );
+                MemFree( FileInfo.fname[ASM]);
+            } else {
+                main_init();
+                do_init_stuff( argv, FALSE );
+                if ( _findnext( fh, &finfo ) == -1 ) {
+                    _findclose( fh );
+                    break;
+                }
             }
-            break;
+            FileInfo.fname[ASM] = MemAlloc( strlen(drv) + strlen(dir) + strlen(finfo.name) + 3 );
+            _makepath( FileInfo.fname[ASM], drv, dir, finfo.name, NULL );
+#endif
+            GetDefaultFnames( FileInfo.fname[ASM] );
+            open_files();
+            OmfRecInit();
+            omf_GenMSInit();
+            AssembleModule();     // main body: parse the source file
+            omf_GenMSFini();
+            main_fini();
+#if WILDCARDS
         }
-        SetMemoryModel();
-        AssembleModule();     // main body: parse the source file
-        main_fini();
-#ifndef __UNIX__
-        pCmd = argv[0];
-        while (isspace(*pCmd)) pCmd++;
-        if (*pCmd == NULLC)
-            break;
 #endif
-        first = FALSE;
     };
+
+    if ( numArgs == 0 ) {
+        MsgPrintf( MSG_USAGE );
+    } else if ( numFiles == 0 )
+        AsmError( NO_FILENAME_SPECIFIED );
+
     MsgFini();
-#ifndef __UNIX__
-    free( buff );
-#endif
     return( ModuleInfo.error_count != 0); /* zero if no errors */
 }
 
-void set_cpu_parameters( void )
-/*****************************/
-{
-    int token;
-
-    DebugMsg(("set_cpu_parameters enter\n"));
-#if OWREGCONV
-    // set naming convention
-    if( Options.register_conventions || ( Options.cpu < 3 ) ) {
-        Options.naming_convention = ADD_USCORES;
-    } else {
-        Options.naming_convention = DO_NOTHING;
-    }
-    // set parameters passing convention
-    if( Options.cpu >= 3 ) {
-        if( Options.register_conventions ) {
-            add_constant( "__REGISTER__" );
-        } else {
-            add_constant( "__STACK__" );
-        }
-    }
-#endif
-    switch( Options.cpu ) {
-    case 1:
-        token = T_DOT_186;
-        break;
-    case 2:
-        token =  Options.privileged_mode ? T_DOT_286P : T_DOT_286;
-        break;
-    case 3:
-        token =  Options.privileged_mode ? T_DOT_386P : T_DOT_386;
-        break;
-    case 4:
-        token =  Options.privileged_mode ? T_DOT_486P : T_DOT_486;
-        break;
-    case 5:
-        token =  Options.privileged_mode ? T_DOT_586P : T_DOT_586;
-        break;
-    case 6:
-        token =  Options.privileged_mode ? T_DOT_686P : T_DOT_686;
-        break;
-    default:
-        token = T_DOT_8086;
-        break;
-    }
-    cpu_directive( token );
-}
-
-void set_fpu_parameters( void )
-/*****************************/
-{
-    switch( Options.floating_point ) {
-    case DO_FP_EMULATION:
-//        add_constant( "__FPI__" );
-        break;
-    case NO_FP_EMULATION:
-//        add_constant( "__FPI87__" );
-        break;
-    case NO_FP_ALLOWED:
-//        add_constant( "__FPC__" );
-        cpu_directive( T_DOT_NO87 );
-        return;
-    }
-    switch( Options.fpu ) {
-    case 0:
-    case 1:
-        cpu_directive( T_DOT_8087 );
-        break;
-    case 2:
-        cpu_directive( T_DOT_287 );
-        break;
-    case 3:
-    case 5:
-    case 6:
-        cpu_directive( T_DOT_387 );
-        break;
-    default: // unspecified FPU
-        if ( Options.cpu < 2 )
-            cpu_directive( T_DOT_8087 );
-        else if ( Options.cpu == 2 )
-            cpu_directive( T_DOT_287 );
-        else
-            cpu_directive( T_DOT_387 );
-        break;
-    }
-}
-
-// called by assemble.c
-// this is called for every pass.
-// symbol table and ModuleInfo are initialized.
-
-void CmdlParamsInit( int pass )
-/*************************/
-{
-    DebugMsg(("CmdlParamsInit(%u) enter\n", pass));
-
-#if BUILD_TARGET
-    if (pass == PASS_1) {
-        asm_sym *sym;
-        char * p;
-
-        strupr( Options.build_target );
-        tmp = AsmTmpAlloc( strlen( Options.build_target ) + 5 ); // null + 4 uscores
-        strcpy( tmp, uscores );
-        strcat( tmp, Options.build_target );
-        strcat( tmp, uscores );
-
-        /* define target */
-        sym = SymCreate( tmp, TRUE );
-        sym->state = SYM_INTERNAL;
-        sym->mem_type = MT_ABS;
-        sym->defined = TRUE;
-        sym->predefined = TRUE;
-
-        p = NULL;
-        if( stricmp( Options.build_target, "DOS" ) == 0 ) {
-            p = "__MSDOS__";
-        } else if( stricmp( Options.build_target, "NETWARE" ) == 0 ) {
-            if( (CodeInfo->info.cpu&P_CPU_MASK) >= P_386 ) {
-                p = "__NETWARE_386__";
-            } else {
-                /* do nothing ... __NETWARE__ already defined */
-            }
-        } else if( stricmp( Options.build_target, "WINDOWS" ) == 0 ) {
-            if( (CodeInfo->info.cpu&P_CPU_MASK) >= P_386 ) {
-                p = "__WINDOWS_386__";
-            } else {
-                /* do nothing ... __WINDOWS__ already defined */
-            }
-        } else if( stricmp( Options.build_target, "QNX" ) == 0 ) {
-            p = "__UNIX__";
-        } else if( stricmp( Options.build_target, "LINUX" ) == 0 ) {
-            p = "__UNIX__";
-        }
-        if (p) {
-            sym = SymCreate( p, TRUE );
-            sym->state = SYM_INTERNAL;
-            sym->mem_type = MT_ABS;
-            sym->defined = TRUE;
-            sym->predefined = TRUE;
-        }
-    }
-#endif
-
-    if( ForceInclude != NULL )
-        InputQueueFile( ForceInclude );
-
-    if (pass == PASS_1) {
-        set_cpu_parameters();
-        set_fpu_parameters();
-        add_predefined_tmacros();
-        add_incpaths();
-    }
-    DebugMsg(("CmdlParamsInit exit\n"));
-
-}

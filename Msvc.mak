@@ -1,5 +1,5 @@
 
-# this NMAKE makefile creates JWasm Windows and DOS binaries with MSVC.
+# this makefile (NMake) creates JWasm Windows and DOS binaries with MSVC.
 
 name = jwasm
 
@@ -55,7 +55,7 @@ LOPTD = /debug
 lflagsd = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /Libpath:$(HXDIR)\lib /OPT:NOWIN98
 lflagsw = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /OPT:NOWIN98
 
-CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(extra_c_flags) 
+CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(extra_c_flags)
 
 .c{$(OUTD)}.obj:
 	 $(CC) -Fo$* $<
@@ -78,7 +78,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
 !endif
-           $(OUTD)/autodept.obj $(OUTD)/context.obj
+           $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj
 ######
 
 !if $(WIN)
@@ -107,7 +107,7 @@ libc.lib oldnames.lib /LIBPATH:$(HXDIR)\Lib dkrnl32s.lib imphlp.lib /STUB:$(HXDI
 <<
 	@$(HXDIR)\bin\patchpe $@
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgtext.h H/usage.h H/banner.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h
 	$(CC) -Fo$* msgtext.c
 
 $(OUTD)/parser.obj: parser.c H/instruct.h H/reswords.h

@@ -30,7 +30,6 @@
 
 
 #ifndef OMFPC_H
-#include "watcom.h"
 
 #pragma pack(1)
 /*

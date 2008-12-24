@@ -51,7 +51,7 @@ enum operand_type {
     OP_DX       = ( OP_D | OP_R16 ),
     OP_R1632    = ( OP_R16 | OP_R32 ),
     OP_R        = ( OP_R8 | OP_R16 | OP_R32 ),
-    OP_RMX      = ( OP_MMX | OP_XMM ),
+    // OP_RMX      = ( OP_MMX | OP_XMM ),
 
     OP_I8       = 0x00000100,
     OP_I_1      = 0x00000200,
@@ -78,8 +78,8 @@ enum operand_type {
     OP_M8       = ( OP_M_B | OP_M_DFT ),
     OP_M16      = ( OP_M_W | OP_M_DFT ),
     OP_M32      = ( OP_M_DW | OP_M_DFT ),
-    OP_M64      = ( OP_M_QW | OP_M_DFT ),
-    OP_M128     = ( OP_M_OW | OP_M_DFT ),
+    //OP_M64      = ( OP_M_QW | OP_M_DFT ),
+    //OP_M128     = ( OP_M_OW | OP_M_DFT ),
 
     OP_M        = ( OP_M_B | OP_M_W | OP_M_DW | OP_M_DFT ),
     OP_M_ANY    = ( OP_M_B | OP_M_W | OP_M_DW | OP_M_FW | OP_M_QW | OP_M_TB | OP_M_OW | OP_M_DFT ),
@@ -92,15 +92,17 @@ enum operand_type {
     OP_TR       = 0x04000000,
     OP_SPEC_REG = ( OP_CR | OP_DR | OP_TR ),
 
-    OP_SR2      = 0x08000000,
-    OP_SR3      = 0x10000000,
-    OP_SR       = ( OP_SR2 | OP_SR3 ),
+    OP_SR86     = 0x08000000,
+    OP_SR386    = 0x10000000,
+    OP_SR       = ( OP_SR86 | OP_SR386 ),
 
     OP_ST       = 0x20000000,
     OP_ST_REG   = 0x40000000,
     OP_STI      = ( OP_ST | OP_ST_REG ),
 
-    OP_SPECIAL  = 0x80000000      /* rm_byte provides further info */
+    /* OP_SPECIAL is a flag! */
+    /* field specialtype provides further info */
+    OP_SPECIAL  = 0x80000000
 };
 
 typedef enum operand_type OPNDTYPE;
@@ -151,8 +153,8 @@ typedef enum operand_type OPNDTYPE;
 #define OP_M8       ( OP_M_B | OP_M_DFT )
 #define OP_M16      ( OP_M_W | OP_M_DFT )
 #define OP_M32      ( OP_M_DW | OP_M_DFT )
-#define OP_M64      ( OP_M_QW | OP_M_DFT )
-#define OP_M128     ( OP_M_OW | OP_M_DFT )
+//#define OP_M64      ( OP_M_QW | OP_M_DFT )
+//#define OP_M128     ( OP_M_OW | OP_M_DFT )
 
 #define OP_M        ( OP_M_B | OP_M_W | OP_M_DW | OP_M_DFT )
 #define OP_M_ANY    ( OP_M_B | OP_M_W | OP_M_DW | OP_M_FW | OP_M_QW | OP_M_TB | OP_M_OW | OP_M_DFT )
@@ -165,9 +167,9 @@ typedef enum operand_type OPNDTYPE;
 #define OP_TR       0x04000000
 #define OP_SPEC_REG ( OP_CR | OP_DR | OP_TR )
 
-#define OP_SR2      0x08000000
-#define OP_SR3      0x10000000
-#define OP_SR       ( OP_SR2 | OP_SR3 )
+#define OP_SR86     0x08000000
+#define OP_SR386    0x10000000
+#define OP_SR       ( OP_SR86 | OP_SR386 )
 
 #define OP_ST       0x20000000
 #define OP_ST_REG   0x40000000
@@ -175,7 +177,7 @@ typedef enum operand_type OPNDTYPE;
 
 #define OP_SPECIAL  0x80000000
 
-typedef unsigned_32 OPNDTYPE;
+typedef uint_32 OPNDTYPE;
 
 #endif
 
@@ -193,7 +195,6 @@ enum operand3_type {
  */
 
 enum special_type {
- OP_UNUSED = 0, /* word removed by OPTION NOKEYWORD */
  OP_REGISTER,
  OP_RES_ID,
  OP_DIRECTIVE,

@@ -32,8 +32,8 @@
 #define _QUEUES_H_
 
 typedef struct line_num_info {
-    unsigned_16 number;
-    unsigned_32 offset;
+    uint_16 number;
+    uint_32 offset;
     union {
         const FNAME *srcfile;
         asm_sym * sym;
@@ -41,7 +41,7 @@ typedef struct line_num_info {
 } line_num_info;
 
 extern long     GetQueueItems(void *);
-extern void     AddPublicData( dir_node *data );
+extern void     AddPublicData( asm_sym *sym );
 extern void     AddLnameData( dir_node *data );
 extern void     AddGlobalData( dir_node *data );
 extern void     AddLinnumData( struct line_num_info *data );
@@ -50,7 +50,7 @@ extern direct_idx FindLnameIdx( char * );
 extern char     *GetLname( direct_idx );
 
 extern unsigned GetLnameData( char ** );
-extern uint     GetPublicData( uint *, uint *, char *, char ***, struct pubdef_data **, bool *, bool );
+extern uint     GetPublicData( uint *, uint *, uint_8 *, char ***, struct pubdef_data **, bool *, bool );
 extern int      GetLinnumData( struct linnum_data **ldata, bool *need32 );
 extern void     GetGlobalData( void );
 

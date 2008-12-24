@@ -34,6 +34,7 @@
 #include "mangle.h"
 #include "parser.h"
 #include "directiv.h"
+#include "segment.h"
 #include "queue.h"
 #include "queues.h"
 #include "fastpass.h"
@@ -52,7 +53,8 @@ static qdesc   *PubQueue;    // queue of pubdefs
 static qdesc   *GlobalQueue; // queue of global / externdefs
 static qdesc   *LinnumQueue; // queue of linnum_data structs
 
-//
+// add an existing node to a queue
+// used to add - former - EXTERNDEF items to the PubQueue
 
 static void QAddQItem( qdesc **queue, queuenode *node )
 /*****************************************************/
@@ -64,7 +66,7 @@ static void QAddQItem( qdesc **queue, queuenode *node )
     QEnqueue( *queue, node );
 }
 
-// add a node to a queue
+// add a new node to a queue
 
 static void QAddItem( qdesc **queue, void *data )
 /***********************************************/
@@ -97,10 +99,10 @@ long GetQueueItems( void *q )
     return( count );
 }
 
-void AddPublicData( dir_node *dir )
+void AddPublicData( asm_sym *sym )
 /*********************************/
 {
-    QAddItem( &PubQueue, dir );
+    QAddItem( &PubQueue, sym );
 }
 
 // gather names for publics
@@ -130,9 +132,9 @@ dir_node * GetPublicData2( queuenode * *curr)
             if( sym->isproc == FALSE ) {
                 continue;
             }
-        } else if (sym->state == SYM_EXTERNAL) {
-            /* skip EXTERNDEFs which aren't used */
-            if (sym->weak == TRUE)
+        } else if ( sym->state == SYM_EXTERNAL ) {
+            /* skip EXTERNALs */
+            //if (sym->weak == TRUE)
                 continue;
         }
         if( sym->state != SYM_INTERNAL && sym->state != SYM_PROC) {
@@ -147,7 +149,7 @@ dir_node * GetPublicData2( queuenode * *curr)
 uint GetPublicData(
     uint *seg,
     uint *grp,
-    char *cmd,
+    uint_8 *cmd,
     char ***NameArray,
     struct pubdef_data **data,
     bool *need32,
@@ -198,8 +200,8 @@ uint GetPublicData(
                 continue;
             }
         } else if (sym->state == SYM_EXTERNAL) {
-            /* skip EXTERNDEFs which aren't used */
-            if (sym->weak == TRUE)
+            /* skip EXTERNALS */
+            // if (sym->weak == TRUE)
                 continue;
         }
         if( sym->state != SYM_INTERNAL && sym->state != SYM_PROC) {
@@ -276,6 +278,10 @@ uint GetPublicData(
 
         (*NameArray)[i] = Mangle( sym, NULL );
 
+        if ( ModuleInfo.convert_uppercase ) {
+            strupr((*NameArray)[i]);
+        }
+
         DebugMsg(("GetPublicData 2. loop: %s, mangled=%s\n", sym->name, (*NameArray)[i]));
 
         d[i].name = i;
@@ -292,7 +298,8 @@ static void FreePubQueue( void )
 {
     if( PubQueue != NULL ) {
         while( PubQueue->head != NULL ) {
-            AsmFree( QDequeue( PubQueue ) );
+            void *p = QDequeue( PubQueue );
+            AsmFree( p );
         }
         AsmFree( PubQueue );
         PubQueue = NULL;
@@ -429,23 +436,18 @@ void GetGlobalData( void )
     DebugMsg(("GetGlobalData enter, GlobalQueue=%X\n", GlobalQueue));
     while ( curr = (queuenode *)QDequeue( GlobalQueue )) {
         sym = (asm_sym *)curr->data;
-        DebugMsg(("GetGlobalData: %s, state=%u, lang=%u\n", sym->name, sym->state, sym->langtype));
+        DebugMsg(("GetGlobalData: %s state=%u used=%u public=%u\n", sym->name, sym->state, sym->used, sym->public ));
         if( sym->state == SYM_EXTERNAL ) {
-            // dir_change( (dir_node *)curr->data, TAB_EXT );
             if( sym->used == TRUE)
                 sym->weak = FALSE;
-            else {
-                AsmFree( curr );
-            }
-        } else {
-            if (sym->state == SYM_PROC)
-                ;
-            else if (sym->public == FALSE) {
-                /* make this record a pubdef */
-                sym->public = TRUE;
-                QAddQItem( &PubQueue, curr );
-            }
+        } else if ( sym->state != SYM_PROC && /* ignore PROCs! Masm does also */
+                    sym->public == FALSE ) {
+            /* make this record a pubdef */
+            sym->public = TRUE;
+            QAddQItem( &PubQueue, curr );
+            continue; /* don't free this item! */
         }
+        AsmFree( curr );
     }
     AsmFree( GlobalQueue );
     GlobalQueue = NULL;

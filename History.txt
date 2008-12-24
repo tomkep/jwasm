@@ -1,7 +1,188 @@
 
    Changelog
 
-   __/__/2008, v1.93:
+   12/24/2008, v1.94c:
+
+   Bugfixes:
+   -  multiple filename arguments in cmdline didn't work.
+   
+   12/21/2008, v1.94b:
+   
+   Bugfixes:
+   -  initialization of structure date items embedded in another
+      structure data item didn't work in v1.94/v1.94a.
+   
+   12/20/2008, v1.94a:
+
+   Bugfixes:
+   -  .LISTALL didn't enable listing.
+   -  ".IF 1" doesn't generate code, which made problems in v1.94.
+
+   12/19/2008, v1.94:
+
+   Bugfixes:
+   -  INVOKE rejected a byte register if the parameter type was BYTE.
+   -  if additional cmdline options were given in a separate file - by
+      '@<filename>' - then an exception might have occured.
+   -  syntax 'exitm<>' (no white space after 'exitm') wasn't accepted.
+   -  an external absolute symbol was sometimes forced to 16bit, which
+      was a problem if the symbol was used in an operand for PUSH.
+   -  include paths set with -I had less precedence than include paths
+      set in INCLUDE environment variable.
+   -  expression after .WHILE and .UNTIL wasn't optional.
+   -  keywords removed with OPTION NOKEYWORD weren't restored when another
+      source module was to be assembled.
+   -  if more than one file was to be assembled, there was a risk that
+      setting the include path by either option -I or environment variable
+      INCLUDE caused a GPF.
+   -  size information was lost in an expression if a register plus
+      displacement or scale factor was located AFTER the structure field.
+   -  in COMM directive, a language type followed by the NEAR|FAR keyword
+      wasn't accepted and caused a syntax error.
+   -  invalid size of memory operands for CALL/JMP was silently changed to
+      WORD/DWORD.
+   -  substitution operator (&) didn't work for macro function calls if the
+      expansion operator (%) was first character on a line.
+   -  "TYPE <number>" returned value of <number>. Now 0 is returned.
+   -  "SIZE <simple type>" wasn't accepted.
+   -  invalid fixup types for COFF format were accepted without error message.
+   -  if the filename parameter of an INCLUDE directive wasn't enclosed in <>
+      and did start with a number, the file wasn't found.
+   -  MASK and WIDTH operators worked with bitfields only, not with RECORD
+      types.
+   -  if OPTION OLDSTRUCTS was set, multiple occurances of the same struct
+      definition may have caused error "symbol already defined".
+   -  access to memory locations without fixup, but with a segment override,
+      was assumed with an offset magnitude equal to current CS, which isn't
+      necessarily true.
+   -  it wasn't allowed to open a segment which was already "opened".
+   -  initializer for a structure wasn't ensured to be a literal enclosed
+      in <> or {}.
+   -  the parser didn't distinguish between a single item and an array of
+      size 1. Since data initialization is to be handled differently for
+      these cases, this behavior wasn't compatible.
+   -  there was no test for a max. nesting level implemented if a macro
+      called itself. Usual result was an "endless" loop.
+   -  if option -Fl was set and the assembly source didn't contain any
+      instructions or data definitions, then all lines were listed twice.
+   -  if a required macro parameter was to be expanded, but expansion failed
+      due to an undefined symbol, an access violation might have occured.
+   -  expansion of macro function calls in text equates failed if the
+      string contained a '<', '>' or '!' character.
+   -  OPATTR <literal> returned 36 and OPATTR without operand caused a
+      syntax error. In both cases OPATTR will now return 0.
+   -  SHORT operator did accept any operand types.
+   -  if a short jump destination was a forward reference and too far away,
+      the error was displayed when the destination label was parsed. Now the
+      error is displayed when the jump instruction is parsed.
+   -  environment variable "JWASM" wasn't handled as expected.
+   -  cmdline option -nd didn't work as expected.
+   -  expansion operator in TEXTEQU/CATSTR may have given unexpected results.
+   -  SIZEOF returned double the size for an internal item if it first was
+      declared by an EXTERNDEF directive.
+   -  since v1.9, warning count was reset for every pass.
+   -  if a macro parameter was expanded due to the expansion operator %, it
+      didn't work if at the first nesting level a macro function was expanded
+      and at the next level a text macro had to be expanded.
+   -  numbers > 0xFFFFFFFFh weren't stored as text macros in all cases.
+   -  precedence of operator PTR changed from 5 to 4. This change makes
+      syntax "TYPE <type> PTR <label>" possible. Masm docs also states that
+      PTR should have precedence 4.
+   -  items FNRSTOR[D|W] removed from instruction table.
+   -  some instructions, which should have accepted a word-sized memory
+      operand only, did accept any operand size: LLDT/SLDT, LMSW/SMSW,
+      LTR/STR, FLDCW/FSTCW, FNSTCW, FSTSW, VERR/VERW.
+   -  the variants of string instructions (CMPS, INS, LODS, MOVS, OUTS,
+      SCAS, STOS) WITH suffix (B,D or W) didn't accept the optional (memory)
+      operand(s).
+   -  the '=' directive didn't work with values enclosed in quotes.
+   -  for COFF, the start label is now stored in the decorated form, but
+      without leading underscore (example: label LibEntry, language stdcall,
+      3 DWORD params is exported as "LibEntry@12").
+   -  if a data item was a segment or group symbol, a wrong fixup was
+      generated.
+   -  if INVOKE had to push a far address, its assumptions about what
+      to push as the segment part were a bit too simple.
+   -  LABEL directive did accept near/far labels with incompatible
+      offset size qualifier (i.e. "near32" if current segment is 16bit).
+   -  TR6 register wasn't accepted for cpu 80386.
+   -  GROUP directive didn't ensure that the segment's offset magnitude
+      matches the group's one.
+   -  in data items, segment/group name overrides were rejected if the 
+      offset part wasn't a label. Example: mov ax, DGROUP:[0].
+   -  for cpu < 80386, conditional NEAR jump was rejected, but it should
+      be allowed if OPTION LJMP is on (which is the default).
+   -  if a "relocatable number" has been defined with EQU it wasn't checked
+      in later passes if the value did change.
+   -  .EXIT didn't work if OS_OS2 was selected with .MODEL directive.
+   -  syntax "TYPE offset <label>" was rejected, but should return size of
+      <label>'s offset (2 or 4).
+   -  if an error was displayed, then the current line often wasn't written
+      to the listing file.
+   -  the INCLUDE directive wasn't handled by the preprocessor. As a result,
+      if the -EP cmdline option was set to print preprocessed lines to stdout,
+      the content of include files wasn't contained in the output.
+   -  the lines displayed on stdout when -EP was set wasn't just pure
+      assembly source, it contained generated code, the JWasm logo and
+      things displayed by the ECHO directive.
+   -  if a source filename was found in the cmdline without extension, then
+      ".asm" was added automatically, which is an error.
+   -  OPTION PROLOGUE and OPTION EPILOGUE did verify the correctness of the
+      user-defined prologue/epilogue macros, which was too early.
+   -  if the end delimiter was missing for the COMMENT directive, an
+      infinite loop might have occured.
+   -  "short jump extension" didn't work if the jump to the target was far,
+      external and needed an operand size prefix (66h).
+   -  type coercion for conditional near jumps (near16/near32) was ignored.
+   -  nested procedures were rejected, but they should be allowed as long as
+      they don't have parameters, locals or register "uses".
+   -  .RADIX expects its parameter in decimal, the current radix is ignored.
+   -  if an item was defined both as PUBLIC and EXTERNDEF, but wasn't defined
+      in the module, an error ("Cannot define as PUBLIC...") was displayed.
+
+   Other changes:
+   -  ALIGN(n) supported as segment attribute for COFF/ELF.
+   -  'characteristics' accepted as segment attributes for COFF:
+      INFO, READ, WRITE, EXECUTE, SHARED, NOPAGE, NOCACHE, DISCARD.
+   -  32bit floating-point immediate values accepted ("mov eax, 1.0").
+   -  INCBIN directive added.
+   -  new -Zne cmdline option to enforce strict Masm compatibility.
+   -  PROC <prologuearg> supported, default prologue understands
+      FORCEFRAME and LOADDS.
+   -  NOT and MOD operators work on 64bit operands (Masm v8 compatible).
+   -  PARA, USE16, USE32 removed from the table of reserved words.
+   -  "type expressions" now supported.
+   -  clean-up of the expression evaluator's source code.
+   -  OPTION FIELDALIGN and OPTION PROCALIGN added.
+   -  support for alternative names in EXTERN has been added. Syntax is
+        EXTERN name ( altname ) :qualifiedtype
+   -  display of include file nesting structure on errors improved.
+   -  cmdline option -Zf added.
+   -  the guess about a segment's type using the segment's name - which
+      is done if the class gives no hint - has been restricted to OMF
+      output format.
+   -  warning is displayed if a text macro is used BEFORE it's defined.
+   -  for LEA instruction, segment overrides are skipped.
+   -  remaining hard-coded text constants moved to file msgdef.h.
+   -  after 10000 assembly passes a warning is displayed.
+   -  Makefile MinGW.MAK added to allow to create JWasm with MinGW.
+   -  sample OS216.asm added.
+   -  directives .LISTIF (.LFCOND), .NOLISTIF (.SFCOND) and .TFCOND
+      supported.
+   -  directives .LISTMACRO (.XALL), .NOLISTMACRO (.SALL) and
+      .LISTMACROALL (.LALL) supported.
+   -  directive .LISTALL supported.
+   -  Cmdline options -Sa and -Sx supported.
+   -  Cmdline options -Cu and -Cx supported.
+   -  OPTION CASEMAP:NOTPUBLIC implemented.
+   -  size of symbol hash table increased from 2003 to 8009. Gives a speed
+      boost of 10-20% for programs with lots of symbols (Win32Inc/Masm32).
+   -  symbol table listing is created a lot faster.
+   -  wildcards allowed in source filename parameter.
+    - the max. line length has been increased to 600 (512), the max. number
+      of tokens in a line is now 150 (128).
+
+   10/26/2008, v1.93:
 
    Bugfixes:
    -  possible buffer overflow wasn't detected during macro expansion.
@@ -12,17 +193,17 @@
    -  in the listing, the "current location" was displayed as segment size,
       which isn't necessarily the same.
    -  if an 'EXTERN:varname' line occurs AFTER <varname> has been defined,
-      the EXTERN directive is ignored by Masm (a Masm bug?). Now JWasm 
+      the EXTERN directive is ignored by Masm (a Masm bug?). Now JWasm
       behaves similar.
    -  JWasm did expand macro function calls within string function parameters
       later than Masm. Sometimes this was incompatible.
    -  some invalid numbers weren't detected.
-   -  there was a risk that POPCONTEXT caused a nesting error if the 
+   -  there was a risk that POPCONTEXT caused a nesting error if the
       matching PUSHCONTEXT was done before any code bytes were emitted.
    -  for SHLD & SHRD, acccepted format of 3. operand was restricted.
    -  there was no error displayed when a 16bit segment's size exceeded
       the 64k limit.
-   -  in medium, large and huge memory models the module name, which is 
+   -  in medium, large and huge memory models the module name, which is
       used as name prefix for the default code segment, wasn't transformed
       to upper case.
    -  in v1.90-1.92, if /Zd was set, there was a risk that the first line
@@ -30,12 +211,12 @@
    -  SSE3 instructions ADDSUBPD/ADDSUBPS were silently skipped if second
       operand was a memory reference.
    -  for ELF format, type of externals was 0x0B, should be 0x0 (STT_NOTYPE).
-   -  OPTION directive allowed one argument only. Now multiple arguments, 
+   -  OPTION directive allowed one argument only. Now multiple arguments,
       separated by commas, are accepted.
 
    Other changes:
    -  option '-o' removed. Optionally it can be activated in the source.
-   -  C style hex numbers with "0x" prefix no longer accepted (was an 
+   -  C style hex numbers with "0x" prefix no longer accepted (was an
       undocumented "feature"). Optionally it can be activated in the source.
    -  .RADIX supported.
    -  for OMF, 32bit segment definition records are now used only if

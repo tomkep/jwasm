@@ -30,7 +30,6 @@
 
 
 #ifndef MSDBG_H
-#include "watcom.h"
 #include "queue.h"
 #include "omfrec.h"
 

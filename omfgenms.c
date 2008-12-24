@@ -32,7 +32,6 @@
 #include <stddef.h>
 
 #include "globals.h"
-#include "watcom.h"
 #include "memalloc.h"
 #include "omfrec.h"
 #include "omfprs.h"

@@ -35,23 +35,51 @@
 #define FLAG_LABELDIFF 1 /* flag if 2 label were subtracted in expression */
 
 enum exprtype {
+    EXPR_EMPTY = EMPTY,
+    EXPR_UNDEF = 0,     // undefined type when error occures or result is undefined
     EXPR_ADDR,          // e.g. "foo", "seg foo" and "offset foo"
-    EXPR_CONST,         // A constant; note that "label1 - label2" -> constant
-    EXPR_REG,           // A register
-    EXPR_UNDEF,         // undefined type when error occures or result is undefined
-    EXPR_EMPTY = EMPTY
+    EXPR_CONST,         // a constant; note that "label1 - label2" -> constant
+    EXPR_REG            // a register
+};
+
+// argument types accepted by unary operators
+
+enum oparg_types {
+    AT_TYPE  = 0x01, /* type */
+    AT_LABEL = 0x02, /* label (direct memory) */
+    AT_IND   = 0x04, /* indirect memory */
+    AT_REG   = 0x08, /* register */
+    AT_FIELD = 0x10, /* struct field */
+    AT_NUM   = 0x20, /* number */
+    AT_BF    = 0x40, /* bitfield and record types */
+    AT_UNDEF = 0x80, /* undefined label */
+    AT_CONST = AT_TYPE | AT_NUM,
+    AT_TL    = AT_TYPE | AT_LABEL,
+    AT_TLN   = AT_TYPE | AT_LABEL | AT_NUM,
+    AT_TLF   = AT_TYPE | AT_LABEL | AT_FIELD,
+    AT_TLFN  = AT_TYPE | AT_LABEL | AT_FIELD | AT_NUM,
+    AT_TBF   = AT_TYPE | AT_BF,
+    AT_LF    = AT_LABEL| AT_FIELD,
+    AT_LIF   = AT_LABEL| AT_IND | AT_FIELD,
+    AT_LFN   = AT_LABEL| AT_FIELD | AT_NUM,
+    AT_TLR   = AT_TYPE | AT_LABEL | AT_REG,
+    AT_ALL   = AT_TYPE | AT_LABEL | AT_IND | AT_REG | AT_FIELD | AT_NUM | AT_UNDEF | AT_BF
 };
 
 typedef struct expr_list {
-    enum exprtype   type;           // Type of expression
     union {
         struct {
             union {
                 int_32      value;  // For constant, may also be a label offset
-                uint_32     uvalue;  // For constant, may also be a label offset
+                uint_32     uvalue; // For constant, may also be a label offset
+                float       fvalue; // For constant
             };
             int_32          hvalue; // high 32bit of 64bit number
-            int_16          xvalue; // high 16bit of 80bit number
+            union {
+                int_32      value6495; // bits 64-95 of 128bit number
+                int_16      value6479; // bits 64-79 of 80bit number
+            };
+            int_32          value96127; // bits 96-127 of 128bit number
         };
         struct {
             unsigned long long  llvalue;
@@ -62,27 +90,34 @@ typedef struct expr_list {
     int             base_reg;       // position of token for base register
                                     // if type is EXPR_REG, it holds register
     int             idx_reg;        // position of token for index register
-    int             label;          // Position of token holding the label
-    int             override;       // Position of token holding the override label
+    int             label;          // position of token holding the label
+    int             override;       // position of token holding the override label
                                     //   or register
-    int             instr;          // instruction token for label
-                                    //
-    unsigned        indirect : 1;   // Whether inside [] or not
-    unsigned        explicit : 1;   // Whether expression type explicitly given
-    unsigned        abs      : 1;
-    unsigned        stackbased : 1; // a stack variable
-#if FLAG_LABELDIFF
-    unsigned        labeldiff : 1;
-#endif
-    ofssize         ofs_size;       // for MT_NEAR | MT_FAR
+    enum asm_token  instr;          // instruction token for operator
+
+    enum exprtype   type;           // Type of expression
     memtype         mem_type;       // Whether expr is BYTE, WORD, DWORD, etc.
     uint_8          scale;          // scaling factor 1, 2, 4, or 8 - 386 code only
+    ofssize         ofs_size;       // for MT_NEAR | MT_FAR
+    union {
+        uint_8      flags;
+        struct {
+            unsigned        indirect : 1;   // Whether inside [] or not
+            unsigned        explicit : 1;   // Whether expression type explicitly given
+            unsigned        abs      : 1;
+#if FLAG_LABELDIFF
+            unsigned        labeldiff : 1;
+#endif
+            unsigned        is_type : 1;     // constant is a type
+            unsigned        is_opattr : 1;   // current operator is OPATTR
+        };
+    };
     struct asm_sym  *sym;           // symbol used
-    struct asm_sym  *mbr;           // ??? (member of a struct?)
-    struct asm_sym  *assume;        // for DOT operator
+    struct asm_sym  *mbr;           // (member of a struct?) - also holds the type for typecasts
+    struct asm_sym  *assume;        // for DOT operator. Must be last (see TokenAssign)!
 } expr_list;
 
-extern int          EvalOperand( int *, int, expr_list *, bool );
+extern ret_code     EvalOperand( int *, int, expr_list *, bool );
 extern void         ExprEvalInit( void );
 
 #endif

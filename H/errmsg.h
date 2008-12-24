@@ -32,52 +32,40 @@
 #ifndef _ERRMSG_H_INCLUDED
 #define _ERRMSG_H_INCLUDED
 
-#define ASMFAR
-
 #ifdef DEBUG_OUT
     extern void DoDebugMsg( const char *format, ... );
     #define DebugMsg( x ) DoDebugMsg x
+    #define DebugCurrLine() printf( "%s\n", CurrSource );
 #else
     #define DebugMsg( x )
+    #define DebugCurrLine()
 #endif
 // use DebugMsg((....)) to call it
 
-#define         AsmWarning( errno )             AsmWarn( 0,errno )
+#define AsmWarning( errno )   AsmWarn( 0,errno )
+//#define AsmIntErr( x )        printf( "Internal error %d\n", x )
+
+#ifdef __UNIX__
+#define errout stderr
+#else
+#define errout stdout
+#endif
 
 extern void AsmError( int msgnum );
 extern void AsmErr( int msgnum, ... );
 extern void AsmWarn( int level, int msgnum, ... );
-extern void AsmNote( int msgnum, ... );
-
-#if DEBUG_OUT
-    #define DebugCurrLine() printf( "%s\n", CurrSource );
-    #define AsmIntErr( x ) DebugCurrLine(); printf( "Internal error = %d\n", x )
-#else
-    #define DebugCurrLine()
-    #define AsmIntErr( x ) printf( "Internal error = %d\n", x )
-#endif
-
-#if 0
-
-#define MSG_JWASM_RC_BASE   1
-#include "msg.gh"
-
-#else
+extern void PrintNote( int msgnum, ... );
 
 #undef pick
 #define pick( code, string_eng, string_jap )  code,
 
 enum msgno {
-    MSG_USAGE = 0,
-#include "msgtext.h"
+#include "msgdef.h"
     MSG_LAST
 };
-#endif
 
-#define MAX_RESOURCE_SIZE   128
+#define MAXMSGSIZE 128 /* size of buffer for MsgGet() */
 
-extern int  MsgInit( void );
-extern void MsgFini( void );
-extern char * MsgGet( int, char * );
+extern void InitErrFile( void );
 
 #endif

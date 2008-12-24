@@ -37,19 +37,24 @@
 #include <string.h>
 #include <limits.h>
 #include <time.h>
-#include "watcom.h"
+#include <errno.h>
+#include "inttype.h"
 #include "bool.h"
 
-/* max_ledata_threshold = 1024 - 6 for the header, -6 for space for fixups */
-
-#define MAX_LINE_LEN            512     // there is no restriction for this number
-#define MAX_TOKEN               MAX_LINE_LEN / 4  // there is no restriction for this number
+#define MAX_LINE_LEN            600     // no restriction for this number
+#define MAX_TOKEN               MAX_LINE_LEN / 4  // max tokens in one line
 #define MAX_STRING_LEN          MAX_LINE_LEN - 32 // must be < MAX_LINE_LEN
 #define MAX_ID_LEN              247
-#define MAX_LEDATA_THRESHOLD    1024 - 12
-#define MAX_PUB_SIZE            100     // max # of entries in pubdef record
-#define MAX_EXT_LENGTH          1024    // max length ( in chars ) of extdef
 #define MAX_STRUCT_ALIGN        32
+
+#define MAX_IF_NESTING          20 /* IFxx block nesting         */
+#define MAX_TEXTMACRO_NESTING   20
+#define MAX_QUEUE_NESTING       40 /* "async" macro call nesting */
+#define MAX_SYNC_MACRO_NESTING  20 /* "sync" macro call nesting  */
+
+#define MAX_LEDATA_THRESHOLD    1024 - 12 /* OMF: - 6 for header, -6 for fixups     */
+#define MAX_PUB_SIZE            100       /* OMF: max # of entries in pubdef record */
+#define MAX_EXT_LENGTH          1024      /* OMF: max length ( in chars ) of extdef */
 
 #define COFF_SUPPORT 1 /* support COFF output format             */
 #define ELF_SUPPORT  1 /* support ELF output format              */
@@ -57,13 +62,30 @@
 #define IMAGERELSUPP 1 /* support IMAGEREL operator (COFF+ELF)   */
 #define SECRELSUPP   1 /* support SECTIONREL operator (COFF+ELF) */
 #define SSSE3SUPP    1 /* support SSSE3 instruction set          */
+#define FIELDALIGN   1 /* support OPTION FIELDALIGN:<const>      */
+#define PROCALIGN    1 /* support OPTION PROCALIGN:<const>       */
 #define BUILD_TARGET 0 /* support "build target" (obsolete)      */
+#define INVOKE_WC    0 /* support watcom_c for INVOKE (not impl) */
+#define FASTPASS     1 /* don't scan full source if pass > 1     */
 
-
+#ifndef FASTMEM
 #define FASTMEM      1 /* fast memory allocation */
-#define OWREGCONV    0 /* support 'r' and 's' suffix for cpu */
-#define COCTALS      0 /* allow C form of octals */
-#define CHEXPREFIX   0 /* accept "0x" as hex number prefix */
+#endif
+
+/* JWasm extensions */
+#define BACKQUOTES   1 /* allow IDs enclosed in `             */
+#define FPIMMEDIATE  1 /* allow float immediates: mov eax,1.0 */
+#define INCLUDEBIN   1 /* support INCBIN directive            */
+#define OWREGCONV    0 /* support 'r' and 's' suffix for cpu  */
+#define COCTALS      0 /* allow C form of octals              */
+#define CHEXPREFIX   0 /* accept "0x" as hex number prefix    */
+#define MANGLERSUPP  0 /* support Wasm's "mangler" extension  */
+
+/* JWasm version info */
+
+#define _BETA_
+#define _JWASM_VERSION_ "1.94c" _BETA_
+#define _JWASM_VERSION_INT_ 194
 
 #include "errmsg.h"
 
@@ -74,12 +96,9 @@
 #define NULLC                   '\0'
 #define NULLS                   "\0"
 
-#define BIT_012                 0x07
-#define BIT_345                 0x38
-#define BIT_67                  0xC0
-#define NOT_BIT_012             0xF8
-#define NOT_BIT_345             0xC7
-#define NOT_BIT_67              0x3F
+#define is_valid_id_char( ch )  ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
+
+#define is_valid_id_first_char( ch )  ( isalpha(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' || (ch == '.' && ModuleInfo.dotname == TRUE ))
 
 /* function return values */
 
@@ -88,22 +107,9 @@ typedef enum {
  ERROR = -1,
  NOT_ERROR = 0,
  STRING_EXPANDED = 1,
- SCRAP_INSTRUCTION = 2, /* used by jmp() */
- INDIRECT_JUMP = 3      /* used by jmp() */
+ INDIRECT_JUMP = 2      /* used by jmp() */
+ //SCRAP_INSTRUCTION = 3, /* used by jmp() */
 } ret_code;
-
-enum naming_conventions {
-    DO_NOTHING,
-    ADD_USCORES,            /*  put uscores on the front of labels
-                             *  & the back of procedures
-                             *  this is what the OW compiler does with /3r
-                             */
-    REMOVE_USCORES,         /*
-                             * assume that the user manually put uscores
-                             * as described above into the assembly file
-                             * and take them off
-                             */
-};
 
 enum {
     PASS_1 = 0,
@@ -124,9 +130,7 @@ typedef struct {
     char        *fname[NUM_FILE_TYPES];
 } File_Info;    // Information about the source and object files
 
-extern File_Info        AsmFiles;   // files information
-
-
+extern File_Info        FileInfo;   // files information
 
 #define ASM_EXT "asm"
 #define ERR_EXT "err"
@@ -138,6 +142,8 @@ extern File_Info        AsmFiles;   // files information
 #define OBJ_EXT "obj"
 #endif
 
+// enumerations
+
 enum oformat {
     OFORMAT_OMF,
     OFORMAT_COFF,
@@ -145,10 +151,10 @@ enum oformat {
     OFORMAT_BIN
 };
 
-enum fpe {
-    DO_FP_EMULATION,
-    NO_FP_EMULATION,
-    NO_FP_ALLOWED
+enum fpo {
+    FPO_NO_EMULATION,  /* -FPi87 (default) */
+    FPO_EMULATION,     /* -FPi */
+    FPO_DISABLED       /* -fpc */
 };
 
 typedef enum {
@@ -162,9 +168,11 @@ typedef enum {
     LANG_WATCOM_C = 7
 } lang_type;
 
+// Memory model type
 /* Paul Edwards
-   Note that there is code that is dependent on the ordering
-   of these model types. */
+ Note that there is code that is dependent on the ordering
+ of these model types.
+ */
 typedef enum {
     MOD_NONE    = 0,
     MOD_TINY    = 1,
@@ -174,7 +182,13 @@ typedef enum {
     MOD_LARGE   = 5,
     MOD_HUGE    = 6,
     MOD_FLAT    = 7,
-} mod_type;             // Memory model type
+} mod_type;
+
+typedef enum {
+    SEGORDER_SEQ = 0,  /* .SEQ (default) */
+    SEGORDER_DOSSEG,   /* .DOSSEG */
+    SEGORDER_ALPHA     /* .ALPHA */
+} seg_order;
 
 enum asm_cpu {
         /* bit count from left:
@@ -193,15 +207,16 @@ enum asm_cpu {
         P_86    = 0x0000,         /* 8086, default */
         P_186   = 0x0010,         /* 80186 */
         P_286   = 0x0020,         /* 80286 */
-        P_286p  = P_286 | P_PM,   /* 80286, protected mode */
         P_386   = 0x0030,         /* 80386 */
-        P_386p  = P_386 | P_PM,   /* 80386, protected mode */
         P_486   = 0x0040,         /* 80486 */
-        P_486p  = P_486 | P_PM,   /* 80486, protected mode */
         P_586   = 0x0050,         /* pentium */
-        P_586p  = P_586 | P_PM,   /* pentium, protected mode */
-        P_686   = 0x0060,         /* pentium */
-        P_686p  = P_686 | P_PM,   /* pentium, protected mode */
+        P_686   = 0x0060,         /* ppro */
+
+        P_286p  = P_286 | P_PM,   /* 286, priv mode */
+        P_386p  = P_386 | P_PM,   /* 386, priv mode */
+        P_486p  = P_486 | P_PM,   /* 486, priv mode */
+        P_586p  = P_586 | P_PM,   /* 586, priv mode */
+        P_686p  = P_686 | P_PM,   /* 686, priv mode */
 
         P_MMX   = 0x0080,         /* MMX extension instructions */
         P_K3D   = 0x0100,         /* 3DNow extension instructions */
@@ -217,7 +232,7 @@ enum asm_cpu {
 #else
         P_SSEALL = P_SSE1 | P_SSE2 | P_SSE3,
 #endif
-        NO_OPPRFX  = P_MMX | P_SSEALL,
+        NO_OPPRFX = P_MMX | P_SSEALL,
 
         P_FPU_MASK = P_87 | P_287 | P_387,
         P_CPU_MASK = 0x0070,
@@ -239,19 +254,50 @@ enum M_CPU {
     M_387  = 0x0800  /* 387 */
 };
 
+enum naming_types {
+    NC_DO_NOTHING,
+    /*  put uscores on the front of labels & the back of procedures.
+     this is what the OW compiler does with /3r
+     */
+    NC_ADD_USCORES,
+    /* assume that the user manually put uscores as described above
+     into the assembly file and take them off
+     */
+    NC_REMOVE_USCORES
+};
+
+enum asm_token {
+#define resword( token, string, len) token ,
+#include "reswords.h"
+#undef resword
+    T_NULL
+};
+
+typedef enum {
+    OFSSIZE_EMPTY = 0,
+    OFSSIZE_16,
+    OFSSIZE_32
+} ofssize;
+
+struct qitem {
+    void * next;
+    char value[];
+};
+
 typedef struct global_options {
-    bool        sign_value;            /* -j, -s options */
+    bool        sign_value;            /* -j option */
     bool        quiet;                 /* -q option */
     bool        line_numbers;          /* -Zd option */
-    char        naming_convention;     /* obsolete (OW specific) */
-    enum fpe    floating_point;        /* -FPi, -FPi87, -FPc */
+    enum naming_types naming_convention; /* OW naming peculiarities */
+    enum fpo    floating_point;        /* -FPi, -FPi87, -fpc */
 
     /* error handling stuff */
     int         error_limit;             /* -e option  */
-    char        warning_level;           /* -Wn option */
-    char        warning_error;           /* -WX option */
+    uint_8      warning_level;           /* -Wn option */
+    bool        warning_error;           /* -WX option */
 #ifdef DEBUG_OUT
-    char        debug;                   /* -d6 option */
+    bool        debug;                   /* -d6 option */
+    uint_16     max_passes;              /* -pm option */
 #endif
 #if BUILD_TARGET
     char        *build_target;           /* -bt option */
@@ -260,8 +306,14 @@ typedef struct global_options {
     char        *data_seg;               /* -nd option */
     char        *text_seg;               /* -nt option */
     char        *module_name;            /* -nm option */
+#if MANGLERSUPP
+    char        *default_name_mangler;   /* OW peculiarity */
+#endif
+    char        *ForceInclude;           /* -FI option */
 
-    char        *default_name_mangler;   /* obsolete */
+    struct qitem *SymQueue;              /* list of symbols set by -D */
+    struct qitem *IncQueue;              /* list of include paths set by -I */
+
 #if COCTALS
     bool        allow_c_octals;          /* -o option */
 #endif
@@ -274,11 +326,15 @@ typedef struct global_options {
     bool        no_stdcall_suffix;       /* -zzp option  */
     bool        entry_decorated;         /* -zzs option  */
     bool        write_listing;           /* -Fl option  */
-    bool        nocasemap;               /* -Cp option  */
+    bool        case_sensitive;          /* -Cp,-Cx,-Cu options */
+    bool        convert_uppercase;       /* -Cp,-Cx,-Cu options */
     bool        preprocessor_stdout;     /* -EP option  */
     bool        masm51_compat;           /* -Zm option  */
+    bool        strict_masm_compat;      /* -Zne option  */
+    bool        listif;                  /* -Sx, -Sa option  */
+    bool        list_generated_code;     /* -Sg, -Sa option  */
     bool        no_symbol_listing;       /* -Sn option  */
-    bool        list_generated_code;     /* -Sg option  */
+    bool        all_symbols_public;      /* -Zf option  */
     enum oformat output_format;          /* -omf, -coff, -elf options */
     uint_8      alignment_default;       /* -Zp option  */
     lang_type   langtype;                /* -Gc|d|z option */
@@ -304,36 +360,33 @@ extern global_vars GlobalVars;
 
 typedef struct asm_tok ASM_TOK;
 
-typedef enum {
-    OFSSIZE_EMPTY = 0,
-    OFSSIZE_16,
-    OFSSIZE_32
-} ofssize;
-
-typedef enum {
-    SEGORDER_SEQ = 0,
-    SEGORDER_DOSSEG,
-    SEGORDER_ALPHA
-} seg_order;
+typedef struct  fname_list {
+        struct  fname_list *next;
+        time_t  mtime;
+        char    *name;
+        char    *fullname;
+} FNAME;
 
 /* global variables */
 extern struct asm_tok   *AsmBuffer[];   // token buffer
 extern struct asm_code  *CodeInfo;      // input for codegen
 extern unsigned int     Parse_Pass;     // assembly pass
-extern unsigned char    Opnd_Count;     // operand count of current instr
+extern unsigned int     Opnd_Count;     // operand count of current instr
+extern int              Token_Count;    // number of tokens in current line
 extern bool             Modend;         // end of module is reached
 extern bool             Use32;          // if current segment is 32-bit
-extern int              Token_Count;    // number of tokens in current line
+extern unsigned int     GeneratedCode;  // nesting level generated code
+extern uint_8           MacroLevel;     // macro nesting level
 
 // defined in assemble.c
 
 extern struct asm_sym LineItem;
-#define LineNumber LineItem.offset
+#define LineNumber LineItem.value
 extern struct asm_sym WordSize;
-#define CurrWordSize WordSize.offset
+#define CurrWordSize WordSize.value
 
-extern bool             PhaseError;
-extern bool             write_to_file;
+extern bool             PhaseError;     // phase error occured during pass
+extern bool             write_to_file;  // 1=write the object module
 
 // functions in assemble.c
 
@@ -343,6 +396,8 @@ extern void             OutputByte( unsigned char );
 extern void             OutSelect( bool );
 extern void             AssembleModule( void );
 extern void             AddLinnumDataRef( void );
+extern void             RunLineQueue( void );
+extern void             WritePreprocessedLine( char * );
 
 // main.c
 

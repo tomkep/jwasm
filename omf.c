@@ -44,6 +44,7 @@
 #include "symbols.h"
 #include "autodept.h"
 #include "directiv.h"
+#include "segment.h"
 #include "mangle.h"
 #include "queues.h"
 #include "fixup.h"
@@ -220,9 +221,7 @@ void omf_write_linnum( void )
     count = GetLinnumData( &ldata, &need_32 );
     if( count == 0 )
         return;
-    if( ldata == NULL ) {
-        AsmError( NO_MEMORY );
-    } else {
+    if( ldata ) { /* always true */
         objr = OmfNewRec( CMD_LINNUM );
         objr->is_32 = need_32;
         objr->d.linnum.num_lines = count;
@@ -294,7 +293,7 @@ static void omf_check_need_32bit( obj_rec *objr ) {
             objr->is_32 = 1;
             break;
         }
-        if( (unsigned_32)fix->lr.target_offset > 0xffffUL ) {
+        if( (uint_32)fix->lr.target_offset > 0xffffUL ) {
             objr->is_32 = 1;
         }
         if( objr->is_32 )
@@ -415,7 +414,7 @@ void omf_write_export( void )
     dir_node    *dir;
     obj_rec     *objr;
     char        *name;
-    char        buffer[MAX_LINE_LEN];
+    char        buffer[MAX_ID_LEN+1];
 
     for( dir = Tables[TAB_PROC].head; dir != NULL; dir = dir->next ) {
         if( dir->e.procinfo->export ) {
@@ -515,6 +514,29 @@ void omf_write_seg( void )
                 AsmErr( SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
             objr->is_32 = FALSE;
         }
+        switch ( curr->e.seginfo->alignment ) {
+        case -1:
+            objr->d.segdef.align = SEGDEF_ALIGN_ABS;
+            break;
+        case  1:
+            objr->d.segdef.align = SEGDEF_ALIGN_WORD;
+            break;
+        case  2:
+            objr->d.segdef.align = SEGDEF_ALIGN_DWORD;
+            break;
+        case  4:
+            objr->d.segdef.align = SEGDEF_ALIGN_PARA;
+            break;
+        case  8:
+            objr->d.segdef.align = SEGDEF_ALIGN_PAGE;
+            break;
+        case 12:
+            objr->d.segdef.align = SEGDEF_ALIGN_4KPAGE;
+            break;
+        default:
+            objr->d.segdef.align = SEGDEF_ALIGN_BYTE;
+            break;
+        }
         objr->d.segdef.use_32 = curr->e.seginfo->Use32;
         objr->d.segdef.ovl_name_idx = 1;
         objr->d.segdef.seg_name_idx = GetLnameIdx( curr->sym.name );
@@ -570,7 +592,7 @@ void omf_write_extdef( )
     uint        total_size;
     uint        i;
     char        name[MAX_EXT_LENGTH];
-    char        buffer[MAX_LINE_LEN];
+    char        buffer[MAX_ID_LEN+1];
     uint        len;
 
     total_size = 0;
@@ -588,6 +610,9 @@ void omf_write_extdef( )
             continue;
         DebugMsg(("omf_write_extdef: %s\n", curr->sym.name));
         Mangle( &curr->sym, buffer );
+        if ( ModuleInfo.convert_uppercase )
+            strupr( buffer );
+
         len = strlen( buffer );
 
         if( total_size + len + 2 >= MAX_EXT_LENGTH ) {
@@ -617,6 +642,9 @@ void omf_write_extdef( )
         if( curr->sym.used == TRUE && curr->sym.isproc == FALSE ) {
             DebugMsg(("omf_write_extdef: %s\n", curr->sym.name));
             Mangle( &curr->sym, buffer );
+            if ( ModuleInfo.convert_uppercase )
+                strupr( buffer );
+
             len = strlen( buffer );
 
             if( total_size + len + 2 >= MAX_EXT_LENGTH ) {
@@ -654,10 +682,7 @@ void omf_write_extdef( )
 static int opsize( memtype mem_type )
 /************************************/
 {
-    int i = SizeFromMemtype(mem_type, Use32);
-    if (i == ERROR)
-        return(0);
-    return(i);
+    return( SizeFromMemtype(mem_type, Use32) );
 }
 
 #define THREE_BYTE_MAX ( (1UL << 24) - 1 )
@@ -697,7 +722,7 @@ ret_code omf_write_comdef( )
     uint        len;
     unsigned long value;
     char        *ptr;
-    char        buffer[MAX_LINE_LEN];
+    char        buffer[MAX_ID_LEN+1];
     char        name[MAX_EXT_LENGTH];
 
     DebugMsg(("omf_write_comdef enter\n"));
@@ -869,7 +894,7 @@ void omf_write_alias( void )
         len1 = strlen( alias );
         len2 = strlen( subst );
 
-        new = AsmTmpAlloc( len1 + len2 + 2 );
+        new = (char *)AsmTmpAlloc( len1 + len2 + 2 );
 
         *new = len1;
         new++;

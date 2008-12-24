@@ -36,6 +36,7 @@
 #include "labels.h"
 
 #include "directiv.h"
+#include "segment.h"
 #include "proc.h"
 
 #include "types.h"
@@ -64,9 +65,9 @@ struct asm_sym * IsLabelType( char *name )
     asm_sym *sym;
 
     sym = SymSearch( name );
-    if ( sym && (sym->state == SYM_TYPE ))
-        return(sym);
-    return(NULL);
+    if ( sym && (sym->state == SYM_TYPE ) )
+        return( sym );
+    return( NULL );
 }
 
 // define a label
@@ -75,7 +76,7 @@ struct asm_sym * IsLabelType( char *name )
 // vartype: arbitrary type if mem_type is MT_TYPE
 // bLocal: local should be defined locally if possible
 
-int LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, bool bLocal )
+ret_code LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, bool bLocal )
 /**********************************************/
 {
     struct asm_sym      *sym;
@@ -89,7 +90,7 @@ int LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, b
      */
     if (StructDef.struct_depth) {
         if( Parse_Pass == PASS_1 ) {
-            if (!(sym = AddFieldToStruct( 0, -1, mem_type, vartype, 0 )))
+            if (!(sym = AddFieldToStruct( 0, -1, mem_type, (dir_node *)vartype, 0 )))
                 return( ERROR );
         }
         return( NOT_ERROR );
@@ -170,8 +171,14 @@ ret_code LabelDirective( int i )
     }
     /* label type PROC is a DIRECTIVE! */
     if( AsmBuffer[i+1]->token == T_RES_ID || AsmBuffer[i+1]->token == T_DIRECTIVE) {
-        idx = FindSimpleType(AsmBuffer[i+1]->value);
-        if (idx != ERROR) {
+        idx = FindSimpleType( AsmBuffer[i+1]->value );
+        if ( idx != -1 ) {
+            /* dont allow near16/far16/near32/far32 if size won't match */
+            if ( (Use32 && SimpleType[idx].ofs_size == OFSSIZE_16) ||
+                 (Use32 == FALSE && SimpleType[idx].ofs_size == OFSSIZE_32)) {
+                AsmError( OFFSET_SIZE_MISMATCH );
+                return( ERROR );
+            }
             return( LabelCreate( AsmBuffer[i-1]->string_ptr, SimpleType[idx].mem_type, NULL, FALSE ));
         }
     }

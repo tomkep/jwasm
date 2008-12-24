@@ -31,8 +31,6 @@
 #ifndef _MEMALLOC_H_
 #define _MEMALLOC_H_
 
-#include "walloca.h"
-
 extern void MemInit( void );
 extern void MemFini( void );
 extern void *MemAlloc( size_t size );
@@ -41,6 +39,10 @@ extern void MemFree( void *ptr );
 
 #ifdef __WATCOMC__
 #define AsmTmpAlloc( amount )   alloca( amount )
+#include <malloc.h>
+#elif defined( __GNUC__ )
+#include <malloc.h>
+#define AsmTmpAlloc( amount )   _alloca( amount )
 #else
 #define AsmTmpAlloc( amount )   _alloca( amount )
 #endif
@@ -49,6 +51,11 @@ extern void MemFree( void *ptr );
 // are to be used for all allocations which aren't "global"
 
 extern  void    *AsmAlloc( size_t );
+#if FASTMEM
+/* be careful not to use a function call as argument for AsmFree()! */
+#define AsmFree( p ) ;
+#else
 extern  void    AsmFree( void * );
+#endif
 
 #endif

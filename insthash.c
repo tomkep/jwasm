@@ -31,6 +31,7 @@
 
 #include "globals.h"
 #include "parser.h"
+#include "insthash.h"
 
 #ifdef __USE_BSD
 #define strnicmp strncasecmp
@@ -47,15 +48,15 @@ static struct ReservedWord *inst_table[ HASH_TABLE_SIZE ];
 static unsigned int hashpjw( const char *s )
 /******************************************/
 {
-    unsigned h;
-    unsigned g;
+    uint_32 h;
+    uint_32 g;
 
     for( h = 0; *s; ++s ) {
         /* ( h & ~0x0fff ) == 0 is always true here */
-        h = (h << 4) + (*s | ' ');
-        g = h & ~0x0fff;
+        h = (h << 3) + (*s | ' ');
+        g = h & ~0x1fff;
         h ^= g;
-        h ^= g >> 12;
+        h ^= g >> 13;
     }
     return( h % HASH_TABLE_SIZE );
 }
@@ -70,7 +71,8 @@ static struct ReservedWord *InstrFind( char *name )
 
     for( ; inst; inst = inst->next ) {
         /* check if the name matches the entry for this inst in AsmChars */
-        if( name[ inst->len ] == NULLC && strnicmp( name, inst->name, inst->len ) == 0) {
+//        if( name[ inst->len ] == NULLC && strnicmp( name, inst->name, inst->len ) == 0) {
+        if( name[ inst->len ] == NULLC && memicmp( name, inst->name, inst->len ) == 0) {
             return( inst );
         }
     }
@@ -88,7 +90,9 @@ static struct ReservedWord *InstrAdd( struct ReservedWord *inst )
 
     location = &inst_table[ hashpjw( buffer ) ];
 
-    for( ; *location; location = &((*location)->next) ) {
+    /* sort the items of a line by length! */
+
+    for( ; *location && (*location)->len <= inst->len; location = &((*location)->next) ) {
         /* to be safe check if the name is already in there */
         if( inst->len == (*location)->len &&
             memcmp( buffer, (*location)->name, inst->len ) == 0 ) {
@@ -131,7 +135,10 @@ void make_inst_hash_table( void )
     return;
 }
 
-// remove a reserved word.
+#if 0
+// remove a reserved word from the hash table.
+// no longer needed, there's now a flag in AsmOpCode which
+// tells whether the keyword is valid or not.
 
 struct ReservedWord *InstrRemove( char *string )
 {
@@ -153,3 +160,31 @@ struct ReservedWord *InstrRemove( char *string )
     }
     return( NULL );
 }
+#endif
+
+#ifdef DEBUG_OUT
+void DumpInstrStats( void )
+{
+    unsigned            i;
+    struct ReservedWord *inst;
+    unsigned            count = 0;
+    unsigned            max = 0;
+    unsigned            curr = 0;
+    unsigned            num[8] = {0,0,0,0,0,0,0,0};
+
+    for( i = 0; i < HASH_TABLE_SIZE; i++ ) {
+        for( inst = inst_table[i], curr = 0; inst; inst = inst->next ) {
+            curr++;
+        }
+        count += curr;
+        if ( curr <= 7 )
+            num[curr]++;
+        if (max < curr)
+            max = curr;
+    }
+    if ( Options.quiet == FALSE ) {
+        printf( "%u items in ins table, max items/line=%u\n", count, max );
+        printf( "lines with 0..7 items=%u %u %u %u %u %u %u %u\n", num[0], num[1], num[2], num[3], num[4], num[5], num[6], num[7] );
+    }
+}
+#endif

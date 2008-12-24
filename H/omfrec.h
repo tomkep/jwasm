@@ -35,7 +35,6 @@ typedef struct obj_rec      obj_rec;
 typedef struct linnum_data  linnum_data;
 typedef struct pubdef_data  pubdef_data;
 
-#include "watcom.h"
 #include "omfpc.h"
 #include "omffixup.h"
 #include "omfname.h"

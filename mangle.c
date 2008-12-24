@@ -177,7 +177,7 @@ static char *WatcomCMangler( struct asm_sym *sym, char *buffer )
 static char *CMangler( struct asm_sym *sym, char *buffer )
 /********************************************************/
 {
-    if( Options.naming_convention == ADD_USCORES ) {
+    if( Options.naming_convention == NC_ADD_USCORES ) {
         return( WatcomCMangler( sym, buffer ) );
     } else {
         return( AsmMangler( sym, buffer ) );
@@ -232,8 +232,10 @@ char *Mangle( struct asm_sym *sym, char *buffer )
         break;
     case LANG_NONE:
         mangler = sym->mangler;
+#if MANGLERSUPP
         if( mangler == NULL )
             mangler = GetMangler( Options.default_name_mangler );
+#endif
         if( mangler == NULL )
             mangler = AsmMangler;
         break;
@@ -242,6 +244,9 @@ char *Mangle( struct asm_sym *sym, char *buffer )
     return( mangler( sym, buffer ) );
 }
 
+// the "mangle_type" is an extension inherited from OW Wasm
+// accepted are "C" and "N".
+
 void SetMangler( struct asm_sym *sym, char *mangle_type, int langtype )
 /*********************************************************************/
 {
@@ -249,6 +254,7 @@ void SetMangler( struct asm_sym *sym, char *mangle_type, int langtype )
 
     if( langtype != LANG_NONE )
         sym->langtype = langtype;
+
     mangler = GetMangler( mangle_type );
     if( mangler == NULL ) {
         /* nothing to do */

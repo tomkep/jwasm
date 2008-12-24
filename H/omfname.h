@@ -24,15 +24,13 @@
 *
 *  ========================================================================
 *
-* Description:  WHEN YOU FIGURE OUT WHAT THIS FILE DOES, PLEASE
-*               DESCRIBE IT HERE!
+* Description:  interface for omfname.c. Still used?
 *
 ****************************************************************************/
 
 
 #ifndef OMFNAME_H
 #include <stddef.h>
-#include "watcom.h"
 
 typedef uint_16     name_handle;
 #define NAME_NULL   0xffff

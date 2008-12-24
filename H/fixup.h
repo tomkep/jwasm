@@ -59,8 +59,8 @@ enum fixup_options {
 struct asmfixup {
     struct asmfixup         *next1;        /* linked list backpatch */
     struct asmfixup         *next2;        /* linked list relocs */
-    unsigned long           offset;        /* symbol's offset */
-    unsigned                fixup_loc;     /* location of fixup */
+    uint_32                 offset;        /* symbol's offset */
+    uint_32                 fixup_loc;     /* location of fixup */
     enum fixup_types        type;
     enum fixup_options      fixup_option;
     unsigned loader_resolved:1;
@@ -68,7 +68,7 @@ struct asmfixup {
     union {
         struct {
             int_8           frame;          /* frame specifier (GRP,SEG,...) */
-            uint_16         frame_datum;    /* frame_datum of the fixup */
+            uint_16         frame_datum;    /* additional data, usually index */
         };
         asm_sym             *segment;       /* symbol's segment if assembly time var */
     };
@@ -76,17 +76,11 @@ struct asmfixup {
     struct asm_sym          *sym;
 };
 
-extern int_8            Frame;
-extern uint_8           Frame_Datum;
-
-extern void             find_frame( struct asm_sym *sym );
-extern struct asmfixup  *InsFixups[3];
 extern struct asmfixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
-extern void             add_frame( void );
-extern int              BackPatch( struct asm_sym *sym );
+extern ret_code         BackPatch( struct asm_sym *sym );
 extern void             mark_fixupp( OPNDTYPE determinant, int index );
 extern struct fixup     *CreateFixupRec( int index );
-extern int              store_fixup( int index );
-extern int              MakeFpFixup( struct asm_sym *sym );
+extern ret_code         store_fixup( int index );
+extern ret_code         MakeFpFixup( struct asm_sym *sym );
 
 #endif

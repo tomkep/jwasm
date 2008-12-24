@@ -1,6 +1,6 @@
 
-# the makefile creates the Linux binary of JWasm.
-# Open Watcom v1.7 is needed for the build process.
+# this makefile (WMake) creates the Linux binary of JWasm.
+# Open Watcom v1.7 is used.
 
 name = JWasm
 
@@ -37,7 +37,7 @@ extra_c_flags += -ot -s -DNDEBUG
 #########
 LOPT = op quiet
 !if $(DEBUG)
-LOPTD = debug dwarf op symfile 
+LOPTD = debug dwarf op symfile
 !endif
 
 lflagsl = $(LOPTD) sys linux $(LOPT) op map=$^*
@@ -65,7 +65,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif
-           $(OUTD)/autodept.obj $(OUTD)/context.obj
+           $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj
 ######
 
 ALL: $(OUTD) $(OUTD)/$(name)
@@ -79,12 +79,12 @@ $(OUTD)/$(name) : $(proj_obj)
 	@%append $^*.lnk name $@.
 	$(linker) @$^*.lnk
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgtext.h H/usage.h H/banner.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h
 	$(CC) msgtext.c
 
 $(OUTD)/parser.obj: parser.c H/instruct.h H/reswords.h
 	$(CC) parser.c
-    
+
 ######
 
 clean:

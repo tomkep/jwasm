@@ -39,5 +39,6 @@ extern int      Tokenize( char * , int index);
 extern int      GetTokenStateSize( void );
 extern void     SaveTokenState( unsigned char * pSave );
 extern void     RestoreTokenState( unsigned char * pSave );
+extern void     InitTokenBuffer( void );
 
 #endif

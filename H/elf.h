@@ -211,8 +211,8 @@ typedef struct {
     uint_32  st_name;        // symbol name index into string table
     uint_32  st_value;       // symbol "value"
     uint_32  st_size;        // symbol size
-    unsigned_8  st_info;        // symbol's type and binding attribs.
-    unsigned_8  st_other;       // no meaning yet.
+    uint_8   st_info;        // symbol's type and binding attribs.
+    uint_8   st_other;       // no meaning yet.
     uint_16  st_shndx;       // section index
 } Elf32_Sym;
 
@@ -259,8 +259,8 @@ typedef struct {
 // r_info field contents
 
 #define ELF32_R_SYM(i)  ((i)>>8)                // gets the symbol index
-#define ELF32_R_TYPE(i) ((unsigned_8)(i))       // gets the symbol type
-#define ELF32_R_INFO(s,t) (((s)<<8)+(unsigned_8)(t))    // make a new r_info
+#define ELF32_R_TYPE(i) ((uint_8)(i))           // gets the symbol type
+#define ELF32_R_INFO(s,t) (((s)<<8)+(uint_8)(t))    // make a new r_info
 
 // relocation types.
 //386
@@ -311,11 +311,11 @@ typedef struct {
 // note entry format
 
 typedef struct {
-    unsigned_32     n_namesz;   // length of name
-    unsigned_32     n_descsz;   // length of descriptor
-    unsigned_32     n_type;     // user defined "type" of the note
-    //char            name[];   // variable length name
-    //unsigned_32     desc[];   // descriptors go here
+    uint_32       n_namesz; // length of name
+    uint_32       n_descsz; // length of descriptor
+    uint_32       n_type;   // user defined "type" of the note
+    //char        name[];   // variable length name
+    //uint_32     desc[];   // descriptors go here
 } Elf_Note;
 
 // note types (used in core files)

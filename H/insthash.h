@@ -24,18 +24,16 @@
 *
 *  ========================================================================
 *
-* Description:  Include appropriate header defining alloca().
+* Description:  interface to instruction hash table.
 *
 ****************************************************************************/
 
 
-#ifndef WALLOCA_H_INCLUDED
-#define WALLOCA_H_INCLUDED
+#ifndef _INSTHASH_H_INCLUDED
+#define _INSTHASH_H_INCLUDED
 
-#ifdef __WATCOMC__
-    #include <malloc.h>
-#else
-    #include <stdlib.h>
-#endif
+extern void             make_inst_hash_table( void );
+extern int              get_instruction_position( char *string );
+//extern void             *InstrRemove( char * );
 
 #endif

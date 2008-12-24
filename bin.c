@@ -90,22 +90,11 @@ static void CalcOffset( dir_node *curr )
     else
         offset = curr->e.seginfo->group->offset;
 
-    switch (curr->e.seginfo->segrec->d.segdef.align) {
-    case SEGDEF_ALIGN_PAGE:
-        align = 256;
-        break;
-    case SEGDEF_ALIGN_PARA:
-        align = 16;
-        break;
-    case SEGDEF_ALIGN_DWORD:
-        align = 4;
-        break;
-    case SEGDEF_ALIGN_WORD:
-        align = 2;
-        break;
-    default:
+    if ( curr->e.seginfo->alignment == -1 )
         align = 1;
-    }
+    else
+        align = 1 << curr->e.seginfo->alignment;
+
     alignbytes = ((offset + (align - 1)) & (-align)) - offset;
     fileoffset += alignbytes;
     offset += alignbytes + curr->e.seginfo->start_loc;

@@ -24,28 +24,29 @@
 *
 *  ========================================================================
 *
-* Description:  Open Watcom banner strings and version defines.
+* Description:  uint and int type declarations
 *
 ****************************************************************************/
 
-#define _BETA_ "pre"
+#ifndef _INTTYPE_H_INCLUDED_
+#define _INTTYPE_H_INCLUDED_
 
-#define banner1p1(p)  p
-#define banner1p2(v)  "Version " v
-#define banner1(p,v) banner1p1(p) " "
-#define banner1w(p,v) "JWasm v" v ", " __DATE__ ", Masm-compatible assembler."
+typedef unsigned        uint;
 
-#define banner2p1(year) "Portions Copyright (c) " year "-2002 Sybase, Inc. All Rights Reserved"
-#define banner2p2() ""
-#define banner2(year) banner2p1(year) "."
+typedef unsigned char   uint_8;
+typedef signed char     int_8;
+typedef unsigned short  uint_16;
+typedef signed short    int_16;
+#if defined (LONG_IS_64BITS)
+typedef unsigned int    uint_32;
+typedef   signed int    int_32;
+typedef unsigned long   uint_64;
+typedef   signed long   int_64;
+#else
+typedef unsigned long      uint_32;
+typedef   signed long      int_32;
+typedef unsigned long long uint_64;
+typedef   signed long long int_64;
+#endif
 
-#define banner2a() "Portions Copyright (c) 1984-2002 Sybase, Inc. All Rights Reserved."
-
-#define banner3       "Source code is available under the Sybase Open Watcom Public License."
-#define banner3a      ""
-
-#define BAN_VER_STR "1.93" _BETA_
-
-#define _JWASM_VERSION_ BAN_VER_STR
-#define _JWASM_VERSION_INT_ 193
-
+#endif

@@ -43,14 +43,13 @@
 
 #include "globals.h"
 #include "parser.h"
+#include "insthash.h"
 #include "expreval.h"
 #include "myassert.h"
 #include "directiv.h"
+#include "listing.h"
 
-extern int              get_instruction_position( char *string );
 extern bool SkipMacroMode;
-
-#define    MAX_NESTING  20
 
 /*
  the current if-block can be in one of 4 states:
@@ -77,9 +76,6 @@ bool inside_comment;
 static char delim_char;
 
 // fixme char *IfSymbol;        /* save symbols in IFDEF's so they don't get expanded */
-
-#define is_valid_id_char( ch ) \
-    ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
 static int StartComment( char * p )
 /***********************************/
@@ -126,7 +122,7 @@ void conditional_assembly_prepare( char *line )
             DebugMsg(("COMMENT mode exited\n"));
             inside_comment = FALSE;
         }
-        *line = '\0';
+        *line = NULLC;
         return;
     }
 
@@ -139,7 +135,7 @@ void conditional_assembly_prepare( char *line )
         while (isspace(*ptr)) ptr++;
     }
 
-    if( *ptr == '\0' )
+    if( *ptr == NULLC )
         return;
     end = ptr;
     while ( is_valid_id_char( *end )) ++end;
@@ -150,20 +146,21 @@ void conditional_assembly_prepare( char *line )
         while ( is_valid_id_char( *end )) ++end;
     }
     fix = *end;
-    *end = '\0';
+    *end = NULLC;
 
 //    DebugMsg(("conditional_assembly_prepare IFx (%s)\n", ptr));
 
     count = get_instruction_position( ptr );
     *end = fix;
     if( count == EMPTY ||
-        AsmOpTable[count].opnd_type[0] != OP_SPECIAL ||
+        ( ( AsmOpTable[count].opnd_type[0] & OP_SPECIAL) == 0 ) ||
         AsmOpTable[count].rm_byte != OP_DIRECTIVE ||
-        (AsmOpTable[count].opcode & 2) == 0) {
+        ( AsmOpTable[count].opcode & DF_CONDDIR ) == 0) {
         /* it's not a conditional directive or COMMENT */
         if(( CurrIfState == BLOCK_INACTIVE ) || ( CurrIfState == BLOCK_DONE ) ) {
             DebugMsg(("suppressed: >%s<\n", line));
-            *line = '\0';
+            if ( ModuleInfo.listif ) LstWriteSrcLine();
+            *line = NULLC;
         }
         return;
     }
@@ -172,7 +169,7 @@ void conditional_assembly_prepare( char *line )
     case T_COMMENT:
         StartComment( end );
         DebugMsg(("COMMENT starting, delim is >%c<\n", delim_char));
-        *line = '\0';
+        *line = NULLC;
         return;
     case T_IF:
     case T_IF1:
@@ -191,7 +188,8 @@ void conditional_assembly_prepare( char *line )
          */
         if( CurrIfState == BLOCK_INACTIVE || CurrIfState == BLOCK_DONE ) {
             falseblocknestlevel++;
-            *line = '\0';
+            if ( ModuleInfo.listif ) LstWriteSrcLine();
+            *line = NULLC;
         } else {
             CurrIfState = COND_CHECK;
         }
@@ -229,9 +227,10 @@ void conditional_assembly_prepare( char *line )
     case T_ELSEIFNB:
     case T_ELSEIFNDEF:
     case T_ELSE:
-        if (falseblocknestlevel > 0)
-            *line = '\0';
-        else if (CurrIfState == BLOCK_INACTIVE || CurrIfState == COND_CHECK)
+        if (falseblocknestlevel > 0) {
+            if ( ModuleInfo.listif ) LstWriteSrcLine();
+            *line = NULLC;
+        } else if (CurrIfState == BLOCK_INACTIVE || CurrIfState == COND_CHECK)
             /* the block might become active */
             /* expansion must "run" */
             CurrIfState = COND_CHECK;
@@ -240,7 +239,8 @@ void conditional_assembly_prepare( char *line )
             /* in any case this block is DONE then */
             /* don't run expansion! */
             CurrIfState = BLOCK_DONE;
-            *line = '\0';
+            if ( ModuleInfo.listif ) LstWriteSrcLine();
+            *line = NULLC;
         }
 #ifdef DEBUG_OUT
         {
@@ -266,12 +266,13 @@ void conditional_assembly_prepare( char *line )
     case T_ENDIF:
         if (falseblocknestlevel > 0) {
             falseblocknestlevel--;
-            *line = '\0';
+            if ( ModuleInfo.listif ) LstWriteSrcLine();
+            *line = NULLC;
         }
         DebugMsg(("conditional_assembly_prepare ENDIF: state=%u, level=%u, falselevel=%u\n", CurrIfState, blocknestlevel, falseblocknestlevel));
         break;
     default:
-        *end = '\0';
+        *end = NULLC;
         DebugMsg(("conditional_assembly_prepare: unknown directive %s\n", ptr));
         AsmErr( UNKNOWN_DIRECTIVE, ptr);
     }
@@ -288,11 +289,11 @@ static bool check_defd( char *string )
     /* isolate 1st word */
     ptr = string + strspn( string, " \t" );
     end = ptr + strcspn( ptr, " \t" );
-    *end = '\0';
+    *end = NULLC;
 
     /* there might be no argument at all, which is valid syntax
       and should return FALSE */
-    if (*ptr == '\0')
+    if ( *ptr == NULLC )
         return(FALSE);
 
     sym = SymSearch( ptr );
@@ -327,10 +328,15 @@ static bool check_dif( bool sensitive, char *string, char *string2 )
     }
 }
 
-int conditional_assembly_directive( int i, int directive )
+ret_code conditional_assembly_directive( int i, int directive )
 /*****************************************/
 {
     expr_list opndx;
+
+    if (ModuleInfo.list == TRUE) {
+        if ( MacroLevel == 0 || ModuleInfo.list_macro == LM_LISTMACROALL )
+            LstWrite( LSTTYPE_MACRO, 0, NULL );
+    }
 
     switch( CurrIfState ) {
     case COND_CHECK:
@@ -350,7 +356,7 @@ int conditional_assembly_directive( int i, int directive )
         case T_IFNDEF:
             CurrIfState = BLOCK_ACTIVE;
             blocknestlevel++;
-            if( blocknestlevel > MAX_NESTING ) {
+            if( blocknestlevel > MAX_IF_NESTING ) {
                 blocknestlevel -= 1;
                 AsmError( NESTING_LEVEL_TOO_DEEP );
                 return( ERROR );
@@ -523,7 +529,7 @@ int conditional_assembly_directive( int i, int directive )
     return( NOT_ERROR );
 }
 
-int conditional_error_directive( int i )
+ret_code conditional_error_directive( int i )
 /**************************************/
 {
     expr_list opndx;
@@ -705,13 +711,13 @@ int conditional_error_directive( int i )
     return( NOT_ERROR );
 }
 
-int CheckForOpenConditionals( void )
+ret_code CheckForOpenConditionals( void )
 {
     if( blocknestlevel > 0 ) {
-        AsmErr( UNCLOSED_CONDITIONALS, blocknestlevel );
-        return(ERROR);
+        AsmErr( BLOCK_NESTING_ERROR, "if-else" );
+        return( ERROR );
     }
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 // init (called once per module)

@@ -14,21 +14,15 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
+#include "insthash.h"
 #include "symbols.h"
 #include "directiv.h"
+#include "expreval.h"
 
 #include "myassert.h"
 
 /* prototypes */
 extern asm_sym          *sym_Interface;
-extern void             *InstrRemove( char * );
-extern int              get_instruction_position( char *string );
-
-enum {
-#undef fix
-#define fix( tok, str, val, init )              tok
-#include "dirtoken.h"
-};
 
 typedef struct _option {
     char *name;
@@ -42,6 +36,7 @@ typedef struct _option {
 static int SetDotName(int *pi)
 {
     /* AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[(*pi)-1]->string_ptr ); */
+    ModuleInfo.dotname = TRUE;
     return(NOT_ERROR);
 }
 
@@ -49,7 +44,8 @@ static int SetDotName(int *pi)
 
 static int SetNoDotName(int *pi)
 {
-    AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[(*pi)-1]->string_ptr );
+    //AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[(*pi)-1]->string_ptr );
+    ModuleInfo.dotname = FALSE;
     return( NOT_ERROR );
 }
 
@@ -65,18 +61,22 @@ static int SetCaseMap(int *pi)
     }
     i++;
     if (AsmBuffer[i]->token == T_ID) {
-        if (0 == stricmp(AsmBuffer[i]->string_ptr,"NONE")) {
-            ModuleInfo.nocasemap = TRUE;
-            SymSetCmpFunc(TRUE);
-            i++;
-        } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"NOTPUBLIC")) {
-            AsmWarn( 2, IGNORING_DIRECTIVE, AsmBuffer[i]->string_ptr );
-            i++;
-        } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"ALL")) {
-            ModuleInfo.nocasemap = FALSE;
-            SymSetCmpFunc(FALSE);
-            i++;
+        if ( 0 == stricmp(AsmBuffer[i]->string_ptr,"NONE") ) {
+            ModuleInfo.case_sensitive = TRUE;        /* -Cx */
+            ModuleInfo.convert_uppercase = FALSE;
+        } else if ( 0 == stricmp(AsmBuffer[i]->string_ptr,"NOTPUBLIC") ) {
+            ModuleInfo.case_sensitive = FALSE;       /* -Cp */
+            ModuleInfo.convert_uppercase = FALSE;
+        } else if ( 0 == stricmp(AsmBuffer[i]->string_ptr,"ALL") ) {
+            ModuleInfo.case_sensitive = FALSE;       /* -Cu */
+            ModuleInfo.convert_uppercase = TRUE;
+        } else {
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            return( ERROR );
         }
+        DebugMsg(("SetCaseMap(%s) ok\n", AsmBuffer[i]->string_ptr ));
+        i++;
+        SymSetCmpFunc();
     } else {
         AsmError( SYNTAX_ERROR );
         return( ERROR );
@@ -226,15 +226,10 @@ static int SetNoKeyword(int *pi)
             j = get_instruction_position(buffer);
             if (j == EMPTY) {
                 AsmError( RESERVED_WORD_EXPECTED );
-                return(ERROR);
+                return( ERROR );
             }
-            /* it's valid to remove a reserved word twice! */
-            if (AsmOpTable[j].opnd_type[0] == OP_SPECIAL) {
-                instruct = (struct asm_ins *)&AsmOpTable[j];
-                /* once the word is removed, it can't be restored! */
-                instruct->specialtype = OP_UNUSED;
-            } else
-                InstrRemove(buffer);
+            /* it's valid to disable a reserved word twice! */
+            AsmOpTable[j].disabled = TRUE;
         }
         while (isspace(*p)) p++;
         if (*p == ',') p++;
@@ -249,6 +244,7 @@ static int SetNoKeyword(int *pi)
 static int SetLanguage(int *pi)
 {
     int i = *pi;
+    lang_type langtype;
     int language = ERROR;
 
     if (AsmBuffer[i]->token != T_COLON) {
@@ -256,22 +252,17 @@ static int SetLanguage(int *pi)
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token == T_RES_ID)
-        language = token_cmp( AsmBuffer[i]->string_ptr, TOK_PROC_BASIC, TOK_PROC_SYSCALL );
-
-    if (language == ERROR) {
-        AsmError( SYNTAX_ERROR );
-        return( ERROR );
+    if (AsmBuffer[i]->token == T_RES_ID) {
+        if ( GetLangType( &i, &ModuleInfo.langtype ) == NOT_ERROR ) {
+            /* update @Interface assembly time variable */
+            if (sym_Interface)
+                sym_Interface->value = ModuleInfo.langtype;
+            *pi = i;
+            return( NOT_ERROR );
+        }
     }
-
-    ModuleInfo.langtype = TypeInfo[language].value;
-    /* update @Interface assembly time variable */
-    if (sym_Interface)
-        sym_Interface->value = ModuleInfo.langtype;
-
-    i++;
-    *pi = i;
-    return(NOT_ERROR);
+    AsmError( SYNTAX_ERROR );
+    return( ERROR );
 }
 
 /* OPTION SETIF2 */
@@ -322,7 +313,7 @@ static int SetSetIF2(int *pi)
 static int SetPrologue(int *pi)
 {
     int i = *pi;
-    char * name = (char *)-1;
+    char * name;
     asm_sym * sym;
 
     if (AsmBuffer[i]->token != T_COLON) {
@@ -339,15 +330,11 @@ static int SetPrologue(int *pi)
     } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"PROLOGUEDEF")) {
         name = "";
     } else {
-        sym = SymSearch(AsmBuffer[i]->string_ptr);
-        if ((sym != NULL) && (sym->state == SYM_MACRO) &&
-            (sym->isfunc == TRUE))
-            name = sym->name;
+        name = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1);
+        strcpy( name, AsmBuffer[i]->string_ptr );
     }
-    if (name == (char *)-1) {
-        AsmError( PROLOGUE_MUST_BE_MACRO_FUNC );
-        return( ERROR );
-    }
+    if ( ModuleInfo.proc_prologue && *ModuleInfo.proc_prologue )
+        AsmFree( ModuleInfo.proc_prologue );
 
     ModuleInfo.proc_prologue = name;
     i++;
@@ -356,6 +343,9 @@ static int SetPrologue(int *pi)
 }
 
 /* OPTION EPILOGUE:macroname */
+/*
+ do NOT check the macros here!
+ */
 
 static int SetEpilogue(int *pi)
 {
@@ -377,15 +367,13 @@ static int SetEpilogue(int *pi)
     } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"EPILOGUEDEF")) {
         name = "";
     } else {
-        sym = SymSearch(AsmBuffer[i]->string_ptr);
-        if ((sym != NULL) && (sym->state == SYM_MACRO) &&
-            (sym->isfunc == FALSE))
-            name = sym->name;
+        name = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1);
+        strcpy( name, AsmBuffer[i]->string_ptr );
     }
-    if (name == (char *)-1) {
-        AsmError( EPILOGUE_MUST_BE_MACRO_PROC );
-        return( ERROR );
-    }
+
+    if ( ModuleInfo.proc_epilogue && *ModuleInfo.proc_epilogue )
+        AsmFree( ModuleInfo.proc_epilogue );
+
     ModuleInfo.proc_epilogue = name;
     i++;
     *pi = i;
@@ -469,22 +457,97 @@ static int SetSegment(int *pi)
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token == T_RES_ID) {
-        if (AsmBuffer[i]->value == T_USE16) {
-            ModuleInfo.defUse32 = FALSE;
-            i++;
-        } else if (AsmBuffer[i]->value == T_USE32 ||
-                   AsmBuffer[i]->value == T_FLAT) {
-            ModuleInfo.defUse32 = TRUE;
-            i++;
-        }
+    if ( AsmBuffer[i]->token == T_RES_ID && AsmBuffer[i]->value == T_FLAT ) {
+        ModuleInfo.defUse32 = TRUE;
+    } else if ( AsmBuffer[i]->token == T_ID && stricmp( AsmBuffer[i]->string_ptr, "USE16") == 0) {
+        ModuleInfo.defUse32 = FALSE;
+    } else if ( AsmBuffer[i]->token == T_ID && stricmp( AsmBuffer[i]->string_ptr, "USE16") == 0) {
+        ModuleInfo.defUse32 = TRUE;
     } else {
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
+    i++;
     *pi = i;
     return(NOT_ERROR);
 }
+
+#if FIELDALIGN
+/* OPTION FIELDALIGN:1|2|4|8|16|32 */
+
+static int SetFieldAlign(int *pi)
+{
+    int i = *pi;
+    int temp, temp2;
+    expr_list opndx;
+
+    if ( Options.strict_masm_compat ) {
+        (*pi)--;
+        return( NOT_ERROR );
+    }
+    if (AsmBuffer[i]->token != T_COLON) {
+        AsmError( COLON_EXPECTED );
+        return( ERROR );
+    }
+    i++;
+    if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+        return( ERROR );
+    if ( opndx.type != EXPR_CONST || opndx.string != NULL ) {
+        AsmError( CONSTANT_EXPECTED );
+        return( ERROR );
+    }
+    if( opndx.value > MAX_STRUCT_ALIGN ) {
+        AsmError( STRUCT_ALIGN_TOO_HIGH );
+        return( ERROR );
+    }
+    for( temp = 1, temp2 = 0; temp < opndx.value ; temp <<= 1, temp2++ );
+    if( temp != opndx.value ) {
+        AsmError( POWER_OF_2 );
+        return( ERROR );
+    }
+    ModuleInfo.fieldalign = temp2;
+    *pi = i;
+    return( NOT_ERROR );
+}
+#endif
+
+#if PROCALIGN
+/* OPTION PROCALIGN:1|2|4|8|16|32 */
+
+static int SetProcAlign(int *pi)
+{
+    int i = *pi;
+    int temp, temp2;
+    expr_list opndx;
+
+    if ( Options.strict_masm_compat ) {
+        (*pi)--;
+        return( NOT_ERROR );
+    }
+    if (AsmBuffer[i]->token != T_COLON) {
+        AsmError( COLON_EXPECTED );
+        return( ERROR );
+    }
+    i++;
+    if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+        return( ERROR );
+    if ( opndx.type != EXPR_CONST || opndx.string != NULL ) {
+        AsmError( CONSTANT_EXPECTED );
+        return( ERROR );
+    }
+    if( opndx.value > MAX_STRUCT_ALIGN ) {
+        AsmError( STRUCT_ALIGN_TOO_HIGH );
+    }
+    for( temp = 1, temp2 = 0; temp < opndx.value ; temp <<= 1, temp2++ );
+    if( temp != opndx.value ) {
+        AsmError( POWER_OF_2 );
+        return( ERROR );
+    }
+    ModuleInfo.procalign = temp2;
+    *pi = i;
+    return(NOT_ERROR);
+}
+#endif
 
 static int Unsupported(int *pi)
 {
@@ -524,6 +587,12 @@ static option optiontab[] = {
     "SETIF2",       SetSetIF2,
     "OFFSET",       SetOffset,
     "SEGMENT",      SetSegment,
+#if FIELDALIGN
+    "FIELDALIGN",   SetFieldAlign,
+#endif
+#if PROCALIGN
+    "PROCALIGN",    SetProcAlign,
+#endif
     NULL
 };
 
