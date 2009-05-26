@@ -28,7 +28,6 @@
 *
 ****************************************************************************/
 
-
 #include <ctype.h>
 
 #include "globals.h"
@@ -62,9 +61,8 @@
 #define ONEXMM 1
 
 /* prototypes */
-extern const FNAME      *AddFlist( char const *filename );
-
 extern void             set_def_seg_name( void );
+extern ret_code         process_address( expr_list * );
 
 #define INIT_MODEL      0x1
 #define INIT_LANG       0x2
@@ -81,6 +79,7 @@ static typeinfo ModelInfo[] = {
     { "FLAT",         MOD_FLAT,       INIT_MODEL      }
 };
 #if 0
+// not needed. see GetLangType()
 static typeinfo LangInfo[] = {
     { "BASIC",        LANG_BASIC,     INIT_LANG       },
     { "FORTRAN",      LANG_FORTRAN,   INIT_LANG       },
@@ -91,7 +90,7 @@ static typeinfo LangInfo[] = {
     { "SYSCALL",      LANG_SYSCALL,   INIT_LANG       }
 };
 #else
-static typeinfo LangInfo = { NULL, 0, INIT_LANG }; /* this is a dummy entry */
+static typeinfo dmyLang = { NULL, 0, INIT_LANG };
 #endif
 static typeinfo StackInfo[] = {
     { "NEARSTACK",    STACK_NEAR,     INIT_STACK      },
@@ -175,8 +174,8 @@ static asm_sym *sym_Model     ; /* numeric */
 
 #ifdef DEBUG_OUT
 #ifdef __WATCOMC__
-/* the C heap isn't really used anymore due to speed issues. */
-/* so this heap check function has become pretty useless */
+/* the C heap is used for line queues only - due to speed issues. */
+/* so this heap check function has become less useful. */
 void heap( char *func )
 /*********************/
 {
@@ -194,7 +193,7 @@ void heap( char *func )
 #endif
 #endif
 
-void push( void *stk, void *elt )
+void pushitem( void *stk, void *elt )
 /*******************************/
 {
     void        **stack = stk;
@@ -206,7 +205,7 @@ void push( void *stk, void *elt )
     *stack = node;
 }
 
-void *pop( void *stk )
+void *popitem( void *stk )
 /********************/
 {
     void        **stack = stk;
@@ -220,7 +219,8 @@ void *pop( void *stk )
     return( elt );
 }
 
-void *peek( void *stk, int level )
+#if 0
+void *peekitem( void *stk, int level )
 /********************/
 {
     stacknode   *node = (stacknode *)(stk);
@@ -234,14 +234,16 @@ void *peek( void *stk, int level )
     else
         return( NULL );
 }
+#endif
 
-void dir_add( dir_node *new )
-/*******************************************/
+void dir_add_table( dir_node *new )
+/****************************/
 {
     /* put the new entry into the queue for its type of symbol */
     int tab;
 
     switch( new->sym.state ) {
+    case SYM_UNDEFINED:tab = TAB_UNDEF;break;
     case SYM_SEG:     tab = TAB_SEG;   break;
     case SYM_GRP:     tab = TAB_GRP;   break;
     case SYM_EXTERNAL:tab = TAB_EXT;   break;
@@ -263,18 +265,19 @@ void dir_add( dir_node *new )
     }
 }
 
-static void dir_remove( dir_node *dir )
-/******************************************/
+void dir_remove_table( dir_node *dir )
+/*************************************/
 {
     int tab;
 
     switch( dir->sym.state ) {
-    case SYM_SEG:        tab = TAB_SEG;   break;
-    case SYM_GRP:        tab = TAB_GRP;   break;
+    case SYM_UNDEFINED:  tab = TAB_UNDEF; break;
     case SYM_EXTERNAL:   tab = TAB_EXT;   break;
-    case SYM_PROC:       tab = TAB_PROC;  break;
-    case SYM_ALIAS:      tab = TAB_ALIAS; break;
-    case SYM_LIB:        tab = TAB_LIB;   break;
+    case SYM_PROC:       tab = TAB_PROC;  break; /* shouldn't happen */
+    case SYM_SEG:        tab = TAB_SEG;   break; /* shouldn't happen */
+    case SYM_GRP:        tab = TAB_GRP;   break; /* shouldn't happen */
+    case SYM_ALIAS:      tab = TAB_ALIAS; break; /* shouldn't happen */
+    case SYM_LIB:        tab = TAB_LIB;   break; /* shouldn't happen */
     default:
         return;
     }
@@ -298,7 +301,7 @@ static void dir_remove( dir_node *dir )
 
 
 static void dir_init( dir_node *dir, int type )
-/********************************************/
+/*********************************************/
 /* Change node and insert it into the table specified by tab */
 {
     switch( type ) {
@@ -333,10 +336,10 @@ static void dir_init( dir_node *dir, int type )
     case SYM_GRP:
         dir->sym.state = SYM_GRP;
         dir->e.grpinfo = AsmAlloc( sizeof( grp_info ) );
-        dir->e.grpinfo->idx = 0;
         dir->e.grpinfo->seglist = NULL;
-        dir->e.grpinfo->numseg = 0;
+        dir->e.grpinfo->idx = 0;
         dir->e.grpinfo->lname_idx = 0;
+        dir->e.grpinfo->numseg = 0;
         break;
     case SYM_TYPE:
         dir->sym.state = SYM_TYPE;
@@ -352,7 +355,7 @@ static void dir_init( dir_node *dir, int type )
         /**/myassert( 0 );
         return;
     }
-    dir_add( dir );
+    dir_add_table( dir );
     return;
 }
 
@@ -391,7 +394,7 @@ dir_node *dir_insert_ex( const char *name, int tab )
 void dir_free( dir_node *dir, bool remove )
 /****************************/
 {
-    int i;
+//    int i;
 
     switch( dir->sym.state ) {
     case SYM_GRP:
@@ -459,14 +462,23 @@ void dir_free( dir_node *dir, bool remove )
         break;
     }
     if ( remove == TRUE)
-        dir_remove( dir);
+        dir_remove_table( dir );
 }
 
-void dir_change( dir_node *dir, int type )
+void dir_internal( dir_node *dir )
 /***************************************/
-/* Change node type */
+/* Change node type from SYM_EXTERNAL + sym->weak=1 to SYM_INTERNAL */
 {
-    dir_free( dir, TRUE );
+    dir_remove_table( dir );
+    dir->sym.first_size = 0;
+    dir->sym.state = SYM_INTERNAL;
+}
+
+void dir_settype( dir_node *dir, int type )
+/***************************************/
+/* Change node type from SYM_UNDEFINED to anything else */
+{
+    dir_remove_table( dir );
     dir_init( dir, type );
 }
 
@@ -534,15 +546,11 @@ int SizeFromMemtype( memtype type, bool is32 )
     case MT_FAR:
         return ((is32 ? 4 : 2) + 2);
     case MT_PROC:
-        size = ( Use32 ?  4 : 2);
-        if( ModuleInfo.model == MOD_MEDIUM ||
-            ModuleInfo.model == MOD_LARGE ||
-            ModuleInfo.model == MOD_HUGE )
-            size += 2;      /* add segment for far code pointers */
-        return( size );
+        return( ( ModuleInfo.Use32 ? 4 : 2) +
+                ( SimpleType[ST_PROC].mem_type == MT_FAR ? 2 : 0 ) );
     case MT_PTR:
         /* first determine offset size */
-        size = ( Use32 ?  4 : 2);
+        size = ( ModuleInfo.Use32 ?  4 : 2);
         if( (ModuleInfo.model == MOD_COMPACT)
          || (ModuleInfo.model == MOD_LARGE)
          || (ModuleInfo.model == MOD_HUGE) ) {
@@ -580,17 +588,6 @@ ret_code EchoDirective( int i )
     return( NOT_ERROR );
 }
 
-// set Masm v5.1 compatibility options
-
-void SetMasm510(bool value)
-{
-    ModuleInfo.m510 = value;
-    ModuleInfo.scoped = !value;
-    ModuleInfo.oldstructs = value;
-    ModuleInfo.setif2 = value;
-    return;
-}
-
 /*
  find token in a 'typeinfo' table
  */
@@ -598,7 +595,7 @@ void SetMasm510(bool value)
 typeinfo *FindToken( char *token, typeinfo *table, int size )
 {
     for( ; size; size--, table++ ) {
-        if( stricmp( table->string, token ) == 0 ) {
+        if( _stricmp( table->string, token ) == 0 ) {
             return( table );
         }
     }
@@ -642,10 +639,10 @@ static ret_code IncludeLibDirective( int i )
      includelib <kernel32.lib>
      includelib <KERNEL32.LIB>
      then 2 defaultlib entries are added. If this is to be changed for
-     JWasm, activate the stricmp() below.
+     JWasm, activate the _stricmp() below.
      */
     for (dir = Tables[TAB_LIB].head; dir ; dir = dir->next ) {
-        //if ( stricmp( dir->sym.name, name) == 0)
+        //if ( _stricmp( dir->sym.name, name) == 0)
         if ( strcmp( dir->sym.name, name ) == 0)
             return( NOT_ERROR );
     }
@@ -653,7 +650,7 @@ static ret_code IncludeLibDirective( int i )
     if ( sym == NULL )
         return( ERROR );
     sym->state = SYM_LIB;
-    dir_add( (dir_node *)sym );
+    dir_add_table( (dir_node *)sym );
 
     return( NOT_ERROR );
 }
@@ -665,7 +662,7 @@ static ret_code IncBinDirective( int i )
 /******************/
 {
     FILE *file;
-    int size;
+    //int size;
     uint fileoffset = 0;
     uint sizemax = -1;
     expr_list opndx;
@@ -698,9 +695,9 @@ static ret_code IncBinDirective( int i )
         i++;
         if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
             return( ERROR );
-        if ( opndx.type == EXPR_CONST && opndx.string == NULL ) {
+        if ( opndx.kind == EXPR_CONST && opndx.string == NULL ) {
             fileoffset = opndx.value;
-        } else if ( opndx.type != EXPR_EMPTY ) {
+        } else if ( opndx.kind != EXPR_EMPTY ) {
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
@@ -708,9 +705,9 @@ static ret_code IncBinDirective( int i )
             i++;
             if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
                 return( ERROR );
-            if ( opndx.type == EXPR_CONST && opndx.string == NULL ) {
+            if ( opndx.kind == EXPR_CONST && opndx.string == NULL ) {
                 sizemax = opndx.value;
-            } else if ( opndx.type != EXPR_EMPTY ) {
+            } else if ( opndx.kind != EXPR_EMPTY ) {
                 AsmError( CONSTANT_EXPECTED );
                 return( ERROR );
             }
@@ -748,14 +745,19 @@ static ret_code StartupExitDirective( int i )
 /******************/
 {
     int         count;
+    int         j;
     char        **p;
     char        *buffer = StringBufferEnd;
+    expr_list   opndx;
+
+    if ( ModuleInfo.list )
+        LstWriteSrcLine();
 
     if( ModuleInfo.model == MOD_NONE ) {
         AsmError( MODEL_IS_NOT_DECLARED );
         return( ERROR );
     }
-    if ( Use32 ) {
+    if ( ModuleInfo.Use32 ) {
         AsmErr( DOES_NOT_WORK_WITH_32BIT_SEGMENTS, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
@@ -801,13 +803,21 @@ static ret_code StartupExitDirective( int i )
             p = ExitOS2;
             count = sizeof( ExitOS2) / sizeof( char * );
         }
+        j = i;
         i++;
-        if( ( AsmBuffer[i]->string_ptr != NULL )
-            && ( *(AsmBuffer[i]->string_ptr) != '\0' ) ) {
-            if( ModuleInfo.ostype == OPSYS_DOS ) {
-                sprintf( buffer, "mov ax,4C00h+(%s and 0FFh)", AsmBuffer[i]->string_ptr);
+        if ( AsmBuffer[i]->token != T_FINAL ) {
+            if( ModuleInfo.ostype == OPSYS_OS2 ) {
+                sprintf( buffer, "mov ax,%s", AsmBuffer[j]->pos + 5);
             } else {
-                sprintf( buffer, "mov ax, %s", AsmBuffer[i]->string_ptr);
+                if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+                    return( ERROR );
+                if ( opndx.kind == EXPR_CONST && opndx.value < 0x100 && AsmBuffer[i]->token == T_FINAL ) {
+                    sprintf( buffer, "mov ax,4C%02Xh", opndx.value );
+                } else {
+                    sprintf( buffer, "mov al,%s", AsmBuffer[j]->pos + 5);
+                    AddLineQueue( buffer );
+                    strcpy( buffer, "mov ah,4Ch" );
+                }
             }
             AddLineQueue( buffer );
             p++;
@@ -818,14 +828,16 @@ static ret_code StartupExitDirective( int i )
         }
         break;
     }
+
     RunLineQueue();
+
     return( NOT_ERROR );
 }
 
 static asm_sym * AddPredefinedConstant( char *name, int value)
 /*******************************************************/
 {
-    asm_sym * sym = CreateConstant(name, value, -1, TRUE);
+    asm_sym * sym = CreateConstantEx( name, value );
     if (sym)
         sym->predefined = TRUE;
     return(sym);
@@ -846,16 +858,22 @@ static void AddPredefinedText( char *name, char *value)
 
 // called by ModelDirective()
 
-static void module_prologue( int type )
+static void module_prologue()
 /*************************************/
 /* Generates codes for .MODEL; based on optasm pg.142-146 */
 {
     int         value;
     char        *textvalue;
-    asm_sym     *sym;
+    //asm_sym     *sym;
+
+    /* if model is set, it disables OT_SEGMENT of -Zm switch */
+    if ( ModuleInfo.model == MOD_FLAT )
+        ModuleInfo.offsettype = OT_FLAT;
+    else
+        ModuleInfo.offsettype = OT_GROUP;
 
     PushLineQueue();
-    SegmentModulePrologue(type);
+    SegmentModuleInit( ModuleInfo.model ); /* create segments in first pass */
     ModelAssumeInit();
 
     if ( ModuleInfo.list )
@@ -867,21 +885,23 @@ static void module_prologue( int type )
         return;
 
     /* Set @CodeSize */
-    switch( type ) {
+    switch( ModuleInfo.model ) {
     case MOD_MEDIUM:
     case MOD_LARGE:
     case MOD_HUGE:
         value = 1;
+        SimpleType[ST_PROC].mem_type = MT_FAR;
         break;
     default:
         value = 0;
+        // SimpleType[ST_PROC].mem_type = MT_NEAR; /* this is default */
         break;
     }
     sym_CodeSize = AddPredefinedConstant( "@CodeSize", value );
     AddPredefinedText( "@code", Options.text_seg);
 
     /* Set @DataSize */
-    switch( type ) {
+    switch( ModuleInfo.model ) {
     case MOD_COMPACT:
     case MOD_LARGE:
         value = 1;
@@ -895,7 +915,7 @@ static void module_prologue( int type )
     }
     sym_DataSize = AddPredefinedConstant( "@DataSize", value );
 
-    if (type == MOD_FLAT)
+    if ( ModuleInfo.model == MOD_FLAT )
         textvalue = "FLAT";
     else
         textvalue = "DGROUP";
@@ -920,7 +940,7 @@ static void get_module_name( void )
 
     /**/myassert( FileInfo.fname[ASM] != NULL );
     _splitpath( FileInfo.fname[ASM], NULL, NULL, ModuleInfo.name, dummy );
-    strupr( ModuleInfo.name );
+    _strupr( ModuleInfo.name );
     for( p = ModuleInfo.name; *p != '\0'; ++p ) {
         if( !( isalnum( *p ) || ( *p == '_' ) || ( *p == '$' )
             || ( *p == '@' ) || ( *p == '?') ) ) {
@@ -947,18 +967,16 @@ void ModuleInit( void )
     ModuleInfo.ostype = OPSYS_DOS;
 
     ModuleInfo.emulator = (Options.floating_point == FPO_EMULATION);
-    SetMasm510( Options.masm51_compat );
     ModuleInfo.flatgrp_idx = 0;
 
-    get_module_name();
-
-    // add source file to autodependency list
-    ModuleInfo.srcfile = AddFlist( FileInfo.fname[ASM] );
+    get_module_name(); /* set ModuleInfo.name */
 
     StartupDirectiveFound = FALSE;
 
-    memset(Tables, 0, sizeof(Tables));
+    SimpleType[ST_PROC].mem_type = MT_NEAR;
 
+    memset(Tables, 0, sizeof(Tables));
+    return;
 }
 
 #if 0
@@ -977,8 +995,8 @@ void MakeConstantUnderscored( int token )
     strcpy( buffer, "__" );
     GetInsString( (enum asm_token)token, buffer+2, 18 );
     strcat( buffer, "__" );
-    strupr( buffer );
-    CreateConstant( buffer, 1, -1, TRUE );
+    _strupr( buffer );
+    CreateConstantEx( buffer, 1 );
     return;
 }
 #endif
@@ -997,16 +1015,16 @@ static ret_code SetUse32Default( bool flag )
 }
 
 // handle .model directive
+// syntax: .MODEL <FLAT|TINY|SMALL...> [,<C|PASCAL|STDCALL...>][,<NEARSTACK|FARSTACK>][,<OS_DOS|OS_OS2>]
 
 static ret_code ModelDirective( int i )
 /****************/
 {
-    char        *token;
-    int         initstate = 0;
     typeinfo    *type;           // type of option
+    uint_16 init;
 
     if( Parse_Pass != PASS_1 ) {
-        module_prologue( ModuleInfo.model );
+        module_prologue();
         return( NOT_ERROR );
     }
 
@@ -1016,83 +1034,73 @@ static ret_code ModelDirective( int i )
     }
     ModuleInfo.cmdline = FALSE;
 
-    for( i++; i < Token_Count; i++ ) {
-
-        token = AsmBuffer[i]->string_ptr;
-        //wipe_space( token );
-        /* Add the public name */
-
-        // look up the type of token
-        if( type = FindToken( token, ModelInfo, sizeof(ModelInfo)/sizeof(typeinfo) )) {
-            ModuleInfo.model = type->value;
-            switch ( type->value ) {
-            case MOD_FLAT:
-                DefineFlatGroup();
-                SetUse32Default( TRUE );
-                // fall through
-            case MOD_TINY:
-            case MOD_SMALL:   /* near code, near data */
-            case MOD_MEDIUM:  /* far code, near data */
-                ModuleInfo.distance = STACK_NEAR;
-            case MOD_COMPACT: /* near data, far code */
-            case MOD_LARGE:
-            case MOD_HUGE:
-                set_def_seg_name();
-                break;
-            }
-#if 0
-        } else if ( type = FindToken( token, LangInfo, sizeof(LangInfo)/sizeof(typeinfo) ) ) {
-            ModuleInfo.langtype = type->value;
-#else
-        } else if ( AsmBuffer[i]->token == T_RES_ID && ( GetLangType( &i, &ModuleInfo.langtype ) == NOT_ERROR ) ) {
-            type = &LangInfo;
-            i--; /* restore i, it's incremented below! */
-#endif
-        } else if ( type = FindToken( token, StackInfo, sizeof(StackInfo)/sizeof(typeinfo) ) ) {
-            ModuleInfo.distance = type->value;
-            if ( type->value == STACK_FAR )
-                if (ModuleInfo.model == MOD_FLAT) {
-                    AsmError(INVALID_MODEL_PARAM_FOR_FLAT);
-                }
-        } else if ( type = FindToken( token, OsInfo, sizeof(OsInfo)/sizeof(typeinfo) ) ) {
-            ModuleInfo.ostype = type->value;
-        } else {
-            AsmErr( UNKNOWN_MODEL_OPTION, token );
-            return( ERROR );
-        }
-#if 0
-        /* this is NOT Masm compatible */
-        MakeConstantUnderscored( AsmBuffer[i]->value );
-#endif
-        if( initstate & type->init ) {
-            AsmError( MODEL_PARA_DEFINED ); // initialized already
-            return( ERROR );
-        } else {
-            initstate |= type->init; // mark it initialized
-        }
-        i++;
-
-        /* go past comma */
-        if( ( i < Token_Count ) && ( AsmBuffer[i]->token != T_COMMA ) ) {
-            AsmError( EXPECTING_COMMA );
-            return( ERROR );
-        }
+    i++;
+    if ( AsmBuffer[i]->token == T_FINAL ) {
+        AsmError( SYNTAX_ERROR );
+        return( ERROR );
     }
-
-    if( ( initstate & INIT_MODEL ) == 0 ) {
-        AsmError( NO_MEMORY_MODEL_FOUND );
+    /* get the model parameter */
+    if( type = FindToken( AsmBuffer[i]->string_ptr, ModelInfo, sizeof(ModelInfo)/sizeof(typeinfo) )) {
+        ModuleInfo.model = type->value;
+        i++;
+        switch ( type->value ) {
+        case MOD_FLAT:
+            DefineFlatGroup();
+            SetUse32Default( TRUE );
+            // fall through
+        case MOD_TINY:
+        case MOD_SMALL:   /* near code, near data */
+        case MOD_MEDIUM:  /* far code, near data */
+            ModuleInfo.distance = STACK_NEAR;
+        case MOD_COMPACT: /* near data, far code */
+        case MOD_LARGE:
+        case MOD_HUGE:
+            set_def_seg_name();
+            break;
+        }
+    } else {
+        AsmError( EXPECTED_MEMORY_MODEL );
         return( ERROR );
     }
 
-    module_prologue( ModuleInfo.model );
+    /* get the optional parameters: language, stack distance, os */
+    init = 0;
+    while ( i < ( Token_Count - 1 ) && AsmBuffer[i]->token == T_COMMA ) {
+        i++;
+        if ( AsmBuffer[i]->token != T_COMMA ) {
+            if ( GetLangType( &i, &ModuleInfo.langtype ) == NOT_ERROR ) {
+                type = &dmyLang;
+            } else if ( type = FindToken( AsmBuffer[i]->string_ptr, StackInfo, sizeof(StackInfo)/sizeof(typeinfo) ) ) {
+                if ( ModuleInfo.model == MOD_FLAT ) {
+                    AsmError( INVALID_MODEL_PARAM_FOR_FLAT );
+                    return( ERROR );
+                }
+                i++;
+                ModuleInfo.distance = type->value;
+            } else if ( type = FindToken( AsmBuffer[i]->string_ptr, OsInfo, sizeof(OsInfo)/sizeof(typeinfo) ) ) {
+                i++;
+                ModuleInfo.ostype = type->value;
+            } else {
+                break;
+            }
+            if ( type->init & init ) {
+                i--;
+                break;
+            }
+            init |= type->init;
+        }
+    }
+    /* everything parsed successfully? */
+    if ( AsmBuffer[i]->token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+
+    module_prologue();
     ModuleInfo.cmdline = (LineNumber == 0);
+
     return( NOT_ERROR );
 }
-
-// if count == 1, there's NO start address
-// if count > 1, there's one.
-
-ret_code process_address(expr_list *);
 
 static ret_code EndDirective( int i )
 /************************/
@@ -1104,23 +1112,29 @@ static ret_code EndDirective( int i )
 
     DebugMsg(("EndDirective enter\n"));
 #if FASTPASS
+    /* if there's no code or data emitted, init the line store now */
     if (StoreState == FALSE && Parse_Pass == PASS_1) {
         SaveState();
     }
 #endif
+    if ( CurrStruct ) {
+        while ( CurrStruct->next )
+            CurrStruct = CurrStruct->next;
+        AsmErr( UNMATCHED_BLOCK_NESTING, CurrStruct->sym.name );
+    }
     /* close open segments */
-    SegmentModuleEnd();
+    SegmentModuleExit();
 
     if( StartupDirectiveFound ) {
-        if( i > 1 ) {
-            AsmError( SYNTAX_ERROR );
-            return( ERROR );
+        /* start label behind END ignored if .STARTUP has been found */
+        if( i < Token_Count && Parse_Pass == PASS_1 ) {
+            AsmWarn( 2, START_ADDRESS_IGNORED );
         }
-        strcat( CurrSource, " " );
-        strcat( CurrSource, StartAddr );
-        AddLineQueue( CurrSource );
-        StartupDirectiveFound = FALSE;
-        return( NOT_ERROR );
+        AsmBuffer[i]->token = T_ID;
+        AsmBuffer[i]->string_ptr = StartAddr;
+        AsmBuffer[i+1]->token = T_FINAL;
+        AsmBuffer[i+1]->string_ptr = "";
+        Token_Count = i+1;
     }
 
     EndDirectiveFound = TRUE;
@@ -1133,19 +1147,19 @@ static ret_code EndDirective( int i )
         return( ERROR );
     }
 
-    if( opndx.type == EXPR_EMPTY )
+    if( opndx.kind == EXPR_EMPTY )
         ;
-    else if ( opndx.type == EXPR_ADDR ) {
+    else if ( opndx.kind == EXPR_ADDR ) {
         Modend = TRUE;
         process_address( &opndx );
         fix = CodeInfo->InsFixup[0];
-        if (fix)
+        if ( fix )
             sym = fix->sym;
-        if (fix == NULL || sym == NULL) {
+        if ( fix == NULL || sym == NULL ) {
             AsmError( INVALID_START_ADDRESS );
             return( ERROR );
-        } else if (sym->state == SYM_INTERNAL || sym->state == SYM_EXTERNAL || sym->state == SYM_PROC) {
-            if (sym->mem_type == MT_NEAR || sym->mem_type == MT_FAR || sym->mem_type == MT_PROC)
+        } else if ( sym->state == SYM_INTERNAL || sym->state == SYM_EXTERNAL || sym->state == SYM_PROC ) {
+            if ( sym->mem_type == MT_NEAR || sym->mem_type == MT_FAR || sym->mem_type == MT_PROC )
                 ;
             else {
                 AsmError( MUST_BE_ASSOCIATED_WITH_CODE );
@@ -1160,11 +1174,11 @@ static ret_code EndDirective( int i )
         return( ERROR );
     }
 
-    if (Options.output_format == OFORMAT_OMF) {
+    if ( Options.output_format == OFORMAT_OMF ) {
         ModendRec = OmfNewRec( CMD_MODEND );
         ModendRec->d.modend.main_module = FALSE;
 
-        if( opndx.type == EXPR_EMPTY ) {
+        if( opndx.kind == EXPR_EMPTY ) {
             ModendRec->d.modend.start_addrs = FALSE;
             return( NOT_ERROR );
         }
@@ -1172,19 +1186,18 @@ static ret_code EndDirective( int i )
         ModendRec->d.modend.start_addrs = TRUE;
         ModendRec->d.modend.is_logical = TRUE;
         ModendRec->d.modend.main_module = TRUE;
+        ModendRec->is_32 = SymIs32(sym);
 
         fix->offset = sym->offset + opndx.value;
 
-        ModendRec->is_32 = SymIs32(sym);
-
-        fixup = CreateFixupRec( 0 );
-        if( fixup == NULL ) {
-            return( ERROR );
+        if ( CodeInfo->InsFixup[0] ) {
+            fixup = CreateOmfFixupRec( 0 );
+            // if( fixup == NULL ) return( ERROR );
+            ModendRec->d.modend.ref.log = fixup->lr;
         }
-        ModendRec->d.modend.ref.log = fixup->lr;
     } else {
 
-        if ( opndx.type == EXPR_EMPTY )
+        if ( opndx.kind == EXPR_EMPTY )
             return( NOT_ERROR );
 
         if ( sym->state != SYM_EXTERNAL && sym->public == FALSE ) {
@@ -1208,32 +1221,43 @@ static ret_code EndDirective( int i )
 static ret_code AliasDirective( int i )
 /*******************/
 {
-    char *tmp;
+    //char *tmp;
     asm_sym *sym;
 
+    i++; /* go past ALIAS */
+
+    if ( AsmBuffer[i]->token != T_STRING ||
+        AsmBuffer[i]->string_delim != '<') {
+        DebugMsg(("AliasDirective: text item not found: %s\n", AsmBuffer[i]->string_ptr ));
+        AsmError( TEXT_ITEM_REQUIRED );
+        return( ERROR );
+    }
+
     /* check syntax. note that T_EQU is '=' */
-    if (( i != 0 ) ||
-        (Token_Count < 4) ||
-        (AsmBuffer[i+2]->token != T_DIRECTIVE) ||
-        (AsmBuffer[i+2]->value != T_EQU) ||
-        (AsmBuffer[i+2]->opcode != 1)) {
+    if ( AsmBuffer[i+1]->token != T_DIRECTIVE ||
+        AsmBuffer[i+1]->value != T_EQU ||
+        (AsmBuffer[i+1]->opcode & 1) != 1) {
+        DebugMsg(("AliasDirective: syntax error: %s\n", AsmBuffer[i+1]->string_ptr ));
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
-    i++;
 
-    if ((AsmBuffer[i]->token != T_STRING) &&
-        (AsmBuffer[i]->token != T_ID) &&
-        (AsmBuffer[i+2]->token != T_STRING) &&
-        (AsmBuffer[i+2]->token != T_ID)) {
-        AsmError( SYNTAX_ERROR);
+    if ( AsmBuffer[i+2]->token != T_STRING ||
+        AsmBuffer[i+2]->string_delim != '<')  {
+        DebugMsg(("AliasDirective: text item not found: %s\n", AsmBuffer[i+2]->string_ptr ));
+        AsmError( TEXT_ITEM_REQUIRED );
+        return( ERROR );
+    }
+
+    if ( AsmBuffer[i+3]->token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i+3]->string_ptr );
         return( ERROR );
     }
 
     /* make sure <alias_name> isn't defined elsewhere */
     sym = SymSearch(AsmBuffer[i]->string_ptr);
     if (sym != NULL) {
-        if ( sym->state != SYM_ALIAS || (strcmp(sym->string_ptr, AsmBuffer[i+2]->string_ptr) != 0)) {
+        if ( sym->state != SYM_ALIAS || (strcmp( sym->string_ptr, AsmBuffer[i+2]->string_ptr ) != 0)) {
             DebugMsg(("AliasDirective: symbol redefinition\n"));
             AsmErr( SYMBOL_REDEFINITION, AsmBuffer[i]->string_ptr );
             return( ERROR );
@@ -1259,7 +1283,7 @@ static ret_code AliasDirective( int i )
         sym->state = SYM_ALIAS;
         sym->string_ptr = AsmAlloc( strlen( AsmBuffer[i+2]->string_ptr ) + 1 );
         strcpy( sym->string_ptr, AsmBuffer[i+2]->string_ptr );
-        dir_add( (dir_node *)sym );
+        dir_add_table( (dir_node *)sym );
     }
     return( NOT_ERROR );
 }
@@ -1280,7 +1304,7 @@ static ret_code NameDirective( int i )
      - no 'name' segments!
      - no 'name:' label!
      */
-    if (StructDef.struct_depth != 0 ||
+    if ( CurrStruct != NULL ||
         (AsmBuffer[i]->token == T_DIRECTIVE &&
          (AsmBuffer[i]->value == T_SEGMENT ||
           AsmBuffer[i]->value == T_STRUCT  ||
@@ -1318,7 +1342,7 @@ static ret_code RadixDirective( int i )
         return( ERROR );
     }
 
-    if ( opndx.type != EXPR_CONST ) {
+    if ( opndx.kind != EXPR_CONST ) {
         AsmError( CONSTANT_EXPECTED );
         return( ERROR );
     }
@@ -1343,59 +1367,37 @@ static int comp_opt( uint direct )
   Compare function for CPU directive
 */
 {
-    // follow Microsoft MASM
     switch( direct ) {
 //    case T_DOT_NO87:
 //        return( P_NO87 );
-    case T_DOT_8086:
-        return( P_86 );
-    case T_DOT_8087:
-        return( P_87 );
-    case T_DOT_186:
-        return( P_186 );
-    case T_DOT_286:
-        return( P_286 );
-    case T_DOT_287:
-        return( P_287 );
-    case T_DOT_286P:
-        return( P_286p );
-    case T_DOT_386:
-        return( P_386 );
-    case T_DOT_387:
-        return( P_387 );
-    case T_DOT_386P:
-        return( P_386p );
-    case T_DOT_486:
-        return( P_486 );
-    case T_DOT_486P:
-        return( P_486p );
-    case T_DOT_586:
-        return( P_586 );
-    case T_DOT_586P:
-        return( P_586p );
-    case T_DOT_686:
-        return( P_686 );
-    case T_DOT_686P:
-        return( P_686p );
-    case T_DOT_MMX:
-        return( P_MMX );
-    case T_DOT_K3D:
-        return( P_MMX | P_K3D );
+    case T_DOT_8086:        return( P_86 );
+    case T_DOT_8087:        return( P_87 );
+    case T_DOT_186:         return( P_186 );
+    case T_DOT_286C:
+    case T_DOT_286:         return( P_286 );
+    case T_DOT_286P:        return( P_286p );
+    case T_DOT_287:         return( P_287 );
+    case T_DOT_386C:
+    case T_DOT_386:         return( P_386 );
+    case T_DOT_386P:        return( P_386p );
+    case T_DOT_387:         return( P_387 );
+    case T_DOT_486:         return( P_486 );
+    case T_DOT_486P:        return( P_486p );
+    case T_DOT_586:         return( P_586 );
+    case T_DOT_586P:        return( P_586p );
+    case T_DOT_686:         return( P_686 );
+    case T_DOT_686P:        return( P_686p );
+    case T_DOT_MMX:         return( P_MMX );
+    case T_DOT_K3D:         return( P_MMX | P_K3D );
 #if ONEXMM
-    case T_DOT_XMM:
-        return( P_MMX | P_SSEALL );
+    case T_DOT_XMM:         return( P_MMX | P_SSEALL );
 #else
-    case T_DOT_XMM:
-        return( P_MMX | P_SSE1 );
-    case T_DOT_XMM2:
-        return( P_MMX | P_SSE1 | P_SSE2 );
-    case T_DOT_XMM3:
-        return( P_MMX | P_SSE1 | P_SSE2 | P_SSE3 | P_SSSE3 );
+    case T_DOT_XMM:         return( P_MMX | P_SSE1 );
+    case T_DOT_XMM2:        return( P_MMX | P_SSE1 | P_SSE2 );
+    case T_DOT_XMM3:        return( P_MMX | P_SSE1 | P_SSE2 | P_SSE3 | P_SSSE3 );
 #endif
-    default:
-        // not found
-        return( EMPTY );
     }
+    return( EMPTY );
 }
 
 static int def_fpu( uint direct )
@@ -1409,6 +1411,7 @@ static int def_fpu( uint direct )
     case T_DOT_186:
         return( P_87 );
     case T_DOT_286:
+    case T_DOT_286C:
     case T_DOT_286P:
         return( P_287 );
     default:
@@ -1416,10 +1419,10 @@ static int def_fpu( uint direct )
     }
 }
 
+#if 0
 static void MakeCPUConstant( int i )
 /**********************************/
 {
-#if 0
     MakeConstantUnderscored( i );
 
     switch( i ) {
@@ -1434,16 +1437,18 @@ static void MakeCPUConstant( int i )
     case T_DOT_486:
         MakeConstantUnderscored( T_DOT_486 );
     case T_DOT_386P:
+    case T_DOT_386C:
     case T_DOT_386:
         MakeConstantUnderscored( T_DOT_386 );
         break;
     case T_DOT_286P:
+    case T_DOT_286C:
     case T_DOT_286:
         MakeConstantUnderscored( T_DOT_286 );
     }
-#endif
     return;
 }
+#endif
 
 /* handles
  .8086,
@@ -1459,18 +1464,17 @@ static void MakeCPUConstant( int i )
  OTOH, .MMX/.XMM won't automatically enable .586/.686
 */
 
-ret_code cpu_directive( int i )
+ret_code SetCPU( enum asm_token newcpu )
 {
     int temp;
 
-    if( i == T_DOT_NO87 ) {
+    if( newcpu == T_DOT_NO87 ) {
         ModuleInfo.curr_cpu &= ~P_FPU_MASK;  // turn off FPU bits
     } else {
-        if( ( temp = comp_opt( i ) ) == EMPTY ) {
-            AsmError( SYNTAX_ERROR );
+        if( ( temp = comp_opt( newcpu ) ) == EMPTY ) {
             return( ERROR );
         }
-        if (temp & P_CPU_MASK) {
+        if ( newcpu == T_DOT_8086 || (temp & P_CPU_MASK) ) {
             /* reset CPU, FPU and EXT bits */
             ModuleInfo.curr_cpu &= ~( P_CPU_MASK | P_FPU_MASK | P_EXT_MASK | P_PM );
 
@@ -1478,7 +1482,7 @@ ret_code cpu_directive( int i )
             ModuleInfo.curr_cpu |= temp & ( P_CPU_MASK | P_PM );
 
             /* set default FPU bits */
-            ModuleInfo.curr_cpu |= def_fpu( i ) & P_FPU_MASK;
+            ModuleInfo.curr_cpu |= def_fpu( newcpu ) & P_FPU_MASK;
         }
 
         if( temp & P_FPU_MASK ) {
@@ -1494,67 +1498,60 @@ ret_code cpu_directive( int i )
 
     temp = ModuleInfo.curr_cpu & P_CPU_MASK;
     switch ( temp ) {
-    case P_186:
-        ModuleInfo.cpu = M_8086 | M_186;
-        break;
-    case P_286:
-        ModuleInfo.cpu = M_8086 | M_186 | M_286;
-        break;
-    case P_386:
-        ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386;
-        break;
-    case P_486:
-        ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486;
-        break;
-    case P_586:
-        ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486 | M_586;
-        break;
-    case P_686:
-        // ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486 | M_586 | M_686;
-        /* Masm's .686 directive doesn't set the Pentium flag! A bug? */
-        ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486 | M_686;
-        break;
-    default:
-        ModuleInfo.cpu = M_8086;
-        break;
+    case P_186: ModuleInfo.cpu = M_8086 | M_186; break;
+    case P_286: ModuleInfo.cpu = M_8086 | M_186 | M_286; break;
+    case P_386: ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386; break;
+    case P_486: ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486; break;
+    case P_586: ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486 | M_586; break;
+    /* Masm's .686 directive doesn't set the Pentium flag! A bug? */
+    //case P_686: ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486 | M_586 | M_686; break;
+    case P_686: ModuleInfo.cpu = M_8086 | M_186 | M_286 | M_386 | M_486 | M_686; break;
+    default: ModuleInfo.cpu = M_8086; break;
     }
     if ( ModuleInfo.curr_cpu & P_PM )
         ModuleInfo.cpu = ModuleInfo.cpu | M_PROT;
 
     temp = ModuleInfo.curr_cpu & P_FPU_MASK;
     switch (temp) {
-    case P_87:
-        ModuleInfo.cpu = ModuleInfo.cpu | M_8087;
-        break;
-    case P_287:
-        ModuleInfo.cpu = ModuleInfo.cpu | M_8087 | M_287;
-        break;
-    case P_387:
-        ModuleInfo.cpu = ModuleInfo.cpu | M_8087 | M_287 | M_387;
-        break;
+    case P_87:  ModuleInfo.cpu = ModuleInfo.cpu | M_8087;     break;
+    case P_287: ModuleInfo.cpu = ModuleInfo.cpu | M_8087 | M_287; break;
+    case P_387: ModuleInfo.cpu = ModuleInfo.cpu | M_8087 | M_287 | M_387; break;
     }
 
-    DebugMsg(("cpu_directive: curr_cpu=%X, @Cpu=%X\n", ModuleInfo.curr_cpu, ModuleInfo.cpu ));
+    DebugMsg(("SetCPU: curr_cpu=%X, @Cpu=%X\n", ModuleInfo.curr_cpu, ModuleInfo.cpu ));
 
-    MakeCPUConstant( i );
+    //MakeCPUConstant( newcpu );
     if ( ModuleInfo.model == MOD_NONE )
         SetUse32Default( (ModuleInfo.curr_cpu & P_CPU_MASK) >= P_386 );
 
     /* Set @Cpu */
     /* differs from Codeinfo cpu setting */
 
-    sym_Cpu = CreateConstant( "@Cpu", ModuleInfo.cpu, -1, TRUE);
+    sym_Cpu = CreateConstantEx( "@Cpu", ModuleInfo.cpu );
 
     return( NOT_ERROR );
+}
+
+static ret_code cpu_directive( int i )
+{
+    if ( SetCPU( AsmBuffer[i]->value ) == NOT_ERROR ) {
+        i++;
+        if ( AsmBuffer[i]->token == T_FINAL )
+            return( NOT_ERROR );
+    }
+    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    return( ERROR );
 }
 
 // .[NO|X]LIST, .[NO|X]CREF, .[NO]LISTIF, .[NO]LISTMACRO
 // .LISTALL, .LISTMACROALL, .[LF|SF|TF]COND, .[X|L|S]ALL
 // PAGE, TITLE, SUBTITLE, SUBTTL directives
 
-static ret_code ListingDirective( int directive, int i)
+static ret_code ListingDirective( int i )
 {
+    int directive = AsmBuffer[i]->value;
     i++;
+
     switch ( directive ) {
     case T_DOT_LIST:
         if ( FileInfo.file[LST] )
@@ -1569,7 +1566,30 @@ static ret_code ListingDirective( int directive, int i)
         break;
     case T_DOT_NOCREF:
     case T_DOT_XCREF:
-        ModuleInfo.cref = FALSE;
+        if ( AsmBuffer[i]->token == T_FINAL ) {
+            ModuleInfo.cref = FALSE;
+        } else {
+            asm_sym *sym;
+            while ( AsmBuffer[i]->token != T_FINAL ) {
+                if ( AsmBuffer[i]->token != T_ID ) {
+                    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+                    return( ERROR );
+                }
+                if ( sym = SymLookup( AsmBuffer[i]->string_ptr )) {
+                    sym->list = FALSE;
+                }
+                i++;
+                if ( AsmBuffer[i]->token != T_FINAL ) {
+                    if ( AsmBuffer[i]->token == T_COMMA ) {
+                        if ( (i + 1) < Token_Count )
+                            i++;
+                    } else {
+                        AsmError( EXPECTING_COMMA );
+                        return( ERROR );
+                    }
+                }
+            }
+        }
         break;
     case T_DOT_LISTALL: /* list false conditionals and generated code */
         if ( FileInfo.file[LST] )
@@ -1601,19 +1621,21 @@ static ret_code ListingDirective( int directive, int i)
         break;
     case T_PAGE:
     default: /* TITLE, SUBTITLE, SUBTTL */
-        /* tiny syntax check to ensure that these directives
-         aren't used as code labels */
-        if (AsmBuffer[i]->token == T_COLON) {
-            AsmError( SYNTAX_ERROR );
+        /* tiny checks to ensure that these directives
+         aren't used as code labels or struct fields */
+        if ( AsmBuffer[i]->token == T_COLON )
+            break;
+        if( CurrStruct ) {
+            AsmError( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION );
             return( ERROR );
         }
         if (Parse_Pass == PASS_1)
-            AsmWarn( 3, DIRECTIVE_IGNORED, AsmBuffer[i-1]->string_ptr );
+            AsmWarn( 4, DIRECTIVE_IGNORED, AsmBuffer[i-1]->string_ptr );
         while (AsmBuffer[i]->token != T_FINAL) i++;
     }
 
     if (AsmBuffer[i]->token != T_FINAL) {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
 
@@ -1622,7 +1644,7 @@ static ret_code ListingDirective( int directive, int i)
 
 // DOSSEG, .DOSSEG, .ALPHA, .SEQ directives
 
-static ret_code SegOrderDirective(int directive, int i)
+static ret_code SegOrderDirective( int i )
 {
     if (Options.output_format != OFORMAT_OMF &&
         Options.output_format != OFORMAT_BIN) {
@@ -1631,7 +1653,7 @@ static ret_code SegOrderDirective(int directive, int i)
         return( ERROR );
     }
 
-    switch( directive ) {
+    switch( AsmBuffer[i]->value ) {
     case T_DOT_DOSSEG:
     case T_DOSSEG:
         ModuleInfo.segorder = SEGORDER_DOSSEG;
@@ -1643,8 +1665,9 @@ static ret_code SegOrderDirective(int directive, int i)
         ModuleInfo.segorder = SEGORDER_SEQ;
         break;
     }
-    if (AsmBuffer[i+1]->token != T_FINAL) {
-        AsmError( SYNTAX_ERROR );
+    i++;
+    if (AsmBuffer[i]->token != T_FINAL) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
     return( NOT_ERROR );
@@ -1662,27 +1685,27 @@ ret_code directive( int i, long direct )
         /* bit 0 of opcode is set if it's the '=' directive */
         return( DefineConstant( AsmBuffer[1]->opcode & 1 ));
     case T_SIZESTR:
-        return( SizeStrDef( 1 ) );
+        return( SizeStrDef( i ) );
     case T_INSTR:
-        return( InStrDef( 1, CurrSource ) );
+        return( InStrDef( i ) );
 #endif
     case T_ENDS:
-        if( StructDef.struct_depth != 0 ) {
-            return( StructDirective( i ) );
+        if( CurrStruct != NULL ) {
+            return( EndstructDirective( i ) );
         }
         // else fall through to T_SEGMENT
     case T_SEGMENT:
-        return( Parse_Pass == PASS_1 ? SegDef(i-1) : SetCurrSeg(i-1) );
+        return( Parse_Pass == PASS_1 ? SegDef( i ) : SetCurrSeg( i ) );
     case T_GROUP:
-        return( GrpDef(i-1) );
+        return( GrpDef( i ) );
     case T_PROTO:
-        return( ProtoDef(i-1, NULL ));
+        return( ProtoDef( i, NULL ));
     case T_PROC:
-        return( ProcDef(i-1) );
+        return( ProcDef( i ) );
     case T_ENDP:
-        return( EndpDef(i-1) );
+        return( EndpDef( i ) );
     case T_LOCAL:
-        return( Parse_Pass == PASS_1 ? LocalDef(i) : NOT_ERROR );
+        return( Parse_Pass == PASS_1 ? LocalDef( i ) : NOT_ERROR );
     case T_INVOKE:
         return( InvokeDirective( i+1 ) );
     case T_DOT_CODE:
@@ -1731,7 +1754,7 @@ ret_code directive( int i, long direct )
     case T_UNION:
         return( StructDirective( i ) );
     case T_TYPEDEF:
-        return( Parse_Pass == PASS_1 ? TypeDef(i-1) : NOT_ERROR );
+        return( Parse_Pass == PASS_1 ? TypeDirective( i ) : NOT_ERROR );
     case T_RECORD:
         return( Parse_Pass == PASS_1 ? RecordDef( i ) : NOT_ERROR );
     case T_LABEL:
@@ -1739,12 +1762,12 @@ ret_code directive( int i, long direct )
     case T_ORG:
         return( OrgDirective( i ) );
     case T_END:
-        return( EndDirective(i+1) );
+        return( EndDirective( i+1 ) );
     case T_ALIGN:
     case T_EVEN:
         return( AlignDirective( direct, i ) );
     case T_DOT_MODEL:
-        return( ModelDirective(i) );
+        return( ModelDirective( i ) );
     case T_POPCONTEXT:
     case T_PUSHCONTEXT:
         return( ContextDirective( direct, i ) );
@@ -1752,24 +1775,24 @@ ret_code directive( int i, long direct )
     case T_DOT_DOSSEG:
     case T_DOSSEG:
     case T_DOT_ALPHA:
-        return( SegOrderDirective(direct, i ) );
+        return( SegOrderDirective( i ) );
     case T_DOT_RADIX:
         return( RadixDirective( i ) );
     case T_PURGE:
-        return( PurgeMacro( i+1 ) );
+        return( PurgeDef( i+1 ) );
     case T_ALIAS:
         return( AliasDirective( i ) );
     case T_ECHO:
-        return(Parse_Pass == PASS_1 ? EchoDirective(i+1) : NOT_ERROR );
+        return(Parse_Pass == PASS_1 ? EchoDirective( i+1 ) : NOT_ERROR );
     case T_NAME:
-        return( Parse_Pass == PASS_1 ? NameDirective(i) : NOT_ERROR );
-    case T_DOT_286C:
-        direct = T_DOT_286;
+        return( Parse_Pass == PASS_1 ? NameDirective( i ) : NOT_ERROR );
     case T_DOT_8086:
     case T_DOT_186:
     case T_DOT_286:
+    case T_DOT_286C:
     case T_DOT_286P:
     case T_DOT_386:
+    case T_DOT_386C:
     case T_DOT_386P:
     case T_DOT_486:
     case T_DOT_486P:
@@ -1788,11 +1811,7 @@ ret_code directive( int i, long direct )
     case T_DOT_XMM2:
     case T_DOT_XMM3:
 #endif
-        if (AsmBuffer[i+1]->token != T_FINAL) {
-            AsmError(SYNTAX_ERROR);
-            return( ERROR );
-        }
-        return( cpu_directive( direct ) );
+        return( cpu_directive( i ) );
     case T_DOT_LIST:
     case T_DOT_CREF:
     case T_DOT_NOLIST:
@@ -1815,20 +1834,24 @@ ret_code directive( int i, long direct )
     case T_TITLE:
     case T_SUBTITLE:
     case T_SUBTTL:
-        return( ListingDirective( direct, i ) );
+        return( ListingDirective( i ) );
     case T_DOT_STARTUP:
     case T_DOT_EXIT:
         return( StartupExitDirective( i ) );
     case T_ENDM:
     case T_EXITM:
         /* these directives should never be seen here */
-        AsmError(UNMATCHED_MACRO_NESTING);
+        AsmError( UNMATCHED_MACRO_NESTING );
         return( ERROR );
     case T_GOTO:
         AsmError( DIRECTIVE_MUST_APPEAR_INSIDE_A_MACRO );
         return( ERROR );
+    default:
+        /* this error may happen if
+         * CATSTR, SUBSTR, MACRO, ...
+         * aren't at pos 1
+         */
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
     }
-    DebugMsg(("unknown directive: >%s< i=%u\n", AsmBuffer[i]->string_ptr, i ));
-    AsmErr( UNKNOWN_DIRECTIVE, AsmBuffer[i]->string_ptr);
-    return( ERROR );
 }

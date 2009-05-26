@@ -28,7 +28,6 @@
 *
 ****************************************************************************/
 
-
 #include "globals.h"
 #include "parser.h"
 #include "codegen.h"
@@ -37,14 +36,9 @@
 #include "directiv.h"
 #include "fpfixup.h"
 
-// for FAR calls/jmps there was a non-compatible solution implemented
-// in WASM which required two additional opcodes, CALLF and JMPF.
-// this has been removed for JWasm, but there's now the need to
-// find the correct entries in AsmOpTable. The following numbers
-// are required to find the correct starting index for the FAR variant.
-
-#define NUMCALLN 6  /* no of entries for near CALLs in INSTRUCT.H */
-#define NUMJMPN  7  /* no of entries for near JMPs in INSTRUCT.H */
+#define ins(tok,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insa(tok,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#include "instruct.h"
 
 static ret_code match_phase_3( int *i, OPNDTYPE determinant );
 
@@ -160,11 +154,16 @@ static ret_code output( int i )
     case F_F30F:
         OutputCodeByte( 0xF3 );
         break;
+#if 0
     case F_16:
+    case F_16A:
     case F_32:
+    case F_32A:
     case F_660F:
     case F_0F:
+    case F_0FNO66:
     case F_0F0F:
+#endif
     default:
         break;
     }
@@ -205,65 +204,51 @@ static ret_code output( int i )
         }
     }
     /*
-     * Output address size prefix
+     * check if address/operand size prefix is to be set
      */
-    if( rCode->prefix.adrsiz == TRUE ) {
-        OutputCodeByte( ADRSIZ );
-    }
-    /*
-     * Output operand size prefix
-     */
-    if( ins->cpu & NO_OPPRFX )
-        rCode->prefix.opsiz = FALSE;
-
     switch( ins->byte1_info ) {
     case F_16:
         if( rCode->use32 ) rCode->prefix.opsiz = TRUE;
         break;
+    case F_16A:
+        if( rCode->use32 ) rCode->prefix.adrsiz = TRUE;
+        break;
     case F_32:
         if( !rCode->use32 ) rCode->prefix.opsiz = TRUE;
+        break;
+    case F_32A:
+        if( !rCode->use32 ) rCode->prefix.adrsiz = TRUE;
         break;
     case F_660F:
         rCode->prefix.opsiz = TRUE;
         break;
+    case F_0FNO66:
+        rCode->prefix.opsiz = FALSE;
+        break;
+#if 0
     case F_0F:
     case F_0F0F:
     case F_F20F:
     case F_F30F:
+#endif
     default:
         break;
     }
-    if( rCode->prefix.opsiz == TRUE && ins->allowed_prefix != AP_NO_OPPRF ) {
-#if 1 /* not really needed if all instructions have correct cpu flags */
+    /*
+     * Output address and operand size prefixes
+     */
+    if( rCode->prefix.adrsiz == TRUE ) {
+        OutputCodeByte( ADRSIZ );
+    }
+    if( rCode->prefix.opsiz == TRUE ) {
+#if 1
         if(( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
-            DebugMsg(("output: incstruction form requires 386\n"));
+            DebugMsg(("output: instruction form requires 386\n"));
             AsmError( INSTRUCTION_FORM_REQUIRES_80386 );
             return( ERROR );
         }
 #endif
-        /*
-            Certain instructions use the ADDRSIZE prefix when they really
-            should use OPERSIZE prefix (well, I think so!). Stupid Intel.
-        */
-        switch( ins->token ) {
-        case T_JCXZ:
-        case T_JECXZ:
-        case T_LOOPD:
-        case T_LOOPW:
-        case T_LOOPED:
-        case T_LOOPEW:
-        case T_LOOPNED:
-        case T_LOOPNEW:
-        case T_LOOPZD:
-        case T_LOOPZW:
-        case T_LOOPNZD:
-        case T_LOOPNZW:
-            OutputCodeByte( ADRSIZ );
-            break;
-        default:
-            OutputCodeByte( OPSIZ );
-            break;
-        }
+        OutputCodeByte( OPSIZ );
     }
     /*
      * Output segment prefix
@@ -281,12 +266,13 @@ static ret_code output( int i )
         OutputCodeByte( EXTENDED_OPCODE );
         // no break
     case F_0F:
+    case F_0FNO66:
     case F_660F:
     case F_F20F:
     case F_F30F:
         OutputCodeByte( EXTENDED_OPCODE );
         break;
-    case F_F3:
+    //case F_F3:
     default:
         break;
     }
@@ -351,7 +337,7 @@ static ret_code output_data( OPNDTYPE determinant, int index )
 
 #if 1
     /* it's not just CMPS/LODS/MOVS/SCAS/STOS, but also
-     the varians with B,W and D suffix which accept a memory operand
+     the variants with B,W and D suffix which accept a memory operand
      */
     if ( CodeInfo->token == T_XLAT ||
          AsmOpTable[AsmResWord[CodeInfo->token].position].allowed_prefix == AP_REP ||
@@ -471,8 +457,13 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
     // look up the hash table to get the real position of instruction
     i = AsmResWord[CodeInfo->token].position;
 
-    // this "hack" makes the CALLF/JMPF hack obsolete. Just skip the
-    // "near" entries for CALL/JMP if the transition is FAR.
+    /* for FAR calls/jmps there was a non-compatible solution implemented
+     * in WASM which required two additional opcodes, CALLF and JMPF.
+     * this has been removed for JWasm, but there's now the need to
+     * find the correct entries in AsmOpTable. The following numbers
+     * are required to find the correct starting index for the FAR variant.
+     */
+
     if (CodeInfo->isfar) {
         if (CodeInfo->token == T_CALL)
             i = i + NUMCALLN;
@@ -501,14 +492,13 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
     cur_opnd = CodeInfo->opnd_type[OPND1];
     pre_opnd = cur_opnd;
 
-    //_asm int 3;
     //if( cur_opnd & OP_M_ANY ) {
     if( cur_opnd == OP_M ) {
         if ( CodeInfo->mem_type == MT_EMPTY ) {
             if ( CodeInfo->InsFixup[0] && CodeInfo->InsFixup[0]->sym )
                 CodeInfo->mem_type = CodeInfo->InsFixup[0]->sym->mem_type;
         }
-        DebugMsg(("match_phase_1 enter: codeinfo->mem_type=%u\n", CodeInfo->mem_type));
+        DebugMsg(( "match_phase_1 enter: codeinfo->mem_type=%Xh\n", CodeInfo->mem_type ));
         switch (CodeInfo->mem_type) {
         case MT_BYTE:
         case MT_SBYTE:
@@ -534,12 +524,14 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
         case MT_OWORD:
             pre_opnd = OP_M_OW;
             break;
+#if 0 /* v1.95: commented out! */
         case MT_FAR:
             pre_opnd = ( CodeInfo->use32 ) ? OP_M_FW : OP_M_DW ;
             break;
         case MT_NEAR:
             pre_opnd = ( CodeInfo->use32 ) ? OP_M_DW : OP_M_W ;
             break;
+#endif
         case MT_EMPTY:
             for (; AsmOpTable[i+1].token == CodeInfo->token; i++ )
                 if ( AsmOpTable[i].opnd_type[OPND1] & OP_M_ANY )
@@ -570,7 +562,7 @@ ret_code match_phase_1( struct asm_code *CodeInfo )
         }
    }
 
-    DebugMsg(("match_phase_1: cur_opnd=%X, pre_opnd=%X, codeinfo->mem_type=%u\n", cur_opnd, pre_opnd, CodeInfo->mem_type));
+    DebugMsg(("match_phase_1: cur_opnd=%X, pre_opnd=%X, codeinfo->mem_type=%Xh\n", cur_opnd, pre_opnd, CodeInfo->mem_type));
 
     for ( ; AsmOpTable[i].token == CodeInfo->token; i++ ) {
         // get the operand type from the instruction table

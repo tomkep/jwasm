@@ -8,18 +8,11 @@
 *
 ****************************************************************************/
 
-
-#include <errno.h>
 #include <ctype.h>
 #include <time.h>
 
-#ifdef __WATCOMC__
-#include <unistd.h>
-#else
-#include <io.h>
-#endif
-
 #include "globals.h"
+#include "myunistd.h"
 #include "symbols.h"
 #include "mangle.h"
 #include "memalloc.h"
@@ -28,7 +21,6 @@
 #include "segment.h"
 #include "queues.h"
 #include "coff.h"
-#include "myassert.h"
 #include "fatal.h"
 
 #if COFF_SUPPORT
@@ -41,7 +33,7 @@ typedef struct stringitem {
     char string[];
 } stringitem;
 
-extern dir_node * GetPublicData2( void ** );
+extern dir_node * GetPublicData( void ** );
 extern line_num_info * GetLinnumData2( void ** );
 
 extern symbol_queue     Tables[];       // tables of definitions
@@ -130,7 +122,7 @@ static uint_32 Coff_AllocString(char * string, int len)
 ret_code coff_write_section_table( int fh )
 {
     dir_node    *curr;
-    obj_rec     *objr;
+    //obj_rec     *objr;
     char        *p;
     struct asmfixup *fix;
     uint        seg_index;
@@ -176,10 +168,10 @@ ret_code coff_write_section_table( int fh )
 
         ish.Characteristics = 0;
 
-        if ( curr->e.seginfo->alignment == -1 ) // ABS not possible
+        if ( curr->e.seginfo->alignment == MAX_SEGALIGNMENT ) // ABS not possible
             ish.Characteristics |= IMAGE_SCN_ALIGN_1BYTES;
         else
-            ish.Characteristics |= (curr->e.seginfo->alignment + 1) << 20;
+            ish.Characteristics |= (uint_32)(curr->e.seginfo->alignment + 1) << 20;
 
         if (curr->e.seginfo->segtype == SEGTYPE_CODE)
             ish.Characteristics |= IMAGE_SCN_CNT_CODE | IMAGE_SCN_MEM_EXECUTE | IMAGE_SCN_MEM_READ;
@@ -204,7 +196,7 @@ ret_code coff_write_section_table( int fh )
         /* manual characteristics set? */
         if ( curr->e.seginfo->characteristics ) {
             ish.Characteristics &= 0x1FFFFFF; /* clear the IMAGE_SCN_MEM flags */
-            ish.Characteristics |= (curr->e.seginfo->characteristics & 0xFE) << 24;
+            ish.Characteristics |= (uint_32)(curr->e.seginfo->characteristics & 0xFE) << 24;
             /* the INFO bit (bit 0) needs special handling! */
             if ( curr->e.seginfo->characteristics & 1 )
                 ish.Characteristics |= IMAGE_SCN_LNK_INFO;
@@ -217,8 +209,8 @@ ret_code coff_write_section_table( int fh )
 
         ish.PointerToRelocations = 0;
         ish.NumberOfRelocations = 0;
-        if (curr->e.seginfo->FixupListHeadCoff) {
-            for ( fix = curr->e.seginfo->FixupListHeadCoff; fix ; fix = fix->next2) {
+        if ( curr->e.seginfo->FixupListHeadGen ) {
+            for ( fix = curr->e.seginfo->FixupListHeadGen; fix ; fix = fix->next2) {
 //                printf("segment %s, reloc=%X\n", curr->sym.name, fix);
                 ish.NumberOfRelocations++;
             }
@@ -241,11 +233,11 @@ ret_code coff_write_section_table( int fh )
         }
 
         DebugMsg(( "coff_write_section_table: %s, Fixups=%u, Linnums=%u\n", curr->sym.name, ish.NumberOfRelocations, ish.NumberOfLinenumbers ));
-        if (write(fh, &ish, sizeof(ish)) != sizeof(ish))
+        if ( _write(fh, &ish, sizeof(ish)) != sizeof(ish) )
             WriteError();
     }
 #if SETDATAPOS
-    data_pos = tell(fh);
+    data_pos = _tell(fh);
 #endif
     DebugMsg(("coff_write_section_table: exit\n"));
     return( NOT_ERROR );
@@ -294,8 +286,8 @@ static void update_header(int fh)
     if (ifh.NumberOfSymbols)
         ifh.PointerToSymbolTable =
             sizeof(IMAGE_FILE_HEADER) + total_segs * sizeof(IMAGE_SECTION_HEADER) + coff_raw_data;
-    lseek(fh, 0, SEEK_SET);
-    if (write(fh, &ifh, sizeof(ifh)) != sizeof(ifh))
+    _lseek(fh, 0, SEEK_SET);
+    if ( _write(fh, &ifh, sizeof(ifh)) != sizeof(ifh) )
         WriteError();
 }
 
@@ -337,12 +329,12 @@ ret_code coff_write_symbols(int fh )
         is.NumberOfAuxSymbols = i / sizeof(IMAGE_AUX_SYMBOL);
         if (i % sizeof(IMAGE_AUX_SYMBOL))
             is.NumberOfAuxSymbols++;
-        if (write(fh, &is, sizeof(is)) != sizeof(is))
+        if ( _write(fh, &is, sizeof(is)) != sizeof(is) )
             WriteError();
 
         for (i=is.NumberOfAuxSymbols;i;i--, p += sizeof(IMAGE_AUX_SYMBOL)) {
             strncpy(ias.File.Name, p, sizeof(IMAGE_AUX_SYMBOL));
-            if (write(fh, &ias, sizeof(ias)) != sizeof(ias))
+            if ( _write(fh, &ias, sizeof(ias)) != sizeof(ias) )
                 WriteError();
         }
         ifh.NumberOfSymbols = is.NumberOfAuxSymbols + 1;
@@ -366,7 +358,10 @@ ret_code coff_write_symbols(int fh )
         is.NumberOfAuxSymbols = 0;
         if (Options.no_section_aux_entry == FALSE)
             is.NumberOfAuxSymbols = 1;
-        if (write(fh, &is, sizeof(is)) != sizeof(is))
+
+        DebugMsg(("coff_write_symbols(SECT): %s, type=%x, stgcls=%x\n", curr->sym.name, is.Type, is.StorageClass ));
+
+        if ( _write(fh, &is, sizeof(is)) != sizeof(is) )
             WriteError();
         ifh.NumberOfSymbols++;
 
@@ -377,7 +372,7 @@ ret_code coff_write_symbols(int fh )
             ias.Section.CheckSum = 0;
             ias.Section.Number = 0;
             ias.Section.Selection = 0;
-            if (write(fh, &ias, sizeof(ias)) != sizeof(ias))
+            if ( _write(fh, &ias, sizeof(ias)) != sizeof(ias) )
                 WriteError();
             ifh.NumberOfSymbols++;
         }
@@ -389,12 +384,13 @@ ret_code coff_write_symbols(int fh )
         /* skip "weak" (=unused) externdefs */
         if (curr->sym.comm == FALSE && curr->sym.weak == TRUE)
             continue;
-        DebugMsg(("coff_write_symbols: %s\n", curr->sym.name));
         Mangle( &curr->sym, buffer );
         len = strlen( buffer );
 
         is.Type = CoffGetType(&curr->sym);
         is.StorageClass = CoffGetClass(&curr->sym);
+
+        DebugMsg(("coff_write_symbols(EXT+COMM): %s, type=%x, stgcls=%x\n", curr->sym.name, is.Type, is.StorageClass ));
 
         /* for COMMUNALs, store their size in the Value field */
         if (curr->sym.comm == TRUE)
@@ -410,7 +406,7 @@ ret_code coff_write_symbols(int fh )
             is.N.Name.Short = 0;
             is.N.Name.Long = Coff_AllocString(buffer, len);
         }
-        if (write(fh, &is, sizeof(is)) != sizeof(is))
+        if ( _write(fh, &is, sizeof(is)) != sizeof(is) )
             WriteError();
         ifh.NumberOfSymbols++;
     }
@@ -431,13 +427,15 @@ ret_code coff_write_symbols(int fh )
         is.SectionNumber = 0;
         is.NumberOfAuxSymbols = 0;
 
+        DebugMsg(("coff_write_symbols(PROTO): %s, type=%x, stgcls=%x\n", curr->sym.name, is.Type, is.StorageClass ));
+
         if (len <= 8)
             strncpy(is.N.ShortName, buffer, 8);
         else {
             is.N.Name.Short = 0;
             is.N.Name.Long = Coff_AllocString(buffer, len);
         }
-        if (write(fh, &is, sizeof(is)) != sizeof(is))
+        if ( _write(fh, &is, sizeof(is)) != sizeof(is) )
             WriteError();
         ifh.NumberOfSymbols++;
     }
@@ -446,7 +444,7 @@ ret_code coff_write_symbols(int fh )
     // been written to the "public" queue inside coff_write_data().
 
     vp = NULL;
-    while ( curr = GetPublicData2(&vp) ) {
+    while ( curr = GetPublicData(&vp) ) {
         Mangle( &curr->sym, buffer );
         len = strlen( buffer );
 
@@ -472,9 +470,9 @@ ret_code coff_write_symbols(int fh )
             is.N.Name.Long = Coff_AllocString(buffer, len);
         }
 
-        DebugMsg(("coff_write_symbols: symbol %s, ofs=%X\n", buffer, is.Value));
+        DebugMsg(("coff_write_symbols(PUB+INT): symbol %s, ofs=%X, type=%X, stgcls=%X\n", buffer, is.Value, is.Type, is.StorageClass ));
 
-        if (write(fh, &is, sizeof(is)) != sizeof(is))
+        if ( _write(fh, &is, sizeof(is)) != sizeof(is) )
             WriteError();
         ifh.NumberOfSymbols++;
     }
@@ -501,9 +499,9 @@ ret_code coff_write_symbols(int fh )
         is.StorageClass = IMAGE_SYM_CLASS_WEAK_EXTERNAL;
         is.NumberOfAuxSymbols = 1;
 
-        DebugMsg(("coff_write_symbols: symbol %s, ofs=%X\n", buffer, is.Value));
+        DebugMsg(("coff_write_symbols(ALIAS): symbol %s, ofs=%X\n", buffer, is.Value));
 
-        if (write(fh, &is, sizeof(is)) != sizeof(is))
+        if ( _write(fh, &is, sizeof(is)) != sizeof(is) )
             WriteError();
         ifh.NumberOfSymbols++;
 
@@ -514,7 +512,7 @@ ret_code coff_write_symbols(int fh )
             ias.Sym.TagIndex = sym->idx;
 
         ias.Sym.Misc.TotalSize = IMAGE_WEAK_EXTERN_SEARCH_ALIAS;
-        if (write(fh, &ias, sizeof(ias)) != sizeof(ias))
+        if ( _write(fh, &ias, sizeof(ias)) != sizeof(ias) )
             WriteError();
         ifh.NumberOfSymbols++;
 
@@ -522,11 +520,11 @@ ret_code coff_write_symbols(int fh )
 
     /* the string table is ALWAYS written, even if no strings are defined */
 
-    if (write(fh, &SizeLongNames, sizeof(SizeLongNames)) != sizeof(SizeLongNames))
+    if ( _write(fh, &SizeLongNames, sizeof(SizeLongNames)) != sizeof(SizeLongNames) )
         WriteError();
     for (pName = LongNamesHead; pName; pName = pName->next) {
         i = strlen(pName->string)+1;
-        if (write(fh, pName->string, i ) != i)
+        if ( _write(fh, pName->string, i ) != i )
             WriteError();
     }
 
@@ -588,6 +586,7 @@ ret_code coff_write_header( int fh )
 
     directives = NULL;
 
+    /* does a proc exist with the EXPORT attribute? */
     for( dir = Tables[TAB_PROC].head; dir != NULL; dir = dir->next ) {
         if( dir->e.procinfo->export )
             break;
@@ -613,6 +612,8 @@ ret_code coff_write_header( int fh )
                 if( dir->e.procinfo->export ) {
                     Mangle(&dir->sym, buffer);
                     size += strlen(buffer) + sizeof(" -export:");
+                    if ( Options.no_stdcall_export_decoration == TRUE )
+                        size += dir->sym.name_size + 1;
                 }
             }
             for( dir = Tables[TAB_LIB].head; dir ; dir = dir->next ) {
@@ -636,7 +637,10 @@ ret_code coff_write_header( int fh )
             for( dir = Tables[TAB_PROC].head; dir ; dir = dir->next ) {
                 if( dir->e.procinfo->export ) {
                     Mangle(&dir->sym, buffer);
-                    size = sprintf(p, "-export:%s ", buffer);
+                    if ( Options.no_stdcall_export_decoration == FALSE )
+                        size = sprintf(p, "-export:%s ", buffer);
+                    else
+                        size = sprintf(p, "-export:%s=%s ", dir->sym.name, buffer);
                     p += size;
                 }
             }
@@ -664,15 +668,15 @@ ret_code coff_write_header( int fh )
 #ifdef __UNIX__
     time((long *)&ifh.TimeDateStamp);
 #else
-    time(&ifh.TimeDateStamp);
+    time((time_t *)&ifh.TimeDateStamp);
 #endif
     ifh.PointerToSymbolTable = 0;
     ifh.NumberOfSymbols = 0;
     ifh.SizeOfOptionalHeader = 0;
     ifh.Characteristics = 0;
 
-    lseek(fh, 0, SEEK_SET);
-    if (write(fh, &ifh, sizeof(ifh)) != sizeof(ifh))
+    _lseek(fh, 0, SEEK_SET);
+    if ( _write(fh, &ifh, sizeof(ifh)) != sizeof(ifh) )
         WriteError();
 
     DebugMsg(("coff_write_header: exit\n"));
@@ -721,7 +725,7 @@ static uint_32 CoffGetSymIndex(void)
 
     /* count publics */
     vp = NULL;
-    while( curr = GetPublicData2(&vp)) {
+    while( curr = GetPublicData(&vp)) {
         if( curr->sym.state == SYM_UNDEFINED ) {
             continue;
         } else if( curr->sym.state == SYM_PROC && curr->sym.isproc == FALSE) {
@@ -756,7 +760,7 @@ ret_code coff_write_data(int fh)
     index = CoffGetSymIndex();
 
 #if SETDATAPOS
-    lseek(fh, data_pos, SEEK_SET);
+    _lseek(fh, data_pos, SEEK_SET);
 #endif
 
 #if HELPSYMS==0
@@ -787,14 +791,14 @@ ret_code coff_write_data(int fh)
         size = section->e.seginfo->segrec->d.segdef.seg_length;
         if (size) {
             offset += size;
-            if ((offset & 1) && section->e.seginfo->FixupListHeadCoff) {
+            if ((offset & 1) && section->e.seginfo->FixupListHeadGen ) {
                 offset++;
                 size++;
             }
             DebugMsg(("coff_write_data(%s): size=%X, content=[%02X %02X]\n", section->sym.name, size, *(section->e.seginfo->CodeBuffer), *(section->e.seginfo->CodeBuffer+1)));
-            if (write(fh, section->e.seginfo->CodeBuffer, size) != size)
+            if ( _write(fh, section->e.seginfo->CodeBuffer, size) != size )
                 WriteError();
-            for (fix = section->e.seginfo->FixupListHeadCoff; fix ; fix = fix->next2) {
+            for (fix = section->e.seginfo->FixupListHeadGen; fix ; fix = fix->next2) {
                 switch (fix->type) {
                 case FIX_RELOFF16: /* 16bit offset */
                     ir.Type = IMAGE_REL_I386_REL16;
@@ -866,7 +870,7 @@ ret_code coff_write_data(int fh)
                 }
                 ir.VirtualAddress = fix->fixup_loc;
                 ir.SymbolTableIndex = fix->sym->idx;
-                if (write(fh, &ir, sizeof(ir)) != sizeof(ir))
+                if ( _write(fh, &ir, sizeof(ir)) != sizeof(ir) )
                     WriteError();
                 DebugMsg(("coff_write_data(%s): reloc loc=%X type=%u idx=%u sym=%s\n", section->sym.name, ir.VirtualAddress, ir.Type, ir.SymbolTableIndex, fix->sym->name));
                 offset += sizeof(ir);
@@ -883,7 +887,7 @@ ret_code coff_write_data(int fh)
                         il.Type.SymbolTableIndex = index++;
                     } else
                         il.Type.VirtualAddress = lni->offset;
-                    if (write(fh, &il, sizeof(il)) != sizeof(il))
+                    if ( _write(fh, &il, sizeof(il)) != sizeof(il) )
                         WriteError();
                     offset += sizeof(il);
                 }

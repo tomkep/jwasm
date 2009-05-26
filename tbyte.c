@@ -35,25 +35,30 @@
     Math operation is on 96-bit wide operands (mantisa).
 */
 
-#include <string.h>
 #include <ctype.h>
+
 #include "globals.h"
 #include "tbyte.h"
 
-typedef unsigned __int64 u64;
-typedef uint_32 u32;
+#if defined(LLONG_MAX) || defined(__GNUC__)
+#define MAXUI64BIT 0x8000000000000000ULL
+#define MAXUI64    0xffffffffffffffffULL
+#else
+#define MAXUI64BIT 0x8000000000000000ui64
+#define MAXUI64    0xffffffffffffffffui64
+#endif
 
 typedef union {
-    u64 m64[3];
-    u32 m32[6];
+    uint_64 m64[3];
+    uint_32 m32[6];
 } u192;
 
 typedef union {
-    u32 m32[3];
+    uint_32 m32[3];
 } u96;
 
 typedef struct {
-    u32 m32[3];
+    uint_32 m32[3];
     unsigned short e;
 } ELD;
 
@@ -125,7 +130,7 @@ static int add_check_u96_overflow( u96 *x, unsigned int c)
     add one decimal digit to u96
 */
 {
-    u64 cy;
+    uint_64 cy;
     int i;
 
     if( cmp_u96_max(x) > 0 ) {
@@ -133,7 +138,7 @@ static int add_check_u96_overflow( u96 *x, unsigned int c)
     } else {
         cy = c;
         for( i = 0; i < 3; i++ ) {
-            cy += (u64)x->m32[i] * 10;
+            cy += (uint_64)x->m32[i] * 10;
             x->m32[i] = cy;
             cy >>= 32;
         }
@@ -141,9 +146,9 @@ static int add_check_u96_overflow( u96 *x, unsigned int c)
     }
 }
 
-static int bitsize32(u32 x)
+static int bitsize32(uint_32 x)
 /**********************************************
-    calculate bitsize for u32
+    calculate bitsize for uint_32
 */
 {
     int i;
@@ -155,15 +160,15 @@ static int bitsize32(u32 x)
     return i;
 }
 
-static int bitsize64(u64 x)
+static int bitsize64(uint_64 x)
 /**********************************************
-    calculate bitsize for u64
+    calculate bitsize for uint_64
 */
 {
     int i;
 
     for( i = 64; i > 0 ; i-- ) {
-        if( x & 0x8000000000000000ULL ) break;
+        if( x & MAXUI64BIT ) break;
         x <<= 1;
     }
     return i;
@@ -246,15 +251,15 @@ static int normalize(u192 *res)
     return bs - 192;
 }
 
-static int add192(u192 *res, u64 x, int pos)
+static int add192(u192 *res, uint_64 x, int pos)
 /**************************************************
-    add u64 to u192 on u32 position
+    add uint_64 to u192 on uint_32 position
 */
 {
-    u64 cy;
+    uint_64 cy;
     int i;
 
-    cy = (u32)x;
+    cy = (uint_32)x;
     for( i = pos; i < 6; i++ ) {
         cy += res->m32[i];
         res->m32[i] = cy;
@@ -275,25 +280,25 @@ static int multiply(ELD *op1, ELD *op2, ELD *res)
     normalize and round result
 */
 {
-    u64 x1;
+    uint_64 x1;
     u192 r1;
     long exp;
 
     exp = (long)(op1->e & 0x7fff) + (long)(op2->e & 0x7fff) - EXPONENT_BIAS + 1;
-    r1.m64[0] = (u64)(op1->m32[0]) * (u64)(op2->m32[0]);
-    r1.m64[1] = (u64)(op1->m32[1]) * (u64)(op2->m32[1]);
-    r1.m64[2] = (u64)(op1->m32[2]) * (u64)(op2->m32[2]);
-    x1 = (u64)(op1->m32[1]) * (u64)(op2->m32[0]);
+    r1.m64[0] = (uint_64)(op1->m32[0]) * (uint_64)(op2->m32[0]);
+    r1.m64[1] = (uint_64)(op1->m32[1]) * (uint_64)(op2->m32[1]);
+    r1.m64[2] = (uint_64)(op1->m32[2]) * (uint_64)(op2->m32[2]);
+    x1 = (uint_64)(op1->m32[1]) * (uint_64)(op2->m32[0]);
     add192(&r1, x1, 1);
-    x1 = (u64)(op1->m32[0]) * (u64)(op2->m32[1]);
+    x1 = (uint_64)(op1->m32[0]) * (uint_64)(op2->m32[1]);
     add192(&r1, x1, 1);
-    x1 = (u64)(op1->m32[0]) * (u64)(op2->m32[2]);
+    x1 = (uint_64)(op1->m32[0]) * (uint_64)(op2->m32[2]);
     add192(&r1, x1, 2);
-    x1 = (u64)(op1->m32[2]) * (u64)(op2->m32[0]);
+    x1 = (uint_64)(op1->m32[2]) * (uint_64)(op2->m32[0]);
     add192(&r1, x1, 2);
-    x1 = (u64)(op1->m32[1]) * (u64)(op2->m32[2]);
+    x1 = (uint_64)(op1->m32[1]) * (uint_64)(op2->m32[2]);
     add192(&r1, x1, 3);
-    x1 = (u64)(op1->m32[2]) * (u64)(op2->m32[1]);
+    x1 = (uint_64)(op1->m32[2]) * (uint_64)(op2->m32[1]);
     add192(&r1, x1, 3);
     exp += normalize(&r1);
     // round result
@@ -343,11 +348,11 @@ static int TB_create(u96 *value, long exponent, TB_LD *ld)
         // exponent overflow
     }
     ld->e = res.e;
-    ld->m = res.m32[1] + ((u64)res.m32[2] << 32) ;
+    ld->m = res.m32[1] + ((uint_64)res.m32[2] << 32) ;
     // round result
     if(res.m32[0] & 0x80000000U) {
-        if( ld->m == 0xffffffffffffffffULL ) {
-            ld->m = 0x8000000000000000ULL;
+        if( ld->m == MAXUI64 ) {
+            ld->m = MAXUI64BIT;
             ld->e++;
         } else {
             ld->m++;

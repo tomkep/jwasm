@@ -28,11 +28,9 @@
 *
 ****************************************************************************/
 
-
 #include <stdarg.h>
 
 #include "globals.h"
-#include "omfprs.h"
 #include "memalloc.h"
 #include "fatal.h"
 #include "symbols.h"
@@ -45,20 +43,17 @@ extern void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args );
 typedef void (*err_act)( void );
 
 typedef struct {
-    int       num;            // arguments
     int       message;        // message displayed
+    int       num;            // arguments
     err_act   action;         // function to call, if any
     int       ret;            // exit code
 } Msg_Struct;
 
 static const Msg_Struct Fatal_Msg[] = {
 #undef fix
-#define fix( cmd, number, act, ret )     { number, cmd, act, ret }
+#define fix( cmd, argc, act, ret )     { cmd, argc, act, ret }
 #include "fatalmsg.h"
 };
-
-extern void             ObjRecFini( void );
-extern pobj_state       pobjState;      // object file information
 
 // fatal error (out of memory, unable to open files for write, ...)
 // don't use functions which need to alloc memory here!
@@ -67,11 +62,11 @@ void Fatal( unsigned msg, ... )
 /******************************/
 {
     va_list     args;
-    int         i;
+    //int         i;
     const FNAME *fname;
 
     MsgPrintf( MSG_FATAL_ERROR );
-    if ( fname = get_curr_srcfile() )
+    if ( fname = GetFName(get_curr_srcfile()) )
         printf(" (%s,%d)", fname->name, LineNumber);
     printf(": ");
 
@@ -82,6 +77,7 @@ void Fatal( unsigned msg, ... )
     va_end( args );
 
     ModuleInfo.error_count++;
+    write_to_file = FALSE;
 
     /* run exit code */
     if( Fatal_Msg[msg].action != NULL ) {
@@ -93,12 +89,14 @@ void Fatal( unsigned msg, ... )
 void SeekError( void )
 /************************/
 {
-    Fatal( FILE_LSEEK_ERROR, FileInfo.fname[OBJ] );
+    DebugMsg(("SeekError occured\n"));
+    Fatal( MSG_FILE_LSEEK_ERROR, FileInfo.fname[OBJ], errno );
 };
 
 void WriteError( void )
 /************************/
 {
-    Fatal( FILE_WRITE_ERROR, FileInfo.fname[OBJ] );
+    DebugMsg(("WriteError occured\n"));
+    Fatal( MSG_FILE_WRITE_ERROR, FileInfo.fname[OBJ], errno );
 };
 

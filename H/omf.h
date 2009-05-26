@@ -4,8 +4,8 @@
 #ifndef _OMF_H_INCLUDED_
 #define _OMF_H_INCLUDED_
 
-//extern pobj_state       pobjState;
-
+bool      omf_init( int fh );
+void      omf_fini( void );
 void      omf_write_record( obj_rec *objr, char kill );
 ret_code  omf_write_pub( void );
 void      omf_write_alias( void );

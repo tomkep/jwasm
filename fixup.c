@@ -28,15 +28,12 @@
 *
 ****************************************************************************/
 
-
 #include "globals.h"
 #include "parser.h"
 #include "memalloc.h"
 #include "fixup.h"
-
 #include "directiv.h"
 #include "segment.h"
-#include "myassert.h"
 
 // short jump label optimization
 // if this is 0, there is just the simple "fixup backpatch",
@@ -48,7 +45,7 @@
 extern int_8           Frame;          // Frame of current fixup
 extern uint_16         Frame_Datum;    // Frame datum of current fixup
 
-struct asmfixup *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option )
+struct asmfixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixup_options option )
 /************************************************************************************************************/
 /*
   creates a new asmfixup item and initializes it using symbol <sym>.
@@ -82,9 +79,9 @@ struct asmfixup *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enu
         fixup->next1 = sym->fixup;
         sym->fixup = fixup;
     }
-    fixup->type = fixup_type;
+    fixup->type = type;
     fixup->loader_resolved = FALSE;
-    fixup->fixup_option = fixup_option;
+    fixup->option = option;
     CodeInfo->InsFixup[Opnd_Count] = fixup;
     return( fixup );
 }
@@ -104,16 +101,19 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
 
     // all relative fixups should occure only at first pass and they signal forward references
     // they must be removed after patching or skiped ( next processed as normal fixup )
-    DebugMsg(("DoPatch(%s): fixup->ofs=%X, fixup->loc=%X\n", sym->name, fixup->offset, fixup->fixup_loc));
+
+    DebugMsg(("DoPatch(%s): sym=%s fixup->ofs,loc,opt,def_seg=%X,%X,%X,%X\n",
+              sym->name, fixup->sym ? fixup->sym->name : "",
+              fixup->offset, fixup->fixup_loc, fixup->option, fixup->def_seg ));
     seg = GetSeg( sym );
     if( seg == NULL || fixup->def_seg != seg ) {
         /* can't backpatch if fixup location is in diff seg than symbol */
         SkipFixup();
         return( NOT_ERROR );
     } else if( Parse_Pass != PASS_1 ) {
-    } else if( sym->mem_type == MT_FAR && fixup->fixup_option == OPTJ_CALL ) {
+    } else if( sym->mem_type == MT_FAR && fixup->option == OPTJ_CALL ) {
         // convert far call to push cs + near call, only at first pass
-        DebugMsg(("DoPatch: Phase error!\n"));
+        DebugMsg(("DoPatch: Phase error! caused by far call optimization\n"));
         PhaseError = TRUE;
         sym->offset++;  /* a PUSH CS will be added */
         OutputByte( 0 );
@@ -131,10 +131,10 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
     size = 0;
     switch( fixup->type ) {
     case FIX_RELOFF32:
-        size = 2;
+        size = 2; /* will be 4 finally */
         /* fall through */
     case FIX_RELOFF16:
-        size++;
+        size++; /* will be 2 finally */
         /* fall through */
     case FIX_RELOFF8:
         size++;
@@ -143,40 +143,50 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
         disp = fixup->offset + fixup->sym->offset - fixup->fixup_loc - size - 1;
         max_disp = (1UL << ((size * 8)-1)) - 1;
         if( disp > max_disp || disp < (-max_disp-1) ) {
-            DebugMsg(("DoPatch: Phase error, disp=%X, fixup=%s, loc=%X!\n", disp, fixup->sym->name, fixup->fixup_loc));
+            DebugMsg(("DoPatch: Phase error, disp=%X, fixup=%s(%X), loc=%X!\n", disp, fixup->sym->name, fixup->sym->offset, fixup->fixup_loc ));
             PhaseError = TRUE;
+            /* ok, the standard case is: there's a forward jump which
+             * was assumed to be SHORT, but it must be NEAR instead.
+             */
             switch( size ) {
             case 1:
                 size = 0;
-                switch( fixup->fixup_option ) {
+                switch( fixup->option ) {
 #if 0 /* don't display the error at the destination line! */
                 case OPTJ_EXPLICIT:
                     sym->fixup = NULL;
-                    AsmError( JUMP_OUT_OF_RANGE );
+                    DebugMsg(("DoPatch: jump out of range, disp=%d\n", disp ));
+                    AsmErr( JUMP_OUT_OF_RANGE, disp - max_disp );
                     return( ERROR );
 #endif
-                case OPTJ_EXTEND:
+                case OPTJ_EXTEND: /* Jxx for 8086 */
+                    size++;       /* will be 3/5 finally */
+                    /* fall through */
+                case OPTJ_JXX: /* Jxx for 386 */
                     size++;
                     /* fall through */
-                case OPTJ_JXX:
-                    size++;
-                    /* fall through */
-                default:
+                default: /* normal JMP */
                     if( CodeInfo->use32 )
-                        size += 2;
+                        size += 2; /* NEAR32 instead of NEAR16 */
                     size++;
                     sym->offset += size;
 #if LABELOPT
-                    DebugMsg(("sym %s, offset changed %X -> %X\n", sym->name, sym->offset - size, sym->offset));
-                    for (sym2 = seg->e.seginfo->labels;sym2;sym2 = (asm_sym *)((dir_node *)sym2)->next ) {
-                        if (sym2 == sym)
+                    /* scan the label list of the segment and adjust all
+                     * labels which are > fixup target and < current sym.
+                     * ( PROCs are NOT contained in this list because they
+                     * use the <next>-field of dir_node already!)
+                     */
+                    DebugMsg(("DoPatch: sym %s, offset changed %X -> %X\n", sym->name, sym->offset - size, sym->offset));
+                    for ( sym2 = seg->e.seginfo->labels; sym2; sym2 = (asm_sym *)((dir_node *)sym2)->next ) {
+                        if ( sym2 == sym )
                             continue;
-                        if (sym2->offset < fixup->fixup_loc)
+                        if ( sym2->offset < fixup->fixup_loc )
                             break;
                         sym2->offset += size;
                         DebugMsg(("sym %s, offset changed %X -> %X\n", sym2->name, sym2->offset - size, sym2->offset));
                     }
 #endif
+                    /*  it doesn't matter what's actually "written" */
                     for (;size;size--)
                         OutputByte( 0xCC );
                     break;
@@ -184,7 +194,8 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
                 break;
             case 2:
             case 4:
-                AsmWarn( 4, JUMP_OUT_OF_RANGE );
+                DebugMsg(("DoPatch: jump out of range, disp=%d\n", disp ));
+                AsmWarn( 4, JUMP_OUT_OF_RANGE, disp - max_disp );
                 break;
             }
         }
@@ -209,7 +220,7 @@ ret_code BackPatch( struct asm_sym *sym )
     struct asmfixup     *fixup;
     struct asmfixup     *next;
 
-    DebugMsg(("BackPatch(%s) enter\n", sym->name));
+    DebugMsg(("BackPatch(%s) enter, offset=%X\n", sym->name, sym->offset ));
     fixup = sym->fixup;
     sym->fixup = NULL;
     for( ; fixup != NULL; fixup = next ) {
@@ -218,10 +229,11 @@ ret_code BackPatch( struct asm_sym *sym )
             return( ERROR );
         }
     }
+    DebugMsg(("BackPatch(%s) exit, offset=%X\n", sym->name, sym->offset ));
     return( NOT_ERROR );
 }
 
-struct fixup *CreateFixupRec( int index )
+struct fixup *CreateOmfFixupRec( int index )
 /***************************************/
 /* Create a fixup record for OMF, translates "asmfixup" to "fixup";
    Note that if Modend is TRUE, it means the fixup is the starting address
@@ -231,21 +243,9 @@ struct fixup *CreateFixupRec( int index )
     struct asmfixup     *fixup;         // fixup structure from JWasm
     struct fixup        *fixnode;       // fixup structure for OMF
     struct asm_sym      *sym;
-    struct asm_sym      *grpsym;
 
     fixup = CodeInfo->InsFixup[index];
-
-    if( fixup == NULL )
-        return( NULL );
-
-    sym = fixup->sym;
-#if 0
-    /* a relocatable address doesn't need a symbol.
-     Also, SYM_STACK symbols should have been filtered already.
-     */
-    if(( sym == NULL ) || (sym->state == SYM_STACK))
-        return( NULL );
-#endif
+    sym = fixup->sym; /* may be NULL! */
     fixnode = FixNew();
     fixnode->next = NULL;
     fixnode->self_relative = FALSE;
@@ -289,9 +289,9 @@ struct fixup *CreateFixupRec( int index )
 
 #ifdef DEBUG_OUT
     if (sym)
-        DebugMsg(("CreateFixupRec: sym=%s, state=%u\n", sym->name, sym->state));
+        DebugMsg(("CreateOmfFixupRec: sym=%s, state=%u\n", sym->name, sym->state));
     else
-        DebugMsg(("CreateFixupRec: sym=NULL\n" ));
+        DebugMsg(("CreateOmfFixupRec: sym=NULL\n" ));
 #endif
 
     /* loader_resolved is FALSE for OFFSET, TRUE for LROFFSET */
@@ -313,10 +313,12 @@ struct fixup *CreateFixupRec( int index )
         fixnode->lr.frame = FRAME_TARG;
 
     } else if( sym->state == SYM_UNDEFINED ) {
-        DebugMsg(("CreateFixupRec: state of >%s< is SYM_UNDEFINED\n", sym->name));
+        DebugMsg(("CreateOmfFixupRec: state of >%s< is SYM_UNDEFINED\n", sym->name));
         AsmErr( SYMBOL_NOT_DEFINED, sym->name );
         return( NULL );
     } else if( sym->state == SYM_GRP ) {
+
+        DebugMsg(("CreateOmfFixupRec: GROUP %s\n", sym->name));
 
         fixnode->lr.target = TARGET_GRP;
         fixnode->lr.target_datum = GetGrpIdx( sym );
@@ -329,6 +331,8 @@ struct fixup *CreateFixupRec( int index )
         }
 
     } else if( sym->state == SYM_SEG ) {
+
+        DebugMsg(("CreateOmfFixupRec: SEG %s\n", sym->name));
 
         fixnode->lr.target = TARGET_SEG;
         fixnode->lr.target_datum = GetSegIdx( sym );
@@ -345,7 +349,7 @@ struct fixup *CreateFixupRec( int index )
         /* symbol is a label */
 
         if( sym->state == SYM_EXTERNAL ) {
-            DebugMsg(("CreateFixupRec: EXTERNAL %s\n", sym->name));
+            DebugMsg(("CreateOmfFixupRec: EXTERNAL %s\n", sym->name));
             if( Modend ) {
                 fixnode->lr.target = TARGET_EXT & TARGET_WITH_DISPL;
             } else {
@@ -360,29 +364,28 @@ struct fixup *CreateFixupRec( int index )
             }
         } else if ( sym->state == SYM_PROC && sym->isproc == FALSE ) {
             /* these are PROTOs without a segment reference */
-            DebugMsg(("CreateFixupRec: PROTO %s\n", sym->name));
+            DebugMsg(("CreateOmfFixupRec: PROTO %s\n", sym->name));
             fixnode->lr.target = TARGET_EXT;
             fixnode->lr.target_datum = sym->idx;
         } else {
+            //asm_sym *grpsym;
             /* it's a SYM_INTERNAL/SYM_PROC */
-            DebugMsg(("CreateFixupRec: sym->name=%s state=%X segm=%X\n", sym->name, sym->state, sym->segment));
+            DebugMsg(("CreateOmfFixupRec: fixup->frame,datum=%u.%u sym->name=%s state=%X segm=%X\n", fixup->frame, fixup->frame_datum, sym->name, sym->state, sym->segment ));
             if ( sym->segment == NULL ) {
                 AsmErr( SEGMENT_MISSING_FOR_FIXUP, sym->name );
                 return (NULL);
             }
-            grpsym = GetGrp( sym );
 
-            fixnode->lr.target = TARGET_SEG;
-
-            if( Modend ) {
+            if( Modend )
                 fixnode->lr.target = TARGET_SEG & TARGET_WITH_DISPL;
-                fixup->frame = FRAME_TARG;
-                DebugMsg(("ModEnd sym=%s segm=%X, grp=%X\n", sym->name, sym->segment, ((dir_node *)sym->segment)->e.seginfo->group));
-            }
-            if (grpsym) {
+            else
+                fixnode->lr.target = TARGET_SEG;
+#if 0
+            if ( grpsym = GetGrp( sym ) ) {
                 fixup->frame = FRAME_GRP;
                 fixup->frame_datum = GetGrpIdx( grpsym );
             }
+#endif
             fixnode->lr.target_datum = GetSegIdx( sym->segment );
         }
 
@@ -394,7 +397,7 @@ struct fixup *CreateFixupRec( int index )
         fixnode->lr.frame_datum = fixup->frame_datum;
 
         if( Modend ) {
-            DebugMsg(("CreateFixupRec: ModEnd fixup=%X/%X/%X/%X\n", fixnode->lr.target, fixnode->lr.frame, fixnode->lr.frame_datum, fixnode->loc_offset));
+            DebugMsg(( "CreateOmfFixupRec: ModEnd fixup=%X/%X/%X/%X\n", fixnode->lr.target, fixnode->lr.frame, fixnode->lr.frame_datum, fixnode->loc_offset ));
             return( fixnode );
         }
     }
@@ -448,10 +451,10 @@ void mark_fixupp( OPNDTYPE determinant, int index )
     }
 }
 
-/* Store asmfixup information of CodeInfo->InsFixup[index] in current segment's
-   fixup linked list.
+/*
+ * Store asmfixup information of CodeInfo->InsFixup[index] in current
+ * segment's fixup linked list.
 */
-
 ret_code store_fixup( int index )
 /**************************/
 {
@@ -462,7 +465,7 @@ ret_code store_fixup( int index )
 
     fixup = CodeInfo->InsFixup[index];
 
-    if( write_to_file == FALSE || fixup == NULL)
+    if( write_to_file == FALSE || fixup == NULL )
         return( NOT_ERROR );
 
     fixup->fixup_loc = GetCurrOffset();
@@ -486,8 +489,11 @@ ret_code store_fixup( int index )
             CodeInfo->data[index] += fixup->sym->offset;
         }
 
-        /* convert asmfixup to OMF fixup! */
-        fixnode = CreateFixupRec( index );
+        /* convert asmfixup to OMF fixup.
+         * This probably should be done later, when the record is written;
+         * then the segment's fixup list will always contain asmfixup entries.
+         */
+        fixnode = CreateOmfFixupRec( index );
         if( fixnode == NULL )
             return( ERROR );
 
@@ -528,7 +534,7 @@ ret_code store_fixup( int index )
                 CodeInfo->data[index] = -4;
         }
         /* special handling for assembly time variables needed */
-        if (fixup->sym && fixup->sym->variable) {
+        if ( fixup->sym && fixup->sym->variable ) {
             /* add symbol's offset to the fixup location and fixup's offset */
             CodeInfo->data[index] += fixup->sym->offset;
             fixup->offset         += fixup->sym->offset;
@@ -540,13 +546,15 @@ ret_code store_fixup( int index )
          symbol offset is stored an the fixup location!
         */
 
-        /* for COFF/ELF, store the asmfixup records directly! */
+        /* for COFF/ELF/BIN, store the asmfixup records directly.
+         * (this should be done for OMF as well!)
+         */
 
-        if( CurrSeg->seg->e.seginfo->FixupListHeadCoff == NULL ) {
-            CurrSeg->seg->e.seginfo->FixupListTailCoff = CurrSeg->seg->e.seginfo->FixupListHeadCoff = fixup;
+        if( CurrSeg->seg->e.seginfo->FixupListHeadGen == NULL ) {
+            CurrSeg->seg->e.seginfo->FixupListTailGen = CurrSeg->seg->e.seginfo->FixupListHeadGen = fixup;
         } else {
-            CurrSeg->seg->e.seginfo->FixupListTailCoff->next2 = fixup;
-            CurrSeg->seg->e.seginfo->FixupListTailCoff = fixup;
+            CurrSeg->seg->e.seginfo->FixupListTailGen->next2 = fixup;
+            CurrSeg->seg->e.seginfo->FixupListTailGen = fixup;
         }
     }
     return( NOT_ERROR );
@@ -559,15 +567,13 @@ ret_code MakeFpFixup( struct asm_sym *sym )
     int_8 old_frame;
 
     old_count = Opnd_Count;
-    old_frame = Frame;
+    old_frame = Frame; /* what is with Frame_Datum? */
     Opnd_Count = 2;
     Frame = FRAME_LOC;
     AddFixup( sym, FIX_OFF16, OPTJ_NONE );
     Frame = old_frame;
     Opnd_Count = old_count;
     CodeInfo->data[2] = 0;
-    if( store_fixup( 2 ) == ERROR )
-        return( ERROR ); // extra entry in CodeInfo->Insfixup
-    return( NOT_ERROR );
+    return ( store_fixup( 2 ) );
 }
 

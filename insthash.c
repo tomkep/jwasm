@@ -28,7 +28,6 @@
 *
 ****************************************************************************/
 
-
 #include "globals.h"
 #include "parser.h"
 #include "insthash.h"
@@ -71,8 +70,8 @@ static struct ReservedWord *InstrFind( char *name )
 
     for( ; inst; inst = inst->next ) {
         /* check if the name matches the entry for this inst in AsmChars */
-//        if( name[ inst->len ] == NULLC && strnicmp( name, inst->name, inst->len ) == 0) {
-        if( name[ inst->len ] == NULLC && memicmp( name, inst->name, inst->len ) == 0) {
+//        if( name[ inst->len ] == NULLC && _strnicmp( name, inst->name, inst->len ) == 0) {
+        if( name[ inst->len ] == NULLC && _memicmp( name, inst->name, inst->len ) == 0) {
             return( inst );
         }
     }
@@ -183,8 +182,8 @@ void DumpInstrStats( void )
             max = curr;
     }
     if ( Options.quiet == FALSE ) {
-        printf( "%u items in ins table, max items/line=%u\n", count, max );
-        printf( "lines with 0..7 items=%u %u %u %u %u %u %u %u\n", num[0], num[1], num[2], num[3], num[4], num[5], num[6], num[7] );
+        printf( "%u items in ins table, max items/line=%u ", count, max );
+        printf( "[%u %u %u %u %u %u %u %u]\n", num[0], num[1], num[2], num[3], num[4], num[5], num[6], num[7] );
     }
 }
 #endif

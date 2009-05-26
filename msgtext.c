@@ -118,7 +118,7 @@ char * MsgGet( int msgid, char *buffer )
     return( buffer );
 }
 
-char *MsgGetPrefix( int msgid )
+char *MsgGetEx( int msgid )
 {
     return( MsgGet( msgid, NULL ) );
 }
@@ -129,11 +129,13 @@ void MsgPrintf( int msgid )
     printf( MsgGet( msgid, NULL ));
 }
 
+#if 0
 void MsgPrintf1( int msgid, char *token )
 {
     trademark();
     printf( MsgGet( msgid, NULL ), token );
 }
+#endif
 
 void MsgPrintUsage( void )
 {

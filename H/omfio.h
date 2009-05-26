@@ -68,8 +68,8 @@ typedef struct {
 #error "OBJ_MAX_REC must be smaller than OBJ_BUFFER_SIZE"
 #endif
 
-extern OBJ_WFILE    *ObjWriteOpen( const char *filename );
-extern void         ObjWriteClose( OBJ_WFILE *obj );
+extern OBJ_WFILE    *OmfWriteOpen( int fh );
+extern void         OmfWriteClose( OBJ_WFILE *obj );
 
 extern void         OmfWBegRec( OBJ_WFILE *obj, uint_8 command );
 extern void         OmfWEndRec( OBJ_WFILE *obj );
@@ -78,7 +78,6 @@ extern void         OmfWrite16( OBJ_WFILE *obj, uint_16 word );
 extern void         OmfWrite32( OBJ_WFILE *obj, uint_32 dword );
 extern void         OmfWriteIndex( OBJ_WFILE *obj, uint_16 index );
 extern void         OmfWrite( OBJ_WFILE *obj, const uint_8 *buffer, size_t len );
-extern void         OmfWriteRec( OBJ_WFILE *obj, uint_8 command,
-                        uint_16 length, const uint_8 *contents );
+extern void         OmfWriteRec( OBJ_WFILE *obj, uint_8 command, size_t length, const uint_8 *contents );
 extern void         OmfWFlushBuffer( OBJ_WFILE *out );
 #endif

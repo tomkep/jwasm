@@ -29,7 +29,6 @@
 ****************************************************************************/
 
 #include "globals.h"
-
 #include "memalloc.h"
 #include "mangle.h"
 #include "parser.h"
@@ -38,7 +37,6 @@
 #include "queue.h"
 #include "queues.h"
 #include "fastpass.h"
-
 #include "myassert.h"
 
 #define COFF_LINNUM 0
@@ -105,192 +103,41 @@ void AddPublicData( asm_sym *sym )
     QAddItem( &PubQueue, sym );
 }
 
-// gather names for publics
-// they are written by the caller (assemble.c)
-// PUBDEF are true publics, LPUBDEF (CMD_STATIC_PUBLIC) are "static"
+// get (next) PUBLIC item
 
-dir_node * GetPublicData2( queuenode * *curr)
+dir_node * GetPublicData( queuenode * *curr)
 {
     if (PubQueue == NULL)
-        return(NULL);
+        return( NULL );
+
     if (*curr == NULL)
         *curr = PubQueue->head;
     else
         *curr = (*curr)->next;
 
-    for (;*curr;*curr = (*curr)->next) {
+    for ( ; *curr ; *curr = (*curr)->next ) {
         asm_sym *sym = (*curr)->data;
-        if( sym->state == SYM_UNDEFINED ) {
-#if FASTPASS
-            /* do not use saved state, scan full source in second pass */
-            SkipSavedState();
-#endif
-            // AsmErr( SYMBOL_NOT_DEFINED, sym->name );
-            continue;
-        } else if( sym->state == SYM_PROC ) {
+        if( sym->state == SYM_PROC ) {
             /* skip PROTOs without matching PROC */
             if( sym->isproc == FALSE ) {
                 continue;
             }
         } else if ( sym->state == SYM_EXTERNAL ) {
-            /* skip EXTERNALs */
+            /* silently skip EXTERNDEFs (and EXTERNs???) */
             //if (sym->weak == TRUE)
                 continue;
         }
-        if( sym->state != SYM_INTERNAL && sym->state != SYM_PROC) {
-            AsmErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
-            continue;
-        }
-        return((dir_node *)sym);
-    }
-    return(NULL);
-}
-
-uint GetPublicData(
-    uint *seg,
-    uint *grp,
-    uint_8 *cmd,
-    char ***NameArray,
-    struct pubdef_data **data,
-    bool *need32,
-    bool first )
-/****************************/
-{
-    static struct queuenode    *start;
-    struct queuenode           *curr;
-    struct asm_sym             *sym;
-    dir_node                   *pub;
-    uint                       count;
-    uint                       i;
-    struct pubdef_data         *d;
-    struct asm_sym             *curr_seg;
-    bool bReset = TRUE;
-
-    if( PubQueue == NULL )
-        return( 0 );
-    if( first )
-        start = PubQueue->head;
-    if( start == NULL )
-        return( 0 );
-
-// the first loop just calcs the number of entries (count)
-
-    *need32 = FALSE;
-    *cmd = CMD_PUBDEF;
-    curr = start;
-    for( count = 0; curr != NULL; curr = curr->next ) {
-        sym = (asm_sym *)curr->data;
-        DebugMsg(("GetPublicData: %s, lang=%u\n", sym->name, sym->langtype));
-        if( sym->state == SYM_UNDEFINED ) {
-            /* don't display an error here, it's confusing since it will
-             be associated with the END directive. In the next pass, the error
-             will be displayed when the PUBLIC directive is handled
-             */
-            // AsmErr( SYMBOL_NOT_DEFINED, sym->name );
+        if( sym->state != SYM_INTERNAL && sym->state != SYM_PROC ) {
+            // v1.95: make a full second pass and emit error on PUBLIC
+            //AsmErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
 #if FASTPASS
-            /* do not use saved state, scan full source in second pass */
             SkipSavedState();
 #endif
             continue;
         }
-        if( sym->state == SYM_PROC ) {
-            /* skip PROTOs without matching PROC */
-            if( sym->isproc == FALSE ) {
-                DebugMsg(("GetPublicData: %s skipped\n", sym->name));
-                continue;
-            }
-        } else if (sym->state == SYM_EXTERNAL) {
-            /* skip EXTERNALS */
-            // if (sym->weak == TRUE)
-                continue;
-        }
-        if( sym->state != SYM_INTERNAL && sym->state != SYM_PROC) {
-            AsmErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
-            continue;
-        }
-
-        if( count == MAX_PUB_SIZE )  // don't let the records get too big
-            break;
-        if (bReset) {
-            bReset = FALSE;
-            start = curr;
-            curr_seg = sym->segment;
-            if( curr_seg == NULL ) {      // absolute symbol ( without segment )
-                *seg = 0;
-                *grp = 0;
-            } else {
-                *seg = GetSegIdx( curr_seg );
-                *grp = GetGrpIdx( GetGrp( curr_seg ) );
-            }
-        }
-        if( sym->segment != curr_seg )
-            break;
-        DebugMsg(("GetPublicData: %s ok\n", sym->name));
-        if( sym->state == SYM_PROC ) {
-            if( !sym->public ) {
-                if( *cmd == CMD_PUBDEF ) {
-                    if( curr != start ) {
-                        DebugMsg(("GetPublicData: break curr != start\n"));
-                        break;
-                    }
-//                    *cmd = CMD_STATIC_PUBDEF;
-                }
-            } else {
-                if( *cmd == CMD_STATIC_PUBDEF ) {
-                    DebugMsg(("GetPublicData: break *cmd == CMD_STATIC_PUBDEF\n"));
-                    break;
-                }
-            }
-        }
-        count++;
-        /* if we don't get to here, this entry is part of the next pubdef */
+        return((dir_node *)sym);
     }
-    DebugMsg(("GetPublicData: count=%u\n", count));
-    if (!count)
-        return (0);
-
-    *NameArray = AsmAlloc( count * sizeof( char * ) );
-    for( i = 0; i < count; i++ ) {
-        (*NameArray)[i] = NULL;
-    }
-
-    *data = d = AsmAlloc( count * sizeof( struct pubdef_data ) );
-
-    for( curr = start, i = 0; i < count; curr = curr->next ) {
-        sym = (asm_sym *)curr->data;
-
-        if ( sym->state == SYM_UNDEFINED )
-            continue;
-        else if( sym->state == SYM_PROC ) {
-            /* skip PROTOs without matching PROC */
-            if( sym->isproc == FALSE )
-                continue;
-        } else if ( sym->state == SYM_EXTERNAL )
-            /* skip EXTERNDEFs which aren't used */
-            if (sym->weak == TRUE)
-                continue;
-
-        if( sym->segment != curr_seg )
-            break;
-
-        if( sym->offset > 0xffffUL )
-            *need32 = TRUE;
-
-        (*NameArray)[i] = Mangle( sym, NULL );
-
-        if ( ModuleInfo.convert_uppercase ) {
-            strupr((*NameArray)[i]);
-        }
-
-        DebugMsg(("GetPublicData 2. loop: %s, mangled=%s\n", sym->name, (*NameArray)[i]));
-
-        d[i].name = i;
-        d[i].offset = sym->offset;
-        d[i].type.idx = 0;
-        i++;
-    }
-    start = curr;
-    return( count );
+    return( NULL );
 }
 
 static void FreePubQueue( void )
@@ -305,6 +152,12 @@ static void FreePubQueue( void )
         PubQueue = NULL;
     }
 }
+
+/* what's inserted into the LNAMES queue:
+ * SYM_SEG: segment names
+ * SYM_GRP: group names
+ * SYM_CLASS_LNAME : class names
+*/
 
 void AddLnameData( dir_node *dir )
 /********************************/
@@ -327,7 +180,7 @@ direct_idx FindLnameIdx( char *name )
         dir = (dir_node *)node->data;
         if( dir->sym.state != SYM_CLASS_LNAME )
             continue;
-        if( stricmp( dir->sym.name, name ) == 0 ) {
+        if( _stricmp( dir->sym.name, name ) == 0 ) {
             return( dir->sym.idx );
         }
     }
@@ -370,7 +223,7 @@ unsigned GetLnameData( char **data )
     if( LnameQueue )
         for( curr = LnameQueue->head; curr != NULL ; curr = curr->next ) {
             dir = (dir_node *)(curr->data);
-            myassert( dir != NULL );
+            /**/myassert( dir != NULL );
             total_size += 1 + strlen( dir->sym.name );
         }
 
@@ -387,7 +240,10 @@ unsigned GetLnameData( char **data )
             lname[i] = (char)len;
             i++;
             strcpy( lname+i, dir->sym.name );
-            //For the Q folks... strupr( lname+i );
+            //if ( ModuleInfo.convert_uppercase )
+            /* lnames are converted for casemaps ALL and NOTPUBLIC */
+            if ( ModuleInfo.case_sensitive == FALSE )
+                _strupr( lname+i );
             i += len; // overwrite the null char
         }
     }

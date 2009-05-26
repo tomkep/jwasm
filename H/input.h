@@ -36,20 +36,22 @@ extern void     PushLineQueue( void );
 extern void     AddLineQueue( char *line );
 extern void     AddMacroLineQueue( char *line );
 extern ret_code InputQueueFile( char *path, FILE * *pfile );
-extern char     *ReadTextLine( char *string, int max );
+extern char     *GetTextLine( char *string, int max );
 extern void     PushMacro( struct asm_sym *sym );
+extern void     PushMacroGoto( struct asm_sym *sym, int lineno );
 extern void     AddStringToIncludePath( char *string );
 extern void     InputInit( void );
+extern void     InputPassInit( void );
 extern void     InputFini( void );
 extern int      GetPreprocessedLine( char * );
 extern int      GetCurrSrcPos( char * );
 extern void     ClearFileStack( void );
-extern const FNAME      *get_curr_srcfile( void );
+extern uint     get_curr_srcfile( void );
+extern const FNAME  *GetFName( uint );
 
 typedef struct line_list {
     struct line_list    *next;
-    uint_8 macrolevel;
-    char line[1];
+    char line[];
 } line_list;
 
 typedef struct input_queue {

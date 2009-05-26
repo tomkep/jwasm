@@ -8,7 +8,6 @@
 *
 ****************************************************************************/
 
-
 #include <ctype.h>
 
 #include "globals.h"
@@ -18,8 +17,6 @@
 #include "symbols.h"
 #include "directiv.h"
 #include "expreval.h"
-
-#include "myassert.h"
 
 /* prototypes */
 extern asm_sym          *sym_Interface;
@@ -61,13 +58,13 @@ static int SetCaseMap(int *pi)
     }
     i++;
     if (AsmBuffer[i]->token == T_ID) {
-        if ( 0 == stricmp(AsmBuffer[i]->string_ptr,"NONE") ) {
+        if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"NONE") ) {
             ModuleInfo.case_sensitive = TRUE;        /* -Cx */
             ModuleInfo.convert_uppercase = FALSE;
-        } else if ( 0 == stricmp(AsmBuffer[i]->string_ptr,"NOTPUBLIC") ) {
+        } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"NOTPUBLIC") ) {
             ModuleInfo.case_sensitive = FALSE;       /* -Cp */
             ModuleInfo.convert_uppercase = FALSE;
-        } else if ( 0 == stricmp(AsmBuffer[i]->string_ptr,"ALL") ) {
+        } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"ALL") ) {
             ModuleInfo.case_sensitive = FALSE;       /* -Cu */
             ModuleInfo.convert_uppercase = TRUE;
         } else {
@@ -216,7 +213,7 @@ static int SetNoKeyword(int *pi)
             char buffer[64];
             int cnt = sizeof(buffer) - 1;
             char * p2 = buffer;
-            struct asm_ins *instruct;
+            //struct asm_ins *instruct;
             for (;*p && cnt;cnt--) {
                 if (isspace(*p) || *p == ',')
                     break;
@@ -244,8 +241,8 @@ static int SetNoKeyword(int *pi)
 static int SetLanguage(int *pi)
 {
     int i = *pi;
-    lang_type langtype;
-    int language = ERROR;
+    //lang_type langtype;
+    //int language = ERROR;
 
     if (AsmBuffer[i]->token != T_COLON) {
         AsmError( COLON_EXPECTED );
@@ -280,9 +277,9 @@ static int SetSetIF2(int *pi)
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
-    if (0 == stricmp(AsmBuffer[i]->string_ptr, "TRUE"))
+    if (0 == _stricmp(AsmBuffer[i]->string_ptr, "TRUE"))
         ModuleInfo.setif2 = TRUE;
-    else if (0 == stricmp(AsmBuffer[i]->string_ptr, "FALSE"))
+    else if (0 == _stricmp(AsmBuffer[i]->string_ptr, "FALSE"))
         ModuleInfo.setif2 = FALSE;
     else {
         AsmError( SYNTAX_ERROR );
@@ -314,7 +311,7 @@ static int SetPrologue(int *pi)
 {
     int i = *pi;
     char * name;
-    asm_sym * sym;
+    //asm_sym * sym;
 
     if (AsmBuffer[i]->token != T_COLON) {
         AsmError( COLON_EXPECTED );
@@ -325,9 +322,9 @@ static int SetPrologue(int *pi)
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
-    if (0 == stricmp(AsmBuffer[i]->string_ptr,"NONE")) {
+    if (0 == _stricmp(AsmBuffer[i]->string_ptr,"NONE")) {
         name = NULL;
-    } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"PROLOGUEDEF")) {
+    } else if (0 == _stricmp(AsmBuffer[i]->string_ptr,"PROLOGUEDEF")) {
         name = "";
     } else {
         name = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1);
@@ -351,7 +348,7 @@ static int SetEpilogue(int *pi)
 {
     int i = *pi;
     char * name = (char *)-1;
-    asm_sym * sym;
+    //asm_sym * sym;
 
     if (AsmBuffer[i]->token != T_COLON) {
         AsmError( COLON_EXPECTED );
@@ -362,9 +359,9 @@ static int SetEpilogue(int *pi)
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
-    if (0 == stricmp(AsmBuffer[i]->string_ptr,"NONE")) {
+    if (0 == _stricmp(AsmBuffer[i]->string_ptr,"NONE")) {
         name = NULL;
-    } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"EPILOGUEDEF")) {
+    } else if (0 == _stricmp(AsmBuffer[i]->string_ptr,"EPILOGUEDEF")) {
         name = "";
     } else {
         name = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1);
@@ -380,9 +377,10 @@ static int SetEpilogue(int *pi)
     return(NOT_ERROR);
 }
 
-// OPTION OFFSET: SEGMENT | GROUP | FLAT
-/* OFFSET: SEGMENT isn't supported yet */
-
+/* OPTION OFFSET: GROUP | FLAT | SEGMENT
+ * default is GROUP.
+ * determines result of OFFSET operator fixups if .model isn't set.
+ */
 static int SetOffset(int *pi)
 {
     int i = *pi;
@@ -396,16 +394,19 @@ static int SetOffset(int *pi)
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
-    if (0 == stricmp(AsmBuffer[i]->string_ptr,"GROUP")) {
-        i++;
-    } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"FLAT")) {
-        i++;
-    } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"SEGMENT")) {
-        AsmErr( NOT_SUPPORTED, AsmBuffer[i-3]->pos );
+    if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"GROUP" ) ) {
+        ModuleInfo.offsettype = OT_GROUP;
+    } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"FLAT" ) ) {
+        ModuleInfo.offsettype = OT_FLAT;
+    } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"SEGMENT" ) ) {
+        ModuleInfo.offsettype = OT_SEGMENT;
+    } else {
+        AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
+    i++;
     *pi = i;
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 /* OPTION PROC:PRIVATE | PUBLIC | EXPORT */
@@ -421,11 +422,11 @@ static int SetProc(int *pi)
     i++;
     switch (AsmBuffer[i]->token) {
     case T_ID:
-        if (0 == stricmp(AsmBuffer[i]->string_ptr,"PRIVATE")) {
+        if (0 == _stricmp(AsmBuffer[i]->string_ptr,"PRIVATE")) {
             ModuleInfo.procs_private = TRUE;
             ModuleInfo.procs_export = FALSE;
             i++;
-        } else if (0 == stricmp(AsmBuffer[i]->string_ptr,"EXPORT")) {
+        } else if (0 == _stricmp(AsmBuffer[i]->string_ptr,"EXPORT")) {
             ModuleInfo.procs_private = FALSE;
             ModuleInfo.procs_export = TRUE;
             i++;
@@ -446,7 +447,10 @@ static int SetProc(int *pi)
     return( NOT_ERROR );
 }
 
-/* OPTION SEGMENT:USE16|USE32|FLAT */
+/* OPTION SEGMENT:USE16|USE32|FLAT
+ * this option set the default offset size for segments and
+ * externals defined outside of segments.
+ */
 
 static int SetSegment(int *pi)
 {
@@ -459,9 +463,9 @@ static int SetSegment(int *pi)
     i++;
     if ( AsmBuffer[i]->token == T_RES_ID && AsmBuffer[i]->value == T_FLAT ) {
         ModuleInfo.defUse32 = TRUE;
-    } else if ( AsmBuffer[i]->token == T_ID && stricmp( AsmBuffer[i]->string_ptr, "USE16") == 0) {
+    } else if ( AsmBuffer[i]->token == T_ID && _stricmp( AsmBuffer[i]->string_ptr, "USE16" ) == 0) {
         ModuleInfo.defUse32 = FALSE;
-    } else if ( AsmBuffer[i]->token == T_ID && stricmp( AsmBuffer[i]->string_ptr, "USE16") == 0) {
+    } else if ( AsmBuffer[i]->token == T_ID && _stricmp( AsmBuffer[i]->string_ptr, "USE32" ) == 0) {
         ModuleInfo.defUse32 = TRUE;
     } else {
         AsmError( SYNTAX_ERROR );
@@ -492,7 +496,7 @@ static int SetFieldAlign(int *pi)
     i++;
     if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
         return( ERROR );
-    if ( opndx.type != EXPR_CONST || opndx.string != NULL ) {
+    if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
         AsmError( CONSTANT_EXPECTED );
         return( ERROR );
     }
@@ -531,7 +535,7 @@ static int SetProcAlign(int *pi)
     i++;
     if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
         return( ERROR );
-    if ( opndx.type != EXPR_CONST || opndx.string != NULL ) {
+    if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
         AsmError( CONSTANT_EXPECTED );
         return( ERROR );
     }
@@ -614,7 +618,7 @@ ret_code OptionDirective( int i )
         case T_ID:
             DebugMsg(( "option=%s\n", AsmBuffer[i]->string_ptr ));
             for ( po = optiontab; po->name != NULL ; po++) {
-                if (0 == stricmp(AsmBuffer[i]->string_ptr, po->name)) {
+                if (0 == _stricmp(AsmBuffer[i]->string_ptr, po->name)) {
                     i++;
                     if (po->func(&i) == ERROR)
                         return( ERROR );

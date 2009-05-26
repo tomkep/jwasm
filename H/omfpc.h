@@ -177,7 +177,7 @@ typedef enum {
     CMD_MODE32          = 0x8b,     /* 32-bit end of module record      */
     CMD_EXTDEF          = 0x8c,     /* import names record              */
     CMD_TYPDEF          = 0x8e,     /* type definition record           */
-    CMD_PUBDEF          = 0x90,     /* export names record              */
+    CMD_PUBDEF          = 0x90,     /* public names record              */
     CMD_PUBDEF32        = 0x91,     /* 32-bit export names record       */
     CMD_PUBD32          = 0x91,     /* 32-bit export names record       */
     CMD_LOCSYM          = 0x92,
@@ -211,10 +211,8 @@ typedef enum {
     CMD_STATIC_EXTDEF   = 0xb4,
     CMD_LEXTDEF32       = 0xb5,     /*  32-bit local import names record */
     CMD_STATIC_EXTD32   = 0xb5,
-    CMD_LPUBDEF         = 0xb6,     /* static export names record */
-    CMD_STATIC_PUBDEF   = 0xb6,
-    CMD_LPUBDEF32       = 0xb7,     /* static export names record */
-    CMD_STATIC_PUBD32   = 0xb7,
+    CMD_LPUBDEF         = 0xb6,     /* local public names def record */
+    CMD_LPUBDEF32       = 0xb7,
     CMD_LCOMDEF         = 0xb8,     /* local comdev */
     CMD_STATIC_COMDEF   = 0xb8,
     CMD_CEXTDF          = 0xbc,     /* external reference to a COMDAT */

@@ -5,24 +5,31 @@
     It's a fork of Open Watcom's WASM (v1.7).
 
     JWasm is distributed in three packages:
-    - JWASMnnB.zip : binaries for Windows (JWASM.EXE) and DOS (JWASMD.EXE)
-    - JWASMnnBl.zip: binary for Linux
-    - JWASMnnS.zip : JWasm's source code
+    - JWASMnnB.zip : binaries for Windows (JWASM.EXE) and DOS (JWASMD.EXE,
+      JWASMR.EXE).
+    - JWASMnnBl.zip: binary for Linux.
+    - JWASMnnS.zip : JWasm's source code. Included are makefiles to create
+      binaries for Windows, DOS, OS/2, Linux and FreeBSD.
 
     JWasm natively supports output formats BIN, OMF, COFF and ELF.
 
 
     2. Requirements
 
-    JWasm needs at least a 80386 cpu to run.
+    - JWASM.EXE runs on any Win32 platform.
 
-    JWASM.EXE runs on Win32 platforms. JWASMD.EXE needs a MS-DOS v5
-    compatible DOS to run (FreeDOS v1 will do as well). Long filenames are
-    supported.
+    - JWASMD.EXE runs in DOS 32bit protected-mode. It requires a 80386 cpu
+      and needs a MS-DOS v5 compatible DOS to run (FreeDOS v1 will do).
+      Long filenames (LFN) are supported.
+
+    - JWASMR.EXE is a DOS real-mode program which runs on any x86 cpu.
+      Similar to JWASMD.EXE it needs a MS-DOS v5 compatible DOS. However,
+      this version doesn't support long filenames.
 
     Memory requirements depend on the source which is assembled. The source
     itself is not kept in memory, but the symbol table is, and this table
     can easily grow to several MBs if huge amounts of equates are defined.
+    That's why JWASMR.EXE might be unable to assemble large sources.
 
 
     3. JWasm Command Line Options
@@ -40,14 +47,25 @@
      Some environments - Win16 and 16bit OS/2 - can then replace the FP
      instructions by calls to an FP emulator if no coprocessor exists.
 
+    -Zg: this option makes JWasm to try an exact copy of Masm's code
+     generation, which results in the following changes:
+      - the default prologue for procedures will use
+        "add [e]sp, - localsize" instead of "sub [e]sp, localsize".
+      - the default epilogue for procedures will always prefer to use 
+        opcode "leave".
+      - expressions '<reg> == 0' and 'reg != 0' will generate code
+        'or <reg>,<reg>' instead of 'cmp <reg>,0'.
+
     -zlc, -zld, -zlf, -zls: these options reduce size of the output module.
      They might be useful if lots of - small - modules are to be assembled
      and put into a static library.
 
     -Zm: this option (or setting OPTION M510) will do:
       - set OPTION OLDSTRUCTS
-      - set OPTION NOSCOPED
+      - set OPTION DOTNAME
       - set OPTION SETIF2:TRUE
+      - set OPTION OFFSET:SEGMENT (if no model is set)
+      - set OPTION NOSCOPED (if no model with language is set)
       - allow to define data items behind code labels
       - allow "invalid" use of REP/REPE/REPNE instruction prefixes
      Other MASM v5.1 compatibility options aren't implemented yet.
@@ -59,10 +77,13 @@
       - floating-point immediate operands in instructions
       - directive INCBIN 
       - directives OPTION FIELDALIGN and OPTION PROCALIGN
-    
+
     -zzo: "no name decoration for STDCALL symbols". This will avoid to add
      a '_' prefix and '@size' suffix to STDCALL symbols. Makes object modules
      written by JWasm compatible to ALINK + Win32.lib.
+
+    -zze: this option suppresses name decoration for procedures with
+     the EXPORT attribute (exported name only).
 
     -zzs: this option is kind of a workaround for a WLink incompatibility.
      It's useful to be set if 1) the source module has a starting address,
@@ -106,9 +127,6 @@
 
     The binary packages contain samples in subdirectory SAMPLES.
 
-    As far as programming for Win32 is concerned: JWasm should be
-    compatible with recent versions of both Win32Inc and Masm32.
-
     For output formats other than BIN, JWasm's output has to be linked to
     create an executable binary. Select one of the following linkers:
 
@@ -144,7 +162,6 @@
       (or WORD in 32bit code) causes bad code to be generated in MASM.
     - PROTOs contained twice in the source caused an EXTDEF entry to be
       generated in the object module.
-    - PURGE actually works in JWasm.
     - MASM ignores an optional alignment parameter for STRUCTs which have
       just one field (and also for UNIONs, no matter how many fields it has).
       JWasm never ignores this parameter. So a STRUCT/UNION with alignment
@@ -194,21 +211,21 @@
     - directives PAGE, TITLE, SUBTITLE, SUBTTL.
       the directives are ignored and a warning (level 3) is displayed.
     - the following parameters of the OPTION directive:
-      - OFFSET:SEGMENT
       - NOSIGNEXTEND
       - OLDMACROS
       - EXPR16
       - READONLY
+    - optional parameter NONUNIQUE for structures is ignored.
     - types SQWORD, MMWORD, XMMWORD (MASM v8+)
     - operators LOW32, HIGH32 (MASM v8+)
-    - INVOKE doesn't support the Watcom C calling convention.
-    - commandline option -Zd option works with OMF output format only.
-    - commandline option -Zi is a no-op.
+    - INVOKE for procedures which use the Watcom C calling convention.
+    - commandline option -Zd option for COFF/ELF output format.
+    - commandline option -Zi (it's a no-op).
 
     c) Missing features which most likely won't be implemented:
 
     - %OUT directive
-    - syntax "mm(n)" and "xmm(n)" (MASM v6 and v7 only)
+    - syntax "mm(n)" and "xmm(n)" (supported by MASM v6 and v7 only)
 
 
     9. How to Create the JWasm Binaries
@@ -217,20 +234,36 @@
     written in C. The following Makefiles are supplied:
 
     name        tool chain used                 creates binary for
-    --------------------------------------------------------------
-    Makefile    Open Watcom v1.7a               Win32, DOS
-    MSVC.MAK    MS VC Toolkit 2003 or MS VC 6   Win32, DOS
-    MinGW.MAK   MinGW with GCC v3.4.5           Win32
-    OWLnx.MAK   Open Watcom v1.7a               Linux
+    ---------------------------------------------------------------
+    Makefile    OW v1.7a[/v1.8*]                Win32, DOS (32-bit)
+    OWDOS16.MAK OW v1.7a/v1.8                   DOS (16-bit)
+    OWOS2.MAK   OW v1.7a/v1.8                   OS/2 (32-bit)
+    OWLinux.MAK OW v1.7a/v1.8                   Linux
+    MSVC.MAK    VC++ TK 2003 or VC++ 2005 EE    Win32 [, DOS (32-bit)]
+    GccWin.MAK  GCC + MinGW/Cygwin              Win32
+    GccUnix.MAK GCC + FreeBSD/Linux             FreeBSD [, Linux]
 
-     The default settings in Makefile will create both the Windows and DOS
-    binaries of JWasm (this can be changed by modifying variables WIN= and/or
-    DOS= ). Makefile, MinGW.MAK and OWLnx.MAK are supposed to be run with
-    Open Watcom's WMake! Please read the comments in these file before trying
-    to run WMake!
+     Makefile, OWDOS16.MAK, OWOS2.MAK and OWLinux.MAK are supposed to be run
+    with Open Watcom's WMake! Please read the comments in these files before
+    trying to run WMake!
+
+     The default settings in Makefile will create both the Win32 and 
+    32bit-DOS (JWASMD) binaries of JWasm.
+
+    *WARNING: if OW v1.8 is used then the build of the 32bit-DOS binary will
+    cause linker warnings and the resulting binary won't run!
 
 
-    10. License
+    10. Contributors
+
+    These people contributed to JWasm ( additions, bugfixes, bug reports):
+
+    agner, BlackVortex, drizz, Paul Edwards, filofel, Peter Flass, gfalen,
+    Japheth, Jimg, jj2007, Khusraw, Alex Kozlov, Peter Kuznetsov, misca,
+    Michal Necasek, RotateRight, Ito Toshimitsu, Vortex.
+
+
+    11. License
 
     Read LICENSE.TXT for details.
 

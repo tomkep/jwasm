@@ -26,7 +26,7 @@ typedef struct equ_item {
 
 typedef struct line_item {
     struct line_item *next;
-    uint_32 lineno;
+    uint_32 lineno:20, srcfile:12;
     uint_32 list_pos; /* position .LST file */
     uint_8 macrolevel; /* just a bit (macrolevel > 0?) is needed */
     char line[];

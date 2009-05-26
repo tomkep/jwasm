@@ -33,11 +33,9 @@
 
 enum {
 #undef fix
-#define fix( cmd, number, act, ret ) MSG_ ## cmd
+#define fix( cmd, argc, act, ret ) MSG_ ## cmd
 #include "fatalmsg.h"
 };
-
-/* number = number of arguments that follow; ret = return value */
 
 extern void   Fatal( unsigned msg, ... );
 extern void   SeekError( void );

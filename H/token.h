@@ -76,14 +76,14 @@ struct asm_tok {
                 char      rm_byte;/* for T_RES_ID only */
                 union {
                     unsigned char  opcode; /* for T_DIRECTIVE, T_RES_ID */
-                    unsigned char  precedence; /* for T_UNARY_OPERATOR */
+                    unsigned char  precedence; /* for T_UNARY_OPERATOR/T_BINARY_OPERATOR */
                     char  string_delim; /* for T_STRING only */
                 };
             };
             unsigned char bytes[16]; /* used by T_FLOAT + T_NUM */
             struct {
-                unsigned long long llvalue;
-                unsigned long long hlvalue;
+                uint_64 llvalue;
+                uint_64 hlvalue;
             };
         };
 };

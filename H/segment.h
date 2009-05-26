@@ -56,7 +56,7 @@ extern asm_sym          *GetGrp( struct asm_sym * );
 extern uint_32          GetCurrSegAlign( void );
 extern ret_code         SetUse32( void );
 extern void             DefineFlatGroup( void );
-extern ret_code         SegmentModulePrologue( int type );
-extern ret_code         SegmentModuleEnd( void );
+extern ret_code         SegmentModuleInit( int type );
+extern ret_code         SegmentModuleExit( void );
 
 #endif

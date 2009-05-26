@@ -28,61 +28,34 @@
 *
 ****************************************************************************/
 
-
 #include <fcntl.h>
-#ifdef __WATCOMC__
-#include <unistd.h>
-#endif
-#include <stdio.h>      /* for SEEK_SET, SEEK_CUR, SEEK_END */
-#include <sys/stat.h>   /* _S_IREAD ... */
-#include <string.h>
+
 #include "globals.h"
+#include "myunistd.h"
 #include "memalloc.h"
 #include "omfrec.h"
 #include "myassert.h"
 #include "omfio.h"
 #include "fatal.h"
 
-#ifdef __UNIX__
-#define OP_MODE         (O_RDWR | O_CREAT | O_TRUNC)
-#define OP_PERM         (0666)
-#else
-#define OP_MODE         (O_RDWR | O_CREAT | O_TRUNC | O_BINARY)
-#ifdef __WATCOMC__
-#define OP_PERM         (S_IREAD | S_IWRITE)
-#else
-#define OP_PERM         (_S_IREAD | _S_IWRITE)
-#endif
-#endif
-
 static void safeSeek( int fh, long offset, int mode ) {
 
-    if( lseek( fh, offset, mode ) == -1 ) {
+    if( _lseek( fh, offset, mode ) == -1 ) {
         SeekError();
     }
 }
 
 static void safeWrite( int fh, const uint_8 *buf, size_t len ) {
 
-    if( write( fh, buf, len ) != len ) {
+    if( _write( fh, buf, len ) != len ) {
         WriteError();
     }
 }
 
-/*
- ObjWriteOpen() and ObjWriteClose() are generally used,
- not just if OMF output format is selected!
- */
-
-OBJ_WFILE *ObjWriteOpen( const char *filename ) {
+OBJ_WFILE *OmfWriteOpen( int fh ) {
 /*********************************************/
-    int         fh;
     OBJ_WFILE    *new;
 
-    fh = open( filename, OP_MODE, OP_PERM );
-    if( fh < 0 ) {
-        return( NULL );
-    }
     new = AsmAlloc( sizeof( *new ) + OBJ_BUFFER_SIZE );
     new->fh = fh;
     new->in_buf = 0;
@@ -91,14 +64,19 @@ OBJ_WFILE *ObjWriteOpen( const char *filename ) {
     return( new );
 }
 
-void ObjWriteClose( OBJ_WFILE *obj ) {
+void OmfWriteClose( OBJ_WFILE *obj ) {
 /**********************************/
-/**/myassert( obj != NULL );
 
-    if( obj->in_rec ) {
+    /**/myassert( obj != NULL );
+
+    /* this function is called from inside CloseFiles(),
+     * which in turn is called on fatal errors. Therefore don't
+     * access object module file if write_to_file is FALSE!
+     */
+    if( obj->in_rec && write_to_file ) {
         OmfWEndRec( obj );
     }
-    close( obj->fh );
+    obj->fh = -1;
     AsmFree( obj );
 }
 
@@ -179,7 +157,7 @@ void OmfWrite16( OBJ_WFILE *obj, uint_16 word ) {
         OmfWFlushBuffer( obj );
     }
     WriteU16( obj->buffer + obj->in_buf, word );
-    obj->in_buf += sizeof(uint_16);
+    obj->in_buf += sizeof( uint_16 );
 }
 
 void OmfWrite32( OBJ_WFILE *obj, uint_32 dword ) {
@@ -190,7 +168,7 @@ void OmfWrite32( OBJ_WFILE *obj, uint_32 dword ) {
         OmfWFlushBuffer( obj );
     }
     WriteU32( obj->buffer + obj->in_buf, dword );
-    obj->in_buf += sizeof( uint_32);
+    obj->in_buf += sizeof( uint_32 );
 }
 
 void OmfWriteIndex( OBJ_WFILE *obj, uint_16 index ) {
@@ -238,8 +216,7 @@ static uint_8 checkSum( const uint_8 *buf, uint_16 length ) {
     return( checksum );
 }
 
-void OmfWriteRec( OBJ_WFILE *obj, uint_8 command, uint_16 length,
-    const uint_8 *contents ) {
+void OmfWriteRec( OBJ_WFILE *obj, uint_8 command, size_t length, const uint_8 *contents ) {
 /***************************************************************/
 /*
     Contents and length don't include checksum

@@ -82,8 +82,8 @@ typedef struct expr_list {
             int_32          value96127; // bits 96-127 of 128bit number
         };
         struct {
-            unsigned long long  llvalue;
-            unsigned long long  hlvalue;
+            uint_64         llvalue;
+            uint_64         hlvalue;
         };
     };
     char            *string;        // for strings only -- NULL otherwise
@@ -95,7 +95,7 @@ typedef struct expr_list {
                                     //   or register
     enum asm_token  instr;          // instruction token for operator
 
-    enum exprtype   type;           // Type of expression
+    enum exprtype   kind;           // Type of expression
     memtype         mem_type;       // Whether expr is BYTE, WORD, DWORD, etc.
     uint_8          scale;          // scaling factor 1, 2, 4, or 8 - 386 code only
     ofssize         ofs_size;       // for MT_NEAR | MT_FAR
@@ -112,9 +112,9 @@ typedef struct expr_list {
             unsigned        is_opattr : 1;   // current operator is OPATTR
         };
     };
-    struct asm_sym  *sym;           // symbol used
-    struct asm_sym  *mbr;           // (member of a struct?) - also holds the type for typecasts
-    struct asm_sym  *assume;        // for DOT operator. Must be last (see TokenAssign)!
+    struct asm_sym  *sym;   // label used
+    struct asm_sym  *mbr;   // struct member
+    struct asm_sym  *type;  // for DOT operator. Must be last (see TokenAssign)!
 } expr_list;
 
 extern ret_code     EvalOperand( int *, int, expr_list *, bool );

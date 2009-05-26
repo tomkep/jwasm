@@ -28,8 +28,6 @@
 *
 ****************************************************************************/
 
-
-#include <string.h>
 #include "globals.h"
 #include "memalloc.h"
 #include "omfrec.h"
@@ -95,30 +93,26 @@ void OmfKillRec( obj_rec *objr ) {
         }
         break;
     case CMD_PUBDEF:
-    case CMD_STATIC_PUBDEF:
-        if( objr->d.pubdef.free_pubs ) {
-/**/        myassert( objr->d.pubdef.pubs != NULL );
-            AsmFree( objr->d.pubdef.pubs );
-        }
+    case CMD_LPUBDEF:
         break;
     }
     CarveFree( myCarver, objr );
 }
 
-void OmfAllocData( obj_rec *objr, uint_16 len ) {
+void OmfAllocData( obj_rec *objr, size_t len ) {
 /*********************************************/
 /**/myassert( objr->data == NULL );
     objr->data = AsmAlloc( len );
     objr->length = len;
-    objr->free_data = 1;
+    objr->free_data = TRUE;
 }
 
-void OmfAttachData( obj_rec *objr, uint_8 *data, uint_16 len ) {
+void OmfAttachData( obj_rec *objr, uint_8 *data, size_t len ) {
 /************************************************************/
 /**/myassert( objr->data == NULL );
     objr->data = data;
     objr->length = len;
-    objr->free_data = 0;
+    objr->free_data = FALSE;
 }
 
 void OmfDetachData( obj_rec *objr ) {
@@ -143,7 +137,7 @@ uint_16 OmfGet16( obj_rec *objr ) {
     uint_8  *p;
 
 /**/myassert( objr != NULL && objr->data != NULL );
-    p = OmfGet( objr, 2 );
+    p = OmfGet( objr, sizeof( uint_16) );
     return( ReadU16( p ) );
 }
 
@@ -153,7 +147,7 @@ uint_32 OmfGet32( obj_rec *objr ) {
 
 /**/myassert( objr != NULL && objr->data != NULL );
 
-    p = OmfGet( objr, 4 );
+    p = OmfGet( objr, sizeof( uint_32) );
     return( ReadU32( p ) );
 }
 
@@ -169,9 +163,9 @@ uint_32 OmfGetEither( obj_rec *objr ) {
 }
 #endif
 
-uint_16 OmfGetIndex( obj_rec *objr ) {
+size_t OmfGetIndex( obj_rec *objr ) {
 /**********************************/
-    uint_16 index;
+    size_t index;
 
 /**/myassert( objr != NULL && objr->data != NULL );
 
@@ -182,17 +176,11 @@ uint_16 OmfGetIndex( obj_rec *objr ) {
     return( index );
 }
 
-uint_8 *OmfGet( obj_rec *objr, uint_16 len ) {
+uint_8 *OmfGet( obj_rec *objr, size_t len ) {
 /******************************************/
     uint_8  *p;
 
-#if DEBUG_OUT
-    if ( objr == NULL || objr->data == NULL ) {
-        _asm int 3;
-    }
-#else
 /**/myassert( objr != NULL && objr->data != NULL );
-#endif
 
     p = objr->data + objr->curoff;
     objr->curoff += len;
@@ -211,7 +199,7 @@ void OmfPut16( obj_rec *objr, uint_16 word ) {
 /**/myassert( objr != NULL && objr->data != NULL );
 
     WriteU16( objr->data + objr->curoff, word );
-    objr->curoff += 2;
+    objr->curoff += sizeof( uint_16 );
 }
 
 void OmfPut32( obj_rec *objr, uint_32 dword ) {
@@ -219,7 +207,7 @@ void OmfPut32( obj_rec *objr, uint_32 dword ) {
 /**/myassert( objr != NULL && objr->data != NULL );
 
     WriteU32( objr->data + objr->curoff, dword );
-    objr->curoff += 4;
+    objr->curoff += sizeof( uint_32 );
 }
 
 #if 0
@@ -234,7 +222,7 @@ void OmfPutEither( obj_rec *objr, uint_32 data ) {
 }
 #endif
 
-void OmfPutIndex( obj_rec *objr, uint_16 idx ) {
+void OmfPutIndex( obj_rec *objr, size_t idx ) {
 /********************************************/
 /**/myassert( objr != NULL && objr->data != NULL );
     if( idx > 0x7f ) {
@@ -243,14 +231,14 @@ void OmfPutIndex( obj_rec *objr, uint_16 idx ) {
     OmfPut8( objr, idx & 0xff );
 }
 
-void OmfPut( obj_rec *objr, const uint_8 *data, uint_16 len ) {
+void OmfPut( obj_rec *objr, const uint_8 *data, size_t len ) {
 /***********************************************************/
 /**/myassert( objr != NULL && objr->data != NULL );
     memcpy( objr->data + objr->curoff, data, len );
     objr->curoff += len;
 }
 
-void OmfPutName( obj_rec *objr, const char *name, uint_8 len ) {
+void OmfPutName( obj_rec *objr, const char *name, size_t len ) {
 /************************************************************/
 /**/myassert( objr != NULL && objr->data != NULL );
     OmfPut8( objr, len );

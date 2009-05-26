@@ -68,9 +68,9 @@
 #define D32             0x05
 #define D16             0x06
 
-#define ESP             0x04
-#define EBP             0x05
-#define BP              0x06
+//#define ESP             0x04
+//#define EBP             0x05
+//#define BP              0x06
 
 #define MEM_BX_SI       0x00
 #define MEM_BX_DI       0x01

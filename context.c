@@ -20,8 +20,6 @@
 #include "fastpass.h"
 #include "listing.h"
 
-#include "myassert.h"
-
 enum {
     CONT_ASSUMES,
     CONT_RADIX,
@@ -31,6 +29,7 @@ enum {
 };
 
 typedef struct _context {
+    struct _context *next;
     uint_32 type;
     char data[];
 } context;
@@ -70,7 +69,7 @@ static context *ContextStack;
 
 #if FASTPASS
 static int saved_numcontexts;
-static all_context *saved_contexts;
+static context *saved_contexts;
 #endif
 
 ret_code ContextDirective( int directive, int i )
@@ -90,19 +89,18 @@ ret_code ContextDirective( int directive, int i )
     if (AsmBuffer[i]->token == T_ID) {
         char **p;
         for (p = context, type = CONT_ASSUMES; *p ; p++, type++) {
-            if (stricmp(*p, AsmBuffer[i]->string_ptr) == 0) {
+            if (_stricmp(*p, AsmBuffer[i]->string_ptr) == 0) {
                 i++;
                 if (AsmBuffer[i]->token == T_FINAL) {
                     if (directive == T_POPCONTEXT) {
                         DebugMsg(( "POPCONTEXT %s\n", AsmBuffer[i-1]->string_ptr ));
                         /* for POPCONTEXT, check if the proper item is pushed */
-                        pcontext = peek( ContextStack, 0 );
+                        pcontext = ContextStack;
                         if (pcontext == NULL || pcontext->type != type) {
                             AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i-2]->pos);
                             return( ERROR );
                         }
-                        // get the item
-                        pcontext = pop( &ContextStack );
+                        ContextStack = pcontext->next;
 
                         // restore the values
                         switch (type) {
@@ -197,7 +195,8 @@ ret_code ContextDirective( int directive, int i )
                             ccontext->cpu      = ModuleInfo.cpu;
                             ccontext->curr_cpu = ModuleInfo.curr_cpu;
                         }
-                        push( &ContextStack, pcontext );
+                        pcontext->next = ContextStack;
+                        ContextStack = pcontext;
                     }
                     return( NOT_ERROR );
                 }
@@ -216,16 +215,15 @@ ret_code ContextDirective( int directive, int i )
 void ContextSaveState( void )
 {
     int i;
+    context *p;
 
-    for ( i = 0 ; ; i++ )
-        if ( peek( ContextStack, i ) == NULL )
-            break;
+    for ( i = 0, p=ContextStack ; p ; i++, p = p->next );
 
     saved_numcontexts = i;
     if ( i ) {
-        saved_contexts = AsmAlloc( i * sizeof(all_context) );
-        for ( i = 0; i < saved_numcontexts ; i++ )
-            memcpy( saved_contexts+i, peek( ContextStack, i), sizeof(all_context));
+        saved_contexts = AsmAlloc( i * (sizeof(context) + sizeof(all_context)) );
+        for ( i = 0, p = ContextStack ; i < saved_numcontexts ; i++, p = p->next )
+            memcpy( saved_contexts+i, p, sizeof(context) + sizeof(all_context));
     }
 }
 
@@ -234,8 +232,13 @@ void ContextSaveState( void )
 static void ContextRestoreState( void )
 {
     int i;
-    for ( i = saved_numcontexts; i ; i-- )
-        push( &ContextStack, saved_contexts+i-1 );
+    context *p;
+
+    for ( i = saved_numcontexts; i ; i-- ) {
+        p = saved_contexts+i-1;
+        p->next = ContextStack;
+        ContextStack = p;
+    }
 }
 
 #endif

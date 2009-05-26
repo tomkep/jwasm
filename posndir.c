@@ -28,9 +28,7 @@
 *
 ****************************************************************************/
 
-
 #include "globals.h"
-
 #include "parser.h"
 #include "directiv.h"
 #include "segment.h"
@@ -75,34 +73,34 @@ static uint_8 *NopLists[] = { NopList16, NopList32 };
 ret_code OrgDirective( int i )
 /***********************/
 {
-    struct asm_sym  *sym;
-    int_32          value = 0;
+    //struct asm_sym  *sym;
+    //int_32          value = 0;
     expr_list opndx;
 
     i++;
     if ((ERROR == EvalOperand( &i, Token_Count, &opndx, TRUE )))
         return(ERROR);
-    switch (opndx.type) {
+    switch ( opndx.kind ) {
     case EXPR_CONST:
-        if (opndx.string != NULL)
-            break;
-        if (AsmBuffer[i]->token != T_FINAL) {
-            AsmError(SYNTAX_ERROR);
-            return(ERROR);
+        //if ( opndx.string != NULL ) // type string is allowed!
+        //    break;
+        if ( AsmBuffer[i]->token != T_FINAL ) {
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            return( ERROR );
         }
-        if( StructDef.struct_depth != 0 )
+        if( CurrStruct != NULL )
             return( SetStructCurrentOffset( opndx.value ) );
 
         return( SetCurrOffset( opndx.value, FALSE, FALSE ) );
     case EXPR_ADDR:
         if (opndx.indirect || (opndx.sym && opndx.sym->state == SYM_STACK))
             break;
-        if (AsmBuffer[i]->token != T_FINAL) {
-            AsmError(SYNTAX_ERROR);
-            return(ERROR);
+        if ( AsmBuffer[i]->token != T_FINAL ) {
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            return( ERROR );
         }
         /* ORG inside a struct requires a CONST value */
-        if( StructDef.struct_depth != 0 )
+        if( CurrStruct != NULL )
             break;
         return( SetCurrOffset( opndx.sym->offset + opndx.value, FALSE, FALSE ) );
     default:
@@ -118,31 +116,45 @@ static void fill_in_objfile_space( uint size )
     int i;
     int nop_type;
 
-    /* first decide whether to output nulls or nops - is it a code seg? */
+    /* emit
+     - nothing ... for BSS
+     - x'00'   ... for DATA
+     - nops    ... for CODE
+     */
+
     if( ! SEGISCODE( CurrSeg ) ) {
-        /* just output nulls */
-        for( i = 0; i < size; i++ ) {
-            OutputByte( 0x00 );
+
+        if (CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS ||
+            CurrSeg->seg->e.seginfo->segtype == SEGTYPE_ABS ) {
+
+            SetCurrOffset( size, TRUE, TRUE );
+
+        } else {
+            /* just output nulls */
+            for( i = 0; i < size; i++ ) {
+                OutputByte( 0x00 );
+            }
         }
+
     } else {
         /* output appropriate NOP type instructions to fill in the gap */
-        /**/ myassert( Use32 == 0 || Use32 == 1 );
+        /**/ myassert( ModuleInfo.Use32 == 0 || ModuleInfo.Use32 == 1 );
 
-        while( size > NopLists[Use32][0] ) {
-            for( i = 1; i <= NopLists[Use32][0]; i++ ) {
-                OutputByte( NopLists[Use32][i] );
+        while( size > NopLists[ ModuleInfo.Use32 ][0] ) {
+            for( i = 1; i <= NopLists[ ModuleInfo.Use32 ][0]; i++ ) {
+                OutputByte( NopLists[ ModuleInfo.Use32 ][i] );
             }
-            size -= NopLists[Use32][0];
+            size -= NopLists[ ModuleInfo.Use32 ][0];
         }
         if( size == 0 ) return;
 
         i=1; /* here i is the index into the NOP table */
-        for( nop_type = NopLists[Use32][0]; nop_type > size ; nop_type-- ) {
+        for( nop_type = NopLists[ ModuleInfo.Use32 ][0]; nop_type > size ; nop_type-- ) {
             i+=nop_type;
         }
         /* i now is the index of the 1st part of the NOP that we want */
         for( ; nop_type > 0; nop_type--,i++ ) {
-            OutputByte( NopLists[Use32][i] );
+            OutputByte( NopLists[ ModuleInfo.Use32 ][i] );
         }
     }
 }
@@ -169,15 +181,16 @@ ret_code AlignDirective( int directive, int i )
     int_32 align_val;
     int seg_align;
     expr_list opndx;
-    int j = i+1;
     unsigned int CurrAddr;
 
     DebugMsg(("AlignDirective enter\n"));
+
+    i++;
     switch( directive ) {
     case T_ALIGN:
-        if ( EvalOperand( &j, Token_Count, &opndx, TRUE ) == ERROR )
+        if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
             return( ERROR );
-        if ( opndx.type == EXPR_CONST && opndx.string == NULL ) {
+        if ( opndx.kind == EXPR_CONST ) {
             int power;
             align_val = opndx.value;
             /* check that the parm is a power of 2 */
@@ -186,21 +199,24 @@ ret_code AlignDirective( int directive, int i )
                 AsmError( POWER_OF_2 );
                 return( ERROR );
             }
+        } else if ( opndx.kind == EXPR_EMPTY ) {
+            align_val = GetCurrSegAlign();
         } else {
-            if( Token_Count == i + 1 ) {
-                align_val = GetCurrSegAlign();
-            } else {
-                AsmError( EXPECTING_NUMBER );
-                return( ERROR );
-            }
+            AsmError( EXPECTING_NUMBER );
+            return( ERROR );
         }
         break;
     case T_EVEN:
         align_val = 2;
         break;
     }
+    if ( AsmBuffer[i]->token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+
     /* ALIGN/EVEN inside a STRUCT definition? */
-    if ( StructDef.struct_depth > 0 )
+    if ( CurrStruct )
         return( AlignInStruct( align_val ));
 
     seg_align = GetCurrSegAlign(); // # of bytes
@@ -209,7 +225,8 @@ ret_code AlignDirective( int directive, int i )
         return( ERROR );
     }
     if( align_val > seg_align ) {
-        AsmWarn( 1, ALIGN_TOO_HIGH );
+        if ( Parse_Pass == PASS_1 )
+            AsmWarn( 1, ALIGN_TOO_HIGH );
         return( ERROR );
     }
     /* find out how many bytes past alignment we are & add the remainder */

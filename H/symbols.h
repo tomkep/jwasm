@@ -139,7 +139,7 @@ typedef struct asm_sym {
         char            *(*mangler)( struct asm_sym *sym, char *buffer );
         unsigned        used:1;       /* symbol has been referenced */
         unsigned        defined:1;    /* symbol has been defined */
-        unsigned        local:1;      /* symbol is local label or LOCAL */
+        unsigned        scoped:1;     /* symbol is local label or LOCAL */
         unsigned        global:1;     /* symbol is global */
         unsigned        equate:1;     /* symbol has been defined with EQU */
         unsigned        predefined:1; /* symbol is predefined */
@@ -174,6 +174,7 @@ extern  void            SymFini( void );
 extern  void            SymPassInit( int pass );
 extern  struct asm_sym **SymSort( unsigned int * );
 extern  void            SymMakeAllSymbolsPublic( void );
+extern  void            SymSetCurrPC( void );
 
 #ifdef __WATCOMC__
 typedef int (__watcall * StrCmpFunc)(const char *, const char * );
@@ -183,5 +184,9 @@ typedef int (* StrCmpFunc)(const char *, const char * );
 extern StrCmpFunc SymCmpFunc;
 
 extern  struct asm_sym  *SymCreate( const char *, bool );
+extern  struct asm_sym  *SymLCreate( const char * );
+extern  void             SymClearLocal( void );
+extern  void             SymSetLocal( asm_sym * );
+extern  void             SymGetLocal( asm_sym * );
 
 #endif

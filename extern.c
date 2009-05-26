@@ -48,8 +48,6 @@
 #include "proc.h"
 #include "extern.h"
 
-#include "myassert.h"
-
 // the "mangler" has been inherited from Wasm.
 // it allows some fine tuning of the external's name in the object module,
 // but is relevant for mixing with OW code only.
@@ -83,10 +81,10 @@ static asm_sym *CreateGlobal( asm_sym *sym, char * name )
         sym = SymCreate( name, *name != NULLC );
     if ( sym ) {
         sym->state = SYM_EXTERNAL;
-        sym->use32 = Use32;
+        sym->use32 = ModuleInfo.Use32;
         sym->comm = 0;
         sym->weak = 1;
-        dir_add( (dir_node *)sym );
+        dir_add_table( (dir_node *)sym );
     }
     return( sym );
 }
@@ -97,10 +95,10 @@ static asm_sym *CreateExternal( asm_sym *sym, char *name )
         sym = SymCreate( name, *name != NULLC );
     if ( sym ) {
         sym->state = SYM_EXTERNAL;
-        sym->use32 = Use32;
+        sym->use32 = ModuleInfo.Use32;
         sym->comm = 0;
         sym->weak = 0;
-        dir_add( (dir_node *)sym );
+        dir_add_table( (dir_node *)sym );
     }
     return( sym );
 }
@@ -111,11 +109,11 @@ static asm_sym *CreateComm( asm_sym *sym, char *name)
         sym = SymCreate( name, *name != NULLC );
     if ( sym ) {
         sym->state = SYM_EXTERNAL;
-        sym->use32 = Use32;
+        sym->use32 = ModuleInfo.Use32;
         sym->comm = 1;
         sym->weak = 0;
         sym->isfar = 0;
-        dir_add( (dir_node *)sym );
+        dir_add_table( (dir_node *)sym );
     }
     return( sym );
 }
@@ -139,13 +137,13 @@ ret_code ExterndefDirective( int i )
     DebugMsg(("ExterndefDirective entry\n"));
 
     mangle_type = Check4Mangler( &i );
-    for( ; i < Token_Count; ) {
+    do {
 
         symtype = NULL;
         mem_type = MT_EMPTY;
          /* set default offset size */
         if ( CurrSeg )
-            is32 = Use32;
+            is32 = ModuleInfo.Use32;
         else
             is32 = ModuleInfo.defUse32;
 
@@ -154,6 +152,10 @@ ret_code ExterndefDirective( int i )
         GetLangType( &i, &langtype );
 
         /* get the symbol name */
+        if( AsmBuffer[i]->token != T_ID ) {
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            return( ERROR );
+        }
         token = AsmBuffer[i++]->string_ptr;
 
         /* go past the colon */
@@ -165,12 +167,12 @@ ret_code ExterndefDirective( int i )
 
         typetoken = AsmBuffer[i]->string_ptr;
         if ( AsmBuffer[i]->token == T_ID ) {
-            if (0 == stricmp(AsmBuffer[i]->string_ptr, "ABS")) {
+            if (0 == _stricmp(AsmBuffer[i]->string_ptr, "ABS")) {
                 mem_type = MT_ABS;
             } else if( symtype = IsLabelType( AsmBuffer[i]->string_ptr ) ) {
                 mem_type = MT_TYPE;
             }
-        } else if (AsmBuffer[i]->token == T_DIRECTIVE ) {
+        } else if ( AsmBuffer[i]->token == T_DIRECTIVE ) {
             if ( AsmBuffer[i]->value == T_PROTO ) {
                 /* dont scan this line further */
                 /* a SYM_PROC will be defined finally, not a SYM_EXTERNAL */
@@ -178,7 +180,7 @@ ret_code ExterndefDirective( int i )
             } else if ( AsmBuffer[i]->value == T_PROC ) {
                 mem_type = SimpleType[ST_PROC].mem_type;
             }
-        } else if (AsmBuffer[i]->token == T_RES_ID ) {
+        } else if ( AsmBuffer[i]->token == T_RES_ID ) {
             if ( AsmBuffer[i]->rm_byte == OP_TYPE ) {
                 mem_type = SimpleType[AsmBuffer[i]->opcode].mem_type;
                 if (SimpleType[AsmBuffer[i]->opcode].ofs_size != OFSSIZE_EMPTY)
@@ -194,7 +196,7 @@ ret_code ExterndefDirective( int i )
         /* if it is a pointer to something (not VOID),
          an anonymous TYPEDEF has to be created
          */
-        if (mem_type == MT_PTR && AsmBuffer[i+1]->token != T_FINAL) {
+        if ( mem_type == MT_PTR && AsmBuffer[i+1]->token != T_FINAL ) {
             if (( symtype = CreateTypeDef("", &i )) == NULL )
                 return (ERROR);
             DebugMsg(("ExterndefDirective(%s): CreateTypeDef()=%X\n", token, symtype));
@@ -208,8 +210,10 @@ ret_code ExterndefDirective( int i )
             sym = CreateGlobal( NULL, token );
             DebugMsg(("ExterndefDirective(%s): new symbol\n", token));
         } else {
-            if ( sym->state == SYM_UNDEFINED )
+            if ( sym->state == SYM_UNDEFINED ) {
+                dir_remove_table( (dir_node *)sym );
                 CreateGlobal( sym, NULL );
+            }
             DebugMsg(("ExterndefDirective(%s): symbol exists, state=%u\n", token, sym->state));
         }
 
@@ -217,7 +221,7 @@ ret_code ExterndefDirective( int i )
 
         /* ensure that the type of the symbol won't change */
 
-        if (sym->state == SYM_EXTERNAL && sym->mem_type == MT_EMPTY) {
+        if ( sym->state == SYM_EXTERNAL && sym->mem_type == MT_EMPTY ) {
             DebugMsg(("ExterndefDirective: type set for >%s<\n", sym->name));
             if (mem_type != MT_ABS)
                 SetSymSegOfs(sym);
@@ -238,13 +242,13 @@ ret_code ExterndefDirective( int i )
                 if ( size != 0 )
                     sym->total_size = size;
             }
-        } else if (sym->mem_type != mem_type) {
+        } else if ( sym->mem_type != mem_type ) {
             /* if the symbol is already defined (as SYM_INTERNAL), Masm
              won't display an error. The other way, first externdef and
              then the definition, will make Masm complain, however */
             DebugMsg(("ExterndefDirective: type conflict for %s. mem_types: %u - %u ; %u - %u\n", sym->name, sym->mem_type, mem_type));
             AsmWarn( 1, SYMBOL_TYPE_CONFLICT, sym->name );
-        } else if (sym->mem_type == MT_TYPE && sym->type != symtype) {
+        } else if ( sym->mem_type == MT_TYPE && sym->type != symtype ) {
             asm_sym *sym2 = sym;
             /* skip alias types and compare the base types */
             DebugMsg(("ExterndefDirective(%s): types differ: %X (%s) - %X (%s)\n", sym->name, sym->type, sym->type->name, symtype, symtype->name));
@@ -270,13 +274,17 @@ ret_code ExterndefDirective( int i )
             AddGlobalData( (dir_node *)sym );
         }
 
-        if (AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA) {
-            AsmError( EXPECTING_COMMA );
-            return( ERROR );
-        }
-        i++;
+        if ( AsmBuffer[i]->token != T_FINAL )
+            if ( AsmBuffer[i]->token == T_COMMA ) {
+                if ( (i + 1) < Token_Count )
+                    i++;
+            } else {
+                AsmError( EXPECTING_COMMA );
+                return( ERROR );
+            }
 
-    } /* end for */
+    } while ( i < Token_Count );
+
     return( NOT_ERROR );
 }
 
@@ -322,20 +330,24 @@ ret_code ExternDirective( int i )
     lang_type           langtype;
 
     mangle_type = Check4Mangler( &i );
-    for( ; i < Token_Count; i++ ) {
+    do {
 
         symtype = NULL;
         mem_type = MT_EMPTY;
-        is32 = Use32;
+        is32 = ModuleInfo.Use32;
 
         /* get the symbol language type if present */
         langtype = ModuleInfo.langtype;
         GetLangType( &i, &langtype );
 
         /* get the symbol name */
+        if( AsmBuffer[i]->token != T_ID ) {
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            return( ERROR );
+        }
         token = AsmBuffer[i++]->string_ptr;
 
-        /* go past the optional alternative name */
+        /* go past the optional alternative name (weak ext, default resolution) */
         if( AsmBuffer[i]->token == T_OP_BRACKET ) {
             i++;
             if ( AsmBuffer[i]->token != T_ID ) {
@@ -361,7 +373,7 @@ ret_code ExternDirective( int i )
 
         typetoken = AsmBuffer[i]->string_ptr;
         if (AsmBuffer[i]->token == T_ID) {
-            if ( 0 == stricmp( AsmBuffer[i]->string_ptr, "ABS" ) ) {
+            if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "ABS" ) ) {
                 mem_type = MT_ABS;
             } else if ( symtype = IsLabelType( typetoken ) ) {
                 mem_type = MT_TYPE;
@@ -390,10 +402,12 @@ ret_code ExternDirective( int i )
         sym = SymSearch( token );
 
         if( sym == NULL || sym->state == SYM_UNDEFINED ) {
-            if (sym && sym->public == TRUE) {
+            if ( sym && sym->public == TRUE ) {
                 AsmErr(CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name);
                 return( ERROR );
             }
+            if ( sym )
+                dir_remove_table( (dir_node *)sym );
             if(( sym = MakeExtern( token, mem_type, symtype, sym, is32 )) == NULL )
                 return( ERROR );
 
@@ -405,7 +419,7 @@ ret_code ExternDirective( int i )
             }
             /* if EXTERN is placed BEHIND the symbol definition, it's
              ignored by Masm! */
-            if (sym->state != SYM_EXTERNAL) {
+            if ( sym->state != SYM_EXTERNAL ) {
                 DebugMsg(("ExternDirective: symbol %s redefinition\n", token ));
                 AsmWarn( 3, SYMBOL_REDEFINITION, token );
             }
@@ -431,11 +445,16 @@ ret_code ExternDirective( int i )
         }
         SetMangler( sym, mangle_type, langtype );
 
-        if ( AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA ) {
-            AsmError( EXPECTING_COMMA );
-            return( ERROR );
-        }
-    }
+        if ( AsmBuffer[i]->token != T_FINAL )
+            if ( AsmBuffer[i]->token == T_COMMA ) {
+                if ( (i + 1) < Token_Count )
+                    i++;
+            } else {
+                AsmError( EXPECTING_COMMA );
+                return( ERROR );
+            }
+    }  while ( i < Token_Count );
+
     return( NOT_ERROR );
 }
 
@@ -484,27 +503,29 @@ ret_code PublicDirective( int i )
     char                *mangle_type;
     char                *token;
     struct asm_sym      *sym;
-    dir_node            *dir;
+    //dir_node            *dir;
     lang_type           langtype;
 
     mangle_type = Check4Mangler( &i );
-    for( ; i < Token_Count; i+=2 ) {
+    do {
 
         /* read the optional language type */
         langtype = ModuleInfo.langtype;
         GetLangType( &i, &langtype );
 
         if ( AsmBuffer[i]->token != T_ID ) {
-            AsmError( SYNTAX_ERROR );
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         /* get the symbol name */
-        token = AsmBuffer[i]->string_ptr;
+        token = AsmBuffer[i++]->string_ptr;
+
+        DebugMsg(("PublicDirective: %s\n", token ));
 
         /* Add the public name */
         sym = SymSearch( token );
         if (Parse_Pass != PASS_1 && (sym == NULL || sym->state == SYM_UNDEFINED)) {
-            AsmErr( SYMBOL_NOT_DEFINED, sym->name );
+            AsmErr( SYMBOL_NOT_DEFINED, token );
             return( ERROR );
         }
         if( sym != NULL ) {
@@ -515,11 +536,11 @@ ret_code PublicDirective( int i )
                 AsmErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
                 return( ERROR );
             }
-            if (sym->state == SYM_INTERNAL && sym->local == TRUE) {
+            if ( sym->scoped == TRUE && (sym->state == SYM_INTERNAL || sym->state == SYM_PROC) ) {
                 AsmErr( CANNOT_DECLARE_SCOPED_CODE_LABEL_AS_PUBLIC, sym->name );
                 return( ERROR );
             }
-            if (sym->state == SYM_EXTERNAL && sym->weak != TRUE) {
+            if ( sym->state == SYM_EXTERNAL && sym->weak != TRUE ) {
                 DebugMsg(("PublicDirective: symbol redefinition\n"));
                 AsmErr( SYMBOL_REDEFINITION, sym->name );
                 return( ERROR );
@@ -531,12 +552,25 @@ ret_code PublicDirective( int i )
             }
         } else if (Parse_Pass == PASS_1) {
             sym = SymCreate( token, TRUE );
+            dir_add_table( (dir_node *)sym );
             sym->public = TRUE;
             AddPublicData( sym );
+            DebugMsg(("PublicDirective: new symbol, state=%u\n", sym->state ));
         }
         if (Parse_Pass == PASS_1)
             SetMangler( sym, mangle_type, langtype );
-    }
+
+        if ( AsmBuffer[i]->token != T_FINAL )
+            if ( AsmBuffer[i]->token == T_COMMA ) {
+                if ( (i + 1) < Token_Count )
+                    i++;
+            } else {
+                AsmError( EXPECTING_COMMA );
+                return( ERROR );
+            }
+
+    } while ( i < Token_Count );
+
     return( NOT_ERROR );
 }
 
@@ -573,7 +607,7 @@ ret_code CommDirective( int i )
     char            *token;
     char            *mangle_type;
     bool            isfar;
-    int             distance;
+    //int             distance;
     int             tmp;
     int             size;
     int             count;
@@ -621,14 +655,14 @@ ret_code CommDirective( int i )
         for (tmp = i; tmp < Token_Count;tmp++)
             if (AsmBuffer[tmp]->token == T_COLON)
                 break;
-        if (EvalOperand( &i, tmp, &opndx, TRUE ) == ERROR)
+        if ( EvalOperand( &i, tmp, &opndx, TRUE ) == ERROR )
             return( ERROR );
-        if (opndx.type != EXPR_CONST || opndx.string != NULL) {
-            AsmError(CONSTANT_EXPECTED);
+        if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
+            AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
         if (opndx.value == 0) {
-            AsmError(POSITIVE_VALUE_EXPECTED);
+            AsmError( POSITIVE_VALUE_EXPECTED );
             return( ERROR );
         }
         size = opndx.value;
@@ -636,14 +670,14 @@ ret_code CommDirective( int i )
         if( AsmBuffer[i]->token == T_COLON ) {
             i++;
             /* count */
-            if (EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR)
+            if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
                 return( ERROR );
-            if (opndx.type != EXPR_CONST || opndx.string != NULL) {
-                AsmError(CONSTANT_EXPECTED);
+            if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
+                AsmError( CONSTANT_EXPECTED );
                 return( ERROR );
             }
             if (opndx.value == 0) {
-                AsmError(POSITIVE_VALUE_EXPECTED);
+                AsmError( POSITIVE_VALUE_EXPECTED );
                 return( ERROR );
             }
             count = opndx.value;
@@ -656,6 +690,7 @@ ret_code CommDirective( int i )
                     AsmErr(CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name);
                     return( ERROR );
                 }
+                dir_remove_table( (dir_node *)sym );
                 if( MakeComm( token, sym, size, count, isfar) == NULL )
                     return( ERROR );
             } else {

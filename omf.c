@@ -28,18 +28,11 @@
 *
 ****************************************************************************/
 
-
-#include "globals.h"
-#include <errno.h>
 #include <ctype.h>
 #include <time.h>
 
-#ifdef __WATCOMC__
-#include <unistd.h>
-#else
-#include <io.h>
-#endif
-
+#include "globals.h"
+#include "myunistd.h"
 #include "memalloc.h"
 #include "symbols.h"
 #include "autodept.h"
@@ -49,61 +42,43 @@
 #include "queues.h"
 #include "fixup.h"
 #include "omf.h"
+#include "omfgenms.h"
 #include "omffixup.h"
-#include "omfname.h"
 #include "omfio.h"
-#include "omfprs.h"
 #include "fastpass.h"
-
 #include "myassert.h"
+#include "tokenize.h" /* needed because of StringBufferEnd usage */
+#include "input.h"
 
 #define SEPARATE_FIXUPP_16_32
 
+extern dir_node         *GetPublicData( void ** );
+
 extern symbol_queue     Tables[];       // tables of definitions
 extern obj_rec          *ModendRec;     // Record for Modend (OMF)
-extern pobj_state       pobjState;      // object file information
 
 extern uint             segdefidx;      // Number of Segment definition
 extern FNAME            *FNames;
 extern unsigned         total_segs;
 
+OBJ_WFILE               *file_out;
 uint_32                 LastCodeBufSize;
-static char             **NameArray;
 
-#define JUMP_OFFSET(cmd)    ((cmd)-CMD_POBJ_MIN_CMD)
-
-static pobj_filter      jumpTable[ CMD_MAX_CMD - CMD_POBJ_MIN_CMD + 1 ];
-
-void omf_RegList( const pobj_list *list, size_t len )
-/***************************************************/
+bool omf_init( int fh )
 {
-
-    size_t  i;
-
-    for( i = 0; i < len; ++i ) {
-        jumpTable[ JUMP_OFFSET( list[i].command ) ] = list[i].func;
-    }
+    omf_GenMSInit();
+    file_out = OmfWriteOpen( fh );
+    return( file_out != NULL );
 }
 
-void omf_UnRegList( const pobj_list *list, size_t len )
-/*****************************************************/
+void omf_fini( void )
 {
-
-    list = list;
-    len = len;
-}
-
-// call a function in omfgenms.c
-
-void omf_write_record( obj_rec *objr, char kill )
-/*******************************************/
-{
-    /**/myassert( objr != NULL );
-    OmfRSeek( objr, 0 );
-    jumpTable[ JUMP_OFFSET(objr->command) ] ( objr, &pobjState );
-    if( kill ) {
-        OmfKillRec( objr );
+    DebugMsg(("omf_fini enter\n"));
+    if ( file_out ) {
+        OmfWriteClose( file_out );
+        file_out = NULL;
     }
+    omf_GenMSFini();
 }
 
 void omf_FlushCurrSeg( void )
@@ -147,9 +122,11 @@ void omf_FlushCurrSeg( void )
         size = CurrSeg->seg->e.seginfo->current_loc - CurrSeg->seg->e.seginfo->start_loc;
         if( CurrSeg->seg->e.seginfo->FixupListTail->loc_offset + i > size ) {
 #ifdef DEBUG_OUT
+#ifndef __GNUC__
             if (size > 1024) {
                 _asm int 3;
             }
+#endif
 #endif
             DebugMsg(( "omf_FlushCurrSeg: output has to wait, curr size=%u, i=%u, loc_offset=%X\n", size, i, CurrSeg->seg->e.seginfo->FixupListTail->loc_offset ));
             return; // can't output the ledata record as is
@@ -170,9 +147,7 @@ void omf_OutSelect( bool starts )
     unsigned long       curr;
 
     if( starts ) {
-        if( GlobalVars.data_in_code ||
-            !GlobalVars.code_seg ||
-            Options.output_format != OFORMAT_OMF)
+        if( GlobalVars.data_in_code || !GlobalVars.code_seg )
             return;
         GlobalVars.sel_start = GetCurrOffset();
         GlobalVars.data_in_code = TRUE;
@@ -180,7 +155,6 @@ void omf_OutSelect( bool starts )
         if( !GlobalVars.data_in_code || CurrSeg == NULL)
             return;
         GlobalVars.sel_idx = GetSegIdx( &CurrSeg->seg->sym );
-        GlobalVars.data_in_code = FALSE;
 
         if( write_to_file == TRUE ) {
             objr = OmfNewRec( CMD_COMENT );
@@ -203,8 +177,9 @@ void omf_OutSelect( bool starts )
             OmfTruncRec( objr );
             omf_write_record( objr, TRUE );
         }
-        GlobalVars.sel_idx = 0;
-        GlobalVars.sel_start = 0;
+        GlobalVars.data_in_code = FALSE;
+        //GlobalVars.sel_idx = 0;
+        //GlobalVars.sel_start = 0;
     }
 }
 
@@ -413,7 +388,7 @@ void omf_write_export( void )
 {
     dir_node    *dir;
     obj_rec     *objr;
-    char        *name;
+    //char        *name;
     char        buffer[MAX_ID_LEN+1];
 
     for( dir = Tables[TAB_PROC].head; dir != NULL; dir = dir->next ) {
@@ -423,8 +398,10 @@ void omf_write_export( void )
             objr->d.coment.attr = 0x00;
             objr->d.coment.class = CMT_DLL_ENTRY;
 
-            Mangle( &dir->sym, buffer );
-
+            if ( Options.no_stdcall_export_decoration == FALSE )
+                Mangle( &dir->sym, buffer );
+            else
+                strcpy( buffer, dir->sym.name );
             OmfAllocData( objr, 4 + strlen( buffer )  );
             OmfPut8( objr, 2 );
             OmfPut8( objr, 0 );             // temporary
@@ -444,7 +421,7 @@ void omf_write_grp( void )
     dir_node        *segminfo;
     seg_item        *seg;
     obj_rec         *grp;
-    unsigned long   line_num;
+    uint_32         line_num;
     char            writeseg;
 
     DebugMsg(("omf_write_grp enter\n"));
@@ -515,9 +492,6 @@ void omf_write_seg( void )
             objr->is_32 = FALSE;
         }
         switch ( curr->e.seginfo->alignment ) {
-        case -1:
-            objr->d.segdef.align = SEGDEF_ALIGN_ABS;
-            break;
         case  1:
             objr->d.segdef.align = SEGDEF_ALIGN_WORD;
             break;
@@ -530,8 +504,11 @@ void omf_write_seg( void )
         case  8:
             objr->d.segdef.align = SEGDEF_ALIGN_PAGE;
             break;
-        case 12:
+        case 12: /* this is probably invalid for MS OMF */
             objr->d.segdef.align = SEGDEF_ALIGN_4KPAGE;
+            break;
+        case MAX_SEGALIGNMENT:
+            objr->d.segdef.align = SEGDEF_ALIGN_ABS;
             break;
         default:
             objr->d.segdef.align = SEGDEF_ALIGN_BYTE;
@@ -541,6 +518,14 @@ void omf_write_seg( void )
         objr->d.segdef.ovl_name_idx = 1;
         objr->d.segdef.seg_name_idx = GetLnameIdx( curr->sym.name );
         omf_write_record( objr, FALSE );
+        DebugMsg(("omf_write_seg(%u): %s, seg_name_idx=%u, class_name_idx=%u, align=%u, comb=%u\n",
+                  seg_index,
+                  curr->sym.name,
+                  objr->d.segdef.seg_name_idx,
+                  objr->d.segdef.class_name_idx,
+                  objr->d.segdef.align,
+                  objr->d.segdef.combine
+                 ));
         if( curr->e.seginfo->segtype == SEGTYPE_CODE ) {
             obj_rec     *rec;
 
@@ -571,7 +556,21 @@ void omf_write_lnames( void )
     objr->d.lnames.first_idx = 1;
     objr->d.lnames.num_names = LnamesIdx;
     total_size = GetLnameData( &lname );
-    /* fixme: what if lnames are > 1024? */
+#ifdef DEBUG_OUT
+    {
+        char *p;
+        int i = 1;
+        char buffer[MAX_ID_LEN];
+        for (p = lname; ; i++ ) {
+            memcpy( buffer, p+1, *p );
+            buffer[(uint)*p] = NULLC;
+            DebugMsg(("omf_write_lnames: %u=%s\n", i, buffer ));
+            p += *p + 1;
+            if ( *p == NULLC )
+                break;
+        }
+    }
+#endif
     DebugMsg(("omf_write_lnames(): total_size=%u\n", total_size));
     if( total_size > 0 ) {
         OmfAttachData( objr, (uint_8 *)lname, total_size );
@@ -611,7 +610,7 @@ void omf_write_extdef( )
         DebugMsg(("omf_write_extdef: %s\n", curr->sym.name));
         Mangle( &curr->sym, buffer );
         if ( ModuleInfo.convert_uppercase )
-            strupr( buffer );
+            _strupr( buffer );
 
         len = strlen( buffer );
 
@@ -643,7 +642,7 @@ void omf_write_extdef( )
             DebugMsg(("omf_write_extdef: %s\n", curr->sym.name));
             Mangle( &curr->sym, buffer );
             if ( ModuleInfo.convert_uppercase )
-                strupr( buffer );
+                _strupr( buffer );
 
             len = strlen( buffer );
 
@@ -682,7 +681,7 @@ void omf_write_extdef( )
 static int opsize( memtype mem_type )
 /************************************/
 {
-    return( SizeFromMemtype(mem_type, Use32) );
+    return( SizeFromMemtype(mem_type, ModuleInfo.Use32 ) );
 }
 
 #define THREE_BYTE_MAX ( (1UL << 24) - 1 )
@@ -800,7 +799,7 @@ ret_code omf_write_comdef( )
 
             if( curr->sym.isfar == TRUE ) {
                 /* mem type always needs <= 1 byte */
-                myassert( symsize < UCHAR_MAX );
+                /**/myassert( symsize < UCHAR_MAX );
                 name[i++] = symsize;
             }
         } /* end for */
@@ -823,16 +822,19 @@ void omf_write_header( void )
     obj_rec     *objr;
     unsigned    len;
     char        *name;
+    const FNAME *fn;
 
     DebugMsg(("omf_write_header() enter\n"));
+
     objr = OmfNewRec( CMD_THEADR );
     if( Options.module_name != NULL ) {
         name = Options.module_name;
     } else {
-        name = ModuleInfo.srcfile->fullname;
+        fn = GetFName( ModuleInfo.srcfile );
+        name = fn->fullname;
         len = strlen( name );
         name += len;
-        for (;name > ModuleInfo.srcfile->fullname && *(name-1) != '/' && *(name-1) != '\\';name--);
+        for (;name > fn->fullname && *(name-1) != '/' && *(name-1) != '\\';name--);
     }
     len = strlen( name );
     OmfAllocData( objr, len + 1 );
@@ -850,15 +852,17 @@ ret_code omf_write_autodep( void )
     unsigned int    len;
     const FNAME     *curr;
 
+    DebugMsg(("omf_write_autodep() enter\n"));
     for( curr = FNames; curr != NULL; curr = curr->next ) {
+        DebugMsg(("omf_write_autodep(): write record for %s\n", curr->name ));
         objr = OmfNewRec( CMD_COMENT );
         objr->d.coment.attr = 0x80;
         objr->d.coment.class = CMT_DEPENDENCY;
 
-        len = strlen(curr->name);
+        len = strlen( curr->name );
         *((time_t *)buff) = _timet2dos(curr->mtime);
         *(buff + 4) = (unsigned char)len;
-        strcpy(buff + 5, curr->name);
+        strcpy( buff + 5, curr->name );
         len += 5;
 
         OmfAttachData( objr, (uint_8 *)buff, len );
@@ -871,6 +875,7 @@ ret_code omf_write_autodep( void )
     objr->d.coment.class = CMT_DEPENDENCY;
     OmfAttachData( objr, (uint_8 *)"", 0 );
     omf_write_record( objr, TRUE );
+    DebugMsg(("omf_write_autodep() exit\n"));
     return( NOT_ERROR );
 }
 
@@ -912,51 +917,94 @@ void omf_write_alias( void )
     }
 }
 
-ret_code omf_write_pub( void )
-/**************************/
-/* note that procedures with public or export visibility are written out here */
+static void WritePubRec( uint_8 cmd, int seg, int grp, int count, bool need32, struct pubdef_data * data)
 {
     obj_rec             *objr;
-    struct pubdef_data  *data;
     uint                i;
-    uint                count = 0;
+    struct pubdef_data  *d;
+
+    objr = OmfNewRec( cmd );
+    objr->is_32 = need32;
+    objr->d.pubdef.base.grp_idx = grp;
+    objr->d.pubdef.base.seg_idx = seg;
+    objr->d.pubdef.base.frame = 0;
+    objr->d.pubdef.num_pubs = count;
+    objr->d.pubdef.pubs = data;
+    omf_write_record( objr, TRUE );
+    /* free the names */
+    for( i = 0, d = data; i < count; i++, d++ ) {
+        if( d->name != NULL ) {
+            AsmFree( d->name );
+        }
+    }
+    return;
+}
+
+#define PUBITEMBASELEN (4+2+1)  /* sizes offset + index + name len */
+
+ret_code omf_write_pub( void )
+/****************************/
+{
+    struct asm_sym      *sym;
+    struct asm_sym      *curr_seg;
+    struct pubdef_data  *d;
+    struct pubdef_data  *data;
+    void                *vp;
+    uint                count;
+    uint                size;
     uint                seg;
     uint                grp;
-    char                cmd;
-    bool                first = TRUE;
-    bool                need32 = FALSE;
+    uint_8              cmd;
+    bool                init = TRUE;
+    bool                need32;
 
     DebugMsg(("omf_write_pub enter\n"));
-    while( ( count = GetPublicData( &seg, &grp, &cmd, &NameArray, &data, &need32, first) ) > 0 ) {
 
-        /* create a public record for this segment */
-
-        objr = OmfNewRec( cmd );
-        objr->is_32 = need32;
-        objr->d.pubdef.base.grp_idx = grp;
-        objr->d.pubdef.base.seg_idx = seg;
-        objr->d.pubdef.base.frame = 0;
-        objr->d.pubdef.num_pubs = count;
-        objr->d.pubdef.pubs = data;
-//        objr->d.pubdef.free_pubs = TRUE;
-        objr->d.pubdef.free_pubs = FALSE; /* don't free the data */
-        omf_write_record( objr, TRUE );
-
-        /* free the names table */
-        for( i = 0; i < count; i++ ) {
-            if( NameArray[i] != NULL ) {
-                AsmFree( NameArray[i] );
+    vp = NULL;
+    sym = (asm_sym *)GetPublicData( &vp );
+    while ( sym ) {
+        if ( init ) {
+            curr_seg = sym->segment;
+            if( curr_seg == NULL ) { // absolute symbol, no segment
+                seg = 0;
+                grp = 0;
+            } else {
+                seg = GetSegIdx( curr_seg );
+                grp = GetGrpIdx( GetGrp( curr_seg ) );
             }
+            cmd = CMD_PUBDEF;
+            data = d = (struct pubdef_data *)StringBufferEnd;
+            need32 = FALSE;
+            init = FALSE;
+            size = 10; /* =size of a empty PUBDEF record */
+            count = 0;
         }
-        AsmFree( NameArray );
-        first = FALSE;
+        d->name = Mangle( sym, NULL );
+        /* if segment changes of record becomes too big, write record */
+        if( (sym->segment != curr_seg) ||
+           ( (size + strlen(d->name) + PUBITEMBASELEN ) > MAX_PUB_LENGTH )) {
+            init = TRUE;
+            WritePubRec( cmd, seg, grp, count, need32, data );
+            continue;
+        }
+        if ( ModuleInfo.convert_uppercase )
+            _strupr(d->name);
+
+        if( sym->offset > 0xffffUL )
+            need32 = TRUE;
+
+        size += strlen(d->name) + PUBITEMBASELEN;
+        d->offset = sym->offset;
+        d->type.idx = 0;
+        count++;
+        DebugMsg(("omf_write_pub(%u): %s, ofs=%Xh, rec_size=%u\n", count, d->name, d->offset, size ));
+        d++;
+        sym = (asm_sym *)GetPublicData( &vp );
     }
+    if ( init == FALSE )
+        WritePubRec( cmd, seg, grp, count, need32, data );
+
     DebugMsg(("omf_write_pub exit\n"));
     return( NOT_ERROR );
 }
 
-const char *omf_NameGet( uint_16 hdl )
-/********************************/
-{
-    return( NameArray[hdl] );
-}

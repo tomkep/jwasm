@@ -8,8 +8,8 @@ pick( MSG_USAGE,
       "usage: JWasm [ options ] filelist [@env_var]\n"
       "Run \"JWasm -?\" or \"JWasm -h\" for more info\n" )
 pick( MSG_ASSEMBLY_RESULTS,
-      "%s: %u lines, %u passes, %u ms, %u warnings, %u errors\n" ,
-      "%s: %u lines, %u passes, %u ms, %u warnings, %u errors\n" )
+      "%s: %lu lines, %u passes, %u ms, %u warnings, %u errors" ,
+      "%s: %lu lines, %u passes, %u ms, %u warnings, %u errors" )
 pick( MSG_ERROR_PREFIX,
       "Error!",
       "Error!" )
@@ -17,10 +17,10 @@ pick( MSG_WARNING_PREFIX,
       "Warning!",
       "Warning!" )
 pick( MSG_FATAL_PREFIX,
-      "Fatal!",
+      "Fatal!" ,
       "Fatal!" )
 pick( MSG_JWASM,
-      "JWasm v%s, %s",
+      "JWasm v%s, %s" ,
       "JWasm v%s, %s" )
 pick( MSG_BANNER,
       "%s, Masm-compatible assembler.\n"
@@ -28,7 +28,79 @@ pick( MSG_BANNER,
       "Source code is available under the Sybase Open Watcom Public License.\n\n" ,
       "JWasm v%s, %s, Masm-compatible assembler.\n"
       "Portions Copyright (c) 1992-2002 Sybase, Inc. All Rights Reserved.\n"
-      "Source code is available under the Sybase Open Watcom Public License.\n\n" )
+     "Source code is available under the Sybase Open Watcom Public License.\n\n" )
+
+/* text constants for listing */
+
+pick( TXT_MACROS,
+      "Macros:" ,
+      "Macros:" )
+pick( TXT_MACROCAP,
+      "                N a m e                 Type" ,
+      "                N a m e                 Type" )
+pick( TXT_STRUCTS,
+      "Structures and Unions:" ,
+      "Structures and Unions:" )
+pick( TXT_STRUCTCAP,
+      "                N a m e                 Size/Ofs   Type" ,
+      "                N a m e                 Size/Ofs   Type" )
+pick( TXT_RECORDS,
+      "Records:" ,
+      "Records:" )
+pick( TXT_RECORDCAP1,
+      "                N a m e                 Width   # fields" ,
+      "                N a m e                 Width   # fields" )
+pick( TXT_RECORDCAP2,
+      "                                        Shift   Width    Mask   Initial" ,
+      "                                        Shift   Width    Mask   Initial" )
+pick( TXT_TYPEDEFS,
+      "Types:" ,
+      "Types:" )
+pick( TXT_TYPEDEFCAP,
+      "                N a m e              Size    Attr" ,
+      "                N a m e              Size    Attr" )
+pick( TXT_SEGS,
+      "Segments and Groups:" ,
+      "Segments and Groups:" )
+pick( TXT_SEGCAP,
+      "                N a m e                 Size     Length   Align   Combine Class" ,
+      "                N a m e                 Size     Length   Align   Combine Class" )
+pick( TXT_PROCS,
+      "Procedures, parameters and locals:" ,
+      "Procedures, parameters and locals:" )
+pick( TXT_PROCCAP,
+      "                N a m e                 Type     Value    Segment  Length" ,
+      "                N a m e                 Type     Value    Segment  Length" )
+pick( TXT_SYMBOLS,
+      "Symbols:" ,
+      "Symbols:" )
+pick( TXT_SYMCAP,
+      "                N a m e                 Type       Value     Attr",
+      "                N a m e                 Type       Value     Attr")
+
+/* other text constants */
+
+pick( TXT_READONLY,
+      "readonly" ,
+      "readonly" )
+pick( TXT_ALIGNMENT,
+      "alignment" ,
+      "alignment" )
+pick( TXT_COMBINE,
+      "combine" ,
+      "combine" )
+pick( TXT_SEG_WORD_SIZE,
+      "segment word size" ,
+      "segment word size" )
+pick( TXT_CLASS,
+      "class" ,
+      "class" )
+pick( TXT_CHARACTERISTICS,
+      "characteristics" ,
+      "characteristics" )
+
+/* error/warning message text constants */
+
 pick( LOCK_PREFIX_IS_NOT_ALLOWED_ON_THIS_INSTRUCTION,
       "LOCK prefix is not allowed on this instruction" ,
       "この命令に対して LOCK プレフィックスは使用できません" )
@@ -79,9 +151,6 @@ pick( TOO_MANY_BASE_INDEX_REGISTERS,
 pick( CANNOT_MIX_16_AND_32_BIT_REGISTERS,
       "Cannot mix 16 and 32-bit registers" ,
       "16ビットレジスタと32ビットレジスタは混在できません" )
-pick( UNKNOWN_DIRECTIVE,
-      "Unknown directive: %s" ,
-      "無効なディレクティブです" )
 pick( EXPECTING_COMMA,
       "Expecting comma" ,
       "コンマが必要です" )
@@ -140,8 +209,8 @@ pick( CANNOT_USE_SHORT_OR_NEAR,
       "Can not use short or near modifiers with this instruction" ,
       "この命令と一緒にshortまたはnearを使用することはできません" )
 pick( JUMP_OUT_OF_RANGE,
-      "Jump out of range" ,
-      "範囲外へのジャンプです" )
+      "Jump out of range by %d bytes" ,
+      "Jump out of range by %d bytes" )
 pick( DISPLACEMENT_OUT_OF_RANGE,
       "Displacement cannot be larger than 32k" ,
       "ディスプレースメントが32Kを越えています" )
@@ -249,9 +318,6 @@ pick( SIZE_TOO_LARGE,
 pick( SEGMENT_ATTRIBUTE_DEFINED_ALREADY,
       "Segment attribute is defined already: %s" ,
       "セグメントパラメータは既に定義されています" )
-pick( MODEL_PARA_DEFINED,
-      "Model parameter is defined already" ,
-      "モデルパラメータは既に定義されています" )
 pick( SEGMENT_DEF_ERROR,
       "Syntax error in segment definition" ,
       "セグメント定義で構文エラーが起きています" )
@@ -270,9 +336,6 @@ pick( SEGMENT_NOT_OPENED,
 pick( UNKNOWN_SEGMENT_ATTRIBUTE,
       "Segment attribute is unknown: %s" ,
       "Segment attribute is unknown: %s" )
-pick( UNKNOWN_MODEL_OPTION,
-      "Unknown .model option: %s" ,
-      "Unknown .model option: %s" )
 pick( MUST_BE_IN_SEGMENT_BLOCK,
       "Must be in segment block" ,
       "現在オープンされているセグメントはありません" )
@@ -297,21 +360,12 @@ pick( QUALIFIED_TYPE_EXPECTED,
 pick( EXT_DEF_DIFF,
       "External definition different from previous one" ,
       "外部定義が前の定義と異なります" )
-pick( NO_MEMORY_MODEL_FOUND,
-      "Memory model is not found in .MODEL" ,
-      ".MODELの中にメモリモデルがありません" )
 pick( CANNOT_OPEN_INCLUDE_FILE,
       "Cannot open include file '%s'" ,
       "インクルード・ファイルをオープンできません %s" )
 pick( LIBRARY_NAME_MISSING,
       "Library name is missing" ,
       "ライブラリ名がありません" )
-pick( SEG_NAME_MISSING,
-      "Segment name is missing" ,
-      "セグメント名がありません" )
-pick( GRP_NAME_MISSING,
-      "Group name is missing" ,
-      "グループ名がありません" )
 pick( DATA_EMITTED_WITH_NO_SEGMENT,
       "Data emitted with no segment" ,
       "データがセグメントに属していません" )
@@ -321,9 +375,9 @@ pick( SEGLOCATION_EXPECTED,
 pick( INVALID_REGISTER,
       "This register isn't supported by ASSUME" ,
       "無効なレジスタです" )
-pick( CANNOT_ACCESS_LABEL_WITH_SEGMENT_REGISTERS,
-      "Cannot access label with segment registers: %s" ,
-      "ASSUMEされたレジスタでアドレスすることはできません" )
+pick( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS,
+      "Cannot access label through segment registers: %s" ,
+      "Cannot access label through segment registers: %s" )
 pick( INVALID_START_ADDRESS,
       "Invalid start address" ,
       "無効なスタートアドレスです" )
@@ -339,9 +393,6 @@ pick( LABEL_EXPECTED_AFTER_COLON,
 pick( MUST_BE_ASSOCIATED_WITH_CODE,
       "Must be associated with code" ,
       "コードと関係していなければなりません" )
-pick( PROC_MUST_HAVE_A_NAME,
-      "Procedure must have a name" ,
-      "プロシージャには名前がなければなりません" )
 pick( LANG_MUST_BE_SPECIFIED,
       "Language type must be specified" ,
       "言語タイプが定義されていなければなりません" )
@@ -351,9 +402,6 @@ pick( LOCAL_VAR_MUST_FOLLOW_PROC,
 pick( CANNOT_NEST_PROCEDURES,
       "Cannot nest procedures" ,
       "プロシージャをネストすることはできません" )
-pick( NO_PROC_IS_CURRENTLY_DEFINED,
-      "No procedure is currently defined" ,
-      "プロシージャが定義されていません" )
 pick( VARARG_REQUIRES_C_CALLING_CONVENTION,
       "Vararg requires C calling convention" ,
       "varargにはCの呼出し規約が必要です" )
@@ -397,23 +445,23 @@ pick( OUT_OF_MEMORY,
       "Out of Memory" ,
       "メモリ不足です" )
 pick( CANNOT_OPEN_FILE,
-      "Cannot open file: %s" ,
-      "Cannot open file: %s" )
+      "Cannot open file: %s [%u]" ,
+      "Cannot open file: %s [%u]" )
 pick( CANNOT_CLOSE_FILE,
-      "Cannot close file: %s" ,
-      "Cannot close file: %s" )
+      "Cannot close file: %s [%u]" ,
+      "Cannot close file: %s [%u]" )
 pick( FILE_WRITE_ERROR,
-      "File write error: %s",
-      "File write error: %s" )
+      "File write error: %s [%u]",
+      "File write error: %s [%u]" )
 pick( FILE_LSEEK_ERROR,
-      "File lseek error: %s" ,
-      "File lseek error: %s" )
-pick( MSG_UNKNOWN_OPTION,
-      "Unknown option %s. Use /? for list of options." ,
-      "%s は無効なオプションです。/?でオプションのリストを表示します\n" )
+      "File lseek error: %s [%u]" ,
+      "File lseek error: %s [%u]" )
+pick( INVALID_CMDLINE_OPTION,
+      "Invalid command-line option: %s" ,
+      "Invalid command-line option: %s" )
 pick( MSG_INTERNAL_ERROR,
-      "Internal error in %s(%u)" ,
-      "%s(%u) で内部エラーが起こりました\n" )
+      "Internal error in %s(%u)\n" ,
+      "Internal error in %s(%u)\n" )
 pick( PARM_REQUIRED,
       "Parameter Required" ,
       "パラメータが必要です" )
@@ -424,8 +472,8 @@ pick( EXPECTED_FILE_NAME,
       "Expecting file name" ,
       "ファイル名が必要です" )
 pick( NO_FP_WITH_FPC_SET,
-      "Floating point instruction not allowed with /fpc" ,
-      "/fpc指定時には、浮動小数点命令は使用できません" )
+      "Floating point instruction not allowed with -fpc" ,
+      "-fpc指定時には、浮動小数点命令は使用できません" )
 pick( TOO_MANY_ERRORS,
       "Too many errors" ,
       "エラーが多すぎます" )
@@ -495,14 +543,11 @@ pick( ALIGN_TOO_HIGH,
       "alignment request greater than segment alignment",
       "整列(ｱﾗｲﾝﾒﾝﾄ)の指定がセグメント整列より大きくなっています" )
 pick( SYMBOL_PREVIOUSLY_DEFINED,
-      "'%s' is already defined",
-      "'%s' は既に定義されています" )
+      "Symbol is already defined: %s" ,
+      "Symbol is already defined: %s" )
 pick( WRONG_CPU_FOR_32BIT_SEGMENT,
       "Wrong CPU type for 32-bit segment" ,
       "Wrong CPU type for 32-bit segment")
-pick( PROC_IS_NOT_CLOSED,
-      "Procedure %s is not closed" ,
-      "Procedure %s is not closed")
 pick( CALL_FAR_TO_NEAR,
       "Far call is converted to near call." ,
       "Far call is converted to near call." )
@@ -521,9 +566,6 @@ pick( SIZEOF_NEEDS_TYPE_OR_DATA_LABEL,
 pick( INVALID_USE_OF_LENGTH_SIZE_OPERATOR,
       "Invalid use of LENGTH/LENGTHOF/SIZE/SIZEOF operator" ,
       "Invalid use of LENGTH/LENGTHOF/SIZE/SIZEOF operator" )
-pick( TYPE_MUST_HAVE_A_NAME,
-      "Typedef must have a name" ,
-      "Typedef must have a name" )
 pick( SYMBOL_TYPE_CONFLICT,
       "Symbol type conflict: %s" ,
       "Symbol type conflict: %s" )
@@ -543,8 +585,8 @@ pick( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION,
       "Statement not allowed inside structure definition" ,
       "Statement not allowed inside structure definition" )
 pick( UNMATCHED_BLOCK_NESTING,
-      "Unmatched block nesting" ,
-      "Unmatched block nesting" )
+      "Unmatched block nesting: %s" ,
+      "Unmatched block nesting: %s" )
 pick( SYMBOL_REDEFINITION,
       "Symbol redefinition: %s" ,
       "Symbol redefinition: %s" )
@@ -665,19 +707,19 @@ pick( INSTRUCTION_OPERAND_MUST_HAVE_SIZE,
 pick( USE_OF_REGISTER_ASSUMED_TO_ERROR,
       "Use of register assumed to ERROR" ,
       "Use of register assumed to ERROR" )
-pick( INITIALIZED_DATA_NOT_SUPPORTED_IN_BSS_SEGMENT,
-      "Initialized data not supported in BSS segment" ,
-      "Initialized data not supported in BSS segment" )
+pick( INITIALIZED_DATA_NOT_SUPPORTED_IN_SEGMENT,
+      "Instructions and initialized data not supported in %s segments" ,
+      "Instructions and initialized data not supported in %s segments" )
 pick( LITERAL_EXPECTED,
       "Literal expected after '='" ,
       "Literal expected after '='" )
 pick( LANG_CONV_NOT_SUPPORTED,
       "Watcom C call convention not supported by INVOKE" ,
       "Watcom C call convention not supported by INVOKE" )
-pick( MSG_MS386_NO_4KPAGE,
+pick( NO_4KPAGE_ALIGNED_SEGMENTS,
       "No 4k Page-aligned segments in MS386 OMF" ,
       "MS386 OMFには4Kページ整列セグメントがありません" )
-pick( MSG_MS386_NO_ACCESS,
+pick( ACCESS_CLASSES_NOT_SUPPORTED,
       "Access classes (RW, EO, RO, ER) not supported in MS386 OMF" ,
       "MS386 OMFではアクセスクラス(RW,EO,RO,ER)はサポートされていません" )
 pick( GROUP_DIRECTIVE_INVALID_FOR_COFF,
@@ -686,6 +728,9 @@ pick( GROUP_DIRECTIVE_INVALID_FOR_COFF,
 pick( OPERAND_MUST_BE_RELOCATABLE,
       "Operand must be relocatable" ,
       "Operand must be relocatable" )
+pick( CONSTANT_OR_RELOCATABLE_LABEL_EXPECTED,
+      "Constant or relocatable label expected" ,
+      "Constant or relocatable label expected" )
 pick( IF2_NOT_ALLOWED,
       "[ELSE]IF2/.ERR2 not allowed, single-pass assembler" ,
       "[ELSE]IF2/.ERR2 not allowed, single-pass assembler" )
@@ -696,11 +741,11 @@ pick( OPERANDS_MUST_BE_IN_SAME_SEGMENT,
       "Operands must be in same segment" ,
       "Operands must be in same segment" )
 pick( INVALID_USE_OF_EXTERNAL_SYMBOL,
-      "Invalid use of external symbol" ,
-      "Invalid use of external symbol" )
+      "Invalid use of external symbol: %s" ,
+      "Invalid use of external symbol: %s" )
 pick( LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL,
-      "For /coff leading underscore required for start label: %s" ,
-      "For /coff leading underscore required for start label: %s" )
+      "For -coff leading underscore required for start label: %s" ,
+      "For -coff leading underscore required for start label: %s" )
 pick( UNKNOWN_FIXUP_TYPE,
       "Unknown fixup type found: %u" ,
       "Unknown fixup type found: %u" )
@@ -727,8 +772,8 @@ pick( SEGMENT_FIXUPS_INVALID,
       "Segment fixups invalid for BIN format: %u" ,
       "Segment fixups invalid for BIN format: %u" )
 pick( START_LABEL_INVALID,
-      "Invalid start label for /bin",
-      "Invalid start label for /bin" )
+      "Invalid start label for -bin",
+      "Invalid start label for -bin" )
 #endif
 pick( INDEX_PAST_END_OF_STRING,
       "Index %u is past end of string",
@@ -838,3 +883,27 @@ pick( ASSEMBLY_PASSES,
 pick( FILENAME_MUST_BE_ENCLOSED_IN_QUOTES_OR_BRACKETS,
       "Filename parameter must be enclosed in <> or quotes" ,
       "Filename parameter must be enclosed in <> or quotes" )
+pick( START_ADDRESS_IGNORED,
+      "Start address on END directive ignored with .STARTUP" ,
+      "Start address on END directive ignored with .STARTUP" )
+pick( INVALID_SYMBOL_TYPE_IN_EXPRESSION,
+     "Invalid symbol type in expression: %s" ,
+     "Invalid symbol type in expression: %s" )
+pick( MISSING_RIGHT_PARENTHESIS,
+      "Missing right parenthesis" ,
+      "Missing right parenthesis" )
+pick( DIRECTIVE_MUST_BE_IN_CONTROL_BLOCK,
+      "Directive must be in control block" ,
+      "Directive must be in control block" )
+pick( EXPECTED_MEMORY_MODEL,
+      "Expected: memory model" ,
+      "Expected: memory model" )
+pick( TYPE_IS_WRONG_SIZE_FOR_REGISTER,
+      "Type is wrong size for register" ,
+      "Type is wrong size for register" )
+pick( IFDEF_EXPECTS_SYMBOL_ARGUMENT,
+     "IF[n]DEF expects a plain symbol as argument: %s" ,
+     "IF[n]DEF expects a plain symbol as argument: %s" )
+pick( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL,
+     "Jump destination must specify a label" ,
+     "Jump destination must specify a label" )

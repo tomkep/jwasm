@@ -1,20 +1,148 @@
 
    Changelog
 
-   12/24/2008, v1.94c:
+   05/26/2009, v1.95:
 
    Bugfixes:
-   -  multiple filename arguments in cmdline didn't work.
-   
-   12/21/2008, v1.94b:
-   
-   Bugfixes:
+   -  listing of items in initialized structures was wrong.
+   -  listing for .STARTUP and .EXIT was messed up.
+   -  optional value behind .EXIT directive wasn't parsed correctly.
+   -  .LISTIF didn't display true conditionals inside macros.
+   -  -Sa cmdline option didn't set .LISTMACROALL
+   -  "if" state wasn't saved/restored if a macro had to be run in a
+      line with expansion operator at the beginning of the line.
+   -  bit 6 returned by OPATTR was set for local variables only, but
+      is has to be set for any indirect memory reference related to SS.
+   -  TYPE with indirect memory operand and a type coercion returned 0.
+   -  line continuation caused by a comma as last token did ignore empty
+      lines. However, an empty line must stop the continuation.
+   -  OPATTR didn't accept expressions as operands which contained the
+      OFFSET operator.
+   -  if the expression evaluator found a macro name, it changed the
+      symbol's type to a label. Now error 'invalid symbol type in
+      expression' is displayed.
+   -  if an INVOKE directive was first line to emit code bytes and was
+      placed outside of a PROC, the code which was generated was wrong.
+   -  names of locals in macros beginning with a digit weren't rejected.
+   -  using OFFSET operator in 'LEA <reg>,[ OFFSET <symbol>]' was rejected.
+   -  if an array of data items was defined, a terminating comma caused a
+      syntax error.
+   -  if a term '<variable>.<type>' was found in an expression, it wasn't
+      handled similar to '<type> PTR <variable>'.
+   -  @InStr and @SizeStr returned result as string in radix 10, but 
+      current radix is to be used instead (which "usually" IS 10).
+   -  AT segments didn't work in v1.94.
+   -  ALIGN directive did emit bytes in BSS and AT segments.
+   -  OMF output format: segment and class names must be converted to
+      uppercase for both OPTION CASEMAP:ALL and OPTION CASEMAP:NOTPUBLIC.
+   -  syntax check of LABEL directive wasn't restrictive enough.
+   -  labels within structure definitions wasn't rejected.
+   -  TYPE with struct operand returned wrong result in v1.94 if size of
+      struct was > 8.
+   -  ASSUME did reject forward references to types.
+   -  syntax check for PUBLIC, EXTERN, EXTERNDEF, GROUP, ENDS, LOCAL
+      wasn't fool-proved.
+   -  @SizeStr's parameter wasn't optional.
+   -  it wasn't possible to define an array of 0 items with the LOCAL
+      directive, size was silently changed to 1 item then.
+   -  a forward reference to a symbol of RECORD type gave an error.
+   -  the MOD operator didn't check if second operand was zero.
+   -  syntax check for conditional assembly directives did accept invalid
+      formats.
+   -  value of $ was wrong inside structure or array definitions.
+   -  reserved word '.386C' was missing.
+   -  once the cpu was set > .8086 it wasn't possible to set .8086 again.
+   -  wrong fixup generated for 32bit addressing modes if the symbol was
+      16bit.
+   -  JWasm got confused if a macro's VARARG parameter did start with a ','.
+   -  in v1.94, OPTION SEGMENT:USE32 set default segment size to USE16.
+   -  JWasm didn't reject an undefined symbol in an expression after IF.
+   -  OPATTR for code labels returned wrong value.
+   -  .NOCREF/.XCREF directives didn't accept arguments.
+   -  type conflicts for symbols which had an additional EXTERNDEF entry
+      were detected for data labels only.
+   -  IF[N]DEF <symbol> failed if <symbol> was a forward reference.
+   -  ':' operator did clear a type which was set by the PTR operator. 
+      Test case: <type> PTR ds:[0].
+   -  hll expression evaluator did always handle the '()' operator, while
+      it should handle it only if the expression enclosed contains a
+      hll operator.
+   -  -D cmdline option didn't tolerate spaces between -D and macro name.
+   -  IF[N]DEF directive didn't work reliably in pass two. This was hardly
+      noticed because in JWasm all passes except the first one handle
+      preprocessed input only - usually.
+   -  protection exception occured if a parameter for INVOKE consist of a
+      register pair (DS::SI) and value of register [E]AX was modified before.
+   -  forward references of assembly time variables were evaluated to 0,
+      but the value must be the variable's value after pass one is finished.
+   -  in v1.94, data initializer of strings within structures didn't cover
+      the full array length.
+   -  ASSUME ignored the PTR operator and accepted invalid types for register.
+   -  ENDP didn't complain if tokens were found behind the directive.
+   -  support for WATCOM_C calling convention was 32bit only.
+   -  for WATCOM_C, it was assumed that the caller does stack cleanup if not
+      all parameters did fit into registers.  However, this is true for
+      VARARG procs only.
+   -  for WATCOM_C, register parameters weren't displayed correctly in the
+      symbol list.
+   -  output format BIN: fixups might have been written multiple times,
+      which then caused a bad binary.
+   -  output format BIN: relative offsets (jumps and calls) were calculated
+      wrong.
+   -  OPTION PROC:PRIVATE made procedures private even if PUBLIC 
+      directives existed for them.
+   -  PROTOs will no longer accept PUBLIC attribute (Masm also rejects).
+   -  a PROC with attribute PRIVATE and a PUBLIC directive for the very
+      same symbol wasn't rejected.
+   -  empty line in a COMMENT block may have been interpreted as EOF.
+   -  a forward reference to a symbol in a DB directive was rejected
+      (initializer magnitude too large).
+   -  if two macro params were separated by one substitution operator (&)
+      and the first param additionally had a & prefix, then the second param
+      wasn't recognized (and substituted).
+   -  CMPSx string instruction was rejected if two segment overrides were
+      used. Now it's rejected only if the second one is != ES:.
+   -  CTRL-Z in input files wasn't interpreted as EOF.
+   -  output format BIN: uninitialized variables located at the start of
+      a segment were skipped.
+   -  output format BIN: stack segment was always written. Now it's written
+      only if it isn't the last segment.
+   -  if radix was > 10, the literal created by the % operator may have
+      contained lowercase letters ('a'-'f'), which isn't Masm-compatible.
+   -  if -Zm (OPTION M510) is set, reserved words which were introduced
+      in "later" cpus should be free to use. For JWasm this still isn't
+      fully true, but it's now possible to use the names introduced by
+      MMX/K3D/SSE extensions.
+   -  OFFSET operator applied to a non-relocatable constant wasn't ignored.
+   -  listing of LABEL directive didn't display current offset.
+   -  handling of macro parameters improved so that strings enclosed in
+      (double)quotes and containing '>' work similiar to Masm.
+   -  OMF format: size of PUBDEF records might have exceeded 1024.
+   -  for errors detected in pass two or later the source filename which
+      was displayed may have been wrong.
+
+   Other changes:
+   -  -Zg option implemented.
+   -  a hash table for local symbols has been implemented since the old
+      implementation (linked list) was too slow if lots of local labels
+      were defined.
+   -  OPTION OFFSET:SEGMENT supported.
+   -  GccUnix.mak added, MinGW.mak renamed to GccWin.mak.
+   -  -X option supported.
+   -  warning level for PAGE, TITLE, SUBTITLE changed from 3 to 4.
+   -  instruction FFREEP supported.
+   -  OWDOS16.mak and OWOS2.mak added.
+   -  -zze option added.
+   -  samples Window4, Mixed1 and OS232 added.
+
+   12/24/2008, v1.94c, bugfixes:
+   -  multiple filename arguments in cmdline didn't work in v1.94-v1.94b.
+
+   12/21/2008, v1.94b, bugfixes:
    -  initialization of structure date items embedded in another
       structure data item didn't work in v1.94/v1.94a.
-   
-   12/20/2008, v1.94a:
 
-   Bugfixes:
+   12/20/2008, v1.94a, bugfixes:
    -  .LISTALL didn't enable listing.
    -  ".IF 1" doesn't generate code, which made problems in v1.94.
 

@@ -6,34 +6,34 @@
 #ifndef _COFF_H_INCLUDED
 #define _COFF_H_INCLUDED
 
-#define IMAGE_FILE_MACHINE_I386		0x014c /* Intel 386 or later processors */
+#define IMAGE_FILE_MACHINE_I386 0x014c /* Intel 386 or later processors */
 
 typedef struct _IMAGE_FILE_HEADER {
-	uint_16 Machine;
-	uint_16 NumberOfSections;
-	uint_32 TimeDateStamp;
-	uint_32 PointerToSymbolTable;
-	uint_32 NumberOfSymbols;
-	uint_16 SizeOfOptionalHeader;
-	uint_16 Characteristics;
+    uint_16 Machine;
+    uint_16 NumberOfSections;
+    uint_32 TimeDateStamp;
+    uint_32 PointerToSymbolTable;
+    uint_32 NumberOfSymbols;
+    uint_16 SizeOfOptionalHeader;
+    uint_16 Characteristics;
 } IMAGE_FILE_HEADER;
 
 #define IMAGE_SIZEOF_SHORT_NAME 8
 
 typedef struct _IMAGE_SECTION_HEADER {
-	uint_8 Name[IMAGE_SIZEOF_SHORT_NAME];
-	union {
-		uint_32 PhysicalAddress;
-		uint_32 VirtualSize;
-	} Misc;
-	uint_32 VirtualAddress;
-	uint_32 SizeOfRawData;
-	uint_32 PointerToRawData;
-	uint_32 PointerToRelocations;
-	uint_32 PointerToLinenumbers;
-	uint_16 NumberOfRelocations;
-	uint_16 NumberOfLinenumbers;
-	uint_32 Characteristics;
+    uint_8 Name[IMAGE_SIZEOF_SHORT_NAME];
+    union {
+        uint_32 PhysicalAddress;
+        uint_32 VirtualSize;
+    } Misc;
+    uint_32 VirtualAddress;
+    uint_32 SizeOfRawData;
+    uint_32 PointerToRawData;
+    uint_32 PointerToRelocations;
+    uint_32 PointerToLinenumbers;
+    uint_16 NumberOfRelocations;
+    uint_16 NumberOfLinenumbers;
+    uint_32 Characteristics;
 } IMAGE_SECTION_HEADER;
 
 #define IMAGE_NUMBEROF_DIRECTORY_ENTRIES 16
@@ -83,52 +83,52 @@ typedef struct _IMAGE_SECTION_HEADER {
 
 #pragma pack(push,2)
 typedef struct _IMAGE_RELOCATION {
-	union {
-		uint_32 VirtualAddress;
-		uint_32 RelocCount;
-	};
-	uint_32 SymbolTableIndex;
-	uint_16 Type;
+    union {
+        uint_32 VirtualAddress;
+        uint_32 RelocCount;
+    };
+    uint_32 SymbolTableIndex;
+    uint_16 Type;
 } IMAGE_RELOCATION;
 #pragma pack(pop)
 
-#define IMAGE_REL_I386_ABSOLUTE	0x0000
-#define IMAGE_REL_I386_DIR16	0x0001
-#define IMAGE_REL_I386_REL16	0x0002
-#define IMAGE_REL_I386_DIR32	0x0006
-#define IMAGE_REL_I386_DIR32NB	0x0007
-#define IMAGE_REL_I386_SEG12	0x0009
-#define IMAGE_REL_I386_SECTION	0x000A
-#define IMAGE_REL_I386_SECREL	0x000B
-#define IMAGE_REL_I386_TOKEN	0x000C
-#define IMAGE_REL_I386_SECREL7	0x000D
-#define IMAGE_REL_I386_REL32	0x0014
+#define IMAGE_REL_I386_ABSOLUTE 0x0000
+#define IMAGE_REL_I386_DIR16    0x0001
+#define IMAGE_REL_I386_REL16    0x0002
+#define IMAGE_REL_I386_DIR32    0x0006
+#define IMAGE_REL_I386_DIR32NB  0x0007
+#define IMAGE_REL_I386_SEG12    0x0009
+#define IMAGE_REL_I386_SECTION  0x000A
+#define IMAGE_REL_I386_SECREL   0x000B
+#define IMAGE_REL_I386_TOKEN    0x000C
+#define IMAGE_REL_I386_SECREL7  0x000D
+#define IMAGE_REL_I386_REL32    0x0014
 
-#define IMAGE_SIZEOF_SYMBOL 18
+#define IMAGE_SIZEOF_SYMBOL     18
 #define IMAGE_SIZEOF_AUX_SYMBOL 18
 
 #pragma pack(push,2)
 typedef struct _IMAGE_SYMBOL {
-	union {
-		uint_8 ShortName[8];
-		struct {
-			uint_32 Short;
-			uint_32 Long;
-		} Name;
-		unsigned char *LongName[2];
-	} N;
-	uint_32 Value;
-	uint_16 SectionNumber;
-	uint_16 Type;
-	uint_8  StorageClass;
-	uint_8  NumberOfAuxSymbols;
+    union {
+        uint_8 ShortName[8];
+        struct {
+            uint_32 Short;
+            uint_32 Long;
+        } Name;
+        unsigned char *LongName[2];
+    } N;
+    uint_32 Value;
+    uint_16 SectionNumber;
+    uint_16 Type;
+    uint_8  StorageClass;
+    uint_8  NumberOfAuxSymbols;
 } IMAGE_SYMBOL;
 
 /* special section numbers */
 
 #define IMAGE_SYM_UNDEFINED  0
 #define IMAGE_SYM_ABSOLUTE (-1)
-#define IMAGE_SYM_DEBUG	   (-2)
+#define IMAGE_SYM_DEBUG    (-2)
 
 #define IMAGE_SYM_TYPE_NULL   0
 #define IMAGE_SYM_TYPE_VOID   1
@@ -155,7 +155,7 @@ typedef struct _IMAGE_SYMBOL {
 
 /* StorageClass values */
 
-#define IMAGE_SYM_CLASS_END_OF_FUNCTION	(-1)
+#define IMAGE_SYM_CLASS_END_OF_FUNCTION (-1)
 #define IMAGE_SYM_CLASS_NULL              0
 #define IMAGE_SYM_CLASS_AUTOMATIC         1
 #define IMAGE_SYM_CLASS_EXTERNAL          2
@@ -189,58 +189,58 @@ typedef struct _IMAGE_SYMBOL {
 #define IMAGE_WEAK_EXTERN_SEARCH_ALIAS      3
 
 typedef union _IMAGE_AUX_SYMBOL {
-	struct {
-		uint_32 TagIndex;
-		union {
-			struct {
-				uint_16 Linenumber;
-				uint_16 Size;
-			} LnSz;
-			uint_32 TotalSize;
-		} Misc;
-		union {
-			struct {
-				uint_32 PointerToLinenumber;
-				uint_32 PointerToNextFunction;
-			} Function;
-			struct {
-				uint_16 Dimension[4];
-			} Array;
-		} FcnAry;
-		uint_16 TvIndex;
-	} Sym;
-	struct {
-		uint_8 Name[IMAGE_SIZEOF_SYMBOL];
-	} File;
-	struct {
-		uint_32 Length;
-		uint_16 NumberOfRelocations;
-		uint_16 NumberOfLinenumbers;
-		uint_32 CheckSum;
-		uint_16 Number;
-		uint_8  Selection;
-	} Section;
+    struct {
+        uint_32 TagIndex;
+        union {
+            struct {
+                uint_16 Linenumber;
+                uint_16 Size;
+            } LnSz;
+            uint_32 TotalSize;
+        } Misc;
+        union {
+            struct {
+                uint_32 PointerToLinenumber;
+                uint_32 PointerToNextFunction;
+            } Function;
+            struct {
+                uint_16 Dimension[4];
+            } Array;
+        } FcnAry;
+        uint_16 TvIndex;
+    } Sym;
+    struct {
+        uint_8 Name[IMAGE_SIZEOF_SYMBOL];
+    } File;
+    struct {
+        uint_32 Length;
+        uint_16 NumberOfRelocations;
+        uint_16 NumberOfLinenumbers;
+        uint_32 CheckSum;
+        uint_16 Number;
+        uint_8  Selection;
+    } Section;
 } IMAGE_AUX_SYMBOL;
 #pragma pack(pop)
 
 typedef struct _IMAGE_COFF_SYMBOLS_HEADER {
-	uint_32 NumberOfSymbols;
-	uint_32 LvaToFirstSymbol;
-	uint_32 NumberOfLinenumbers;
-	uint_32 LvaToFirstLinenumber;
-	uint_32 RvaToFirstByteOfCode;
-	uint_32 RvaToLastByteOfCode;
-	uint_32 RvaToFirstByteOfData;
-	uint_32 RvaToLastByteOfData;
+    uint_32 NumberOfSymbols;
+    uint_32 LvaToFirstSymbol;
+    uint_32 NumberOfLinenumbers;
+    uint_32 LvaToFirstLinenumber;
+    uint_32 RvaToFirstByteOfCode;
+    uint_32 RvaToLastByteOfCode;
+    uint_32 RvaToFirstByteOfData;
+    uint_32 RvaToLastByteOfData;
 } IMAGE_COFF_SYMBOLS_HEADER;
 
 #pragma pack(push,2)
 typedef struct _IMAGE_LINENUMBER {
-	union {
-		uint_32 SymbolTableIndex;
-		uint_32 VirtualAddress;
-	} Type;
-	uint_16 Linenumber;
+    union {
+        uint_32 SymbolTableIndex;
+        uint_32 VirtualAddress;
+    } Type;
+    uint_16 Linenumber;
 } IMAGE_LINENUMBER;
 #pragma pack(pop)
 

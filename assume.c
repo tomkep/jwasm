@@ -43,11 +43,10 @@
 #include "expreval.h"
 #include "fastpass.h"
 
-#include "myassert.h"
-
 /* prototypes */
 
 extern asm_sym          *sym_CurSeg;
+extern struct asm_sym   symPC; /* '$' symbol */
 extern dir_node         *flat_grp;
 
 // table SegAssume is for the segment registers:
@@ -169,18 +168,19 @@ struct asm_sym * GetStdAssume(int reg)
 
 ret_code AssumeDirective( int i )
 /********************/
-/* Handles ASSUME statement
- syntax is :
- assume segregister : seglocation [, segregister : seglocation ]
- assume dataregister : qualified type [, dataregister : qualified type ]
- assume register : ERROR | NOTHING | FLAT
- assume NOTHING
+/* Handles ASSUME
+ * syntax is :
+ * assume segregister : seglocation [, segregister : seglocation ]
+ * assume dataregister : qualified type [, dataregister : qualified type ]
+ * assume register : ERROR | NOTHING | FLAT
+ * assume NOTHING
  */
 {
     int             segloc; /* lcoation of segment/type info */
     int             reg;
     int             j;
     int             type;
+    int             indirection;
     assume_info     *info;
     struct asm_sym  *sym;
     bool            segtable;
@@ -190,31 +190,24 @@ ret_code AssumeDirective( int i )
     DebugMsg(("AssumeDirective enter\n"));
 
     for( i++; i < Token_Count; i++ ) {
+        indirection = 0;
         if( ( AsmBuffer[i]->token == T_ID )
-            && (0 == stricmp(AsmBuffer[i]->string_ptr, "NOTHING" ))) {
+            && (0 == _stricmp(AsmBuffer[i]->string_ptr, "NOTHING" ))) {
             AssumeInit();
             continue;
         }
 
         if (AsmBuffer[i]->token != T_REG) {
-            AsmError( SYNTAX_ERROR );
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         reg = AsmBuffer[i]->value;
-
-        i++;
-
-        if( AsmBuffer[i]->token != T_COLON ) {
-            AsmError( COLON_EXPECTED );
-            return( ERROR );
-        }
-        i++;
 
         /*---- get the info ptr for the register ----*/
 
         info = NULL;
         for (j = 0; j < NUM_SEGREGS; j++)
-            if (segidx[j] == reg) {
+            if ( segidx[j] == reg ) {
                 info = &SegAssumeTable[j];
                 if( ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 )
                     && ( ( reg == T_FS ) || ( reg == T_GS ) ) ) {
@@ -238,9 +231,18 @@ ret_code AssumeDirective( int i )
             }
         }
         if (info == NULL) {
-            AsmError( SYNTAX_ERROR );
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
+
+        i++; /* go past register */
+
+        if( AsmBuffer[i]->token != T_COLON ) {
+            AsmError( COLON_EXPECTED );
+            return( ERROR );
+        }
+        i++;
+
 
         if (segtable == TRUE) {
             if( ( AsmBuffer[i]->token == T_UNARY_OPERATOR )
@@ -248,8 +250,10 @@ ret_code AssumeDirective( int i )
                 i++;
             }
         } else if( ( AsmBuffer[i]->token == T_RES_ID )
-                   && ( AsmBuffer[i]->value == T_PTR ) )
+                  && ( AsmBuffer[i]->value == T_PTR ) ) {
             i++;
+            indirection++;
+        }
 
         segloc = i;
         i++;
@@ -260,23 +264,23 @@ ret_code AssumeDirective( int i )
 
         /*---- Now store the information ----*/
 
-        if( 0 == stricmp( AsmBuffer[segloc]->string_ptr, "ERROR" )) {
+        if( 0 == _stricmp( AsmBuffer[segloc]->string_ptr, "ERROR" )) {
             info->error = TRUE;
             info->flat = FALSE;
             info->symbol = NULL;
-        } else if(0 == stricmp( AsmBuffer[segloc]->string_ptr, "FLAT" )) {
+        } else if(0 == _stricmp( AsmBuffer[segloc]->string_ptr, "FLAT" )) {
             if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
                 AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                 return( ERROR );
             } else if (segtable == FALSE) {
-                AsmError( SYNTAX_ERROR );
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[segloc]->string_ptr );
                 return( ERROR );
             };
             DefineFlatGroup();
             info->flat = TRUE;
             info->error = FALSE;
             info->symbol = NULL;
-        } else if( 0 == stricmp( AsmBuffer[segloc]->string_ptr, "NOTHING" )) {
+        } else if( 0 == _stricmp( AsmBuffer[segloc]->string_ptr, "NOTHING" )) {
             info->flat = FALSE;
             info->error = FALSE;
             info->symbol = NULL;
@@ -285,12 +289,24 @@ ret_code AssumeDirective( int i )
                 type = -1;
                 sym = NULL;
                 if (AsmBuffer[segloc]->token == T_RES_ID) {
-                    type = FindSimpleType(AsmBuffer[segloc]->value);
+                    type = FindSimpleType( AsmBuffer[segloc]->value );
                 }
                 if ( type == -1 ) {
-                    sym = IsLabelType(AsmBuffer[segloc]->string_ptr);
-                    if (sym == NULL) {
+                    sym = SymSearch( AsmBuffer[segloc]->string_ptr );
+                    if ( sym == NULL ) {/* a forward reference is allowed */
+                        sym = SymCreate( AsmBuffer[segloc]->string_ptr, TRUE );
+                    }
+                    if ( sym->state == SYM_UNDEFINED ) {
+                        /* change symbol to a type.
+                         * It still has type TYPE_NONE */
+                        dir_settype( (dir_node *)sym, SYM_TYPE );
+                    }
+                    if ( sym->state != SYM_TYPE ) {
                         AsmErr( QUALIFIED_TYPE_EXPECTED, segloc );
+                        return( ERROR );
+                    }
+                    if ( indirection == 0 && sym->total_size > (is32 ? 4 : 2)) {
+                        AsmError( TYPE_IS_WRONG_SIZE_FOR_REGISTER );
                         return( ERROR );
                     }
                 }
@@ -318,9 +334,13 @@ ret_code AssumeDirective( int i )
 }
 
 
-/* set CS assume entry whenever current segment is changed */
+/* set CS assume entry whenever current segment is changed.
+ * Also updates values of
+ * - text macro @CurSeg
+ * - assembly time variable $
+ */
 
-ret_code SetAssumeCSCurrSeg( void )
+void SetAssumeCSCurrSeg( void )
 /*************************************/
 {
     assume_info     *info;
@@ -331,6 +351,7 @@ ret_code SetAssumeCSCurrSeg( void )
         info->flat = FALSE;
         info->error = TRUE;
         sym_CurSeg->string_ptr = "";
+        symPC.segment = NULL;
     } else {
         info->flat = FALSE;
         info->error = FALSE;
@@ -342,9 +363,10 @@ ret_code SetAssumeCSCurrSeg( void )
             info->symbol = &CurrSeg->seg->sym;
         }
         sym_CurSeg->string_ptr = CurrSeg->seg->sym.name;
+        symPC.segment = &CurrSeg->seg->sym;
         DebugMsg(("SetAssumeCSCurrSeg: current segment=%s\n", CurrSeg->seg->sym.name));
     }
-    return( NOT_ERROR );
+    return;
 }
 
 /* for a symbol, search segment register which holds segment

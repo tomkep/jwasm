@@ -8,18 +8,11 @@
 *
 ****************************************************************************/
 
-
-#include <errno.h>
 #include <ctype.h>
 #include <time.h>
 
-#ifdef __WATCOMC__
-#include <unistd.h>
-#else
-#include <io.h>
-#endif
-
 #include "globals.h"
+#include "myunistd.h"
 #include "symbols.h"
 #include "mangle.h"
 #include "memalloc.h"
@@ -28,7 +21,6 @@
 #include "segment.h"
 #include "queues.h"
 #include "elf.h"
-#include "myassert.h"
 #include "fatal.h"
 
 #if ELF_SUPPORT
@@ -39,7 +31,7 @@
 // there's no STT_IMPORT type for ELF, it's OW specific
 #define OWELFIMPORT 0
 
-extern dir_node * GetPublicData2( void ** );
+extern dir_node * GetPublicData( void ** );
 extern line_num_info * GetLinnumData2( void ** );
 
 extern symbol_queue     Tables[];       // tables of definitions
@@ -47,7 +39,7 @@ extern unsigned  total_segs;
 extern asm_sym          *start_label;   // symbol for Modend (COFF)
 extern uint             segdefidx;      // Number of Segment definition
 
-static uint_32 size_drectve;   /* size of .drectve section */
+//static uint_32 size_drectve;   /* size of .drectve section */
 static uint_32 symindex;       /* entries in symbol table */
 static uint_32 start_globals;  /* start index globals in symbol table */
 static dir_node *directives;
@@ -69,10 +61,10 @@ typedef struct _intseg {
 } intseg;
 
 static intseg internal_segs[] = {
-    ".shstrtab", SHT_STRTAB, 0, 0, NULL,
-    ".symtab", SHT_SYMTAB, 0, 0, NULL,
-    ".strtab", SHT_STRTAB, 0, 0, NULL,
-    NULL, SHT_NULL, 0, 0, NULL
+    { ".shstrtab", SHT_STRTAB, 0, 0, NULL },
+    { ".symtab", SHT_SYMTAB, 0, 0, NULL },
+    { ".strtab", SHT_STRTAB, 0, 0, NULL },
+    { NULL, SHT_NULL, 0, 0, NULL }
 };
 
 #define SHSTRTAB_IDX 0
@@ -125,7 +117,7 @@ static int get_num_reloc_sections( void )
     int num = 0;
 
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
-        if (curr->e.seginfo->FixupListHeadElf)
+        if ( curr->e.seginfo->FixupListHeadGen )
             num++;
     }
     return( num );
@@ -149,7 +141,7 @@ static void set_symtab_values()
     char *p2;
     void *vp;
     Elf32_Sym *p;
-    uint_8 stb;
+    //uint_8 stb;
     uint_8 stt;
     localname *localshead = NULL;
     localname *localstail = NULL;
@@ -174,7 +166,7 @@ static void set_symtab_values()
 
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
         if (curr->e.seginfo->num_relocs) {
-            struct asmfixup * fix = curr->e.seginfo->FixupListHeadElf;
+            struct asmfixup * fix = curr->e.seginfo->FixupListHeadGen;
             for ( ; fix; fix = fix->next2 ) {
                 /* if it's not EXTERNAL/PUBLIC, add symbol. */
                 /* however, if it's an assembly time variable */
@@ -220,7 +212,7 @@ static void set_symtab_values()
 
     /* count publics */
     vp = NULL;
-    while( curr = GetPublicData2(&vp)) {
+    while( curr = GetPublicData(&vp)) {
         if( curr->sym.state == SYM_UNDEFINED ) {
             continue;
         } else if( curr->sym.state == SYM_PROC && curr->sym.isproc == FALSE) {
@@ -342,7 +334,7 @@ static void set_symtab_values()
 
     /* 6. PUBLIC entries */
     vp = NULL;
-    while ( curr = GetPublicData2(&vp) ) {
+    while ( curr = GetPublicData(&vp) ) {
         Mangle( &curr->sym, buffer );
         len = strlen( buffer );
 
@@ -410,7 +402,7 @@ static void set_symtab_values()
         p2 += strlen(p2) + 1;
     }
     vp = NULL;
-    while ( curr = GetPublicData2(&vp) ) {
+    while ( curr = GetPublicData(&vp) ) {
         Mangle( &curr->sym, p2 );
         p2 += strlen(p2) + 1;
     }
@@ -436,7 +428,7 @@ void set_shstrtab_values()
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
         p = ElfConvertSectionName( &curr->sym );
         size += strlen(p) + 1;
-        if (curr->e.seginfo->FixupListHeadElf)
+        if (curr->e.seginfo->FixupListHeadGen)
             size += strlen(p) + 1 + 4;
     }
     /* get internal sections sizes */
@@ -458,7 +450,7 @@ void set_shstrtab_values()
         p += strlen(p) + 1;
     }
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
-        if (curr->e.seginfo->FixupListHeadElf) {
+        if (curr->e.seginfo->FixupListHeadGen) {
             strcpy(p, ".rel");
             p += strlen(p);
             strcpy(p, ElfConvertSectionName( &curr->sym ));
@@ -474,14 +466,14 @@ static unsigned int Get_Num_Relocs(dir_node *curr)
     unsigned relocs;
     struct asmfixup *fix;
 
-    for (relocs = 0, fix = curr->e.seginfo->FixupListHeadElf; fix ; fix = fix->next2, relocs++);
+    for (relocs = 0, fix = curr->e.seginfo->FixupListHeadGen; fix ; fix = fix->next2, relocs++);
 
     return( relocs );
 }
 
 static unsigned int Get_Alignment(dir_node *curr)
 {
-    if ( curr->e.seginfo->alignment == -1 )
+    if ( curr->e.seginfo->alignment == MAX_SEGALIGNMENT )
         return( 0 );
     return( 1 << curr->e.seginfo->alignment );
 }
@@ -491,16 +483,10 @@ static unsigned int Get_Alignment(dir_node *curr)
 static int elf_write_section_table( int fh )
 {
     dir_node    *curr;
-    obj_rec     *objr;
     uint_8      *p;
-    struct asmfixup *fix;
-    uint        seg_index;
     uint        offset;
-    uint        len;
-    uint        size_relocs = 0;
     intseg      *seg;
     Elf32_Shdr shdr;
-    char        buffer[256];
 
     DebugMsg(("elf_write_section_table: enter\n"));
 
@@ -510,7 +496,7 @@ static int elf_write_section_table( int fh )
     set_shstrtab_values();
 
     memset(&shdr, 0, sizeof(shdr));
-    if (write(fh, &shdr, sizeof(shdr)) != sizeof(shdr)) /* write the empty NULL entry */
+    if ( _write(fh, &shdr, sizeof(shdr)) != sizeof(shdr) ) /* write the empty NULL entry */
         WriteError();
 
     p = (uint_8 *)internal_segs[SHSTRTAB_IDX].data;
@@ -549,7 +535,7 @@ static int elf_write_section_table( int fh )
         shdr.sh_addralign = Get_Alignment( curr );
         shdr.sh_entsize = 0;
 
-        if (write(fh, &shdr, sizeof(shdr)) != sizeof(shdr))
+        if ( _write(fh, &shdr, sizeof(shdr)) != sizeof(shdr) )
             WriteError();
 
         /* save the file offset in the segment item */
@@ -586,7 +572,7 @@ static int elf_write_section_table( int fh )
             shdr.sh_addralign = 1;
             shdr.sh_entsize = 0;
         }
-        if (write(fh, &shdr, sizeof(shdr)) != sizeof(shdr))
+        if ( _write(fh, &shdr, sizeof(shdr)) != sizeof(shdr) )
             WriteError();
 
         offset += shdr.sh_size;
@@ -595,7 +581,7 @@ static int elf_write_section_table( int fh )
 
     /* write headers of reloc sections */
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
-        if (curr->e.seginfo->FixupListHeadElf == NULL)
+        if (curr->e.seginfo->FixupListHeadGen == NULL)
             continue;
         memset(&shdr, 0, sizeof(shdr));
 
@@ -615,7 +601,7 @@ static int elf_write_section_table( int fh )
         shdr.sh_addralign = 4;
         shdr.sh_entsize = sizeof(Elf32_Rel);
 
-        if (write(fh, &shdr, sizeof(shdr)) != sizeof(shdr))
+        if ( _write(fh, &shdr, sizeof(shdr)) != sizeof(shdr) )
             WriteError();
 
         offset += shdr.sh_size;
@@ -623,7 +609,7 @@ static int elf_write_section_table( int fh )
 
     }
     DebugMsg(("elf_write_section_table: exit\n"));
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 // write ELF header
@@ -631,7 +617,7 @@ static int elf_write_section_table( int fh )
 
 ret_code elf_write_header( int fh )
 {
-    dir_node   *dir;
+    //dir_node   *dir;
 
     DebugMsg(("elf_write_header: enter\n"));
 
@@ -673,8 +659,8 @@ ret_code elf_write_header( int fh )
     ehdr.e_shnum = 1 + total_segs + 3 + get_num_reloc_sections();
     ehdr.e_shstrndx = 1 + total_segs + SHSTRTAB_IDX;
 
-    lseek(fh, 0, SEEK_SET);
-    if (write(fh, &ehdr, sizeof(ehdr)) != sizeof(ehdr))
+    _lseek(fh, 0, SEEK_SET);
+    if ( _write(fh, &ehdr, sizeof(ehdr)) != sizeof(ehdr) )
         WriteError();
 
     elf_write_section_table( fh );
@@ -708,9 +694,9 @@ ret_code elf_write_symbols( int fh )
 ret_code elf_write_data( int fh )
 {
     dir_node *curr;
-    int seg_index;
-    uint_32 offset = 0;
-    uint_32 index;
+    //int seg_index;
+    //uint_32 offset = 0;
+    //uint_32 index;
     intseg      *seg;
 
     DebugMsg(("elf_write_data: enter\n"));
@@ -718,9 +704,9 @@ ret_code elf_write_data( int fh )
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
         DebugMsg(("elf_write_data: program data at ofs=%X, size=%X\n", curr->e.seginfo->start_loc, curr->e.seginfo->segrec->d.segdef.seg_length));
         if (curr->e.seginfo->segtype != SEGTYPE_BSS && curr->e.seginfo->segrec->d.segdef.seg_length != 0) {
-            lseek(fh, curr->e.seginfo->start_loc, SEEK_SET);
-            if (write(fh, curr->e.seginfo->CodeBuffer,
-                      curr->e.seginfo->segrec->d.segdef.seg_length) != curr->e.seginfo->segrec->d.segdef.seg_length)
+            _lseek(fh, curr->e.seginfo->start_loc, SEEK_SET);
+            if ( _write(fh, curr->e.seginfo->CodeBuffer,
+                      curr->e.seginfo->segrec->d.segdef.seg_length) != curr->e.seginfo->segrec->d.segdef.seg_length )
                 WriteError();
         }
     }
@@ -729,8 +715,8 @@ ret_code elf_write_data( int fh )
     for (seg = internal_segs ; seg->name; seg++) {
         if (seg->data) {
             DebugMsg(("elf_write_data: internal at ofs=%X, size=%X\n", seg->offset, seg->size));
-            lseek( fh, seg->offset, SEEK_SET );
-            if (write( fh, seg->data, seg->size ) != seg->size)
+            _lseek( fh, seg->offset, SEEK_SET );
+            if ( _write( fh, seg->data, seg->size ) != seg->size )
                 WriteError();
         }
     }
@@ -741,8 +727,8 @@ ret_code elf_write_data( int fh )
             struct asmfixup *fixup;
             Elf32_Rel reloc;
             DebugMsg(("elf_write_data: relocs at ofs=%X, size=%X\n", curr->e.seginfo->reloc_offset, curr->e.seginfo->num_relocs * sizeof(Elf32_Rel)));
-            lseek( fh, curr->e.seginfo->reloc_offset, SEEK_SET );
-            for ( fixup = curr->e.seginfo->FixupListHeadElf; fixup; fixup = fixup->next2) {
+            _lseek( fh, curr->e.seginfo->reloc_offset, SEEK_SET );
+            for ( fixup = curr->e.seginfo->FixupListHeadGen; fixup; fixup = fixup->next2) {
                 uint_8 elftype;
                 reloc.r_offset = fixup->fixup_loc;
                 switch (fixup->type) {
@@ -775,7 +761,7 @@ ret_code elf_write_data( int fh )
                 /* the low 8 bits of info are type */
                 /* the high 24 bits are symbol table index */
                 reloc.r_info = ELF32_R_INFO(fixup->sym->idx, elftype);
-                if (write( fh, &reloc, sizeof(reloc) ) != sizeof(reloc))
+                if ( _write( fh, &reloc, sizeof(reloc) ) != sizeof(reloc) )
                     WriteError();
             }
         }

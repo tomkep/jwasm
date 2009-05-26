@@ -1,5 +1,9 @@
 
 # this makefile (NMake) creates JWasm Windows and DOS binaries with MSVC.
+# it has been tested with:
+# - MS VC++ Toolkit 2003
+# - MS VC++ 6
+# - MS VC++ 2005 EE (not recommended, also see definition of c_flags below)
 
 name = jwasm
 
@@ -32,18 +36,21 @@ TRMEM=0
 
 linker = $(VCDIR)\Bin\link.exe
 
-#cflags stuff
-#########
-c_flags =-D__NT__
 !if $(DEBUG)
 !if $(TRMEM)
-extra_c_flags = $(c_flags) -Zd -Od -DDEBUG_OUT -DTRMEM
+extra_c_flags = -Zd -Od -DDEBUG_OUT -DTRMEM
 !else
-extra_c_flags = $(c_flags) -Zd -Od -DDEBUG_OUT
+extra_c_flags = -Zd -Od -DDEBUG_OUT
 !endif
 !else
-extra_c_flags = $(c_flags) -Ox -DNDEBUG
+extra_c_flags = -Oty2 -Gs -DNDEBUG
 !endif
+
+c_flags =-D__NT__ $(extra_c_flags)
+# if MSVC++ 2005 EE is used:
+# 1. define __STDC_WANT_SECURE_LIB__=0 to avoid "deprecated" warnings
+# 2. define -GS- to disable security checks
+#c_flags =-D__NT__ $(extra_c_flags) -D__STDC_WANT_SECURE_LIB__=0 -GS-
 
 #lflags stuff
 #########
@@ -55,7 +62,7 @@ LOPTD = /debug
 lflagsd = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /Libpath:$(HXDIR)\lib /OPT:NOWIN98
 lflagsw = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /OPT:NOWIN98
 
-CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(extra_c_flags)
+CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(c_flags)
 
 .c{$(OUTD)}.obj:
 	 $(CC) -Fo$* $<
@@ -63,22 +70,23 @@ CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(extra_c_flags)
 proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
            $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  \
-           $(OUTD)/msgtext.obj  $(OUTD)/macro.obj    $(OUTD)/condasm.obj \
+           $(OUTD)/macro.obj    $(OUTD)/string.obj   $(OUTD)/condasm.obj \
            $(OUTD)/types.obj    $(OUTD)/fpfixup.obj  $(OUTD)/invoke.obj  \
            $(OUTD)/equate.obj   $(OUTD)/mangle.obj   $(OUTD)/loop.obj    \
            $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   \
-           $(OUTD)/symbols.obj  $(OUTD)/tbyte.obj    $(OUTD)/labels.obj  \
+           $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/labels.obj  \
            $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    \
-           $(OUTD)/insthash.obj $(OUTD)/jumps.obj    $(OUTD)/queues.obj  \
+           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queues.obj  \
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/omf.obj     \
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   \
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  \
            $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   \
+           $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj  \
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
 !endif
-           $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj
+           $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj    
 ######
 
 !if $(WIN)
@@ -96,7 +104,7 @@ $(OUTD):
 $(OUTD)\$(name).exe : $(proj_obj)
 	$(linker) @<<
 $(lflagsw) $(proj_obj)
-/LIBPATH:"$(VCDIR)\Lib" /LIBPATH:"$(W32LIB)" /OUT:$@
+/LIBPATH:"$(VCDIR)\Lib" /LIBPATH:"$(W32LIB)" kernel32.lib /OUT:$@
 <<
 
 $(OUTD)\$(name)d.exe : $(proj_obj)

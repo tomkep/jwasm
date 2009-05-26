@@ -35,7 +35,6 @@
 #include "parser.h"
 #include "expreval.h"
 #include "equate.h"
-
 #include "memalloc.h"
 #include "symbols.h"
 #include "directiv.h"
@@ -44,8 +43,6 @@
 #include "macro.h"
 #include "fastpass.h"
 #include "listing.h"
-
-#include "myassert.h"
 
 #if FASTPASS
 
@@ -76,43 +73,42 @@ void SaveEquateState(asm_sym *sym)
 #endif
 
 // CreateConstant (the worker)
-// <value> is used only if start is -1
-// then a numeric constant/variable is defined with this value.
-// if <start> is != -1, the AsmBuffer is evaluated.
 // EQU:     redefine = FALSE
 // '=':     redefine = TRUE
-// if <start> is 2, it is a standard EQU/=/TEXTEQU
-// for EQU, the pos in the original source line is then
-// AsmBuffer[1]->pos + 4
 
-asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
+asm_sym * CreateConstant( bool redefine )
 /**********************************************************************************************/
 {
     struct asm_sym      *sym;
-    int                 i;
+    char                *name = AsmBuffer[0]->string_ptr;
+    int                 i = 2;
     ret_code            rc;
     bool                cmpvalue = FALSE;
     expr_list           opndx;
     char                buffer[MAX_LINE_LEN];
     char                nameb[MAX_ID_LEN+1];
 
-    DebugMsg(( "%u:CreateConstant(%s, value=%u, redef=%u) enter\n", Parse_Pass+1, name, value, redefine));
+    DebugMsg(( "%u:CreateConstant(%s, redef=%u) enter\n", Parse_Pass+1, name, redefine ));
 
     sym = SymSearch( name );
 
-    if( sym == NULL || sym->state == SYM_UNDEFINED ) {
+    if( sym == NULL ) {
         /*
          if we've never seen it before
          wait with definition until type of equate is clear
          */
+    } else if( sym->state == SYM_UNDEFINED ) {
+
+        dir_remove_table( (dir_node *)sym );
+
     } else if( sym->state == SYM_TMACRO ) {
         /* a text macro, this is valid for EQU only */
         if ( redefine == FALSE) {
             DebugMsg(( "CreateConstant: %s is a text macro, calling SetTextMacro(%s)\n", name, AsmBuffer[1]->pos + 4 ));
-            return ( SetTextMacro(sym, name, AsmBuffer[1]->pos + 4));
+            return ( SetTextMacro( sym, name, AsmBuffer[1]->pos + 4 ) );
         }
         /* this should never happen, since the equate id at pos 0
-         has been expanded already!
+         has been replaced by its value already!
          */
         AsmErr( SYMBOL_REDEFINITION, sym->name );
         return( NULL );
@@ -121,46 +117,21 @@ asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
         DebugMsg(( "CreateConstant(%s) state=%u, mem_type=%u, value=%X, symbol redefinition\n", name, sym->state, sym->mem_type, sym->value));
         AsmErr( SYMBOL_REDEFINITION, name );
         return( NULL );
-    } else if ( redefine == FALSE ) {
+    } else if ( redefine == FALSE || sym->variable == FALSE ) {
         if ( sym->defined == TRUE && sym->state != SYM_EXTERNAL ) {
             /* ensure that value doesn't change! */
             cmpvalue = TRUE;
         }
     }
 
-    /* define a numeric constant/variable without using token buffer?  */
-
-    if( start == -1 ) {
-        if (!sym) {
-            sym = SymCreate( name, TRUE );
-#if FASTPASS
-            sym->saved = FALSE;
-#endif
-        }
-#if FASTPASS
-        if (StoreState && redefine && sym->saved == FALSE) {
-            SaveEquateState(sym);
-        }
-#endif
-        sym->defined = TRUE;
-        sym->state = SYM_INTERNAL;
-        sym->mem_type = MT_ABS;
-        sym->variable = redefine;
-        sym->offset = value;
-        sym->equate = TRUE;
-        DebugMsg(( "%u:CreateConstant(%s) exit, value=%d\n", Parse_Pass+1, name, value ));
-        return( sym );
-    }
-
     // try to evalate the expression for EQU and '='
 
-    i = start;
     if (AsmBuffer[i]->token == T_NUM &&
         AsmBuffer[i+1]->token == T_FINAL &&
         AsmBuffer[i]->hvalue == 0 ) {
         opndx.llvalue = AsmBuffer[i]->llvalue;
         opndx.hlvalue = 0;
-        opndx.type = EXPR_CONST;
+        opndx.kind = EXPR_CONST;
         opndx.string = NULL;
         opndx.instr = EMPTY;
         opndx.labeldiff = FALSE;
@@ -203,21 +174,20 @@ asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
                     break;
             }
         }
-        //rc = EvalOperand( &i, Token_Count, &opndx, FALSE );
         rc = EvalOperand( &i, Token_Count, &opndx, redefine );
     }
     /* for EQU, don't allow value to change */
     if (cmpvalue) {
         if ( rc != ERROR &&
             AsmBuffer[i]->token == T_FINAL &&
-            (opndx.type == EXPR_CONST ||
-             (opndx.type == EXPR_ADDR && opndx.sym != NULL ))) {
+            (opndx.kind == EXPR_CONST ||
+             (opndx.kind == EXPR_ADDR && opndx.sym != NULL ))) {
             DebugMsg(( "CreateConstant(%s): expression evaluated, value=%X, string=%X\n", name, opndx.value, opndx.string));
-            if ( opndx.type == EXPR_CONST && sym->value == opndx.value ) {
+            if ( opndx.kind == EXPR_CONST && sym->value == opndx.value ) {
                 return( sym );
             }
-            // if ((opndx.type == EXPR_ADDR) && (dir->e.constinfo->sym->offset == opndx.sym->offset))
-            if (opndx.type == EXPR_ADDR) {
+            // if ((opndx.kind == EXPR_ADDR) && (dir->e.constinfo->sym->offset == opndx.sym->offset))
+            if (opndx.kind == EXPR_ADDR) {
 #if 0
                 /* test case:
 
@@ -250,14 +220,14 @@ asm_sym * CreateConstant( char *name, int value, int start, bool redefine )
             }
         }
 #ifdef DEBUG_OUT
-        if (opndx.type == EXPR_CONST)
+        if (opndx.kind == EXPR_CONST)
             DebugMsg(("CreateConstant(%s), CONST value changed: old=%X, new=%X\n", name, sym->offset, opndx.value ));
-        else if (opndx.type == EXPR_ADDR && opndx.sym)
+        else if (opndx.kind == EXPR_ADDR && opndx.sym)
             DebugMsg(("CreateConstant(%s), ADDR value changed: old=%X, new ofs+val=%X+%X\n", name, sym->offset, opndx.sym->offset, opndx.value));
         else
             DebugMsg(("CreateConstant(%s), ADDR value changed: old=%X, new sym=NULL, value=%X\n", name, sym->offset, opndx.value));
 #endif
-        if (opndx.type == EXPR_CONST) {
+        if (opndx.kind == EXPR_CONST) {
 #if FLAG_LABELDIFF
             /* skip error if constant is the difference of 2 labels and
              a phase error has occured */
@@ -288,27 +258,33 @@ noerr:
         opndx.indirect == FALSE &&
         
          /* the CONST's magnitude must be <= 32 */
-        ((opndx.type == EXPR_CONST &&
+        ((opndx.kind == EXPR_CONST &&
           ((opndx.hvalue == 0 && opndx.hlvalue == 0) ||
            (opndx.value < 0 && opndx.hvalue == -1))) ||
-         (opndx.type == EXPR_ADDR && opndx.sym != NULL && opndx.sym->state != SYM_EXTERNAL)) &&
+         (opndx.kind == EXPR_ADDR && opndx.sym != NULL && opndx.sym->state != SYM_EXTERNAL)) &&
         (opndx.instr == EMPTY || redefine == TRUE)) {
         if (!sym) {
             sym = SymCreate( name, TRUE );
 #if FASTPASS
-            sym->saved = FALSE;
+            //sym->saved = FALSE;
+            /* don't save symbols which are defined after StoreState has been set */
+            sym->saved = StoreState;
 #endif
         }
 #if FASTPASS
-        if (StoreState && redefine && sym->saved == FALSE) {
-            SaveEquateState(sym);
+        else if ( StoreState && redefine ) {
+            if ( sym->saved == FALSE && sym->defined == TRUE )
+                SaveEquateState( sym );
+            sym->saved = TRUE; /* don't try to save this symbol (anymore) */
         }
 #endif
-        sym->variable = redefine;
+        if ( sym->state != SYM_INTERNAL ) { /* SYM_UNDEFINED or SYM_EXTERNAL? */
+            sym->variable = redefine;
+            sym->equate = TRUE;
+            sym->state = SYM_INTERNAL;
+        }
         sym->defined = TRUE;
-        sym->equate = TRUE;
-        sym->state = SYM_INTERNAL;
-        if (opndx.type == EXPR_CONST) {
+        if (opndx.kind == EXPR_CONST) {
             sym->mem_type = MT_ABS;
             sym->value = opndx.value;
             DebugMsg(("%u:CreateConstant(%s), CONST, value=%X\n", Parse_Pass+1, name, opndx.value ));
@@ -358,7 +334,44 @@ noerr:
 
     DebugMsg(("CreateConstant(%s): value is NOT numeric, opndx.string=%X, calling SetTextMacro()\n", name, opndx.string));
 
-    return ( SetTextMacro(sym, name, buffer ));
+    return ( SetTextMacro( sym, name, buffer ) );
+}
+
+// CreateConstantEx
+// define an assembly time variable directly without using the token buffer.
+// this is used for some internally generated variables.
+
+asm_sym * CreateConstantEx( char *name, int value )
+/**********************************************************************************************/
+{
+    struct asm_sym      *sym;
+
+    DebugMsg(( "CreateConstantEx(%s, %d ) enter\n", name, value ));
+
+    sym = SymSearch( name );
+    if( sym == NULL ) {
+        sym = SymCreate( name, TRUE );
+#if FASTPASS
+        sym->saved = FALSE;
+#endif
+    } else if ( sym->state == SYM_UNDEFINED ) {
+        dir_remove_table( (dir_node *)sym );
+    } else if ( sym->equate == FALSE ) {
+        AsmErr( SYMBOL_REDEFINITION, name );
+        return( NULL );
+    }
+#if FASTPASS
+    if ( StoreState && sym->saved == FALSE ) {
+        SaveEquateState(sym);
+    }
+#endif
+    sym->defined  = TRUE;
+    sym->state    = SYM_INTERNAL;
+    sym->mem_type = MT_ABS;
+    sym->variable = TRUE;
+    sym->offset   = value;
+    sym->equate   = TRUE;
+    return( sym );
 }
 
 // DefineConstant is used by
@@ -370,11 +383,11 @@ ret_code DefineConstant( bool redefine )
 {
     asm_sym *sym;
 
-    if( AsmBuffer[0]->token != T_ID) {
+    if( AsmBuffer[0]->token != T_ID ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
         return( ERROR );
     }
-    if ( sym = CreateConstant( AsmBuffer[0]->string_ptr, 0, 2, redefine ) ) {
+    if ( sym = CreateConstant( redefine ) ) {
         if ( ModuleInfo.list == TRUE ) {
             LstWrite( LSTTYPE_EQUATE, 0, sym );
         }

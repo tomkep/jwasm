@@ -28,7 +28,6 @@
 *
 ****************************************************************************/
 
-
 #include <stdarg.h>
 #include <ctype.h>
 
@@ -58,13 +57,11 @@ void                    print_include_file_nesting_structure( void );
 /* globals to this module */
 #define ErrLimit Options.error_limit
 #define WngLevel Options.warning_level
-#define ErrCount ModuleInfo.error_count
-#define WngCount ModuleInfo.warning_count
 
 static FILE             *ErrFile;
-static bool             Errfile_Written;
+//static bool             Errfile_Written;
 
-static void             PrtMsg1( char *prefix, int msgnum, va_list args1, va_list args2 );
+static void             PrtMsg( char *prefix, int msgnum, va_list args1, va_list args2 );
 void                    PutMsg( FILE *fp, char *prefix, int msgnum, va_list args );
 
 void AsmError( int msgnum )
@@ -96,7 +93,7 @@ void PrintNote( int msgnum, ... )
     va_start( args1, msgnum );
     va_start( args2, msgnum );
 
-    PrtMsg1( NULL, msgnum, args1, args2 );
+    PrtMsg( NULL, msgnum, args1, args2 );
     va_end( args1 );
     va_end( args2 );
 }
@@ -111,14 +108,14 @@ void AsmErr( int msgnum, ... )
 #endif
     va_start( args1, msgnum );
     va_start( args2, msgnum );
-    PrtMsg1( MsgGetPrefix( MSG_ERROR_PREFIX ), msgnum, args1, args2 );
+    PrtMsg( MsgGetEx( MSG_ERROR_PREFIX ), msgnum, args1, args2 );
     va_end( args1 );
     va_end( args2 );
-    ++ErrCount;
+    ModuleInfo.error_count++;
     write_to_file = FALSE;
     print_include_file_nesting_structure();
-    if( ErrLimit != -1  &&  ErrCount >= ErrLimit ) {
-        PrtMsg1( MsgGetPrefix( MSG_FATAL_PREFIX ), TOO_MANY_ERRORS, args1, args2 );
+    if( ErrLimit != -1  &&  ModuleInfo.error_count >= ErrLimit ) {
+        PrtMsg( MsgGetEx( MSG_FATAL_PREFIX ), TOO_MANY_ERRORS, args1, args2 );
         /* Just simulate the END directive, don't do a fatal exit!
          This allows to continue to assemble further modules.
          */
@@ -138,11 +135,11 @@ void AsmWarn( int level, int msgnum, ... )
         va_start( args1, msgnum );
         va_start( args2, msgnum );
         if( !Options.warning_error ) {
-            PrtMsg1( MsgGetPrefix( MSG_WARNING_PREFIX ), msgnum, args1, args2 );
-            ++WngCount;
+            PrtMsg( MsgGetEx( MSG_WARNING_PREFIX ), msgnum, args1, args2 );
+            ModuleInfo.warning_count++;
         } else {
-            PrtMsg1( MsgGetPrefix( MSG_ERROR_PREFIX ), msgnum, args1, args2 );
-            ++ErrCount;
+            PrtMsg( MsgGetEx( MSG_ERROR_PREFIX ), msgnum, args1, args2 );
+            ModuleInfo.error_count++;
         }
         va_end( args1 );
         va_end( args2 );
@@ -150,7 +147,7 @@ void AsmWarn( int level, int msgnum, ... )
     }
 }
 
-static void PrtMsg1( char *prefix, int msgnum, va_list args1, va_list args2 )
+static void PrtMsg( char *prefix, int msgnum, va_list args1, va_list args2 )
 /***************************************************************************/
 {
     if( !banner_printed )
@@ -161,33 +158,17 @@ static void PrtMsg1( char *prefix, int msgnum, va_list args1, va_list args2 )
     PutMsg( errout, prefix, msgnum, args1 );
     fflush( errout );                       /* 27-feb-90 */
     if( ErrFile ) {
-        Errfile_Written = TRUE;
+        //Errfile_Written = TRUE;
         PutMsg( ErrFile, prefix, msgnum, args2 );
     }
-}
-
-void PrtMsg( int msgnum, ... )
-/****************************/
-{
-    va_list args1;
-
-    if( !banner_printed )
-        trademark();
-
-    if( ErrFile == NULL )
-        OpenErrFile();
-    va_start( args1, msgnum );
-    PutMsg( errout, MsgGetPrefix( MSG_WARNING_PREFIX ), msgnum, args1 );
-    fflush( errout );
 }
 
 void InitErrFile( void )
 /*********************/
 {
-    // fixme if( CompFlags.errout_redirected ) return;
     remove( FileInfo.fname[ERR] );
     ErrFile = NULL;
-    Errfile_Written = FALSE;
+    //Errfile_Written = FALSE;
 }
 
 void OpenErrFile( void )
@@ -241,16 +222,15 @@ int InternalError( const char *file, unsigned line )
 /**************************************************/
 // it's used by myassert() function in debug version
 {
-
-    char msgbuf[MAXMSGSIZE];
-
+    char buffer[MAX_LINE_LEN];
     DebugMsg(("InternalError enter\n"));
-    MsgGet( MSG_INTERNAL_ERROR, msgbuf );
-    fprintf( errout, msgbuf, file, line );
-    fflush( errout );
+    ModuleInfo.error_count++;
+    GetCurrSrcPos( buffer );
+    fprintf( errout, "%s", buffer );
+    fprintf( errout, MsgGetEx( MSG_INTERNAL_ERROR ), file, line );
     CloseFiles();
     exit( EXIT_FAILURE );
-    return( 0 );
+    return(0);
 }
 #endif
 

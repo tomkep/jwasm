@@ -44,6 +44,7 @@ extern assume_info SegAssumeTable[];
 #define NUM_STDREGS 8
 
 enum assume_segreg {
+    ASSUME_NOTHING=-2,
     ASSUME_DS=0,
     ASSUME_ES,
     ASSUME_SS,
@@ -52,6 +53,9 @@ enum assume_segreg {
     ASSUME_CS
 };
 
+#if 0
+/* the assumes for standard registers use the register number set in
+ instruct.h. */
 enum assume_stdreg {
     ASSUME_EAX=0,
     ASSUME_ECX,
@@ -62,11 +66,9 @@ enum assume_stdreg {
     ASSUME_ESI,
     ASSUME_EDI
 };
+#endif
 
-#define ASSUME_NOTHING -2
-//#define ASSUME_ERROR   -1
-
-extern void             AssumeInit( void );     // init assume tables
+extern void AssumeInit( void );     // init assume tables
 
 extern enum assume_segreg search_assume( struct asm_sym *sym,
                                          enum assume_segreg def, bool search_grps );
@@ -76,7 +78,7 @@ extern struct asm_sym   *GetOverrideAssume( enum assume_segreg );
 
 extern struct asm_sym   *GetStdAssume( int );
 
-extern ret_code         SetAssumeCSCurrSeg( void );
+extern void             SetAssumeCSCurrSeg( void );
 
 extern ret_code         AssumeDirective( int );
 extern void             ModelAssumeInit( void );

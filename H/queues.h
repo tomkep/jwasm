@@ -35,7 +35,7 @@ typedef struct line_num_info {
     uint_16 number;
     uint_32 offset;
     union {
-        const FNAME *srcfile;
+        uint srcfile;
         asm_sym * sym;
     };
 } line_num_info;
@@ -50,7 +50,6 @@ extern direct_idx FindLnameIdx( char * );
 extern char     *GetLname( direct_idx );
 
 extern unsigned GetLnameData( char ** );
-extern uint     GetPublicData( uint *, uint *, uint_8 *, char ***, struct pubdef_data **, bool *, bool );
 extern int      GetLinnumData( struct linnum_data **ldata, bool *need32 );
 extern void     GetGlobalData( void );
 

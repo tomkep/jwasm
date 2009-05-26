@@ -49,7 +49,7 @@ enum fixup_types {
 };
 
 enum fixup_options {
-        OPTJ_NONE,
+        OPTJ_NONE,               /* normal jump */
         OPTJ_EXPLICIT,           /* forward reference explicit J... SHORT */
         OPTJ_EXTEND,             /* forward reference JXX (SHORT 8086), can be extend by JMP NEAR */
         OPTJ_JXX,                /* forward reference JXX (SHORT/NEAR 386) */
@@ -62,7 +62,7 @@ struct asmfixup {
     uint_32                 offset;        /* symbol's offset */
     uint_32                 fixup_loc;     /* location of fixup */
     enum fixup_types        type;
-    enum fixup_options      fixup_option;
+    enum fixup_options      option;
     unsigned loader_resolved:1;
 
     union {
@@ -79,7 +79,7 @@ struct asmfixup {
 extern struct asmfixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
 extern ret_code         BackPatch( struct asm_sym *sym );
 extern void             mark_fixupp( OPNDTYPE determinant, int index );
-extern struct fixup     *CreateFixupRec( int index );
+extern struct fixup     *CreateOmfFixupRec( int index );
 extern ret_code         store_fixup( int index );
 extern ret_code         MakeFpFixup( struct asm_sym *sym );
 

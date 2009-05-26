@@ -38,8 +38,8 @@ enum operand_type {
     OP_R8       = 0x00000001,
     OP_R16      = 0x00000002,
     OP_R32      = 0x00000004,
-    OP_MMX      = 0x00000008,
-    OP_XMM      = 0x00000010,
+    OP_MMX      = 0x00000008,  /* MMx register */
+    OP_XMM      = 0x00000010,  /* XMMx register */
     OP_A        = 0x00000020,  // AL, AX, EAX registers
     OP_C        = 0x00000040,  // CL register
     OP_D        = 0x00000080,  // DX register
@@ -80,6 +80,8 @@ enum operand_type {
     OP_M32      = ( OP_M_DW | OP_M_DFT ),
     //OP_M64      = ( OP_M_QW | OP_M_DFT ),
     //OP_M128     = ( OP_M_OW | OP_M_DFT ),
+    OP_MDWOW    = ( OP_M_DW | OP_M_OW ),
+    OP_MQWOW    = ( OP_M_QW | OP_M_OW ),
 
     OP_M        = ( OP_M_B | OP_M_W | OP_M_DW | OP_M_DFT ),
     OP_M_ANY    = ( OP_M_B | OP_M_W | OP_M_DW | OP_M_FW | OP_M_QW | OP_M_TB | OP_M_OW | OP_M_DFT ),

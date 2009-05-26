@@ -69,14 +69,17 @@ struct ReservedWord {
  F_0F : the first byte is 0x0F, follow by opcode and rm_byte
 */
 enum BYTE1_INFO {
-    F_16   = 0x1,   // 16bit variant
-    F_32   = 0x2,   // 32bit variant
+    F_16   = 0x1,   // 16bit variant, 66h switches
+    F_32   = 0x2,   // 32bit variant, 66h switches
     F_0F   = 0x3,   // 0F prefix
     F_F3   = 0x4,   // F3 prefix (pause: F3 90)
     F_0F0F = 0x5,   // AMD 3DNow prefix
     F_660F = 0x6,   // SSEx prefix 1
     F_F20F = 0x7,   // SSEx prefix 2
-    F_F30F = 0x8    // SSEx prefix 3
+    F_F30F = 0x8,   // SSEx prefix 3
+    F_0FNO66 = 0x9, // 0F prefix, no size prefix
+    F_16A = 0xA,    // 16bit variant, 67h switches
+    F_32A = 0xB     // 32bit variant, 67h switches
 };
 
 /*
@@ -98,12 +101,11 @@ enum RM_INFO {
 enum ALLOWED_PREFIX {
  AP_NO_PREFIX= 0x00,
  AP_LOCK     = 0x01,
- AP_IREG     = 0x01,   /* for OP_REGISTER indicates an INDEX register */
+ APR_IREG    = 0x01,   /* for OP_REGISTER: INDEX register. it's a flag! */
  AP_REP      = 0x02,
  AP_REPxx    = 0x03,
  AP_FWAIT    = 0x04,
- AP_NO_FWAIT = 0x05,
- AP_NO_OPPRF = 0x06    /* no operand prefix (SMSW, LMSW, STR, ...) */
+ AP_NO_FWAIT = 0x05
 };
 
 // asm_ins is the structure used to store instructions, directives and
@@ -163,6 +165,7 @@ enum directive_flags {
                      /* enclose strings in <> in macro expansion step */
  DF_NOEXPAND = 0x20, /* don't expand params for directive (PURGE, FOR, IFDEF, ...) */
  DF_DATADIR  = 0x40, /* data definition directive */
+ DF_LABEL    = 0x80, /* directive requires a label */
  DF_PREPROC  = DF_ERRDIR /* special preprocessor directive */
 };
 

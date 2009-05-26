@@ -24,48 +24,40 @@
 *
 *  ========================================================================
 *
-* Description:  was "object file parser", which is virtually not used
-*               by JWasm. Is to be removed ASAP.
-*
+*  Description: file for GNU (Posix) CRT. Included by globals.h
+*               if __UNIX__ or __CYGWIN__ is defined.
 ****************************************************************************/
 
+#define _stricmp strcasecmp
+#define _strcmpi strcasecmp
+#define _strnicmp strncasecmp
 
-#ifndef OMFPRS_H
-#define OMFPRS_H    1
+#define _ltoa   ltoa
+#define _strupr strupr
 
-#include <stddef.h>
-#include "omfrec.h"
-#include "omfpc.h"
-#include "queue.h"
-#include "omfio.h"
-
-typedef struct {
-    uint_8      pass;           /* current pass number */
-    OBJ_WFILE   *file_out;      /* output file pointer */
-} pobj_state;
-
-#define POBJ_ALL_PASSES     0   /* invoke filter on all passes          */
-#define POBJ_READ_PASS      1   /* invoke filter on the read pass only  */
-#define POBJ_WRITE_PASS     2   /* invoke filter on the write pass only */
-
-typedef int (*pobj_filter)( obj_rec *objr, pobj_state *state );
-
-/* for lists of filters... */
-typedef struct {
-    uint_8      command;
-    uint_8      pass;
-    pobj_filter func;
-} pobj_list;
-
-enum extra_commands {
-        /* our effective minimum command (should be == 0(mod2)) */
-    CMD_POBJ_MIN_CMD = ( CMD_MIN_CMD -             1  ) & ~1,
-        /* the number of extra commands goes here ^^^ */
-    CMD_LAST_DEFN = CMD_POBJ_MIN_CMD
-        /* each extra command should be == 0 (mod2), so add 2 to previous */
-};
-
-extern void omf_RegList( const pobj_list *list, size_t len );
-extern void omf_UnRegList( const pobj_list *list, size_t len );
-
+/* for gcc, use POSIX names? or NOT? */
+#ifndef __CYGWIN__
+/* for Cygwin, never translate _lseek(). It won't work! */
+#define _lseek lseek
+#if 1 /* set to 0 if POSIX isn't needed. */
+#define _open  open 
+#define _close close
+#define _read  read
+#define _write write
 #endif
+#endif
+
+char *_fullpath( char *, const char *, size_t );
+char * _strdate(char *);
+char * _strtime(char *);
+
+#define _MAX_DRIVE      48      /*  maximum length of node name w/ '\0' */
+#define _MAX_DIR        256     /*  maximum length of subdirectory      */
+#define _MAX_FNAME      48      /*  maximum length of a file name       */
+#define _MAX_EXT        48      /*  maximum length of a file extension  */
+
+#ifndef _MAX_PATH
+ #define _MAX_PATH      256     /*  maximum length of path name         */
+#endif
+
+

@@ -28,7 +28,6 @@
 *
 ****************************************************************************/
 
-
 #include <stdarg.h>
 #include <ctype.h>
 
@@ -63,6 +62,7 @@
 
 extern uint_32  LastCodeBufSize;
 extern bool     line_listed;
+extern int      StructInit;     // see data.c
 
 uint_32 list_pos; /* current pos in LST file */
 uint_32 list_pos_start;
@@ -72,6 +72,33 @@ static unsigned         SymCount;
 #define DOTSMAX 32
 static char  dots[] = " . . . . . . . . . . . . . . . .";
 static char  stdprefix[] = "%08X                  ";
+
+enum typestring {
+    TS_BYTE,   TS_WORD,   TS_DWORD,   TS_FWORD,
+    TS_QWORD,  TS_TBYTE,  TS_PARA,    TS_OWORD,
+    TS_PAGE,
+    TS_NEAR,   TS_FAR,    TS_NEAR16,  TS_FAR16,  TS_NEAR32,  TS_FAR32,
+    TS_LNEAR,  TS_LFAR,   TS_LNEAR16, TS_LFAR16, TS_LNEAR32, TS_LFAR32,
+    TS_PTR,    TS_PROC,   TS_FUNC,    TS_NUMBER,
+    TS_PRIVATE,TS_STACK,  TS_PUBLIC,  TS_EXTERNAL, TS_UNDEFINED,
+    TS_GROUP,  TS_NOSEG,  TS_TEXT,    TS_ALIAS
+};
+
+static char *typestr[] = {
+    "Byte", "Word", "DWord", "FWord",
+    "QWord", "TByte", "Para", "OWord",
+    "Page",
+    "Near", "Far", "Near16", "Far16", "Near32", "Far32",
+    "L Near", "L Far", "L Near16", "L Far16", "L Near32", "L Far32",
+    "Ptr", "Proc", "Func", "Number",
+    "Private", "Stack", "Public", "External", "Undefined",
+    "GROUP", "No Seg", "Text", "Alias"
+};
+
+/* don't change this order, must match enum lang_type in globals.h */
+static char *langstr[] = {
+    "", "C", "SYSCALL", "STDCALL", "PASCAL", "FORTRAN", "BASIC", "WATCOM_C"
+};
 
 void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
 {
@@ -110,7 +137,8 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
     }
 #endif
 
-    p = buffer + OFSSIZE+2*CODEBYTES+2;
+    p = buffer + OFSSIZE + 2*CODEBYTES + 2;
+    memset( buffer, ' ', OFSSIZE+ 2*CODEBYTES + 2 );
 
     switch ( type ) {
     case LSTTYPE_LIDATA:
@@ -171,16 +199,17 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
             p = buffer + strlen( buffer );
         }
         break;
+    case LSTTYPE_MACROLINE:
+        buffer[1] = '>';
+        break;
     case LSTTYPE_STRUCT:
-        len = sprintf(buffer, stdprefix, oldofs);
+        len = sprintf( buffer, stdprefix, oldofs );
         break;
     case LSTTYPE_LABEL:
         oldofs = GetCurrOffset();
     default:
         if ( type != LSTTYPE_MACRO && (CurrSeg || value) )
             len = sprintf(buffer, stdprefix, oldofs);
-        else
-            memset( buffer, ' ', OFSSIZE+2*CODEBYTES+2 );
     }
 
     *p = ' ';
@@ -201,7 +230,7 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
     if ( MacroLevel ) {
         list_pos += sprintf( buffer, "%u ", MacroLevel );
     }
-    if ( GeneratedCode )
+    if ( GeneratedCode || StructInit )
         list_pos++;
 
     list_pos += len + NLSIZ;
@@ -217,7 +246,7 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
         fwrite( buffer, 1, strlen(buffer), FileInfo.file[LST] );
 
     /* if it's generated code, write a '*' before the line */
-    if ( GeneratedCode )
+    if ( GeneratedCode || StructInit )
         fwrite( "*", 1, 1, FileInfo.file[LST] );
 
     fwrite( p, 1, len, FileInfo.file[LST] );
@@ -256,20 +285,14 @@ static char *get_seg_align( seg_info *seg, char * buffer )
 /****************************************/
 {
     switch( seg->alignment ) {
-    case 0:
-        return( "Byte " );
-    case 1:
-        return( "Word " );
-    case 2:
-        return( "DWord" );
-    case 3:
-        return( "QWord" );
-    case 4:
-        return( "Para " );
-    case 8:
-        return( "Page " );
+    case 0:    return( typestr[TS_BYTE]  );
+    case 1:    return( typestr[TS_WORD]  );
+    case 2:    return( typestr[TS_DWORD] );
+    case 3:    return( typestr[TS_QWORD] );
+    case 4:    return( typestr[TS_PARA]  );
+    case 8:    return( typestr[TS_PAGE]  );
     default:
-        sprintf( buffer, "%.5u", 1 << seg->alignment );
+        sprintf( buffer, "%u", 1 << seg->alignment );
         return( buffer );
     }
 }
@@ -278,26 +301,25 @@ static const char *get_seg_combine( seg_info *seg )
 /*************************************************/
 {
     switch( seg->segrec->d.segdef.combine ) {
-    case COMB_INVALID:
-        return( "Private " );
-    case COMB_STACK:
-        return( "Stack   " );
-    case COMB_ADDOFF:
-        return( "Public  " );
-    default:
-        return( "?       " );
+    case COMB_INVALID:    return( typestr[TS_PRIVATE] );
+    case COMB_STACK:      return( typestr[TS_STACK]   );
+    case COMB_ADDOFF:     return( typestr[TS_PUBLIC]  );
     }
+    return( "?" );
 }
 
 static void log_macro( struct asm_sym *sym )
 {
     int i = strlen ( sym->name);
     char *pdots = dots + i + 1;
-    char *type = (sym->isfunc) ? "Func" : "Proc";
+    char *type = (sym->isfunc) ? typestr[TS_FUNC] : typestr[TS_PROC];
 
     if (i >= DOTSMAX)
         pdots = "";
     LstPrintf( "%s %s        %s", sym->name, pdots ,type);
+#ifdef DEBUG_OUT
+    LstPrintf( " %5u", ((dir_node *)sym)->e.macroinfo->count );
+#endif
     LstNL();
     return;
 }
@@ -310,42 +332,45 @@ static char * GetMemtypeString(asm_sym * sym, char * buffer)
     switch (sym->mem_type) {
     case MT_BYTE:
     case MT_SBYTE:
-        return( "Byte");
+        return( typestr[TS_BYTE] );
     case MT_WORD:
     case MT_SWORD:
-        return( "Word");
+        return( typestr[TS_WORD] );
     case MT_DWORD:
     case MT_SDWORD:
-        return( "Dword");
+        return( typestr[TS_DWORD] );
     case MT_FWORD:
-        return( "Fword");
+        return( typestr[TS_FWORD] );
     case MT_QWORD:
-        return( "Qword");
+        return( typestr[TS_QWORD] );
     case MT_TBYTE:
-        return( "TByte");
+        return( typestr[TS_TBYTE] );
     case MT_OWORD:
-        return( "Oword");
+        return( typestr[TS_OWORD] );
     case MT_PTR:
         if ( buffer ) {
             if ( sym->isfar )
-                strcat(buffer,"Far");
+                if ( sym->use32 )
+                    strcat( buffer, typestr[TS_FAR32] );
+                else
+                    strcat( buffer, typestr[TS_FAR16] );
             else
-                strcat(buffer,"Near");
-            if ( sym->use32 )
-                strcat(buffer,"32");
-            else
-                strcat(buffer,"16");
-            strcat(buffer," Ptr");
+                if ( sym->use32 )
+                    strcat( buffer, typestr[TS_NEAR32] );
+                else
+                    strcat( buffer, typestr[TS_NEAR16] );
+            strcat(buffer," ");
+            strcat(buffer, typestr[TS_PTR] );
             return(buffer);
         }
-        return( "Ptr");
+        return( typestr[TS_PTR] );
     case MT_FAR:
     is_far:
         if ( sym->segment )
-            return( "L Far");
+            return( typestr[TS_LFAR] );
         if ( SymIs32( sym ) )
-            return( "L Far32");
-        return( "L Far16");
+            return( typestr[TS_LFAR32] );
+        return( typestr[TS_LFAR16] );
     case MT_PROC:
         if ( ModuleInfo.model == MOD_MEDIUM ||
              ModuleInfo.model == MOD_LARGE ||
@@ -354,17 +379,17 @@ static char * GetMemtypeString(asm_sym * sym, char * buffer)
         /* fall through */
     case MT_NEAR:
         if ( sym->segment )
-            return( "L Near");
+            return( typestr[TS_LNEAR] );
         if ( SymIs32( sym ) )
-            return( "L Near32");
-        return( "L Near16");
+            return( typestr[TS_LNEAR32] );
+        return( typestr[TS_LNEAR16] );
     case MT_TYPE:
         if (*(sym->type->name))  /* it must be set, but to be safe ... */
             return(sym->type->name);
-        return( "Ptr");
+        return( typestr[TS_PTR] );
     case MT_ABS:
     case MT_EMPTY: /* relocatable number, assigned with '=' directive */
-        return( "Number" );
+        return( typestr[TS_NUMBER] );
     }
     return("?");
 }
@@ -372,24 +397,9 @@ static char * GetMemtypeString(asm_sym * sym, char * buffer)
 static const char *GetLanguage( struct asm_sym *sym )
 /****************************************************/
 {
-    switch( sym->langtype ) {
-    case LANG_C:
-        return( "C" );
-    case LANG_BASIC:
-        return( "BASIC" );
-    case LANG_FORTRAN:
-        return( "FORTRAN" );
-    case LANG_PASCAL:
-        return( "PASCAL" );
-    case LANG_STDCALL:
-        return( "STDCALL" );
-    case LANG_SYSCALL:
-        return( "SYSCALL" );
-    case LANG_WATCOM_C:
-        return( "WATCOM_C" );
-    default:
-        return( "" );
-    }
+    if (sym->langtype <= 7 )
+        return( langstr[sym->langtype] );
+    return( "?" );
 }
 
 // display STRUCTs and UNIONs
@@ -497,17 +507,18 @@ static void log_typedef( struct asm_sym **syms, struct asm_sym *sym )
             pdots = "";
         buffer[0] = '\0';
         if (sym->mem_type == MT_PROC && si->target ) { /* typedef proto? */
-            strcat(buffer,"Proc ");
+            strcat(buffer, typestr[TS_PROC] );
+            strcat(buffer, " " );
             if ( *si->target->name ) {  /* the name may be "" */
-                strcat(buffer, si->target->name);
-                strcat(buffer," ");
+                strcat( buffer, si->target->name);
+                strcat( buffer," ");
             }
             strcat(buffer, GetMemtypeString( si->target, NULL ) );
             strcat(buffer," ");
             strcat(buffer, GetLanguage( si->target ) );
             p = buffer;
         } else
-            p = GetMemtypeString(sym, buffer);
+            p = GetMemtypeString( sym, buffer);
         LstPrintf( "%s %s    %8u %s", sym->name, pdots, sym->total_size, p );
         LstNL();
     }
@@ -533,7 +544,7 @@ static void log_segment( struct asm_sym *sym, struct asm_sym *group )
             //LstPrintf( "16 Bit   %04lX     ", seg->current_loc );
             LstPrintf( "16 Bit   %04lX     ", seg->segrec->d.segdef.seg_length );
         }
-        LstPrintf( "%s   %s", get_seg_align( seg, buffer ), get_seg_combine( seg ) );
+        LstPrintf( "%-7s %-8s", get_seg_align( seg, buffer ), get_seg_combine( seg ) );
         LstPrintf( "'%s'", GetLname( seg->segrec->d.segdef.class_name_idx ) );
 #if 0
         if ( group != NULL )
@@ -553,7 +564,7 @@ static void log_group( struct asm_sym *grp )
     pdots = dots + i + 1;
     if (i >= DOTSMAX)
         pdots = "";
-    LstPrintf( "%s %s        GROUP", grp->name, pdots );
+    LstPrintf( "%s %s        %s", grp->name, pdots, typestr[TS_GROUP] );
     LstNL();
 }
 
@@ -565,15 +576,14 @@ static const char *get_proc_type( struct asm_sym *sym )
     switch( sym->mem_type ) {
     case MT_NEAR:
         if ( sym->segment == NULL )
-            return( SymIs32( sym ) ? "Near32" : "Near16");
-        return( "Near  " );
+            return( SymIs32( sym ) ? typestr[TS_NEAR32] : typestr[TS_NEAR16] );
+        return( typestr[TS_NEAR] );
     case MT_FAR:
         if ( sym->segment == NULL )
-            return( SymIs32( sym ) ? "Far32 " : "Far16 ");
-        return( "Far   " );
-    default:
-        return( "      " );
+            return( SymIs32( sym ) ? typestr[TS_FAR32] : typestr[TS_FAR16] );
+        return( typestr[TS_FAR] );
     }
+    return( " " );
 }
 
 static const char *get_sym_seg_name( struct asm_sym *sym )
@@ -582,7 +592,7 @@ static const char *get_sym_seg_name( struct asm_sym *sym )
     if( sym->segment ) {
         return( sym->segment->name );
     } else {
-        return( "No Seg" );
+        return( typestr[TS_NOSEG] );
     }
 }
 
@@ -615,19 +625,18 @@ static void log_symbol( struct asm_sym *sym )
         if (sym->mem_type == MT_ABS)
             ;
         else
-            LstPrintf( "%s\t", get_sym_seg_name( sym ) );
+            LstPrintf( "%s ", get_sym_seg_name( sym ) );
 
         if( sym->public )
-            LstPrintf( "Public " );
+            LstPrintf( "%s ", typestr[TS_PUBLIC] );
 
         if ( sym->state == SYM_EXTERNAL ) {
-
             if (sym->weak == 1)
-                LstPrintf( "*External " );
+                LstPrintf( "*%s ", typestr[TS_EXTERNAL] );
             else
-                LstPrintf( "External  " );
+                LstPrintf( "%s ", typestr[TS_EXTERNAL] );
         } else if ( sym->state == SYM_UNDEFINED ) {
-            LstPrintf( "Undefined! " );
+            LstPrintf( "%s ", typestr[TS_UNDEFINED] );
         }
 
         LstPrintf( "%s", GetLanguage( sym ) );
@@ -635,11 +644,11 @@ static void log_symbol( struct asm_sym *sym )
         break;
     case SYM_TMACRO:
         GetTextMacroValue(sym->string_ptr, buffer);
-        LstPrintf( "%s %s        Text   %s", sym->name, pdots, buffer );
+        LstPrintf( "%s %s        %s   %s", sym->name, pdots, typestr[TS_TEXT], buffer );
         LstNL();
         break;
     case SYM_ALIAS:
-        LstPrintf( "%s %s        Alias  %s", sym->name, pdots, sym->string_ptr );
+        LstPrintf( "%s %s        %s  %s", sym->name, pdots, typestr[TS_ALIAS], sym->string_ptr );
         LstNL();
         break;
     }
@@ -650,8 +659,8 @@ static void log_symbol( struct asm_sym *sym )
 static void log_proc( struct asm_sym *sym )
 /*****************************************/
 {
-    local_sym *f;
-    struct asm_sym *l;
+    dir_node *f;
+    struct dir_node *l;
     char * p;
     dir_node *dir = (dir_node *)sym;
     int i = strlen( sym->name );
@@ -660,9 +669,9 @@ static void log_proc( struct asm_sym *sym )
     if (i >= DOTSMAX)
         pdots = "";
     if (sym->use32)
-        p = "%s %s        P %s %08X %-8s ";
+        p = "%s %s        P %-6s %08X %-8s ";
     else
-        p = "%s %s        P %s %04X     %-8s ";
+        p = "%s %s        P %-6s %04X     %-8s ";
     LstPrintf( p,
             sym->name,
             pdots,
@@ -673,35 +682,41 @@ static void log_proc( struct asm_sym *sym )
         LstPrintf( "%08X ", sym->total_size );
     else
         LstPrintf( "%04X     ", sym->total_size );
+
     if( sym->public ) {
-        LstPrintf( "Public " );
+        LstPrintf( "%-9s", typestr[TS_PUBLIC] );
     } else if ( dir->sym.isproc == TRUE ) {
-        LstPrintf( "Private " );
+        LstPrintf( "%-9s", typestr[TS_PRIVATE] );
     } else
-        LstPrintf( "External " );
+        LstPrintf( "%-9s", typestr[TS_EXTERNAL] );
 
     LstPrintf( "%s", GetLanguage( sym ) );
     LstNL();
     if ( dir->sym.isproc == TRUE ) {
         if (dir->sym.langtype == LANG_C ||
             dir->sym.langtype == LANG_SYSCALL ||
-            dir->sym.langtype == LANG_STDCALL) {
+            dir->sym.langtype == LANG_STDCALL ||
+            dir->sym.langtype == LANG_WATCOM_C) {
             int cnt;
             /* position f2 to last param */
-            for (cnt = 0,f = dir->e.procinfo->paralist; f; f = (local_sym *)f->sym.next)
+            for ( cnt = 0, f = dir->e.procinfo->paralist; f; f = f->nextparam )
                 cnt++;
             for (;cnt;cnt--) {
                 int curr;
-                for (curr = 1,f = dir->e.procinfo->paralist; curr < cnt;f = (local_sym *)f->sym.next,curr++);
+                for (curr = 1,f = dir->e.procinfo->paralist; curr < cnt;f = f->nextparam, curr++ );
                 i = strlen ( f->sym.name);
                 pdots = dots + i + 1 + 2;
                 if (i >= DOTSMAX)
                     pdots = "";
-                LstPrintf( "  %s %s        %-17s bp +%04X", f->sym.name, pdots, GetMemtypeString( &f->sym, NULL), f->sym.offset);
+                /* WATCOM_C: parameter may be a text macro (=register name) */
+                if ( f->sym.state == SYM_TMACRO)
+                    LstPrintf( "  %s %s        %-17s %s", f->sym.name, pdots, GetMemtypeString( &f->sym, NULL), f->sym.string_ptr);
+                else
+                    LstPrintf( "  %s %s        %-17s bp +%04X", f->sym.name, pdots, GetMemtypeString( &f->sym, NULL), f->sym.offset);
                 LstNL();
             }
         } else {
-            for ( f = dir->e.procinfo->paralist; f; f = (local_sym *)f->sym.next) {
+            for ( f = dir->e.procinfo->paralist; f; f = f->nextparam ) {
                 i = strlen ( f->sym.name);
                 pdots = dots + i + 1 + 2;
                 if (i >= DOTSMAX)
@@ -710,30 +725,41 @@ static void log_proc( struct asm_sym *sym )
                 LstNL();
             }
         }
-        for ( f = dir->e.procinfo->locallist; f; f = (local_sym *)f->sym.next) {
-            i = strlen ( f->sym.name);
+        for ( l = dir->e.procinfo->locallist; l; l = l->nextlocal ) {
+            char buffer[32];
+            i = strlen ( l->sym.name);
             pdots = dots + i + 1 + 2;
             if (i >= DOTSMAX)
                 pdots = "";
-            LstPrintf( "  %s %s        %-17s bp -%04X", f->sym.name, pdots, GetMemtypeString(&f->sym, NULL), - f->sym.offset);
+            if ( l->sym.isarray )
+                sprintf( buffer, "%s[%u]", GetMemtypeString(&l->sym, NULL), l->sym.total_length );
+            else
+                strcpy( buffer, GetMemtypeString(&l->sym, NULL) );
+            LstPrintf( "  %s %s        %-17s bp -%04X", l->sym.name, pdots, buffer, - l->sym.offset);
             LstNL();
         }
-        for (l = dir->e.procinfo->labellist;l;l = l->next) {
-            i = strlen ( l->name);
-            pdots = dots + i + 1 + 2;
-            if (i >= DOTSMAX)
-                pdots = "";
-            if (sym->use32)
-                p = "  %s %s        L %s %08X %s";
-            else
-                p = "  %s %s        L %s %04X     %s";
-            LstPrintf( p,
-                    l->name,
-                    pdots,
-                    get_proc_type( l ),
-                    l->offset,
-                    get_sym_seg_name( l ));
-            LstNL();
+        for ( l = dir->e.procinfo->labellist; l ; l = l->nextll ) {
+            dir_node *l2;
+            for ( l2 = l; l2; l2 = (dir_node *)l2->sym.next ) {
+                /* filter params and locals! */
+                if ( l2->sym.state == SYM_STACK || l2->sym.state == SYM_TMACRO)
+                    continue;
+                i = strlen ( l2->sym.name);
+                pdots = dots + i + 1 + 2;
+                if (i >= DOTSMAX)
+                    pdots = "";
+                if ( sym->use32 )
+                    p = "  %s %s        L %-6s %08X %s";
+                else
+                    p = "  %s %s        L %-6s %04X     %s";
+                LstPrintf( p,
+                          l2->sym.name,
+                          pdots,
+                          get_proc_type( &l2->sym ),
+                          l2->sym.offset,
+                          get_sym_seg_name( &l2->sym ));
+                LstNL();
+            }
         }
     }
 }
@@ -748,7 +774,6 @@ static void LstCaption( char *caption, int prefNL )
 }
 
 /* write symbol table listing */
-/* todo: move the text strings to msgdef.h */
 
 void LstWriteCRef( void )
 /***********************/
@@ -816,40 +841,40 @@ void LstWriteCRef( void )
         ((dir_node *)syms[i])->next = NULL;
     }
     if ( Macros.head ) {
-        LstCaption( "Macros:", 2 );
-        LstCaption( "                N a m e                 Type", 0 );
+        LstCaption( MsgGetEx( TXT_MACROS ), 2 );
+        LstCaption( MsgGetEx( TXT_MACROCAP ), 0 );
         /* write out macros */
         for( dir = Macros.head; dir ; dir = dir->next ) {
             log_macro( &dir->sym );
         }
     }
     if ( Structs.head ) {
-        LstCaption( "Structures and Unions:", 2 );
-        LstCaption( "                N a m e                 Size/Ofs   Type", 0 );
+        LstCaption( MsgGetEx( TXT_STRUCTS ), 2 );
+        LstCaption( MsgGetEx( TXT_STRUCTCAP ), 0 );
         /* write out structures */
         for( dir = Structs.head; dir; dir = dir->next ) {
             log_struct( NULL, &dir->sym, 0 );
         }
     }
     if ( Records.head ) {
-        LstCaption( "Records:", 2 );
-        LstPrintf( "                N a m e                 Width   # fields" );
+        LstCaption( MsgGetEx( TXT_RECORDS ), 2 );
+        LstPrintf( MsgGetEx( TXT_RECORDCAP1 ) );
         LstNL();
-        LstCaption( "                                        Shift   Width    Mask   Initial", 0 );
+        LstCaption( MsgGetEx( TXT_RECORDCAP2 ), 0 );
         for( dir = Records.head; dir; dir = dir->next ) {
             log_record( syms, &dir->sym );
         }
     }
     if ( Typedefs.head ) {
-        LstCaption( "Types:", 2 );
-        LstCaption( "                N a m e              Size    Attr", 0 );
+        LstCaption( MsgGetEx( TXT_TYPEDEFS ), 2 );
+        LstCaption( MsgGetEx( TXT_TYPEDEFCAP ), 0 );
         for( dir = Typedefs.head; dir; dir = dir->next ) {
             log_typedef( syms, &dir->sym );
         }
     }
     /* write out segments & groups */
-    LstCaption( "Segments and Groups:", 2 );
-    LstCaption( "                N a m e                 Size     Length   Align   Combine Class", 0 );
+    LstCaption( MsgGetEx( TXT_SEGS ), 2 );
+    LstCaption( MsgGetEx( TXT_SEGCAP ), 0 );
     /* write out segments not within a group */
     for( dir = Segs.head; dir; dir = dir->next ) {
         log_segment( &dir->sym, NULL );
@@ -866,8 +891,8 @@ void LstWriteCRef( void )
 
     if ( Procs.head ) {
         /* write out procedures and stuff */
-        LstCaption( "Procedures, parameters and locals:", 2 );
-        LstCaption( "                N a m e                 Type     Value    Segment  Length", 0 );
+        LstCaption( MsgGetEx( TXT_PROCS) , 2 );
+        LstCaption( MsgGetEx( TXT_PROCCAP), 0 );
         for( dir = Procs.head; dir; dir = dir->next ) {
             log_proc( &dir->sym );
         }
@@ -875,8 +900,8 @@ void LstWriteCRef( void )
     }
 
     /* write out symbols */
-    LstCaption( "Symbols:", 2 );
-    LstCaption( "                N a m e                 Type       Value     Attr", 0 );
+    LstCaption( MsgGetEx( TXT_SYMBOLS ), 2 );
+    LstCaption( MsgGetEx( TXT_SYMCAP ), 0 );
     for( i = 0; i < SymCount; ++i ) {
         if ( syms[i]->list == TRUE )
             log_symbol( syms[i] );
@@ -891,6 +916,7 @@ void LstWriteCRef( void )
 void LstOpenFile( void )
 /**********************/
 {
+    const FNAME *fn;
     char buffer[128];
 
     list_pos = 0;
@@ -898,14 +924,15 @@ void LstOpenFile( void )
         int namelen;
         FileInfo.file[LST] = fopen( FileInfo.fname[LST], "wb" );
         if ( FileInfo.file[LST] == NULL )
-            Fatal( MSG_CANNOT_OPEN_FILE, FileInfo.fname[LST] );
+            Fatal( MSG_CANNOT_OPEN_FILE, FileInfo.fname[LST], errno );
 
         MsgGetJWasmName( buffer );
         list_pos = strlen( buffer );
         fwrite( buffer, 1, list_pos, FileInfo.file[LST] );
         LstNL();
-        namelen = strlen( ModuleInfo.srcfile->name );
-        fwrite( ModuleInfo.srcfile->name, 1, namelen, FileInfo.file[LST] );
+        fn = GetFName( ModuleInfo.srcfile );
+        namelen = strlen( fn->name );
+        fwrite( fn->name, 1, namelen, FileInfo.file[LST] );
         list_pos += namelen;
         LstNL();
     }

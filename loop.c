@@ -28,10 +28,9 @@
 *
 ****************************************************************************/
 
-
-#include "globals.h"
 #include <ctype.h>
 
+#include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
 #include "directiv.h"
@@ -42,6 +41,8 @@
 #include "labels.h"
 #include "macro.h"
 #include "listing.h"
+
+#define USELOCALMAC 1 /* 1=create the macro onto the stack */
 
 ret_code LoopDirective( int i, int directive )
 /*************************************/
@@ -56,7 +57,14 @@ ret_code LoopDirective( int i, int directive )
     char *ptr;
     dir_node * macro;
     expr_list opndx;
-    char buffer[MAX_LINE_LEN];
+#if USELOCALMAC
+    macro_info macinfo;
+    dir_node tmpmacro;
+#endif
+#ifdef DEBUG_OUT
+    uint_32 count = 0;
+#endif
+    char line[MAX_LINE_LEN];
 
     DebugMsg(("LoopDirective(%u, %u) enter\n", i, directive));
 
@@ -68,7 +76,7 @@ ret_code LoopDirective( int i, int directive )
     case T_REPEAT:
         if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
             return( ERROR );
-        if ( opndx.type != EXPR_CONST ) { /* syntax <REPEAT 'A'> is valid! */
+        if ( opndx.kind != EXPR_CONST ) { /* syntax <REPEAT 'A'> is valid! */
             AsmError( CONSTANT_EXPECTED );
             opndx.value = 0;
         }
@@ -81,15 +89,15 @@ ret_code LoopDirective( int i, int directive )
     case T_WHILE:
         if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
             return( ERROR );
-        if ( opndx.type != EXPR_CONST ) { /* syntax <WHILE 'A'> is valid! */
+        if ( opndx.kind != EXPR_CONST ) { /* syntax <WHILE 'A'> is valid! */
             AsmError( CONSTANT_EXPECTED );
-            opndx.type = EXPR_CONST;
+            opndx.kind = EXPR_CONST;
             opndx.value = 0;
         }
         /* the expression must be saved, since AsmBuffer will be destroyed */
         ptr = AsmBuffer[start]->pos + 5;  /* 5 = strlen("WHILE") */
         while (isspace(*ptr)) ptr++;
-        strcpy(buffer, ptr);
+        strcpy( line, ptr );
         break;
     default: /* FOR, FORC, IRP, IRPC */
         /* get the formal parameter and the argument list */
@@ -163,12 +171,24 @@ ret_code LoopDirective( int i, int directive )
     }
 
     /* now make a temporary macro */
+#if USELOCALMAC
+    macro = &tmpmacro;
+    memset( &tmpmacro, 0, sizeof(tmpmacro));
+    tmpmacro.sym.name = "";
+    tmpmacro.e.macroinfo = &macinfo;
+    memset( &macinfo, 0, sizeof(macinfo));
+#else
     macro = CreateMacro( "" );
+#endif
     macro->e.macroinfo->srcfile = get_curr_srcfile();
 
     DebugMsg(("LoopDirective: calling StoreMacro\n"));
     if( StoreMacro( macro, i, TRUE ) == ERROR ) {
+#if USELOCALMAC
+        ReleaseMacroData( macro );
+#else
         dir_free(macro, FALSE);
+#endif
         return( ERROR );
     }
     /* EXITM is allowed inside a loop construct */
@@ -180,14 +200,22 @@ ret_code LoopDirective( int i, int directive )
     switch (directive) {
     case T_REPEAT:
     case T_REPT:
+        /* currently there's just one queue generated for all
+         * repetitions. This won't work if a GOTO is contained!
+         * Same might be the case for FORC (see below!).
+         * Also, the line numbering probably won't work correctly
+         * for iteration > 1.
+         */
         for (;len;len--) {
             RunMacro( macro, "", NULL, len == 1, first, FALSE );
+            DebugMsg(("LoopDirective REPT: cnt=%u\n", count++ ));
             first = FALSE;
         }
         break;
     case T_WHILE:
         oldbufferend = StringBufferEnd;
-        while (opndx.type == EXPR_CONST && opndx.value != 0) {
+        while (opndx.kind == EXPR_CONST && opndx.value != 0) {
+            DebugMsg(("LoopDirective WHILE: cnt=%u\n", count++ ));
             RunMacro( macro, "", NULL, TRUE, TRUE, FALSE );
             if (AsmBuffer[0]->value == T_EXITM)
                 break;
@@ -197,7 +225,7 @@ ret_code LoopDirective( int i, int directive )
              with each iteration! */
             i = 1;
             StringBufferEnd = oldbufferend;
-            Token_Count = Tokenize( buffer, i );
+            Token_Count = Tokenize( line, i );
             if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
                 break;
         }
@@ -205,7 +233,7 @@ ret_code LoopDirective( int i, int directive )
     case T_FORC:
     case T_IRPC:
         for( ptr = parmstring; *ptr; ) {
-            char * ptr2 = buffer;
+            char * ptr2 = line;
             *ptr2++ = '<';
             //if (*ptr == '!' || *ptr == '<' || *ptr == '>')
             if (*ptr == '!' || *ptr == '<' || *ptr == '>' || *ptr == '%')
@@ -213,16 +241,16 @@ ret_code LoopDirective( int i, int directive )
             *ptr2++ = *ptr++;
             *ptr2++ = '>';
             *ptr2 = NULLC;
-            RunMacro( macro, buffer, NULL, *ptr == NULLC, first, FALSE);
+            RunMacro( macro, line, NULL, *ptr == NULLC, first, FALSE);
             first = FALSE;
-            DebugMsg(("LoopDirective FORC: call RunMacro(), param=>%s<\n", buffer));
+            DebugMsg(("LoopDirective FORC: call RunMacro(), cnt=%u, param=>%s<\n", count++, line ));
         }
         break;
     default: /* T_FOR, T_IRP */
         /* a FOR/IRP parameter can be a macro function call */
-        /* that's why the macro calls cannot be buffered */
+        /* that's why the macro calls must be run synchronously */
         for( ptr = parmstring; *ptr;) {
-            DebugMsg(("LoopDirective FOR: calling RunMacro( param=>%s<, prefix=NULL, runit=1, insert=1, addbrackets=0 )\n", ptr ));
+            DebugMsg(("LoopDirective FOR: cnt=%u, calling RunMacro( param=>%s<, prefix=NULL, runit=1, insert=1, addbrackets=0 )\n", count++, ptr ));
             len = RunMacro( macro, ptr, NULL, TRUE, TRUE, FALSE);
             if (len < 1 || AsmBuffer[0]->value == T_EXITM)
                 break;
@@ -237,10 +265,14 @@ ret_code LoopDirective( int i, int directive )
 #endif
         }
     }
+#if USELOCALMAC
+    ReleaseMacroData( macro );
+#else
     /* free the temporary macro. dir_free() doesn't really free the whole
-     thing, but with FASTMEM=1 this is pretty irrelevant.
+     * thing, but with FASTMEM=1 this is pretty irrelevant.
      */
     dir_free( macro, FALSE );
+#endif
     DebugMsg(("LoopDirective exit\n"));
     return( NOT_ERROR );
 }

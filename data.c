@@ -48,6 +48,7 @@
 #include "types.h"
 #include "fastpass.h"
 #include "tokenize.h"
+#include "macro.h"
 
 #ifndef min
 #define min(x,y) (((x) < (y)) ? (x) : (y))
@@ -82,7 +83,7 @@ int StructInit;
 
 static ret_code InitializeArray( field_list *f, int *pi )
 {
-    int  count;
+    //int  count;
     char *ptr;
     int  oldofs;
     unsigned char *pSave;
@@ -97,15 +98,18 @@ static ret_code InitializeArray( field_list *f, int *pi )
     if ( AsmBuffer[i]->token != T_STRING ||
          ( AsmBuffer[i]->string_delim != '<' &&
            AsmBuffer[i]->string_delim != '{' )) {
+        DebugMsg(("InitializeArray( %s ): i=%u token=%s\n", f->sym->name, i, AsmBuffer[i]->string_ptr ));
         if ( EvalOperand( pi, Token_Count, &opndx, TRUE ) == ERROR )
             return( ERROR );
         i = *pi;
-        if ( opndx.type == EXPR_CONST && opndx.string ) {
+        /* a string enclosed in double-quotes? */
+        if ( opndx.kind == EXPR_CONST && opndx.string ) {
             asm_sym *sym2;
             for ( sym2 = f->sym; sym2->type; sym2 = sym2->type );
             if ( sym2->mem_type == MT_BYTE || sym2->mem_type == MT_SBYTE ) {
                 sprintf( buffer, "%s %s ", f->initializer, opndx.string );
-                if ( strlen( opndx.string ) > (f->sym->total_size + 2) ) {
+                opndx.value = strlen( opndx.string ) - 2;
+                if ( opndx.value > f->sym->total_size ) {
                     i--;
                     AsmErr( TOO_MANY_INITIAL_VALUES_FOR_ARRAY, AsmBuffer[i]->string_ptr );
                     return( ERROR );
@@ -115,11 +119,12 @@ static ret_code InitializeArray( field_list *f, int *pi )
                 return( ERROR );
             }
         } else {
+            /* it must be '<expr> DUP (...)' */
             if ( AsmBuffer[i]->token != T_RES_ID || AsmBuffer[i]->value != T_DUP ) {
                 AsmError( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM );
                 return( ERROR );
             }
-            if ( opndx.type != EXPR_CONST || opndx.string != NULL ) {
+            if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
                 AsmError( CONSTANT_EXPECTED );
                 return( ERROR );
             }
@@ -157,7 +162,9 @@ static ret_code InitializeArray( field_list *f, int *pi )
         AddLineQueue( buffer );
 
         if ( opndx.value < f->sym->total_length ) {
-            if ( f->sym->mem_type == MT_TYPE )
+            asm_sym *sym2;
+            for ( sym2 = f->sym; sym2->type; sym2 = sym2->type );
+            if ( f->sym->mem_type == MT_TYPE && ((dir_node *)sym2)->e.structinfo->typekind != TYPE_TYPEDEF )
                 ptr = "<>";
             else
                 ptr = "?";
@@ -189,7 +196,7 @@ static ret_code InitializeArray( field_list *f, int *pi )
     pSave = (unsigned char *)AsmTmpAlloc( GetTokenStateSize() );
     SaveTokenState( pSave );
     if ( line_queue )
-        RunLineQueue();
+        RunLineQueueEx();
 
     oldofs = GetCurrOffset();
     DebugMsg(("InitializeArray(%s): current offset=%X\n", f->sym->name, oldofs ));
@@ -203,7 +210,7 @@ static ret_code InitializeArray( field_list *f, int *pi )
         strcat( buffer, AsmBuffer[i]->string_ptr );
 
     AddLineQueue( buffer );
-    RunLineQueue();
+    RunLineQueueEx();
     j = GetCurrOffset() - oldofs ;
     DebugMsg(("InitializeArray(%s): new offset=%X\n", f->sym->name, j + oldofs ));
 
@@ -222,7 +229,7 @@ static ret_code InitializeArray( field_list *f, int *pi )
         AddLineQueue( buffer );
     }
 
-    DebugMsg(("InitializeArray(%s) exit\n", f->sym->name ));
+    DebugMsg(("InitializeArray(%s) exit, curr ofs=%X\n", f->sym->name, GetCurrOffset() ));
     return( NOT_ERROR );
 }
 
@@ -256,9 +263,11 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
         ptr = "";
 
 #ifdef DEBUG_OUT
+#if FASTPASS
     if ( Parse_Pass > PASS_1 && UseSavedState ) {
         DebugMsg(("InitializeStructure(%s): unexpectedly called in pass %u!!!!!\n", symtype->sym.name, Parse_Pass+1 ));
     }
+#endif
     DebugMsg(("InitializeStructure(%s) enter, total=%u/%u, init=>%s<\n",
               symtype->sym.name, symtype->sym.total_size, symtype->sym.total_length, ptr ));
 #endif
@@ -325,10 +334,15 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
 
     for( f = symtype->e.structinfo->head; f != NULL; f = f->next ) {
 
-        DebugMsg(("InitializeStructure field=%s total_size=%u total_length=%u default=>%s<\n", f->sym->name, f->sym->total_size, f->sym->total_length, f->value));
+        DebugMsg(("InitializeStructure field=%s total_size=%u total_length=%u initializer=%s default=>%s<\n",
+                  f->sym->name,
+                  f->sym->total_size,
+                  f->sym->total_length,
+                  f->initializer ? f->initializer : "NULL",
+                  f->value));
 
         if (f->sym->mem_type == MT_BITS) {
-            opndx.type = EXPR_CONST;
+            opndx.kind = EXPR_CONST;
             opndx.string = NULL;
             if (AsmBuffer[i]->token == T_COMMA || AsmBuffer[i]->token == T_FINAL) {
                 if (f->value) {
@@ -343,8 +357,8 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
                 EvalOperand(&i, Token_Count, &opndx, TRUE);
                 is_record_set = TRUE;
             }
-            if (opndx.type != EXPR_CONST || opndx.string != NULL)
-                AsmError(SYNTAX_ERROR);
+            if (opndx.kind != EXPR_CONST || opndx.string != NULL)
+                AsmError( SYNTAX_ERROR );
             if (f->sym->total_size < 32) {
                 unsigned long dwMax = (1 << f->sym->total_size);
                 if (opndx.value >= dwMax)
@@ -387,13 +401,19 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
                         lvl--;
                     else if ( lvl == 0 && AsmBuffer[i]->token == T_COMMA )
                         break;
+
                     if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<') {
                         char *src = AsmBuffer[i]->string_ptr;
                         ptr = buffer + strlen(buffer);
                         *ptr++ = '<';
                         while (*src) {
+#if 0
+                            /* this was an error. the tokenizer doesn't
+                             * swallow the '!' char in <> literals.
+                             */
                             if (*src == '<' || *src == '>' || *src == '!')
                                 *ptr++ = '!';
+#endif
                             *ptr++ = *src++;
                         }
                         *ptr++ = '>';
@@ -459,7 +479,7 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
      if at least one line has been generated */
 
     if ( line_queue && ( embedded == FALSE ))
-        RunLineQueue();
+        RunLineQueueEx();
 
     RestoreTokenState( pSave );
 
@@ -591,7 +611,7 @@ next_item:
             SetCurrOffset( count, TRUE,
                            ( ( CurrSeg != NULL ) && SEGISCODE( CurrSeg ) ) );
         } else {
-            UpdateStructSize(count);
+            UpdateStructSize( count );
         }
 
         cur_pos++;
@@ -621,8 +641,10 @@ next_item:
                          in LineStore. If InitializeStruct() is reentered,
                          then this var mustn't be touched anymore.
                          */
-                        if ( StructInit == 0)
+                        if ( StructInit == 0) {
                             *LineStoreCurr->line = ';';
+                        }
+                        LstWriteSrcLine();
                         /* CurrSource holds the source line, which is never
                          to reach pass 2 */
                         *CurrSource = ';';
@@ -655,13 +677,13 @@ next_item:
 
     if ( EvalOperand(&cur_pos, Token_Count, &opndx, TRUE) == ERROR )
         return( ERROR );
-    //DebugMsg(("data_item, EvalOperand() returned, opndx.type=%u\n", opndx.type ));
+    //DebugMsg(("data_item, EvalOperand() returned, opndx.kind=%u\n", opndx.kind ));
 
     /* handle DUP operator */
 
     if ( AsmBuffer[cur_pos]->token == T_RES_ID && AsmBuffer[cur_pos]->value == T_DUP ) {
-        if (opndx.type != EXPR_CONST || opndx.string != NULL) {
-            DebugMsg(("data_item, error, opndx.type=%u, opndx.string=%X\n", opndx.type, opndx.string));
+        if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
+            DebugMsg(("data_item, error, opndx.kind=%u, opndx.string=%X\n", opndx.kind, opndx.string));
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
@@ -704,7 +726,7 @@ next_item:
             AsmErr( STRUCTURE_IMPROPERLY_INITIALIZED, struct_sym->sym.name );
             return( ERROR );
         }
-        switch( opndx.type ) {
+        switch( opndx.kind ) {
         case EXPR_EMPTY:
             negative = FALSE;
             /* evaluator cannot handle '?' and FLOATS! */
@@ -718,7 +740,7 @@ next_item:
                 if (!struct_field)
                     output_float( cur_pos, no_of_bytes, negative );
                 else {
-                    UpdateStructSize(no_of_bytes);
+                    UpdateStructSize( no_of_bytes );
                 }
                 if( sym && Parse_Pass == PASS_1 ) {
                     update_sizes( sym, first, no_of_bytes );
@@ -726,7 +748,10 @@ next_item:
                 cur_pos++;
             } else {
                 DebugMsg(("data_item.EMPTY: idx=%u, AsmBuffer->token=%X\n", cur_pos, AsmBuffer[cur_pos]->token));
-                AsmError( SYNTAX_ERROR );
+                if ( AsmBuffer[cur_pos]->token != T_FINAL )
+                    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[cur_pos]->string_ptr );
+                else
+                    AsmError( SYNTAX_ERROR );
                 return( ERROR );
             }
             break;
@@ -735,13 +760,16 @@ next_item:
                 AsmError( MUST_USE_FLOAT_INITIALIZER );
                 return( ERROR );
             }
-            /* warn about initialized data in BSS */
+            /* warn about initialized data in BSS/AT */
             if ( struct_field == FALSE  &&
                  CurrSeg != NULL &&
-                 CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS &&
-                 Parse_Pass == PASS_2 &&
-                 initwarn == FALSE) {
-                AsmWarn( 2, INITIALIZED_DATA_NOT_SUPPORTED_IN_BSS_SEGMENT);
+                (CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS ||
+                 CurrSeg->seg->e.seginfo->segtype == SEGTYPE_ABS) &&
+                Parse_Pass == PASS_2 &&
+                initwarn == FALSE) {
+                AsmWarn( 2,
+                        INITIALIZED_DATA_NOT_SUPPORTED_IN_SEGMENT,
+                        (CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS) ? "BSS" : "AT" );
                 initwarn = TRUE;
             };
 
@@ -853,7 +881,7 @@ next_item:
                         }
                     }
                 } else {
-                    UpdateStructSize(no_of_bytes);
+                    UpdateStructSize( no_of_bytes );
                 }
             }
             break;
@@ -880,16 +908,19 @@ next_item:
                     update_sizes( sym, first, no_of_bytes );
                 }
                 /* for STRUCT fields, just update size. Don't care about fixups */
-                if (struct_field) {
-                    UpdateStructSize(no_of_bytes);
+                if ( struct_field ) {
+                    UpdateStructSize( no_of_bytes );
                     break;
                 }
 
-                if (CurrSeg != NULL &&
-                    CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS &&
+                if ( CurrSeg != NULL &&
+                    (CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS ||
+                     CurrSeg->seg->e.seginfo->segtype == SEGTYPE_ABS) &&
                     Parse_Pass == PASS_2 &&
-                    initwarn == FALSE) {
-                    AsmWarn( 2, INITIALIZED_DATA_NOT_SUPPORTED_IN_BSS_SEGMENT);
+                    initwarn == FALSE ) {
+                    AsmWarn( 2,
+                            INITIALIZED_DATA_NOT_SUPPORTED_IN_SEGMENT,
+                            (CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS) ? "BSS" : "AT" );
                     initwarn = TRUE;
                 };
 
@@ -959,10 +990,15 @@ next_item:
                 default:
                     /* size < 2 can work with T_LOW operator only */
                     if ( no_of_bytes < 2) {
-                        DebugMsg(("data_item.ADDR: error, no of bytes=%u\n", no_of_bytes ));
-                        AsmError( SIZE_TOO_LARGE );
-                        fixup_type = FIX_LOBYTE;
-                        break;
+                        /* forward reference? */
+                        if ( Parse_Pass == PASS_1 && opndx.sym && opndx.sym->state == SYM_UNDEFINED)
+                            ;
+                        else {
+                            DebugMsg(("data_item.ADDR: error, no of bytes=%u\n", no_of_bytes ));
+                            AsmError( SIZE_TOO_LARGE );
+                            fixup_type = FIX_LOBYTE;
+                            break;
+                        }
                     }
                     /* if the symbol references a segment or group,
                      then generate a segment fixup.
@@ -1070,15 +1106,18 @@ next_item:
             AsmError( INVALID_USE_OF_REGISTER );
             break;
         default:
-            DebugMsg(("data_item: error, opndx.type=%u\n", opndx.type));
+            DebugMsg(("data_item: error, opndx.kind=%u\n", opndx.kind ));
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
     }
 item_done:
     if( AsmBuffer[cur_pos]->token == T_COMMA ) {
-        first = FALSE;
         cur_pos++;
+        /* if there's nothing anymore after the comma, exit without error! */
+        if ( AsmBuffer[cur_pos]->token == T_FINAL )
+            break;
+        first = FALSE;
         if ( sym )
             sym->isarray = TRUE;
         goto next_item;
@@ -1102,20 +1141,18 @@ ret_code data_init( int sym_loc, int initializer_loc, dir_node *struct_sym )
 /***********************************************/
 {
     unsigned            no_of_bytes;
-    memtype             mem_type;
     struct asm_sym      *sym = NULL;
-    dir_node            *dir;
-    bool                struct_field = FALSE;
-    bool                float_initializer = FALSE;
+    //dir_node            *dir;
     uint                old_offset;
     uint                currofs; /* for LST output */
-    int                 oldofs;
-    char                label_directive = FALSE;
+    //int                 oldofs;
+    memtype             mem_type;
+    bool                float_initializer = FALSE;
 
 
     DebugMsg(("data_init enter, sym_loc=%d, init_loc=%d\n", sym_loc, initializer_loc));
 
-    if( (sym_loc >= 0) && (StructDef.struct_depth == 0) ) {
+    if( (sym_loc >= 0) && ( CurrStruct == NULL ) ) {
         /* get/create the label */
         /* it might be a code label if Masm v5.1 compatibility is enabled */
         DebugMsg(("data_init: calling SymLookup(%s)\n", AsmBuffer[sym_loc]->string_ptr));
@@ -1158,7 +1195,7 @@ ret_code data_init( int sym_loc, int initializer_loc, dir_node *struct_sym )
              AsmBuffer[ initializer_loc]->rm_byte == OP_TYPE ) {
             i = AsmBuffer[ initializer_loc]->opcode;
         } else if ( AsmBuffer[ initializer_loc]->token == T_DIRECTIVE &&
-                    AsmBuffer[ initializer_loc]->opcode == DF_DATADIR ) {
+                   (AsmBuffer[ initializer_loc]->opcode & DF_DATADIR )) {
             i = AsmOpTable[AsmResWord[AsmBuffer[initializer_loc]->value].position].opnd_type[1];
         } else {
             AsmErr( INVALID_TYPE_FOR_DATA_DECLARATION, sym->name );
@@ -1181,37 +1218,37 @@ ret_code data_init( int sym_loc, int initializer_loc, dir_node *struct_sym )
         return( ERROR );
     }
 
+#if 0
+    /* * Probably in WASM the LABEL directive was handled here? */
     if( sym_loc >= 0 && AsmBuffer[ sym_loc ]->value == T_LABEL ) {
         label_directive = TRUE;
         sym_loc--;
     }
+#endif
+
     /* in a struct declaration? */
-    if( StructDef.struct_depth != 0 ) {
+    if( CurrStruct != NULL ) {
 
-        /* everything will be done in the first pass */
-        /* problem: listing output! */
-        if( Parse_Pass != PASS_1 )
-            return( NOT_ERROR );
+        /* structure parsing is done in the first pass only */
+        if( Parse_Pass == PASS_1 ) {
 
-        if ( FileInfo.file[LST] )
-            currofs = StructDef.curr_struct->sym.offset;
+            currofs = CurrStruct->sym.offset;
 
-        if (!(sym = AddFieldToStruct( sym_loc, initializer_loc, mem_type, struct_sym, no_of_bytes ))) {
-            return ( ERROR );
+            if (!(sym = AddFieldToStruct( sym_loc, initializer_loc, mem_type, struct_sym, no_of_bytes ))) {
+                return ( ERROR );
+            }
+            DebugMsg(("data_init: %s, AddFieldToStruct called, ofs=%X\n", sym->name, sym->offset ));
         }
-
-        struct_field = TRUE;
-        DebugMsg(("data_init: %s, AddFieldToStruct called, ofs=%X\n", sym->name, sym->offset ));
         initializer_loc++;
-        if( data_item( sym, struct_sym, &initializer_loc, no_of_bytes, 1, struct_field, float_initializer ) == ERROR ) {
+        if( data_item( sym, struct_sym, &initializer_loc, no_of_bytes, 1, TRUE, float_initializer ) == ERROR ) {
             DebugMsg(("data_init: exit 4, data_item() returned with error\n"));
             return( ERROR );
         }
 
-        if ( ModuleInfo.list )
+        if ( ModuleInfo.list && Parse_Pass == PASS_1 )
             LstWrite( LSTTYPE_STRUCT, currofs, sym->name );
 
-        DebugMsg(("data_init: exit, inside struct declaration, no error\n"));
+        DebugMsg(("data_init: exit, inside struct declaration (%s.%u), no error\n", CurrStruct->sym.name, CurrStruct->sym.offset ));
         return( NOT_ERROR );
     }
 
@@ -1224,12 +1261,14 @@ ret_code data_init( int sym_loc, int initializer_loc, dir_node *struct_sym )
         if( Parse_Pass == PASS_1 ) {
             /* if it's an EXTERNDEF, remove the external info */
             if( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
-                dir_free( (dir_node *)sym, TRUE);
+                dir_internal( (dir_node *)sym );
                 sym->total_size = 0;
                 sym->total_length = 0;
-                sym->first_size = 0;
                 sym->first_length = 0;
-            } else if( sym->state != SYM_UNDEFINED ) {
+            } else if( sym->state == SYM_UNDEFINED ) {
+                dir_remove_table( (dir_node *)sym );
+                sym->state = SYM_INTERNAL;
+            } else {
                 DebugMsg(("data_init: exit 5 with error\n"));
                 AsmErr( SYMBOL_ALREADY_DEFINED, sym->name );
                 return( ERROR );
@@ -1272,16 +1311,17 @@ ret_code data_init( int sym_loc, int initializer_loc, dir_node *struct_sym )
 #endif
             PhaseError = TRUE;
         }
-        sym->state = SYM_INTERNAL;
         sym->defined = TRUE;
         sym->mem_type = mem_type;
         BackPatch( sym );
     }
 
+#if 0
     if( label_directive ) {
         DebugMsg(("data_init: exit without error\n"));
         return( NOT_ERROR );
     }
+#endif
 
     if (struct_sym) {
         while (struct_sym->sym.mem_type == MT_TYPE)
@@ -1292,17 +1332,17 @@ ret_code data_init( int sym_loc, int initializer_loc, dir_node *struct_sym )
     }
 
     initializer_loc++;
-    if ( data_item( sym, struct_sym, &initializer_loc, no_of_bytes, 1, struct_field, float_initializer ) == ERROR ) {
+    if ( data_item( sym, struct_sym, &initializer_loc, no_of_bytes, 1, FALSE, float_initializer ) == ERROR ) {
         DebugMsg(("data_init: exit, error in data_item()\n"));
         return( ERROR );
     }
 
     if (AsmBuffer[initializer_loc]->token != T_FINAL) {
-        AsmError(SYNTAX_ERROR);
-        return(ERROR);
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[initializer_loc]->string_ptr );
+        return( ERROR );
     }
 
-    if ( ModuleInfo.list ) {
+    if ( ModuleInfo.list && line_listed == FALSE ) {
         if ( Parse_Pass != PASS_1 ) {
             LstWrite( LSTTYPE_LIDATA, currofs, NULL );
         } else

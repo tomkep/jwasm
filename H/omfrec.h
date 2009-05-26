@@ -37,7 +37,6 @@ typedef struct pubdef_data  pubdef_data;
 
 #include "omfpc.h"
 #include "omffixup.h"
-#include "omfname.h"
 
 #define ReadU16(p)      (*(uint_16*)(p))
 #define ReadU32(p)      (*(uint_32*)(p))
@@ -189,14 +188,13 @@ struct pubdef_info {
     struct base_info base;  /* base information                         */
     uint_16 num_pubs;       /* number of publics in following array     */
     struct pubdef_data {
-        name_handle name;   /* name of this public                      */
-        uint_32     offset; /* public offset                            */
+        //name_handle name; /* name of this public                      */
+        char *name;         /* name of this public                      */
+        uint_32 offset;     /* public offset                            */
         union {             /* see PUBDEF.h for more information        */
-            uint_16     idx;/* Intel OMF type index                     */
+            uint_16 idx;    /* Intel OMF type index                     */
         } type;
     } *pubs;                /* array of size num_pubs                   */
-    uint_8 free_pubs : 1;   /* can we MemFree the pubs array?           */
-    uint_8 processed : 1;   /* for use by dbg_generator (init'd to 0)   */
 };
 /*
     (This format for PUBDEFs is probably only useful for WOMP.)  No data
@@ -276,7 +274,7 @@ extern void         OmfKillRec( obj_rec *objr );
 */
 
 
-extern void         OmfAllocData( obj_rec *objr, uint_16 len );
+extern void         OmfAllocData( obj_rec *objr, size_t len );
 /*
     Allocate a piece of memory of length len, attach it to the object
     record, and set the can_free bit.  This is the most common way to
@@ -285,7 +283,7 @@ extern void         OmfAllocData( obj_rec *objr, uint_16 len );
 */
 
 
-extern void         OmfAttachData( obj_rec *objr, uint_8 *data, uint_16 len );
+extern void         OmfAttachData( obj_rec *objr, uint_8 *data, size_t len );
 /*
     This is useful for attaching constants to an object record.  For example,
     when creating the 80386 comment record for pharlap OMF, you could do the
@@ -318,20 +316,20 @@ extern void         OmfCanFree( obj_rec *objr );
 extern uint_8       OmfGet8( obj_rec *objr );
 extern uint_16      OmfGet16( obj_rec *objr );
 extern uint_32      OmfGet32( obj_rec *objr );
-extern uint_32      OmfGetEither( obj_rec *objr );
-extern uint_16      OmfGetIndex( obj_rec *objr );
-extern uint_8       *OmfGet( obj_rec *objr, uint_16 len );
-extern int          OmfEOR( obj_rec *objr );
-extern uint_16      OmfRTell( obj_rec *objr );
-extern void         OmfRSeek( obj_rec *objr, uint_16 set );
-extern uint_16      ObjRemain( obj_rec *objr );
+//extern uint_32      OmfGetEither( obj_rec *objr );
+extern size_t       OmfGetIndex( obj_rec *objr );
+extern uint_8       *OmfGet( obj_rec *objr, size_t len );
+//extern int          OmfEOR( obj_rec *objr );
+extern size_t       OmfRTell( obj_rec *objr );
+extern void         OmfRSeek( obj_rec *objr, size_t set );
+extern size_t       ObjRemain( obj_rec *objr );
 extern void         OmfPut8( obj_rec *objr, uint_8 byte );
 extern void         OmfPut16( obj_rec *objr, uint_16 word );
 extern void         OmfPut32( obj_rec *objr, uint_32 dword );
-extern void         OmfPutIndex( obj_rec *objr, uint_16 idx );
-extern void         OmfPutEither( obj_rec *objr, uint_32 val );
-extern void         OmfPut( obj_rec *objr, const uint_8 *data, uint_16 len );
-extern void         OmfPutName( obj_rec *objr, const char *name, uint_8 len );
+extern void         OmfPutIndex( obj_rec *objr, size_t idx );
+//extern void         OmfPutEither( obj_rec *objr, uint_32 val );
+extern void         OmfPut( obj_rec *objr, const uint_8 *data, size_t len );
+extern void         OmfPutName( obj_rec *objr, const char *name, size_t len );
 /*
     Notes:
 
@@ -348,7 +346,7 @@ extern void         OmfPutName( obj_rec *objr, const char *name, uint_8 len );
     OmfGet          return ptr to len bytes, bump ptr by len.
                     The ptr to the entire data record is returned by
                     the call OmfGet( rec, 0 );
-    OmfEOR          returns TRUE (non-zero) if pointer is at end of record
+    //OmfEOR          returns TRUE (non-zero) if pointer is at end of record
     OmfRTell        returns the offset of the pointer into the data
     OmfRSeek        sets the offset of the pointer into the data
     OmfRemain       how many bytes left in record
@@ -390,7 +388,7 @@ extern void         ObjTruncRec( obj_rec *objr );
     The following macros are just for speed.
 */
 
-#define OmfEOR(objr)            ( (objr)->curoff >= (objr)->length )
+//#define OmfEOR(objr)            ( (objr)->curoff >= (objr)->length )
 #define OmfRTell(objr)          ( (objr)->curoff )
 #define OmfRSeek(objr,set)      (void)( (objr)->curoff = set )
 #define OmfRemain(objr)         ( (objr)->length - (objr)->curoff )

@@ -32,7 +32,7 @@
 #define _TBYTE_H
 
 typedef struct {
-        unsigned long long m;
+        uint_64 m;
         unsigned short e;
 } TB_LD;
 

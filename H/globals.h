@@ -40,6 +40,9 @@
 #include <errno.h>
 #include "inttype.h"
 #include "bool.h"
+#if defined(__UNIX__) || defined(__CYGWIN__) /* avoid for MinGW! */
+#include "watcomc.h"  /* for POSIX based C runtimes */
+#endif
 
 #define MAX_LINE_LEN            600     // no restriction for this number
 #define MAX_TOKEN               MAX_LINE_LEN / 4  // max tokens in one line
@@ -51,9 +54,10 @@
 #define MAX_TEXTMACRO_NESTING   20
 #define MAX_QUEUE_NESTING       40 /* "async" macro call nesting */
 #define MAX_SYNC_MACRO_NESTING  20 /* "sync" macro call nesting  */
+#define MAX_STRUCT_NESTING      32 /* limit for "anonymous structs" only */
 
 #define MAX_LEDATA_THRESHOLD    1024 - 12 /* OMF: - 6 for header, -6 for fixups     */
-#define MAX_PUB_SIZE            100       /* OMF: max # of entries in pubdef record */
+#define MAX_PUB_LENGTH          1024      /* OMF: max length of pubdef record */
 #define MAX_EXT_LENGTH          1024      /* OMF: max length ( in chars ) of extdef */
 
 #define COFF_SUPPORT 1 /* support COFF output format             */
@@ -66,7 +70,10 @@
 #define PROCALIGN    1 /* support OPTION PROCALIGN:<const>       */
 #define BUILD_TARGET 0 /* support "build target" (obsolete)      */
 #define INVOKE_WC    0 /* support watcom_c for INVOKE (not impl) */
+
+#ifndef FASTPASS
 #define FASTPASS     1 /* don't scan full source if pass > 1     */
+#endif
 
 #ifndef FASTMEM
 #define FASTMEM      1 /* fast memory allocation */
@@ -83,9 +90,9 @@
 
 /* JWasm version info */
 
-#define _BETA_
-#define _JWASM_VERSION_ "1.94c" _BETA_
-#define _JWASM_VERSION_INT_ 194
+#define _BETA_ "RC"
+#define _JWASM_VERSION_ "1.95"
+#define _JWASM_VERSION_INT_ 195
 
 #include "errmsg.h"
 
@@ -93,10 +100,11 @@
 #define PATH_MAX 259
 #endif
 
-#define NULLC                   '\0'
-#define NULLS                   "\0"
+#define NULLC  '\0'
+#define NULLS  "\0"
 
-#define is_valid_id_char( ch )  ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
+//#define is_valid_id_char( ch )  ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
+#define is_valid_id_char( ch )  ( isalnum(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
 #define is_valid_id_first_char( ch )  ( isalpha(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' || (ch == '.' && ModuleInfo.dotname == TRUE ))
 
@@ -108,7 +116,6 @@ typedef enum {
  NOT_ERROR = 0,
  STRING_EXPANDED = 1,
  INDIRECT_JUMP = 2      /* used by jmp() */
- //SCRAP_INSTRUCTION = 3, /* used by jmp() */
 } ret_code;
 
 enum {
@@ -128,9 +135,10 @@ enum {
 typedef struct {
     FILE        *file[NUM_FILE_TYPES];      // ASM, ERR, OBJ and LST
     char        *fname[NUM_FILE_TYPES];
-} File_Info;    // Information about the source and object files
+} File_Info;
 
-extern File_Info        FileInfo;   // files information
+// Information about source, object, listing and error files
+extern File_Info        FileInfo;
 
 #define ASM_EXT "asm"
 #define ERR_EXT "err"
@@ -157,6 +165,10 @@ enum fpo {
     FPO_DISABLED       /* -fpc */
 };
 
+/* language vaules.
+ * the order cannot be changed, it's
+ * returned by OPATTR and used in user-defined prologue/epilogue.
+ */
 typedef enum {
     LANG_NONE     = 0,
     LANG_C        = 1,
@@ -168,10 +180,9 @@ typedef enum {
     LANG_WATCOM_C = 7
 } lang_type;
 
-// Memory model type
-/* Paul Edwards
- Note that there is code that is dependent on the ordering
- of these model types.
+/* Memory model type.
+ * the order cannot be changed, it's
+ * the value of the predefined @Model symbol.
  */
 typedef enum {
     MOD_NONE    = 0,
@@ -189,6 +200,13 @@ typedef enum {
     SEGORDER_DOSSEG,   /* .DOSSEG */
     SEGORDER_ALPHA     /* .ALPHA */
 } seg_order;
+
+/* .NOLISTMACRO, .LISTMACRO and .LISTMACROALL directives setting */
+enum listmacro {
+    LM_NOLISTMACRO,
+    LM_LISTMACRO,
+    LM_LISTMACROALL
+};
 
 enum asm_cpu {
         /* bit count from left:
@@ -297,6 +315,7 @@ typedef struct global_options {
     bool        warning_error;           /* -WX option */
 #ifdef DEBUG_OUT
     bool        debug;                   /* -d6 option */
+    bool        print_linestore;         /* -ls option */
     uint_16     max_passes;              /* -pm option */
 #endif
 #if BUILD_TARGET
@@ -323,6 +342,7 @@ typedef struct global_options {
     bool        no_section_aux_entry;    /* -zls option  */
     bool        watcom_c_mangler;        /* -zcw option */
     bool        no_stdcall_decoration;   /* -zzo option */
+    bool        no_stdcall_export_decoration;   /* -zze option */
     bool        no_stdcall_suffix;       /* -zzp option  */
     bool        entry_decorated;         /* -zzs option  */
     bool        write_listing;           /* -Fl option  */
@@ -331,10 +351,13 @@ typedef struct global_options {
     bool        preprocessor_stdout;     /* -EP option  */
     bool        masm51_compat;           /* -Zm option  */
     bool        strict_masm_compat;      /* -Zne option  */
+    bool        masm_compat_gencode;     /* -Zg option  */
     bool        listif;                  /* -Sx, -Sa option  */
     bool        list_generated_code;     /* -Sg, -Sa option  */
+    enum listmacro list_macro;           /* -Sa option  */
     bool        no_symbol_listing;       /* -Sn option  */
     bool        all_symbols_public;      /* -Zf option  */
+    uint_8      ignore_include;          /* -X option */
     enum oformat output_format;          /* -omf, -coff, -elf options */
     uint_8      alignment_default;       /* -Zp option  */
     lang_type   langtype;                /* -Gc|d|z option */
@@ -374,7 +397,6 @@ extern unsigned int     Parse_Pass;     // assembly pass
 extern unsigned int     Opnd_Count;     // operand count of current instr
 extern int              Token_Count;    // number of tokens in current line
 extern bool             Modend;         // end of module is reached
-extern bool             Use32;          // if current segment is 32-bit
 extern unsigned int     GeneratedCode;  // nesting level generated code
 extern uint_8           MacroLevel;     // macro nesting level
 
@@ -397,7 +419,9 @@ extern void             OutSelect( bool );
 extern void             AssembleModule( void );
 extern void             AddLinnumDataRef( void );
 extern void             RunLineQueue( void );
+extern void             RunLineQueueEx( void );
 extern void             WritePreprocessedLine( char * );
+extern void             SetMasm510( bool );
 
 // main.c
 

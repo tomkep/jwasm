@@ -41,8 +41,10 @@ extern void MemFree( void *ptr );
 #define AsmTmpAlloc( amount )   alloca( amount )
 #include <malloc.h>
 #elif defined( __GNUC__ )
-#include <malloc.h>
-#define AsmTmpAlloc( amount )   _alloca( amount )
+//#include <malloc.h>
+//#define AsmTmpAlloc( amount )   _alloca( amount )
+#include <stdlib.h>
+#define AsmTmpAlloc( amount )   alloca( amount )
 #else
 #define AsmTmpAlloc( amount )   _alloca( amount )
 #endif

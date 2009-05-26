@@ -33,10 +33,9 @@
 *  However, this will require some work and intensive tests.
 ****************************************************************************/
 
-
-#include "globals.h"
 #include <ctype.h>
 
+#include "globals.h"
 #include "codegen.h"
 #include "insthash.h"
 #include "parser.h"
@@ -46,6 +45,11 @@
 
 char                    *CurrSource;      // Current Input Line
 char                    *StringBufferEnd; // start free space in string buffer
+
+#ifdef DEBUG_OUT
+extern int cnttok0;
+extern int cnttok1;
+#endif
 
 // string buffer - token strings and other stuff are stored here.
 // must be a multiple of MAX_LINE_LEN since it is used for string expansion.
@@ -64,6 +68,10 @@ typedef struct {
     char *input;
     char *output;
 } ioptrs;
+
+#ifndef __GNUC__
+#define tolower(c) ((c >= 'A' && c <= 'Z') ? c | 0x20 : c )
+#endif
 
 // initialize the token buffer array
 
@@ -229,13 +237,23 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
         } else {
         std_string:
         /* this is an undelimited string,
-         * so just copy it until we hit something that looks like the end
+         * so just copy it until we hit something that looks like the end.
+         * this format is used by the INCLUDE directive, maybe others also?
          */
-            for(count = 0 ; *iptr != '\0' && !isspace( *iptr ) && *iptr != ','; count++ ) {
+            for( count = 0 ;
+                count < MAX_STRING_LEN &&
+                *iptr != NULLC &&
+                !isspace( *iptr ) &&
+                *iptr != ',';
+                 count++ ) {
                 *optr++ = *iptr++;
             }
+            if ( count > MAX_STRING_LEN ) {
+                AsmError( STRING_OR_TEXT_LITERAL_TOO_LONG );
+                return( ERROR );
+            }
         }
-        *optr++ = '\0';
+        *optr++ = NULLC;
         buf->value = count;
         p->input = iptr;
         p->output = optr;
@@ -283,12 +301,15 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
             }
 #if 1
             /*
-             a "" inside a <>/{} string? Since it's not a must that
+             a " or ' inside a <>/{} string? Since it's not a must that
              [double-]quotes are paired in a literal it must be done
              directive-dependant!
              see: IFIDN <">,<">
              */
-        } else if( *iptr == '"' && symbol_c != 0 && (g_opcode & DF_STRPARM) == 0) {
+        } else if( ( *iptr == '"' || *iptr == '\'' ) &&
+                  symbol_c != 0 &&
+                  (g_opcode & DF_STRPARM) == 0) {
+            char delim = *iptr;
             char *toptr;
             char *tiptr;
             int tcount;
@@ -297,11 +318,11 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
             toptr = optr;
             tiptr = iptr;
             tcount = count;
-            while (*iptr != '"' && *iptr != NULLC && count < MAX_STRING_LEN-1) {
+            while (*iptr != delim && *iptr != NULLC && count < MAX_STRING_LEN-1 ) {
                 *optr++ = *iptr++;
                 count++;
             }
-            if (*iptr == '"') {
+            if ( *iptr == delim ) {
                 *optr++ = *iptr++;
                 count++;
                 continue;
@@ -324,24 +345,27 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
             count++;
         } else if( *iptr == '\0' || *iptr == '\n' ) {
             if ((symbol_o == '<') || (symbol_o == '{')) {
-                /* test if last nonspace character was a comma */
-                /* if yes, get next line and continue string scan */
+                /* if last nonspace character was a comma
+                 * get next line and continue string scan
+                 */
                 char *tmp = optr-1;
-                char buffer[MAX_LINE_LEN];
-                while (isspace(*(tmp))) tmp--;
-                if (*tmp == ',' &&
-                    (ReadTextLine( buffer, MAX_LINE_LEN ) != NULL )) {
-                    tmp = buffer;
+                while ( isspace(*tmp) ) tmp--;
+                if (*tmp == ',') {
+                    /* use optr as temp buffer */
+                    tmp = optr;
+                    if( GetTextLine( tmp, MAX_LINE_LEN ) == NULL ) {
+                        AsmError( UNEXPECTED_END_OF_FILE );
+                        return( ERROR );
+                    }
                     /* skip leading spaces */
                     while (isspace(*tmp)) tmp++;
-                    // this size check isn't fool-proved
+
+                    /* this size check isn't fool-proved yet */
                     if ( strlen(tmp) + count >= MAX_LINE_LEN ) {
                         AsmError( LINE_TOO_LONG );
                         return( ERROR );
                     }
-                    /* with FASTPASS, it's important to concat the lines,
-                     because the FULL line must be saved! */
-                    strcpy(iptr, tmp);
+                    strcpy( iptr, tmp );
                     continue;
                 }
                 /* the end delimiter ( '>' or '}') is missing, but don't
@@ -569,10 +593,34 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
 //  DebugMsg(("found item >%s< in instruction table, rm=%X\n", buf->string_ptr, AsmOpTable[count].rm_byte));
     buf->value = AsmOpTable[count].token;
 
-    /* to do: if ID is an instruction, test whether the instruction is active
-     with current cpu settings (example: MONITOR is an instruction if .XMM is
-     set, else it is an ID)
+    /* if -Zm is set, the following from the Masm docs is relevant:
+     *
+     * Reserved Keywords Dependent on CPU Mode with OPTION M510
+     *
+     * With OPTION M510, keywords and instructions not available in the
+     * current CPU mode (such as ENTER under .8086) are not treated as
+     * keywords. This also means the USE32, FLAT, FAR32, and NEAR32 segment
+     * types and the 80386/486 registers are not keywords with a processor
+     * selection less than .386.
+     * If you remove OPTION M510, any reserved word used as an identifier
+     * generates a syntax error. You can either rename the identifiers or
+     * use OPTION NOKEYWORD. For more information on OPTION NOKEYWORD, see
+     * OPTION NOKEYWORD, later in this appendix.
+     *
+     * The current implementation of this rule below is likely to be improved.
      */
+    if ( ModuleInfo.m510 ) {
+        /* checking the cpu won't give the expected results currently since
+         * some instructions in the table (i.e. MOV) start with a 386 variant!
+         */
+        //if (( AsmOpTable[count].cpu & P_CPU_MASK ) > ( ModuleInfo.curr_cpu & P_CPU_MASK ) ||
+        //    ( AsmOpTable[count].cpu & P_EXT_MASK ) > ( ModuleInfo.curr_cpu & P_EXT_MASK )) {
+          if (( AsmOpTable[count].cpu & P_EXT_MASK ) > ( ModuleInfo.curr_cpu & P_EXT_MASK )) {
+            buf->token = T_ID;
+            return( NOT_ERROR );
+        }
+    }
+
     if( !( AsmOpTable[count].opnd_type[OPND1] & OP_SPECIAL ) ) {
         buf->token = T_INSTRUCTION;
         return( NOT_ERROR );
@@ -623,7 +671,7 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
 /***********************************************************/
 {
     char    symbol;
-    int     i;
+//    int     i;
 
     buf->string_ptr = p->output;
     buf->pos = p->input;
@@ -652,7 +700,7 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
         if (*(p->input+1) != '=') {
             buf->token = T_DIRECTIVE;
             buf->value = T_EQU;
-            buf->opcode = 1; /* for EQU, this value is 0 */
+            buf->opcode = DF_LABEL | 1; /* for EQU, bit 0 is 0 */
             *(p->output)++ = *(p->input)++;
             *(p->output)++ = '\0';
             break;
@@ -718,7 +766,7 @@ static ret_code GetToken(unsigned int buf_index, ioptrs *p )
     } else if( *p->input == '.' &&
                (buf_index == 0 ||
                 (buf_index > 1 && AsmBuffer[buf_index-1]->token == T_COLON) ||
-                ((0 == memicmp(p->input+1,"type",4) && is_valid_id_char(*(p->input+5)) == FALSE)))) {
+                ((0 == _memicmp(p->input+1,"type",4) && is_valid_id_char(*(p->input+5)) == FALSE)))) {
         if( get_id( AsmBuffer[buf_index], p ) == ERROR ) {
             return( ERROR );
         }
@@ -751,6 +799,9 @@ int Tokenize( char *string, int index )
     unsigned int                buf_index;
 
     if (index == 0) {
+#ifdef DEBUG_OUT
+        cnttok0++;
+#endif
         CurrSource = string;
         p.output = token_stringbuf;
         g_opcode = 0;
@@ -763,6 +814,9 @@ int Tokenize( char *string, int index )
             expansion = TRUE;
         }
     } else {
+#ifdef DEBUG_OUT
+        cnttok1++;
+#endif
         p.output = StringBufferEnd;
         p.input = string;
     }

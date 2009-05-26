@@ -31,10 +31,11 @@
 
 #include <stdlib.h>
 #include <sys/stat.h>
-#include "autodept.h"
-#ifndef  __WATCOMC__
-//#include "clibext.h"
+
+#ifdef __GNUC__
+#include "globals.h"
 #endif
+#include "autodept.h"
 
 enum {
     TIME_SEC_B  = 0,

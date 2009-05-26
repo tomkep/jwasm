@@ -38,10 +38,8 @@
 #else
     #include <stdlib.h>
 #endif
-
-//#include <stdlib.h>
-#ifdef DEBUG_OUT
-#include <stdio.h>
+#if defined(__UNIX__) && defined(__GNUC__)
+    #include <sys/mman.h>
 #endif
 
 #include "globals.h"
@@ -49,10 +47,14 @@
 // FASTMEM is a simple memory alloc approach which allocates chunks of 256 kB
 // and will release it only at MemFini()
 #if FASTMEM
-#define BLKSIZE 0x80000
-#ifndef __UNIX__
-#include "win32.h"
-#endif
+ #define BLKSIZE 0x80000
+ #ifndef __UNIX__
+  #ifdef __OS2__
+   #include "os2.h"
+  #else
+   #include "win32.h"
+  #endif
+ #endif
 #endif
 
 #include "memalloc.h"
@@ -60,13 +62,10 @@
 
 #ifdef TRMEM
 #include <fcntl.h>
+#include <sys/stat.h>
+#include "myunistd.h"
 #include "trmem.h"
-#include "sys/stat.h"
-#ifdef __WATCOMC__
-#include <unistd.h>
-#else
-#include <io.h>
-#endif
+
 static _trmem_hdl   memHandle;
 static int          memFile;     /* file handle we'll write() to */
 #endif
@@ -82,7 +81,7 @@ static void memLine( int *fh, const char *buf, unsigned size )
 }
 #endif
 
-#ifdef __UNIX__
+#if defined(__UNIX__) && defined(__WATCOMC__)
 
 #define SYS_mmap                 90
 #define SYS_munmap               91
@@ -107,7 +106,11 @@ typedef struct mmap {
     uint_32 fd;     // should be -1
     uint_32 offset; // ignored
 } mmap;
+// 0x22 = MAP_PRIVATE | MAP_ANON
 static mmap mymmap = {0, 0, 3, 0x22, -1, 0};
+#endif
+#if defined(__GNUC__)
+uint_32 mymmap_size = 0;   // size in bytes
 #endif
 
 #if FASTMEM
@@ -120,7 +123,7 @@ int currfree;
 void MemInit( void )
 {
 #ifdef TRMEM
-    memFile = open( "~jwasm.trk", O_WRONLY | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE );
+    memFile = _open( "~jwasm.trk", O_WRONLY | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE );
     memHandle = _trmem_open( malloc, free, realloc, _expand, &memFile, memLine,
         _TRMEM_ALLOC_SIZE_0 |
         _TRMEM_FREE_NULL |
@@ -145,7 +148,7 @@ void MemFini( void )
         _trmem_prt_list( memHandle );
         _trmem_close( memHandle );
         if( memFile != -1 ) {
-            close( memFile );
+            _close( memFile );
         }
         memHandle = NULL;
     }
@@ -159,9 +162,17 @@ void MemFini( void )
     while (pBase) {
         uint_8 * pNext = *((uint_8 * *)pBase);
 #ifndef __UNIX__
+ #ifdef  __OS2__
+        DosFreeMem(pBase);
+ #else
         VirtualFree(pBase, 0, MEM_RELEASE);
+ #endif
 #else
+  #if defined(__WATCOMC__)
         sys_call2(SYS_munmap, (uint_32)pBase, 0);
+  #else
+        munmap( (void *)pBase, 0 );
+  #endif
 #endif
         pBase = pNext;
     }
@@ -175,24 +186,48 @@ void *AsmAlloc( size_t size )
 #if FASTMEM
     size = (size + 3) & ~3;
     if (currfree < size) {
+        DebugMsg(("AsmAlloc: new block, req. size=%u\n", size ));
         if (size > BLKSIZE-4) {
 #ifndef __UNIX__
+ #ifdef __OS2__
+            DosAllocMem( (void**)&pCurr, size+4, PAG_COMMIT|PAG_READ|PAG_WRITE);
+ #else
             pCurr = (uint_8 *)VirtualAlloc(NULL, size+4, MEM_COMMIT, PAGE_READWRITE);
+ #endif
 #else
+  #if defined(__GNUC__)
+            mymmap_size = size+4;
+            pCurr = (char *)mmap( 0, mymmap_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0 );
+            if ( pCurr == MAP_FAILED )
+                pCurr = NULL;
+  #else
             mymmap.size = size+4;
             pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
+  #endif
 #endif
             currfree = size;
         } else {
 #ifndef __UNIX__
+ #ifdef __OS2__
+            DosAllocMem( (void **)&pCurr, BLKSIZE, PAG_COMMIT|PAG_READ|PAG_WRITE);
+ #else
             pCurr = (uint_8 *)VirtualAlloc(NULL, BLKSIZE, MEM_COMMIT, PAGE_READWRITE);
+  #endif
 #else
+  #if defined(__GNUC__)
+            mymmap_size = BLKSIZE;
+            pCurr = (char *)mmap( 0, mymmap_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0 );
+            if ( pCurr == MAP_FAILED )
+                pCurr = NULL;
+  #else
             mymmap.size = BLKSIZE;
             pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
+  #endif
 #endif
-            currfree = BLKSIZE-sizeof(uint_8 *);
+            currfree = BLKSIZE - sizeof(uint_8 *);
         }
         if (!pCurr) {
+            currfree = 0;
             Fatal( MSG_OUT_OF_MEMORY );
         }
         *(uint_8 * *)pCurr = pBase;

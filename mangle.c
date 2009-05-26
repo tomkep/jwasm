@@ -29,13 +29,12 @@
 ****************************************************************************/
 
 #include <ctype.h>
-#include "globals.h"
 
+#include "globals.h"
 #include "symbols.h"
 #include "memalloc.h"
 #include "directiv.h"
 #include "mangle.h"
-
 
 /* constants used by the name manglers ( changes ) */
 enum changes {
@@ -48,6 +47,10 @@ enum changes {
 };
 
 #define USCORE "_"
+
+#ifndef __GNUC__
+#define tolower(c) ((c >= 'A' && c <= 'Z') ? c | 0x20 : c )
+#endif
 
 typedef char *(*mangle_func)( struct asm_sym *, char * );
 
@@ -80,7 +83,7 @@ static char *UCaseMangler( struct asm_sym *sym, char *buffer )
         name = buffer;
     }
     strcpy( name, sym->name );
-    strupr( name );
+    _strupr( name );
     return( name );
 }
 

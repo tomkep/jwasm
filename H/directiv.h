@@ -32,7 +32,7 @@
 #ifndef _DIRECTIV_H_
 #define _DIRECTIV_H_
 
-#include "omfrec.h"
+#include "omfrec.h" /* needed because of obj_rec member in seg_info */
 
 #define MAX_LNAME       255
 #define LNAME_NULL      0
@@ -54,10 +54,11 @@ typedef enum {
 #define NUM_OS 2
 
 enum {
-    TAB_SEG = 0,
+    TAB_UNDEF = 0,
+    TAB_EXT,
+    TAB_SEG,
     TAB_GRP,
     TAB_LIB,
-    TAB_EXT,
     TAB_PROC,
     TAB_ALIAS,
     TAB_LAST,
@@ -70,6 +71,12 @@ typedef enum {
     SEGTYPE_BSS,
     SEGTYPE_ABS
 } seg_type;
+
+typedef enum {
+    OT_GROUP = 0,  /* OFFSET:GROUP (default, must be 0) */
+    OT_FLAT,       /* OFFSET:FLAT    */
+    OT_SEGMENT     /* OFFSET:SEGMENT */
+} offset_type;
 
 /*---------------------------------------------------------------------------*/
 
@@ -113,10 +120,10 @@ typedef struct seg_item {
 } seg_item;
 
 typedef struct {
-    direct_idx          idx;            // its group index
     seg_item            *seglist;       // list of segments in the group
-    uint                numseg;         // number of segments in the group
+    direct_idx          idx;            // its group index
     direct_idx          lname_idx;      // LNAME index (OMF only)
+    uint                numseg;         // number of segments in the group
 } grp_info;
 
 /* todo: remove the OMF segment record and store the info directly
@@ -134,14 +141,12 @@ typedef struct {
     uint_8              *CodeBuffer;
     asm_sym             *labels;        // linked list of labels in this seg
     union {
-        struct fixup        *FixupListHead; // head of list of fixups
-        struct asmfixup     *FixupListHeadCoff;
-        struct asmfixup     *FixupListHeadElf;
+        struct fixup        *FixupListHead; /* for OMF */
+        struct asmfixup     *FixupListHeadGen; /* for other formats */
     };
     union {
-        struct fixup        *FixupListTail;
-        struct asmfixup     *FixupListTailCoff;
-        struct asmfixup     *FixupListTailElf;
+        struct fixup        *FixupListTail;    /* for OMF */
+        struct asmfixup     *FixupListTailGen; /* for other formats */
     };
     void                *LinnumQueue;   // for COFF line numbers
     union {
@@ -159,24 +164,20 @@ typedef struct {
 #endif
 } seg_info;
 
+#define MAX_SEGALIGNMENT 0x0F
+
 typedef struct regs_list {
     struct regs_list    *next;
     char                *reg;
 } regs_list;
 
-typedef struct local_sym {
-    asm_sym             sym;            // symbol for this param/local
-    unsigned            is_vararg:1;    // if it is a VARARG param
-    unsigned            is_ptr:1;       // if it is a PTR type
-    unsigned            is_far:1;       // if ptr is FAR
-    unsigned            is32:1;         // if offset is 32 bit (ptr only)
-} local_sym;
+// PROC item
 
 typedef struct {
     regs_list           *regslist;      // PROC: list of registers to be saved
-    local_sym           *paralist;      // list of parameters
-    local_sym           *locallist;     // PROC: list of local variables
-    struct asm_sym      *labellist;     // PROC: list of local labels
+    struct dir_node     *paralist;      // list of parameters
+    struct dir_node     *locallist;     // PROC: list of local variables
+    struct dir_node     *labellist;     // PROC: list of local labels
     int                 parasize;       // total no. of bytes used by parameters
     int                 localsize;      // PROC: total no. of bytes used by local variables
     char                *prologuearg;   // PROC: prologuearg attribute
@@ -197,26 +198,28 @@ typedef struct mparm_list {
     unsigned int        required:1;     // is parm required (REQ)
 } mparm_list;
 
-// macro local
-
-typedef struct mlocal_list {
-    struct mlocal_list  *next;
-    char                *label;         // name of local
-} mlocal_list;
+// macro line
 
 typedef struct asmlines {
     struct asmlines     *next;
-    char                *line;
-    char                parmcount;
+    uint_8              ph_count; /* placeholders contained in this line */
+    char                line[];
 } asmlines;
 
+// macro item
+
 typedef struct {
-    uint_32             parmcnt;    /* no of params */
+    uint_16             parmcnt;    /* no of params */
+    uint_16             localcnt;   /* no of locals */
     mparm_list          *parmlist;  /* array of parameter items */
-    mlocal_list         *locallist; // list of locals
-    asmlines            *data;      // the guts of the macro - LL of strings
-    const FNAME         *srcfile;
+    asmlines            *data;      /* prepared macro source lines */
+#ifdef DEBUG_OUT
+    uint_32             count;      /* no of times the macro was invoked */
+#endif
+    uint                srcfile;    /* sourcefile index */
 } macro_info;
+
+// STRUCT field item
 
 typedef struct field_list {
     struct field_list   *next;
@@ -262,13 +265,48 @@ union entry {
     macro_info          *macroinfo;     // MACRO definition
 };
 
+/* dir_node originally was a "directive_node"
+ * However, currently all symbols are allocated as a dir_node
+ * the additional 3 fields are used differently depending on symbol's type.
+ */
+
 typedef struct dir_node {
-    struct asm_sym      sym;
-    union entry         e;
-    struct dir_node     *next; // linked list of this type of symbol
-    struct dir_node     *prev; /* useful if item is likely to be removed */
-} dir_node;         // List of grpdef, segdef, pubdef, externs, included lib
-                    // and symbolic integer constants.
+    struct asm_sym sym;
+    union {
+        /* additional fields, used by seg, grp, proc, type, macro */
+        union entry e;
+        /* used to save the local hash table (contains PROC locals: params,
+         locals, labels). Details see SymGetLocal(), SymSetLocal() in symbols.c */
+        struct dir_node *nextll;
+    };
+    union {
+        /* for SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_PROC, SYM_ALIAS, SYM_LIB:
+         * linked list of this type of symbol.
+         * for SYM_INTERNAL:
+         * linked list of labels for current segment (used for BackPatch)
+         */
+        struct dir_node *next;
+        /* used by PROC params */
+        struct {
+            unsigned            is_vararg:1;    // if it is a VARARG param
+            unsigned            is_ptr:1;       // if it is a PTR type
+            unsigned            is_far:1;       // if ptr is FAR
+            unsigned            is32:1;         // if offset is 32 bit (ptr only)
+        };
+    };
+    union {
+        /* for SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_PROC, SYM_ALIAS, SYM_LIB:
+         * linked list of this type of symbol, to allow fast removes.
+         * Actually, the only symbols which have a "chance" to be
+         * removed are those of type SYM_EXTERNAL.
+         */
+        struct dir_node *prev;
+        /* used by PROC locals (SYM_STACK) for linked list */
+        struct dir_node *nextlocal;
+        /* used by PROC params (SYM_STACK) for linked list */
+        struct dir_node *nextparam;
+    };
+} dir_node;
 
 typedef struct {
     dir_node            *head;
@@ -276,13 +314,6 @@ typedef struct {
 } symbol_queue;     // tables array - queues of symbols of 1 type ie: segments
                     // the data are actually part of the symbol table
 
-
-/* .NOLISTMACRO, .LISTMACRO and .LISTMACROALL directives setting */
-enum listmacro {
-    LM_NOLISTMACRO,
-    LM_LISTMACRO,
-    LM_LISTMACROALL
-};
 
 /*---------------------------------------------------------------------------*/
 
@@ -295,11 +326,13 @@ typedef struct {
     char                *proc_epilogue;  // current OPTION EPILOGUE value
     unsigned            anonymous_label; // "anonymous label" counter
     unsigned            hll_label;       // hll directive label counter
+    bool                Use32;           // current wordsize
     dist_type           distance;        // stack distance;
     mod_type            model;           // memory model;
     lang_type           langtype;        // language;
     os_type             ostype;          // operating system;
     seg_order           segorder;        // .alpha, .seq, .dosseg
+    offset_type         offsettype;      // OFFSET:GROUP|FLAT|SEGMENT
     short               cpu;             // cpu setting (value @cpu symbol);
     enum asm_cpu        curr_cpu;        // cpu setting (OW stylex);
     unsigned char       radix;           // current .RADIX setting
@@ -328,20 +361,20 @@ typedef struct {
 
     unsigned            flatgrp_idx;     // index of FLAT group
     char                name[_MAX_FNAME];// name of module
-    const FNAME         *srcfile;
+    uint                srcfile;
 } module_info;                           // Information about the module
 
 extern module_info      ModuleInfo;
-
-#define IS_PROC_FAR()   ( ModuleInfo.model == MOD_MEDIUM || ModuleInfo.model == MOD_LARGE || ModuleInfo.model == MOD_HUGE )
 
 /*---------------------------------------------------------------------------*/
 
 extern dir_node         *dir_insert( const char *, int );
 extern dir_node         *dir_insert_ex( const char *, int );
-extern void             dir_change( dir_node *, int );
+extern void             dir_settype( dir_node *, int );
+extern void             dir_internal( dir_node * );
 extern void             dir_free( dir_node *, bool );
-extern void             dir_add( dir_node * );
+extern void             dir_add_table( dir_node * );
+extern void             dir_remove_table( dir_node * );
 
 extern int              SizeFromMemtype( memtype, bool );
 extern ret_code         MemtypeFromSize( int, memtype * );
@@ -356,11 +389,11 @@ extern int              SizeFromRegister( int );
 extern ret_code         EchoDef( int );         // handle ECHO directive
 extern ret_code         OptionDirective( int ); // handle OPTION directive
 
-extern void             push( void *stack, void *elt );
-extern void             *pop( void *stack );
-extern void             *peek( void *stack, int );
-extern void             SetMasm510( bool );
-extern ret_code         cpu_directive( int i );
+extern void             pushitem( void *stack, void *elt );
+extern void             *popitem( void *stack );
+//extern void             *peekitem( void *stack, int );
+//extern ret_code         cpu_directive( int i );
+extern ret_code         SetCPU( enum asm_token );
 extern ret_code         directive( int , long );
 extern void             ModuleInit( void ); /* Initializes ModuleInfo structure */
 

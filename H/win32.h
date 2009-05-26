@@ -19,7 +19,7 @@
 #define MEM_RELEASE    0x8000
 #define PAGE_READWRITE 0x0004
 
-WINBASEAPI uint_32 WINAPI GetTickCount( void );
+//WINBASEAPI uint_32 WINAPI GetTickCount( void );
 WINBASEAPI char *  WINAPI GetCommandLineA( void );
 WINBASEAPI void *  WINAPI VirtualAlloc( void *, uint_32, uint_32, uint_32 );
 WINBASEAPI int     WINAPI VirtualFree( void *, uint_32, uint_32 );

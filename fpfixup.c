@@ -30,14 +30,12 @@
 *
 ****************************************************************************/
 
-
 #include "globals.h"
 #include "parser.h"
 #include "directiv.h"
 #include "extern.h"
 #include "fixup.h"
 #include "mangle.h"
-
 #include "myassert.h"
 
 typedef enum {

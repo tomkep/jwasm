@@ -38,7 +38,8 @@ enum lsttype {
  LSTTYPE_DIRECTIVE = 2,
  LSTTYPE_MACRO     = 3,
  LSTTYPE_STRUCT    = 4,
- LSTTYPE_LABEL     = 5
+ LSTTYPE_LABEL     = 5,
+ LSTTYPE_MACROLINE = 6
 };
 
 extern void LstOpenFile( void );

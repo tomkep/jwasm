@@ -29,9 +29,9 @@
 ****************************************************************************/
 
 fix( OUT_OF_MEMORY,          0, CloseFiles, 1 ),
-fix( CANNOT_OPEN_FILE,       1, NULL,       1 ),
-fix( CANNOT_CLOSE_FILE,      1, NULL,       1 ),
-fix( FILE_WRITE_ERROR,       1, CloseFiles, 1 ),
-fix( FILE_LSEEK_ERROR,       1, CloseFiles, 1 ),
+fix( CANNOT_OPEN_FILE,       2, NULL,       1 ),
+fix( CANNOT_CLOSE_FILE,      2, NULL,       1 ),
+fix( FILE_WRITE_ERROR,       2, CloseFiles, 1 ),
+fix( FILE_LSEEK_ERROR,       2, CloseFiles, 1 ),
 fix( EXPANDED_LINE_TOO_LONG, 1, CloseFiles, 1 ),
 fix( NESTING_LEVEL_TOO_DEEP, 0, CloseFiles, 1 ),

@@ -28,8 +28,8 @@
 *
 ****************************************************************************/
 
-
 #include <stddef.h>
+
 #include "globals.h"
 #include "memalloc.h"
 #include "omfpc.h"
