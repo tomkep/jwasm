@@ -67,11 +67,14 @@ static uint_8 NopList32[] = {
     0x90                            // nop
 };
 
-
+#if AMD64_SUPPORT
+static uint_8 *NopLists[] = { NopList16, NopList32, NopList32 };
+#else
 static uint_8 *NopLists[] = { NopList16, NopList32 };
+#endif
 
 ret_code OrgDirective( int i )
-/***********************/
+/****************************/
 {
     //struct asm_sym  *sym;
     //int_32          value = 0;
@@ -122,10 +125,10 @@ static void fill_in_objfile_space( uint size )
      - nops    ... for CODE
      */
 
-    if( ! SEGISCODE( CurrSeg ) ) {
+    if( ! CurrSeg->e.seginfo->segtype == SEGTYPE_CODE ) {
 
-        if (CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS ||
-            CurrSeg->seg->e.seginfo->segtype == SEGTYPE_ABS ) {
+        if (CurrSeg->e.seginfo->segtype == SEGTYPE_BSS ||
+            CurrSeg->e.seginfo->segtype == SEGTYPE_ABS ) {
 
             SetCurrOffset( size, TRUE, TRUE );
 
@@ -138,23 +141,22 @@ static void fill_in_objfile_space( uint size )
 
     } else {
         /* output appropriate NOP type instructions to fill in the gap */
-        /**/ myassert( ModuleInfo.Use32 == 0 || ModuleInfo.Use32 == 1 );
 
-        while( size > NopLists[ ModuleInfo.Use32 ][0] ) {
-            for( i = 1; i <= NopLists[ ModuleInfo.Use32 ][0]; i++ ) {
-                OutputByte( NopLists[ ModuleInfo.Use32 ][i] );
+        while( size > NopLists[ ModuleInfo.Ofssize ][0] ) {
+            for( i = 1; i <= NopLists[ ModuleInfo.Ofssize ][0]; i++ ) {
+                OutputByte( NopLists[ ModuleInfo.Ofssize ][i] );
             }
-            size -= NopLists[ ModuleInfo.Use32 ][0];
+            size -= NopLists[ ModuleInfo.Ofssize ][0];
         }
         if( size == 0 ) return;
 
         i=1; /* here i is the index into the NOP table */
-        for( nop_type = NopLists[ ModuleInfo.Use32 ][0]; nop_type > size ; nop_type-- ) {
+        for( nop_type = NopLists[ ModuleInfo.Ofssize ][0]; nop_type > size ; nop_type-- ) {
             i+=nop_type;
         }
         /* i now is the index of the 1st part of the NOP that we want */
         for( ; nop_type > 0; nop_type--,i++ ) {
-            OutputByte( NopLists[ ModuleInfo.Use32 ][i] );
+            OutputByte( NopLists[ ModuleInfo.Ofssize ][i] );
         }
     }
 }
@@ -162,6 +164,7 @@ static void fill_in_objfile_space( uint size )
 // align current offset to value ( alignment is 2^value )
 
 void AlignCurrOffset( int value )
+/*******************************/
 {
     int seg_align;
     int alignment = (1 << value);

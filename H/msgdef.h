@@ -26,9 +26,9 @@ pick( MSG_BANNER,
       "%s, Masm-compatible assembler.\n"
       "Portions Copyright (c) 1992-2002 Sybase, Inc. All Rights Reserved.\n"
       "Source code is available under the Sybase Open Watcom Public License.\n\n" ,
-      "JWasm v%s, %s, Masm-compatible assembler.\n"
+      "%s, Masm-compatible assembler.\n"
       "Portions Copyright (c) 1992-2002 Sybase, Inc. All Rights Reserved.\n"
-     "Source code is available under the Sybase Open Watcom Public License.\n\n" )
+      "Source code is available under the Sybase Open Watcom Public License.\n\n" )
 
 /* text constants for listing */
 
@@ -57,8 +57,8 @@ pick( TXT_TYPEDEFS,
       "Types:" ,
       "Types:" )
 pick( TXT_TYPEDEFCAP,
-      "                N a m e              Size    Attr" ,
-      "                N a m e              Size    Attr" )
+      "                N a m e                 Size    Attr" ,
+      "                N a m e                 Size    Attr" )
 pick( TXT_SEGS,
       "Segments and Groups:" ,
       "Segments and Groups:" )
@@ -101,19 +101,16 @@ pick( TXT_CHARACTERISTICS,
 
 /* error/warning message text constants */
 
-pick( LOCK_PREFIX_IS_NOT_ALLOWED_ON_THIS_INSTRUCTION,
-      "LOCK prefix is not allowed on this instruction" ,
+pick( LOCK_PREFIX_NOT_ALLOWED,
+      "LOCK prefix not allowed for this instruction" ,
       "この命令に対して LOCK プレフィックスは使用できません" )
-pick( REP_PREFIX_IS_NOT_ALLOWED_ON_THIS_INSTRUCTION,
-      "REP prefix is not allowed on this instruction" ,
+pick( REP_PREFIX_NOT_ALLOWED,
+      "REP prefix not allowed for this instruction" ,
       "この命令に対して REP プレフィックスは使用できません" )
 pick( INVALID_MEMORY_POINTER,
       "Invalid memory pointer" ,
       "無効なメモリポインタです" )
-pick( INVALID_INSTRUCTION_WITH_CURRENT_CPU_SETTING,
-      "Invalid instruction with current CPU setting" ,
-      "現在のCPUの設定に対して無効な命令です" )
-pick( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE,
+pick( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE,
       "Instruction or register not accepted in current CPU mode" ,
       "Instruction or register not accepted in current CPU mode" )
 pick( INVALID_ADDRESSING_MODE_WITH_CURRENT_CPU_SETTING,
@@ -142,9 +139,9 @@ pick( INVALID_INDEX_REGISTER,
 pick( SCALE_FACTOR_MUST_BE_1_2_4_OR_8,
       "Scale factor must be 1, 2, 4 or 8" ,
       "スケールファクタは1,2,4,8のいずれかでなければなりません" )
-pick( ESP_CANNOT_BE_USED_AS_INDEX,
-      "ESP cannot be used as index" ,
-      "ESP はインデックスとしては使用できません" )
+pick( CANNOT_BE_USED_AS_INDEX_REGISTER,
+      "Cannot be used as index register: %s" ,
+      "Cannot be used as index register: %s" )
 pick( TOO_MANY_BASE_INDEX_REGISTERS,
       "Too many base/index registers" ,
       "ベース／インデックス レジスタが多すぎます" )
@@ -209,8 +206,8 @@ pick( CANNOT_USE_SHORT_OR_NEAR,
       "Can not use short or near modifiers with this instruction" ,
       "この命令と一緒にshortまたはnearを使用することはできません" )
 pick( JUMP_OUT_OF_RANGE,
-      "Jump out of range by %d bytes" ,
-      "Jump out of range by %d bytes" )
+      "Jump out of range by %d byte(s)" ,
+      "Jump out of range by %d byte(s)" )
 pick( DISPLACEMENT_OUT_OF_RANGE,
       "Displacement cannot be larger than 32k" ,
       "ディスプレースメントが32Kを越えています" )
@@ -220,9 +217,6 @@ pick( INITIALIZER_OUT_OF_RANGE,
 pick( SYMBOL_ALREADY_DEFINED,
       "Symbol already defined: %s" ,
       "Symbol already defined: %s" )
-pick( NO_JUMP_TO_AUTO,
-      "Can not transfer control to stack symbol" ,
-      "スタックシンボルへ制御を移すことはできません" )
 pick( OFFSET_MAGNITUDE_TOO_LARGE,
       "Offset magnitude too large for specified size" ,
       "オフセットはワード(2バイト)より小さくできません" )
@@ -285,9 +279,11 @@ pick( UNEXPECTED_END_OF_FILE,
 pick( LABEL_TOO_LONG,
       "Label is too long" ,
       "ラベルが長すぎます" )
+#if 0
 pick( INCONSISTENT_INTERNAL_TABLES,
       "Inconsistent internal tables: '%.*s' not found" ,
       "Inconsistent internal tables: '%.*s' not found" )
+#endif
 pick( CANNOT_OFFSET_GRP,
       "Can not take offset of group" ,
       "グループのオフセットは取れません" )
@@ -309,9 +305,9 @@ pick( FLOAT_OPERAND,
 pick( ONLY_SHORT_AND_NEAR_DISPLACEMENT_IS_ALLOWED,
       "Only SHORT and NEAR displacement is allowed" ,
       "SHORT,NEARディスプレースメントのみ可能です" )
-pick( REPX_PREFIX_IS_NOT_ALLOWED_ON_THIS_INSTRUCTION,
-      "REPZ, REPNZ, REPE or REPNE prefix is not allowed for this instruction" ,
-      "REPZ, REPNZ, REPE or REPNE prefix is not allowed for this instruction" )
+pick( REPX_PREFIX_NOT_ALLOWED,
+      "REPZ, REPNZ, REPE or REPNE prefix not allowed for this instruction" ,
+      "REPZ, REPNZ, REPE or REPNE prefix not allowed for this instruction" )
 pick( SIZE_TOO_LARGE,
       "Initializer magnitude too large for specified size" ,
       "Initializer magnitude too large for specified size" )
@@ -369,12 +365,6 @@ pick( LIBRARY_NAME_MISSING,
 pick( DATA_EMITTED_WITH_NO_SEGMENT,
       "Data emitted with no segment" ,
       "データがセグメントに属していません" )
-pick( SEGLOCATION_EXPECTED,
-      "Seglocation is expected" ,
-      "セグメント・ロケーションが必要です" )
-pick( INVALID_REGISTER,
-      "This register isn't supported by ASSUME" ,
-      "無効なレジスタです" )
 pick( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS,
       "Cannot access label through segment registers: %s" ,
       "Cannot access label through segment registers: %s" )
@@ -406,8 +396,8 @@ pick( VARARG_REQUIRES_C_CALLING_CONVENTION,
       "Vararg requires C calling convention" ,
       "varargにはCの呼出し規約が必要です" )
 pick( MODEL_DECLARED_ALREADY,
-      "Model declared already" ,
-      "既に宣言されているモデルです" )
+      "Multiple .MODEL directives, .MODEL ignored" ,
+      "Multiple .MODEL directives, .MODEL ignored" )
 pick( MODEL_IS_NOT_DECLARED,
       "Model is not declared" ,
       "モデルは宣言されています" )
@@ -445,8 +435,8 @@ pick( OUT_OF_MEMORY,
       "Out of Memory" ,
       "メモリ不足です" )
 pick( CANNOT_OPEN_FILE,
-      "Cannot open file: %s [%u]" ,
-      "Cannot open file: %s [%u]" )
+      "Cannot open file: \"%s\" [%u]" ,
+      "Cannot open file: \"%s\" [%u]" )
 pick( CANNOT_CLOSE_FILE,
       "Cannot close file: %s [%u]" ,
       "Cannot close file: %s [%u]" )
@@ -457,9 +447,9 @@ pick( FILE_LSEEK_ERROR,
       "File lseek error: %s [%u]" ,
       "File lseek error: %s [%u]" )
 pick( INVALID_CMDLINE_OPTION,
-      "Invalid command-line option: %s" ,
-      "Invalid command-line option: %s" )
-pick( MSG_INTERNAL_ERROR,
+      "Invalid command-line option: -%s" ,
+      "Invalid command-line option: -%s" )
+pick( INTERNAL_ERROR,
       "Internal error in %s(%u)\n" ,
       "Internal error in %s(%u)\n" )
 pick( PARM_REQUIRED,
@@ -471,9 +461,11 @@ pick( EXPECTED_CL_SQ_BRACKET,
 pick( EXPECTED_FILE_NAME,
       "Expecting file name" ,
       "ファイル名が必要です" )
+#if 0
 pick( NO_FP_WITH_FPC_SET,
       "Floating point instruction not allowed with -fpc" ,
       "-fpc指定時には、浮動小数点命令は使用できません" )
+#endif
 pick( TOO_MANY_ERRORS,
       "Too many errors" ,
       "エラーが多すぎます" )
@@ -551,7 +543,7 @@ pick( WRONG_CPU_FOR_32BIT_SEGMENT,
 pick( CALL_FAR_TO_NEAR,
       "Far call is converted to near call." ,
       "Far call is converted to near call." )
-pick( MSG_CPU_OPTION_INVALID,
+pick( CPU_OPTION_INVALID,
       "CPU option %s is not valid for selected CPU.\n" ,
       "CPU option %s is not valid for selected CPU.\n" )
 pick( SEGMENT_IN_ANOTHER_GROUP,
@@ -648,8 +640,8 @@ pick( EMPTY_STRING,
       "Empty (null) string" ,
       "Empty (null) string" )
 pick( SEGMENT_MISSING_FOR_FIXUP,
-      "No segment info for '%s' to create fixup" ,
-      "No segment info for '%s' to create fixup" )
+      "No segment information to create fixup: %s" ,
+      "No segment information to create fixup: %s" )
 pick( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE,
       "Register value overwritten by INVOKE" ,
       "Register value overwritten by INVOKE" )
@@ -713,9 +705,9 @@ pick( INITIALIZED_DATA_NOT_SUPPORTED_IN_SEGMENT,
 pick( LITERAL_EXPECTED,
       "Literal expected after '='" ,
       "Literal expected after '='" )
-pick( LANG_CONV_NOT_SUPPORTED,
-      "Watcom C call convention not supported by INVOKE" ,
-      "Watcom C call convention not supported by INVOKE" )
+pick( FASTCALL_VARIANT_NOT_SUPPORTED,
+      "FASTCALL variant not supported by INVOKE" ,
+      "FASTCALL variant not supported by INVOKE" )
 pick( NO_4KPAGE_ALIGNED_SEGMENTS,
       "No 4k Page-aligned segments in MS386 OMF" ,
       "MS386 OMFには4Kページ整列セグメントがありません" )
@@ -774,6 +766,17 @@ pick( SEGMENT_FIXUPS_INVALID,
 pick( START_LABEL_INVALID,
       "Invalid start label for -bin",
       "Invalid start label for -bin" )
+#if MZ_SUPPORT
+pick( NO_START_LABEL,
+      "No start label defined",
+      "No start label defined" )
+pick( NO_STACK,
+      "No stack defined",
+      "No stack defined" )
+pick( INVALID_HEADER_ALIGNMENT,
+      "Invalid alignment - value must be 2^n (n=4..15)",
+      "Invalid alignment - value must be 2^n (n=4..15)" )
+#endif
 #endif
 pick( INDEX_PAST_END_OF_STRING,
       "Index %u is past end of string",
@@ -907,3 +910,17 @@ pick( IFDEF_EXPECTS_SYMBOL_ARGUMENT,
 pick( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL,
      "Jump destination must specify a label" ,
      "Jump destination must specify a label" )
+pick( TOKEN_IGNORED,
+     "Ignored: %s" ,
+     "Ignored: %s" )
+pick( MISSING_ARGUMENT_FOR_CMDLINE_OPTION,
+      "Missing argument for cmdline option" ,
+      "Missing argument for cmdline option" )
+pick( INVALID_COPROCESSOR_REGISTER,
+      "Invalid coprocessor register" ,
+      "Invalid coprocessor register" )
+#if AMD64_SUPPORT
+pick( INVALID_USAGE_OF_AHBHCHDH,
+      "Registers AH-DH may not be used with SPL-DIL or R8-R15" ,
+      "Registers AH-DH may not be used with SPL-DIL or R8-R15" )
+#endif

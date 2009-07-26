@@ -57,11 +57,11 @@
 // COMM [ [ mangle_type, ] langtype] [NEAR|FAR] name: ...
 // mangle_type must be a string.
 
+#if MANGLERSUPP
 static char *Check4Mangler( int *i )
 /**********************************/
 {
     char *mangle_type = NULL;
-#if MANGLERSUPP
     if( AsmBuffer[*i]->token == T_STRING ) {
         mangle_type = AsmBuffer[*i]->string_ptr;
         (*i)++;
@@ -71,9 +71,9 @@ static char *Check4Mangler( int *i )
             (*i)++;
         }
     }
-#endif
     return( mangle_type );
 }
+#endif
 
 static asm_sym *CreateGlobal( asm_sym *sym, char * name )
 {
@@ -81,7 +81,7 @@ static asm_sym *CreateGlobal( asm_sym *sym, char * name )
         sym = SymCreate( name, *name != NULLC );
     if ( sym ) {
         sym->state = SYM_EXTERNAL;
-        sym->use32 = ModuleInfo.Use32;
+        sym->Ofssize = ModuleInfo.Ofssize;
         sym->comm = 0;
         sym->weak = 1;
         dir_add_table( (dir_node *)sym );
@@ -95,7 +95,7 @@ static asm_sym *CreateExternal( asm_sym *sym, char *name )
         sym = SymCreate( name, *name != NULLC );
     if ( sym ) {
         sym->state = SYM_EXTERNAL;
-        sym->use32 = ModuleInfo.Use32;
+        sym->Ofssize = ModuleInfo.Ofssize;
         sym->comm = 0;
         sym->weak = 0;
         dir_add_table( (dir_node *)sym );
@@ -109,7 +109,7 @@ static asm_sym *CreateComm( asm_sym *sym, char *name)
         sym = SymCreate( name, *name != NULLC );
     if ( sym ) {
         sym->state = SYM_EXTERNAL;
-        sym->use32 = ModuleInfo.Use32;
+        sym->Ofssize = ModuleInfo.Ofssize;
         sym->comm = 1;
         sym->weak = 0;
         sym->isfar = 0;
@@ -125,10 +125,10 @@ ret_code ExterndefDirective( int i )
 /********************/
 {
     char                *token;
-    char                *mangle_type;
-    char                *typetoken;
+    char                *mangle_type = NULL;
+    //char                *typetoken;
     memtype             mem_type;
-    bool                is32;
+    unsigned char       Ofssize;
     int                 size;
     struct asm_sym      *sym;
     struct asm_sym      *symtype;
@@ -136,16 +136,18 @@ ret_code ExterndefDirective( int i )
 
     DebugMsg(("ExterndefDirective entry\n"));
 
+#if MANGLERSUPP
     mangle_type = Check4Mangler( &i );
+#endif
     do {
 
         symtype = NULL;
         mem_type = MT_EMPTY;
          /* set default offset size */
         if ( CurrSeg )
-            is32 = ModuleInfo.Use32;
+            Ofssize = ModuleInfo.Ofssize;
         else
-            is32 = ModuleInfo.defUse32;
+            Ofssize = ModuleInfo.defOfssize;
 
         /* get the symbol language type if present */
         langtype = ModuleInfo.langtype;
@@ -165,7 +167,7 @@ ret_code ExterndefDirective( int i )
         }
         i++;
 
-        typetoken = AsmBuffer[i]->string_ptr;
+        //typetoken = AsmBuffer[i]->string_ptr;
         if ( AsmBuffer[i]->token == T_ID ) {
             if (0 == _stricmp(AsmBuffer[i]->string_ptr, "ABS")) {
                 mem_type = MT_ABS;
@@ -181,10 +183,10 @@ ret_code ExterndefDirective( int i )
                 mem_type = SimpleType[ST_PROC].mem_type;
             }
         } else if ( AsmBuffer[i]->token == T_RES_ID ) {
-            if ( AsmBuffer[i]->rm_byte == OP_TYPE ) {
+            if ( AsmBuffer[i]->rm_byte == RWT_TYPE ) {
                 mem_type = SimpleType[AsmBuffer[i]->opcode].mem_type;
-                if (SimpleType[AsmBuffer[i]->opcode].ofs_size != OFSSIZE_EMPTY)
-                    is32 = (SimpleType[AsmBuffer[i]->opcode].ofs_size == OFSSIZE_32);
+                if ( SimpleType[AsmBuffer[i]->opcode].Ofssize != USE_EMPTY )
+                    Ofssize = SimpleType[AsmBuffer[i]->opcode].Ofssize;
             } else if ( AsmBuffer[i]->value == T_PTR ) {
                 mem_type = MT_PTR;
             }
@@ -228,9 +230,9 @@ ret_code ExterndefDirective( int i )
             else if (sym->weak == TRUE)
                 sym->equate = TRUE; /* allow redefinition by EQU, = */
             sym->offset = 0;
-            sym->use32 = is32;
+            sym->Ofssize = Ofssize;
 
-            if ( sym->segment && ((dir_node *)sym->segment)->e.seginfo->Use32 != sym->use32 )
+            if ( sym->segment && ((dir_node *)sym->segment)->e.seginfo->Ofssize != sym->Ofssize )
                 sym->segment = NULL;
 
             sym->mem_type = mem_type;
@@ -238,7 +240,7 @@ ret_code ExterndefDirective( int i )
                 sym->type = symtype;
                 sym->total_size = symtype->total_size;
             } else {
-                size = SizeFromMemtype(mem_type, is32);
+                size = SizeFromMemtype(mem_type, Ofssize );
                 if ( size != 0 )
                     sym->total_size = size;
             }
@@ -290,7 +292,7 @@ ret_code ExterndefDirective( int i )
 
 // helper for EXTERN directive
 
-asm_sym *MakeExtern( char *name, memtype mem_type, struct asm_sym * vartype, asm_sym * sym, bool is32)
+asm_sym *MakeExtern( char *name, memtype mem_type, struct asm_sym * vartype, asm_sym * sym, uint_8 Ofssize )
 /********************************************************************/
 {
     sym = CreateExternal( sym, name );
@@ -304,8 +306,8 @@ asm_sym *MakeExtern( char *name, memtype mem_type, struct asm_sym * vartype, asm
     sym->defined = TRUE;
     sym->mem_type = mem_type;
     if ( mem_type != MT_TYPE ) {
-        int size = SizeFromMemtype(mem_type, is32);
-        sym->use32 = is32;
+        int size = SizeFromMemtype( mem_type, Ofssize );
+        sym->Ofssize = Ofssize;
         if ( size != 0 )
             sym->total_size = size;
     } else
@@ -320,21 +322,23 @@ ret_code ExternDirective( int i )
 /*****************/
 {
     char                *token;
-    char                *mangle_type;
+    char                *mangle_type = NULL;
     char                *typetoken;
     char                *altname;
     memtype             mem_type;
-    bool                is32;
+    unsigned char       Ofssize;
     struct asm_sym      *sym;
     struct asm_sym      *symtype;
     lang_type           langtype;
 
+#if MANGLERSUPP
     mangle_type = Check4Mangler( &i );
+#endif
     do {
 
         symtype = NULL;
         mem_type = MT_EMPTY;
-        is32 = ModuleInfo.Use32;
+        Ofssize = ModuleInfo.Ofssize;
 
         /* get the symbol language type if present */
         langtype = ModuleInfo.langtype;
@@ -383,10 +387,10 @@ ret_code ExternDirective( int i )
                 mem_type = SimpleType[ST_PROC].mem_type;
             }
         } else if ( AsmBuffer[i]->token == T_RES_ID ) {
-            if ( AsmBuffer[i]->rm_byte == OP_TYPE ) {
+            if ( AsmBuffer[i]->rm_byte == RWT_TYPE ) {
                 mem_type = SimpleType[AsmBuffer[i]->opcode].mem_type;
-                if (SimpleType[AsmBuffer[i]->opcode].ofs_size != OFSSIZE_EMPTY)
-                    is32 = (SimpleType[AsmBuffer[i]->opcode].ofs_size == OFSSIZE_32);
+                if (SimpleType[AsmBuffer[i]->opcode].Ofssize != USE_EMPTY)
+                    Ofssize = SimpleType[AsmBuffer[i]->opcode].Ofssize;
             } else if ( AsmBuffer[i]->value == T_PTR ) {
                 mem_type = MT_PTR;
             }
@@ -408,7 +412,7 @@ ret_code ExternDirective( int i )
             }
             if ( sym )
                 dir_remove_table( (dir_node *)sym );
-            if(( sym = MakeExtern( token, mem_type, symtype, sym, is32 )) == NULL )
+            if(( sym = MakeExtern( token, mem_type, symtype, sym, Ofssize )) == NULL )
                 return( ERROR );
 
         } else {
@@ -463,12 +467,15 @@ ret_code ExternDirective( int i )
 ret_code ExternDirective2( int i )
 {
     char                *token;
-    char                *mangle_type;
+    //char                *mangle_type;
     lang_type           langtype;
     struct asm_sym      *sym;
     struct asm_sym      *symalt;
 
-    mangle_type = Check4Mangler( &i );
+#if MANGLERSUPP
+    //mangle_type = Check4Mangler( &i );
+    Check4Mangler( &i );
+#endif
     for( ; i < Token_Count; i++ ) {
 
         GetLangType( &i, &langtype );
@@ -500,13 +507,15 @@ ret_code ExternDirective2( int i )
 ret_code PublicDirective( int i )
 /*****************/
 {
-    char                *mangle_type;
+    char                *mangle_type = NULL;
     char                *token;
     struct asm_sym      *sym;
     //dir_node            *dir;
     lang_type           langtype;
 
+#if MANGLERSUPP
     mangle_type = Check4Mangler( &i );
+#endif
     do {
 
         /* read the optional language type */
@@ -605,7 +614,7 @@ ret_code CommDirective( int i )
 /******************/
 {
     char            *token;
-    char            *mangle_type;
+    char            *mangle_type = NULL;
     bool            isfar;
     //int             distance;
     int             tmp;
@@ -617,9 +626,9 @@ ret_code CommDirective( int i )
 
     for( ; i < Token_Count; i++ ) {
         count = 1;
-
+#if MANGLERSUPP
         mangle_type = Check4Mangler( &i );
-
+#endif
         /* get the symbol language type if present */
         langtype = ModuleInfo.langtype;
         GetLangType( &i, &langtype );

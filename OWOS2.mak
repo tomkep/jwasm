@@ -62,7 +62,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
            $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   &
            $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj  &
-           $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj
+           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj
 ######
 
 TARGET1=$(OUTD)/$(name).exe
@@ -80,9 +80,9 @@ $(lflagso) file { $(proj_obj) } name $@ op stack=0x20000
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/reswords.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
 	$(CC) parser.c
-    
+
 ######
 
 clean:

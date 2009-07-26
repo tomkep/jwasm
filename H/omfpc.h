@@ -32,6 +32,8 @@
 #ifndef OMFPC_H
 
 #pragma pack(1)
+
+#if 0
 /*
  * Library stuff
  */
@@ -60,6 +62,7 @@ enum {
     DIC_REC_SIZE        = 512U,     /* record size of dictionary entry */
     IS_2_BYTES          = 0x80      /* bit set indicating 2 byte value */
 };
+#endif
 
 /*
  *  INTEL Segment Alignment Specifiers - A field
@@ -308,7 +311,7 @@ enum {
     DLL_LNKDIR      = 0x05, /* Subtype LNKDIR of OMF extension class    */
 };
 
-#define EASY_OMF_SIGNATURE  "80386"
+//#define EASY_OMF_SIGNATURE  "80386"
 
 /*
     this is the data that is given in the object file to determine the

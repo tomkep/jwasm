@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  Declaration for mangler routines
+* Description:  Declaration for mangler routines (=name decoration)
 *
 ****************************************************************************/
 

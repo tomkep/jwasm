@@ -23,7 +23,7 @@ void      omf_write_end_of_pass1( void );
 void      omf_write_ledata( void );
 void      omf_write_linnum( void );
 void      omf_OutSelect( bool );
-void      omf_FlushCurrSeg( void );
+int       omf_FlushCurrSeg( void );
 
 #endif // _OMF_H_INCLUDED_
 

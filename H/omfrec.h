@@ -313,11 +313,11 @@ extern void         OmfCanFree( obj_rec *objr );
 */
 
 
-extern uint_8       OmfGet8( obj_rec *objr );
-extern uint_16      OmfGet16( obj_rec *objr );
-extern uint_32      OmfGet32( obj_rec *objr );
+//extern uint_8       OmfGet8( obj_rec *objr );
+//extern uint_16      OmfGet16( obj_rec *objr );
+//extern uint_32      OmfGet32( obj_rec *objr );
 //extern uint_32      OmfGetEither( obj_rec *objr );
-extern size_t       OmfGetIndex( obj_rec *objr );
+//extern size_t       OmfGetIndex( obj_rec *objr );
 extern uint_8       *OmfGet( obj_rec *objr, size_t len );
 //extern int          OmfEOR( obj_rec *objr );
 extern size_t       OmfRTell( obj_rec *objr );

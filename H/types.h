@@ -6,7 +6,7 @@
 
 extern dir_node  *CurrStruct; /* start of current STRUCT list */
 
-extern asm_sym   *SearchNameInStruct(asm_sym *sym, const char *name, unsigned int *poffset );
+extern asm_sym   *SearchNameInStruct(asm_sym *sym, const char *name, unsigned int *poffset, int level );
 extern ret_code  StructDirective( int );
 extern ret_code  EndstructDirective( int );
 extern ret_code  RecordDef( int );

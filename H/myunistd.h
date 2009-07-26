@@ -24,10 +24,10 @@ extern "C" {
 
 #ifdef __WATCOMC__
 #define _close      close
-#define _filelength filelength
+//#define _filelength filelength
 #define _lseek      lseek
 #define _open       open
-#define _read       read
+//#define _read       read
 #define _tell       tell
 #define _write      write
 #endif

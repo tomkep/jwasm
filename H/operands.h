@@ -31,54 +31,75 @@
 #ifndef OPERANDS_H
 #define OPERANDS_H
 
-#if 1 // defined( __WATCOMC__ )
+/* there are no more bits free. Best candidate for removal probably
+ * is OP_J48 (used by far CALL/JMP only). OP_J32 (also for far CALL/JMP)
+ * has been removed already, now used for OP_I64.
+ */
 
 enum operand_type {
     OP_NONE     = 0,
     OP_R8       = 0x00000001,
     OP_R16      = 0x00000002,
     OP_R32      = 0x00000004,
-    OP_MMX      = 0x00000008,  /* MMx register */
-    OP_XMM      = 0x00000010,  /* XMMx register */
-    OP_A        = 0x00000020,  // AL, AX, EAX registers
-    OP_C        = 0x00000040,  // CL register
-    OP_D        = 0x00000080,  // DX register
+#if AMD64_SUPPORT
+    OP_R64      = 0x00000008,
+#endif
+    OP_MMX      = 0x00000010,  /* MMx register */
+    OP_XMM      = 0x00000020,  /* XMMx register */
+    OP_A        = 0x00000040,  // AL, AX, EAX, RAX registers
+    OP_C        = 0x00000080,  // CL register
+    OP_D        = 0x00000100,  // DX register
 
     OP_AL       = ( OP_A | OP_R8 ),
     OP_AX       = ( OP_A | OP_R16 ),
     OP_EAX      = ( OP_A | OP_R32 ),
+#if AMD64_SUPPORT
+    OP_RAX      = ( OP_A | OP_R64 ),
+#endif
     OP_CL       = ( OP_C | OP_R8 ),
     OP_DX       = ( OP_D | OP_R16 ),
-    OP_R1632    = ( OP_R16 | OP_R32 ),
+#if AMD64_SUPPORT
+    OP_RGT8     = ( OP_R16 | OP_R32 | OP_R64 ),
+    OP_RGT16    = ( OP_R32 | OP_R64 ),
+    OP_R        = ( OP_R8 | OP_R16 | OP_R32 | OP_R64 ),
+#else
+    OP_RGT8     = ( OP_R16 | OP_R32 ),
+    OP_RGT16    = ( OP_R32 ),
     OP_R        = ( OP_R8 | OP_R16 | OP_R32 ),
+#endif
     // OP_RMX      = ( OP_MMX | OP_XMM ),
 
-    OP_I8       = 0x00000100,
-    OP_I_1      = 0x00000200,
-    OP_I_3      = 0x00000400,
-    OP_I8_U     = 0x00000800,
-    OP_I16      = 0x00001000,
-    OP_I32      = 0x00002000,
-    OP_J32      = 0x00004000,
-    OP_J48      = 0x00008000,
+    OP_I8       = 0x00000200,
+    OP_I_1      = 0x00000400,
+    OP_I_3      = 0x00000800,
+    OP_I8_U     = 0x00001000,
+    OP_I16      = 0x00002000,
+    OP_I32      = 0x00004000,
+    //OP_J32      = 0x00008000,
+#if AMD64_SUPPORT
+    OP_I64      = 0x00008000,
+#endif
+    OP_J48      = 0x00010000,
     OP_I        = ( OP_I8 | OP_I_1 | OP_I_3 | OP_I8_U | OP_I16 | OP_I32 ),
     OP_GE_8     = ( OP_I8 | OP_I8_U | OP_I16 | OP_I32 ),
     OP_GE_16    = ( OP_I16 | OP_I32 ),
     OP_GE_U8    = ( OP_I8_U | OP_I16 | OP_I32 ),
 
-    OP_M_B      = 0x00010000,
-    OP_M_W      = 0x00020000,
-    OP_M_DW     = 0x00040000,
-    OP_M_FW     = 0x00080000,
-    OP_M_QW     = 0x00100000,
-    OP_M_TB     = 0x00200000,
-    OP_M_OW     = 0x00400000,
-    OP_M_DFT    = 0x00800000,
+    OP_M_B      = 0x00020000,
+    OP_M_W      = 0x00040000,
+    OP_M_DW     = 0x00080000,
+    OP_M_FW     = 0x00100000,
+    OP_M_QW     = 0x00200000,
+    OP_M_TB     = 0x00400000,
+    OP_M_OW     = 0x00800000,
+    OP_M_DFT    = 0x01000000,
 
     OP_M8       = ( OP_M_B | OP_M_DFT ),
     OP_M16      = ( OP_M_W | OP_M_DFT ),
     OP_M32      = ( OP_M_DW | OP_M_DFT ),
-    //OP_M64      = ( OP_M_QW | OP_M_DFT ),
+#if AMD64_SUPPORT
+    OP_M64      = ( OP_M_QW | OP_M_DFT ),
+#endif
     //OP_M128     = ( OP_M_OW | OP_M_DFT ),
     OP_MDWOW    = ( OP_M_DW | OP_M_OW ),
     OP_MQWOW    = ( OP_M_QW | OP_M_OW ),
@@ -89,120 +110,28 @@ enum operand_type {
     OP_M16_R16  = ( OP_M_W | OP_M_DFT | OP_R16 ),
     OP_M32_R32  = ( OP_M_DW | OP_M_DFT | OP_R32 ),
 
-    OP_CR       = 0x01000000,
-    OP_DR       = 0x02000000,
-    OP_TR       = 0x04000000,
+    OP_CR       = 0x02000000,
+    OP_DR       = 0x04000000,
+    OP_TR       = 0x08000000,
     OP_SPEC_REG = ( OP_CR | OP_DR | OP_TR ),
 
-    OP_SR86     = 0x08000000,
-    OP_SR386    = 0x10000000,
+    OP_SR86     = 0x10000000,
+    OP_SR386    = 0x20000000,
     OP_SR       = ( OP_SR86 | OP_SR386 ),
 
-    OP_ST       = 0x20000000,
-    OP_ST_REG   = 0x40000000,
+    OP_ST       = 0x40000000,
+    OP_ST_REG   = 0x80000000,
     OP_STI      = ( OP_ST | OP_ST_REG ),
-
-    /* OP_SPECIAL is a flag! */
-    /* field specialtype provides further info */
-    OP_SPECIAL  = 0x80000000
 };
 
 typedef enum operand_type OPNDTYPE;
 
-#else
-
-#define OP_NONE     0
-#define OP_R8       0x00000001
-#define OP_R16      0x00000002
-#define OP_R32      0x00000004
-#define OP_MMX      0x00000008
-#define OP_XMM      0x00000010
-#define OP_A        0x00000020  // AL AX EAX registers
-#define OP_C        0x00000040  // CL register
-#define OP_D        0x00000080  // DX register
-
-#define OP_AL       ( OP_A | OP_R8 )
-#define OP_AX       ( OP_A | OP_R16 )
-#define OP_EAX      ( OP_A | OP_R32 )
-#define OP_CL       ( OP_C | OP_R8 )
-#define OP_DX       ( OP_D | OP_R16 )
-#define OP_R1632    ( OP_R16 | OP_R32 )
-#define OP_R        ( OP_R8 | OP_R16 | OP_R32 )
-#define OP_RMX      ( OP_MMX | OP_XMM )
-
-#define OP_I8       0x00000100
-#define OP_I_1      0x00000200
-#define OP_I_3      0x00000400
-#define OP_I8_U     0x00000800
-#define OP_I16      0x00001000
-#define OP_I32      0x00002000
-#define OP_J32      0x00004000
-#define OP_J48      0x00008000
-#define OP_I        ( OP_I8 | OP_I_1 | OP_I_3 | OP_I8_U | OP_I16 | OP_I32 )
-#define OP_GE_8     ( OP_I8 | OP_I8_U | OP_I16 | OP_I32 )
-#define OP_GE_16    ( OP_I16 | OP_I32 )
-#define OP_GE_U8    ( OP_I8_U | OP_I16 | OP_I32 )
-
-#define OP_M_B      0x00010000
-#define OP_M_W      0x00020000
-#define OP_M_DW     0x00040000
-#define OP_M_FW     0x00080000
-#define OP_M_QW     0x00100000
-#define OP_M_TB     0x00200000
-#define OP_M_OW     0x00400000
-#define OP_M_DFT    0x00800000
-
-#define OP_M8       ( OP_M_B | OP_M_DFT )
-#define OP_M16      ( OP_M_W | OP_M_DFT )
-#define OP_M32      ( OP_M_DW | OP_M_DFT )
-//#define OP_M64      ( OP_M_QW | OP_M_DFT )
-//#define OP_M128     ( OP_M_OW | OP_M_DFT )
-
-#define OP_M        ( OP_M_B | OP_M_W | OP_M_DW | OP_M_DFT )
-#define OP_M_ANY    ( OP_M_B | OP_M_W | OP_M_DW | OP_M_FW | OP_M_QW | OP_M_TB | OP_M_OW | OP_M_DFT )
-#define OP_M8_R8    ( OP_M_B | OP_M_DFT | OP_R8 )
-#define OP_M16_R16  ( OP_M_W | OP_M_DFT | OP_R16 )
-#define OP_M32_R32  ( OP_M_DW | OP_M_DFT | OP_R32 )
-
-#define OP_CR       0x01000000
-#define OP_DR       0x02000000
-#define OP_TR       0x04000000
-#define OP_SPEC_REG ( OP_CR | OP_DR | OP_TR )
-
-#define OP_SR86     0x08000000
-#define OP_SR386    0x10000000
-#define OP_SR       ( OP_SR86 | OP_SR386 )
-
-#define OP_ST       0x20000000
-#define OP_ST_REG   0x40000000
-#define OP_STI      ( OP_ST | OP_ST_REG )
-
-#define OP_SPECIAL  0x80000000
-
-typedef uint_32 OPNDTYPE;
-
-#endif
-
-
-enum operand3_type {
+enum operand3_type { /* this is a 4bit field only! */
     OP3_NONE = 0x00,
-    OP3_CL   = 0x01,
+    //OP3_CL   = 0x01, /* v1.96: value not used */
     OP3_I8_U = 0x02,
-    OP3_I    = 0x03,
-    OP3_HID  = 0x08
-};
-
-/*
- for OP_SPECIAL, the specialtype field will contain further info:
- */
-
-enum special_type {
- OP_REGISTER,
- OP_RES_ID,
- OP_DIRECTIVE,
- OP_ARITHOP,
- OP_TYPE,
- OP_UNARY_OPERATOR
+    //OP3_I    = 0x03, /* v1.96: value not used */
+    OP3_HID  = 0x08 /* this is a flag, data in bits 0-2! */
 };
 
 #endif

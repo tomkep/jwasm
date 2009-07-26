@@ -19,17 +19,130 @@
 #include "input.h"
 #include "queues.h"
 #include "equate.h"
-#include "mangle.h"
 #include "assume.h"
 #include "segment.h"
 #include "fastpass.h"
 #include "listing.h"
 
 static int size_vararg;
+static int fcscratch;
+
+struct fastcall_conv {
+    void (* invokestart)( dir_node *, int, char * );
+    void (* invokeend)( dir_node *, int, char * );
+    int  (* handleparam)( dir_node *, int, dir_node *, expr_list *, char *, char *, bool * );
+};
+
+static void ms32_fcstart( dir_node *, int, char * );
+static void ms32_fcend( dir_node *, int, char * );
+static  int ms32_param( dir_node *, int, dir_node *, expr_list *, char *, char *, bool * );
+#if AMD64_SUPPORT
+static void ms64_fcstart( dir_node *, int, char * );
+static void ms64_fcend( dir_node *, int, char * );
+static  int ms64_param( dir_node *, int, dir_node *, expr_list *, char *, char *, bool * );
+#endif
+
+static struct fastcall_conv fastcall_tab[] = {
+ { ms32_fcstart, ms32_fcend , ms32_param },
+#if INVOKE_WC
+ { watc_fcstart, watc_fcend , watc_param },
+#else
+ { NULL, NULL , NULL },
+#endif
+#if AMD64_SUPPORT
+    { ms64_fcstart, ms64_fcend , ms64_param }
+#endif
+};
+
+static const char reg_prefix[] = { ' ', 'e', 'r' };
+static const char * ms32_regs[] = {"cx", "dx" };
+#if AMD64_SUPPORT
+static const char * ms64_regs[] = {"rcx", "rdx", "r8", "r9" };;
+#endif
+
+static void ms32_fcstart( dir_node *proc, int numparams, char *buffer )
+{
+    /* nothing to do */
+    fcscratch = 2;
+    return;
+}
+
+static void ms32_fcend( dir_node *proc, int numparams, char *buffer )
+{
+    /* nothing to do */
+    return;
+}
+
+static int ms32_param( dir_node *proc, int index, dir_node *param, expr_list *opndx, char *buffer, char *paramvalue, bool *r0used )
+{
+    if ( param->sym.state != SYM_TMACRO || fcscratch == 0 )
+        return( 0 );
+    fcscratch--;
+    sprintf( buffer, " mov %c%s, %s", reg_prefix[ModuleInfo.Ofssize], ms32_regs[fcscratch], paramvalue );
+    AddLineQueue( buffer );
+    return( 1 );
+}
+
+#if AMD64_SUPPORT
+static void ms64_fcstart( dir_node *proc, int numparams, char *buffer )
+{
+    if ( numparams < 4)
+        numparams = 4;
+    else if ( numparams & 1 )
+        numparams++;
+    sprintf( buffer, " sub rsp, %d", numparams * 8);
+    AddLineQueue( buffer );
+    return;
+}
+
+static void ms64_fcend( dir_node *proc, int numparams, char *buffer )
+{
+    if ( numparams < 4)
+        numparams = 4;
+    else if ( numparams & 1 )
+        numparams++;
+    sprintf( buffer, " lea rsp, [rsp+%d]", numparams * 8);
+    AddLineQueue( buffer );
+    return;
+}
+
+static int ms64_param( dir_node *proc, int index, dir_node *param, expr_list *opndx, char *buffer, char *paramvalue, bool *r0used )
+{
+    int size;
+    char *pstr;
+    if ( index >= 4 ) {
+        if ( opndx->mem_type == MT_EMPTY )
+            sprintf( buffer, " mov qword ptr [rsp+%u], %s", index*8, paramvalue );
+        else {
+            size = SizeFromMemtype( opndx->mem_type, USE64 );
+            switch ( size ) {
+            case 1:  pstr =  "al"; break;
+            case 2:  pstr =  "ax"; break;
+            case 4:  pstr = "eax"; break;
+            default: pstr = "rax"; break;
+            }
+            if ( size <= 8 )
+                sprintf( buffer, " mov %s, %s", pstr, paramvalue );
+            else
+                sprintf( buffer, " lea %s, %s", pstr, paramvalue );
+            AddLineQueue( buffer );
+            sprintf( buffer, "mov [esp+%u], %s", index*8, pstr );
+            *r0used = TRUE;
+        }
+    } else if ( opndx->mem_type == MT_REAL4 || opndx->mem_type == MT_REAL8 ) {
+        sprintf( buffer, " mov xmm%u, %s", index, paramvalue );
+    } else {
+        sprintf( buffer, " mov %s, %s", ms64_regs[index], paramvalue );
+    }
+    AddLineQueue( buffer );
+    return( 1 );
+}
+
+#endif
 
 #if INVOKE_WC
 
-// watcom_c calling convention doesn't work yet with INVOKE!
+// FASTCALL for OW register calling convention doesn't work yet with INVOKE!
 
 static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_number )
 /*************************************************************************************/
@@ -48,7 +161,7 @@ static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_n
         sprintf( buffer, parm_reg[A_WORD][parm] );
         break;
     case 4:
-        if( ModuleInfo.Use32 ) {
+        if( ModuleInfo.Ofssize ) {
             sprintf( buffer, parm_reg[A_DWORD][parm] );
             break;
         } else {
@@ -74,7 +187,7 @@ static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_n
         AsmErr( TBYTE_NOT_SUPPORTED );
         return( ERROR );
     case 6:
-        if( ModuleInfo.Use32 ) {
+        if( ModuleInfo.Ofssize ) {
             switch( parm ) {
             case 0:
                 sprintf( buffer, " [DX EAX]" );
@@ -95,7 +208,7 @@ static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_n
         }
         // fall through for 16 bit to default
     case 8:
-        if( ModuleInfo.Use32 ) {
+        if( ModuleInfo.Ofssize ) {
             switch( parm ) {
             case 0:
                 sprintf( buffer, " [EDX EAX]" );
@@ -124,31 +237,41 @@ static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_n
 }
 #endif
 
-// get size from register (for PUSH)
+// get size of a register (for PUSH)
 
 int SizeFromRegister( int registertoken )
-/******************************/
+/***************************************/
 {
     int flags = AsmOpTable[AsmResWord[registertoken].position].opnd_type[1];
     if ( flags & OP_R32 )
         return( 4 );
+#if AMD64_SUPPORT
+    else if ( flags & OP_R64 )
+        return( 8 );
+#endif
     else if ( flags & OP_R16 )
         return( 2 );
     else if ( flags & OP_R8 )
         return( 1 );
     else if ( flags & OP_SR )
-        return( 0 );
+        return( CurrWordSize );
     else if ( flags & OP_ST )
         return( 10 );
     else if ( flags & OP_MMX )
         return( 8 );
     else if ( flags & OP_XMM )
         return( 16 ); /* masm v6x and v7 return 10, v8 returns 16 */
-    else /* CRx, DRx, TRx ... */
+    else {/* CRx, DRx, TRx */
+#if AMD64_SUPPORT
+        if ( ModuleInfo.Ofssize == USE64 )
+            return( 8 );
+#endif
         return( 4 );
+    }
 }
 
-void SkipTypecast(char * fullparam, int i)
+static void SkipTypecast(char * fullparam, int i)
+/****************************************/
 {
     int j;
     fullparam[0] = NULLC;
@@ -174,7 +297,8 @@ void SkipTypecast(char * fullparam, int i)
   psize,asize: size of parameter/argument in bytes.
 */
 
-static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32, bool * eaxused)
+static int PushInvokeParam( dir_node *proc, dir_node *curr, int i, int reqParam, uint_8 procuse32, bool * r0used)
+/**********************************************************************************************/
 {
     int currParm;
     int psize;
@@ -183,7 +307,7 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
     int j;
     int fptrsize;
     bool addr = FALSE; /* ADDR operator found */
-    struct asm_sym * sym;
+    //struct asm_sym * sym;
     expr_list opndx;
     char fullparam[MAX_LINE_LEN];
     char buffer[MAX_LINE_LEN];
@@ -204,11 +328,11 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
 
     /* set psize (size of parameter) */
     if ( curr->is_ptr ) {
-        psize = curr->is32 ? 4 : 2;
+        psize = 2 << curr->is32;
         if ( curr->is_far )
             psize += 2;
     } else if ( curr->sym.mem_type != MT_TYPE )
-        psize = SizeFromMemtype(curr->sym.mem_type, curr->is32);
+        psize = SizeFromMemtype(curr->sym.mem_type, curr->is32 );
     else
         psize = curr->sym.type->total_size;
 
@@ -231,25 +355,31 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
     }
 
     j = i;
-    fptrsize = procuse32 ? 6 : 4;
+    fptrsize = 2 + (2 << procuse32);
 
     if ( addr ) {
-        if (EvalOperand( &j, Token_Count, &opndx, TRUE ) == ERROR)
-            return(ERROR);
+        if ( EvalOperand( &j, Token_Count, &opndx, TRUE ) == ERROR )
+            return( ERROR );
 
         /* DWORD (16bit) and FWORD(32bit) are treated like FAR ptrs */
         if ( psize > fptrsize ) {
             /* QWORD is NOT accepted as a FAR ptr */
-            AsmErr(INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1);
-            return(NOT_ERROR);
+            AsmErr( INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1 );
+            return( NOT_ERROR );
         }
+
+        if ( proc->sym.langtype == LANG_FASTCALL )
+            if ( fastcall_tab[Options.fastcall].handleparam( proc, reqParam, curr, &opndx, buffer, fullparam, r0used ) )
+                return( NOT_ERROR );
 
         if (opndx.kind == EXPR_REG || opndx.indirect ) {
             if (curr->is_far || psize == fptrsize ) {
                 strcpy(buffer, " push ");
 #if 0
-                /* this is useless, as it is ignored by the assembler */
-                if (curr->is32 != ModuleInfo.Use32) {
+                /* this is useless, as it is ignored by the assembler
+                 * ( use "pushw" / "pushd" instead! )
+                 */
+                if (curr->is32 != ModuleInfo.Ofssize ) {
                     if (curr->is32)
                         strcat(buffer, "dword ptr ");
                     else
@@ -264,18 +394,18 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
                     strcat(buffer,"ds");
                 AddLineQueue( buffer );
             }
-            sprintf(buffer, " lea %s, %s", ModuleInfo.Use32 ? "eax" : "ax", fullparam);
-            *eaxused = TRUE;
+            sprintf(buffer, " lea %cax, %s", reg_prefix[ModuleInfo.Ofssize], fullparam);
+            *r0used = TRUE;
 //          DebugMsg(("PushInvokeParam: %s\n", buffer));
             AddLineQueue( buffer );
-            sprintf(buffer, " push %s", ModuleInfo.Use32 ? "eax" : "ax");
+            sprintf(buffer, " push %cax", reg_prefix[ModuleInfo.Ofssize] );
         } else {
         push_address:
-            if (curr->is_far || psize == fptrsize ) {
+            if ( curr->is_far || psize == fptrsize ) {
                 strcpy(buffer, " push ");
 
-                if (opndx.override != EMPTY) {
-                    strcat(buffer, AsmBuffer[opndx.override]->string_ptr);
+                if ( opndx.override != EMPTY ) {
+                    strcat( buffer, AsmBuffer[opndx.override]->string_ptr );
                 } else if (opndx.sym != NULL && opndx.sym->segment != NULL) {
                     dir_node *dir = GetSeg(opndx.sym);
                     enum assume_segreg as;
@@ -286,25 +416,13 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
                         as = search_assume( (asm_sym *)dir, ASSUME_CS, TRUE );
                     if ( as != ASSUME_NOTHING ) {
                         char *p;
-                        switch (as) {
-                        case ASSUME_DS:
-                            p = "ds";
-                            break;
-                        case ASSUME_CS:
-                            p = "cs";
-                            break;
-                        case ASSUME_SS:
-                            p = "ss";
-                            break;
-                        case ASSUME_ES:
-                            p = "es";
-                            break;
-                        case ASSUME_FS:
-                            p = "fs";
-                            break;
-                        default:
-                            p = "gs";
-                            break;
+                        switch ( as ) {
+                        case ASSUME_ES:  p = "es";  break;
+                        case ASSUME_CS:  p = "cs";  break;
+                        case ASSUME_SS:  p = "ss";  break;
+                        case ASSUME_DS:  p = "ds";  break;
+                        case ASSUME_FS:  p = "fs";  break;
+                        default:         p = "gs";  break;
                         }
                         strcat( buffer, p );
                     } else {
@@ -326,15 +444,21 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
                 AddLineQueue(buffer);
             }
 #if 0
-            if ( ModuleInfo.Use32 != curr->is32 ) {
-                if ( ModuleInfo.Use32 )
+            if ( ModuleInfo.Ofssize != curr->is32 ) {
+                if ( ModuleInfo.Ofssize )
                     /* better use PUSHW/PUSHD! */
                     sprintf(buffer, " push LOWWORD(offset %s)", fullparam);
                 else
                     sprintf(buffer, " push DWORD PTR offset %s", fullparam);
             } else
 #endif
-                sprintf(buffer, " push offset %s", fullparam);
+                if ( (ModuleInfo.curr_cpu & P_CPU_MASK ) < P_186 ) {
+                    sprintf(buffer, " mov ax, offset %s", fullparam);
+                    *r0used = TRUE;
+                    AddLineQueue( buffer );
+                    sprintf(buffer, " push ax");
+                } else
+                    sprintf(buffer, " push offset %s", fullparam);
         }
         if ( curr->is_vararg ) {
             size_vararg = size_vararg + CurrWordSize;
@@ -349,8 +473,6 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
             AsmBuffer[j+2]->token == T_COLON &&
             AsmBuffer[j+3]->token == T_REG) {
             asize = SizeFromRegister(AsmBuffer[j]->value);
-            if (asize == 0)
-                asize = CurrWordSize;
             asize += SizeFromRegister(AsmBuffer[j+3]->value);
             sprintf(buffer, " push %s", AsmBuffer[j]->string_ptr);
             AddLineQueue( buffer );
@@ -366,8 +488,6 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
             /* for a simple register, get its size */
             if ( opndx.kind == EXPR_REG && opndx.indirect == FALSE ) {
                 asize = SizeFromRegister( AsmBuffer[opndx.base_reg]->value );
-                if ( asize == 0 ) /* segment register? */
-                    asize = CurrWordSize;
             } else if ( opndx.mem_type == MT_EMPTY )
                 asize = psize;
             else if ( opndx.mem_type != MT_TYPE ) {
@@ -379,7 +499,9 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
                       opndx.mem_type == MT_FAR ||
                       opndx.mem_type == MT_NEAR))
                     goto push_address;
-                asize = SizeFromMemtype( opndx.mem_type, ModuleInfo.Use32 );
+                if ( opndx.Ofssize == USE_EMPTY )
+                    opndx.Ofssize = ModuleInfo.Ofssize;
+                asize = SizeFromMemtype( opndx.mem_type, opndx.Ofssize );
             } else {
                 if ( opndx.sym != NULL )
                     asize = opndx.sym->type->total_size;
@@ -391,21 +513,25 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
         if (curr->is_vararg == TRUE)
             psize = asize;
 
-        if (asize > psize) { /* argument's size too big */
+        if ( asize > psize ) { /* argument's size too big */
             DebugMsg(("PushInvokeParm(%u): error, arg size=%u, parm size=%u\n", reqParam, asize, psize));
             AsmErr(INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1);
             return (NOT_ERROR);
         }
 
-        sym = opndx.sym;
+        //sym = opndx.sym;
 
 #ifdef DEBUG_OUT
-        if (sym)
-            DebugMsg(("PushInvokeParam(%u): arg name=%s, asize=%u, psize=%u\n", reqParam, sym->name, asize, psize));
+        if (opndx.sym)
+            DebugMsg(("PushInvokeParam(%u): arg name=%s, asize=%u, psize=%u\n", reqParam, opndx.sym->name, asize, psize));
         else
             DebugMsg(("PushInvokeParam(%u): arg no name, asize=%u, psize=%u\n", reqParam, asize, psize));
 #endif
         pushsize = CurrWordSize;
+
+        if ( proc->sym.langtype == LANG_FASTCALL )
+            if ( fastcall_tab[Options.fastcall].handleparam( proc, reqParam, curr, &opndx, buffer, fullparam, r0used ) )
+                return( NOT_ERROR );
 
         if ((opndx.kind == EXPR_ADDR && opndx.instr != T_OFFSET) ||
             (opndx.kind == EXPR_REG && opndx.indirect == TRUE)) {
@@ -419,8 +545,8 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
                 if (curr->is_vararg)
                     size_vararg += asize;
 
-                /* in params like "qword ptr [eax]" the typecast */
-                /* has to be removed */
+                /* in params like "qword ptr [eax]" the typecast
+                 * has to be removed */
                 if (opndx.explicit) {
                     SkipTypecast(fullparam, i);
                     opndx.explicit = FALSE;
@@ -469,7 +595,7 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
                         AddLineQueue( buffer );
                         strcpy(buffer, " push eax");
                     }
-                    *eaxused = TRUE;
+                    *r0used = TRUE;
                     break;
                 case MT_SBYTE:
                     if (pushsize == 2) {
@@ -485,19 +611,31 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
                         AddLineQueue( buffer );
                         strcpy(buffer, " push eax");
                     }
-                    *eaxused = TRUE;
+                    *r0used = TRUE;
                     break;
                 case MT_WORD:
-                    sprintf(buffer, " movzx eax, %s", fullparam);
-                    AddLineQueue( buffer );
-                    strcpy(buffer, " push eax");
-                    *eaxused = TRUE;
+                    if ( Options.masm_compat_gencode ) {
+                        strcpy( buffer, " sub esp, 2");
+                        AddLineQueue( buffer );
+                        sprintf( buffer, "push %s", fullparam );
+                    } else {
+                        sprintf( buffer, " movzx eax, %s", fullparam );
+                        AddLineQueue( buffer );
+                        strcpy( buffer, " push eax" );
+                        *r0used = TRUE;
+                    }
                     break;
                 case MT_SWORD:
-                    sprintf(buffer, " movsx eax, %s", fullparam);
-                    AddLineQueue( buffer );
-                    strcpy(buffer, " push eax");
-                    *eaxused = TRUE;
+                    if ( Options.masm_compat_gencode ) {
+                        strcpy( buffer, " sub esp, 2");
+                        AddLineQueue( buffer );
+                        sprintf( buffer, "push %s", fullparam );
+                    } else {
+                        sprintf(buffer, " movsx eax, %s", fullparam);
+                        AddLineQueue( buffer );
+                        strcpy(buffer, " push eax");
+                        *r0used = TRUE;
+                    }
                     break;
                 default:
                     sprintf(buffer, " push %s", fullparam);
@@ -514,7 +652,8 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
                     size_vararg += pushsize;
             }
         } else { /* the parameter is a register or constant value! */
-            char * qual = "";
+            char *suffix = "";
+            char *qual = "";
             if ( opndx.kind == EXPR_REG ) {
                 if (asize != psize || asize < pushsize) {
                     /* if argument is a 16bit register, just push the full 32bit */
@@ -546,51 +685,63 @@ static int PushInvokeParam( dir_node *curr, int i, int reqParam, bool procuse32,
                         AsmErr(INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1);
                     }
                 }
-                if ( *eaxused )
+                if ( *r0used )
                     if (AsmBuffer[opndx.base_reg]->value == T_EAX ||
                         AsmBuffer[opndx.base_reg]->value == T_AX) {
                         AsmErr(REGISTER_VALUE_OVERWRITTEN_BY_INVOKE);
-                        *eaxused = FALSE;
+                        *r0used = FALSE;
                     }
-            } else {
+            } else { /* constant value */
                 asize = CurrWordSize;
                 if (psize < pushsize)  /* ensure that the default pushsize is met */
                     psize = pushsize;
                 if (asize != psize)
-                    if (psize == 2)
-                        qual = "word ptr ";
-                    else if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 )
-                        qual = "dword ptr ";
-                    else {
-                        sprintf(buffer, " push HIGHWORD (%s)", fullparam);
-                        AddLineQueue( buffer );
-                        qual = "LOWWORD (";
-                        strcat( fullparam, ")");
+                    switch ( psize ) {
+                    case 2:
+                        suffix = "w";
+                        break;
+                    case 4:
+                        if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 )
+                            suffix = "d";
+                        else {
+                            sprintf(buffer, " pushw HIGHWORD (%s)", fullparam);
+                            AddLineQueue( buffer );
+                            suffix = "w LOWWORD (";
+                            strcat( fullparam, ")");
+                        }
+                        break;
+                    case 8:
+#if AMD64_SUPPORT
+                        if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_64 )
+                            break;
+#endif
+                    default:
+                        AsmErr(INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1);
                     }
             }
-            sprintf(buffer, " push %s%s", qual, fullparam);
+            sprintf(buffer, " push%s %s%s", suffix, qual, fullparam);
             if (curr->is_vararg)
                 size_vararg += psize;
         }
     }
     AddLineQueue( buffer );
-    return NOT_ERROR;
+    return( NOT_ERROR );
 }
 
 // generate a call for a prototyped procedure
 
 ret_code InvokeDirective( int i )
-/******************/
+/*******************************/
 {
     struct asm_sym      *sym;
-    dir_node            *dir;
+    dir_node            *proc;
     char                *name;
     //char                *param;
     int                 numParam;
     int                 namepos = i;
-    bool                eaxused = FALSE;
+    bool                r0used = FALSE;
     bool                uselabel = FALSE;
-    bool                procuse32;
+    uint_8              procuse32;
     proc_info   *info;
     dir_node    *curr;
     expr_list   opndx;
@@ -615,38 +766,57 @@ ret_code InvokeDirective( int i )
         DebugMsg(("InvokeDef: target is expression, opndx->sym=%X, opndx->mbr=%X, opndx->type=%X\n", opndx.sym, opndx.mbr, opndx.type ));
 #if 1
         /* a typecast with PTR? Since v1.95, this has highest priority */
-        if (opndx.explicit == TRUE && opndx.type != NULL && opndx.type->state == SYM_TYPE ) {
+        //if (opndx.explicit == TRUE && opndx.type != NULL && opndx.type->state == SYM_TYPE ) {
+        // v1.96: removed opndx.explicit!!!
+        if ( opndx.type != NULL && opndx.type->state == SYM_TYPE ) {
             sym = opndx.type;
-            dir = (dir_node *)sym;
-            if (opndx.label != EMPTY)
+            proc = (dir_node *)sym;
+            if ( opndx.label != EMPTY )
                 uselabel = TRUE;
-            if ( dir->sym.mem_type == MT_PROC )  /* added for v1.95 */
+            if ( proc->sym.mem_type == MT_PROC )  /* added for v1.95 */
                 goto isfnproto;
             goto isfnptr;
 #endif
-        } else if (opndx.mbr != NULL) {
+        } else if ( opndx.mbr != NULL ) {
             sym = opndx.mbr;
             // it may be a typecast. then the mbr member contains the explicit type
             // and sym->state is SYM_TYPE
-            if (sym->state == SYM_TYPE) {
-                dir = (dir_node *)sym;
-                if (opndx.label != EMPTY)
+            // v1.96: the sentence above describes an obsolete feature.
+            // Not sure if <mbr> can contain a type anymore.
+            // this code is to be removed/modified!
+            if ( sym->state == SYM_TYPE ) {
+                proc = (dir_node *)sym;
+                if ( opndx.label != EMPTY )
                     uselabel = TRUE;
                 goto isfnptr;
             }
-        } else if (opndx.kind == EXPR_ADDR &&
+        } else if ( opndx.kind == EXPR_ADDR &&
                    opndx.sym != NULL &&
                    (opndx.sym->state == SYM_PROC ||
                    (opndx.sym->mem_type == MT_TYPE &&
-                   opndx.sym->type->mem_type == MT_PTR))) {
+                   opndx.sym->type->mem_type == MT_PTR)) ) {
             sym = opndx.sym;
         } else {
             AsmErr( INVOKE_REQUIRES_PROTOTYPE );
-            return (ERROR);
+            return ( ERROR );
         }
     } else {
-        name = AsmBuffer[i++]->string_ptr;
-        sym = SymSearch( name );
+        int j;
+        name = AsmBuffer[i]->string_ptr;
+        sym = NULL;
+        if ( AsmBuffer[i]->token == T_ID )
+            sym = SymSearch( name );
+        else if ( AsmBuffer[i]->token == T_REG ) {
+            j = AsmResWord[AsmBuffer[i]->value].position;
+            if ( AsmOpTable[j].opnd_type[1] & OP_RGT8 ) {
+                sym = GetStdAssume( AsmOpTable[j].opcode );
+                proc = (dir_node *)sym;
+                if ( proc->sym.mem_type == MT_PROC )  /* added for v1.95 */
+                    goto isfnproto;
+                goto isfnptr;
+            }
+        }
+        i++;
     }
 
     if( sym == NULL ) {
@@ -657,23 +827,23 @@ ret_code InvokeDirective( int i )
         ;
     else if ((sym->mem_type == MT_TYPE) && (sym->type->mem_type == MT_PTR)) {
         /* second case: symbol is a (function?) pointer */
-        dir = (dir_node *)sym->type;
+        proc = (dir_node *)sym->type;
         /* get the pointer target */
     isfnptr:
-        dir = (dir_node *)dir->e.structinfo->target;
+        proc = (dir_node *)proc->e.structinfo->target;
         /* pointer target must be a PROTO typedef */
     isfnproto:
-        if (dir == NULL || dir->sym.mem_type != MT_PROC) {
+        if ( proc == NULL || proc->sym.mem_type != MT_PROC) {
 #ifdef DEBUG_OUT
             if ( sym )
                 DebugMsg(("InvokeDef: sym->name=%s, sym->type=%X\n", sym->name, sym->type));
             else
-                DebugMsg(("InvokeDef: sym=NULL, dir=%X\n", dir ));
+                DebugMsg(("InvokeDef: sym=NULL, dir=%X\n", proc ));
 #endif
             AsmErr( INVOKE_REQUIRES_PROTOTYPE );
             return( ERROR );
         }
-        sym = dir->e.structinfo->target;
+        sym = proc->e.structinfo->target;
     } else {
 #ifdef DEBUG_OUT
         if (sym->mem_type == MT_TYPE)
@@ -684,26 +854,34 @@ ret_code InvokeDirective( int i )
         AsmErr( INVOKE_REQUIRES_PROTOTYPE );
         return( ERROR );
     }
-    dir = (dir_node *)sym;
-    info = dir->e.procinfo;
-    procuse32 = sym->use32;
+    proc = (dir_node *)sym;
+    info = proc->e.procinfo;
+    procuse32 = sym->Ofssize;
 
-    if (dir->sym.langtype == LANG_WATCOM_C) {
-        AsmError(LANG_CONV_NOT_SUPPORTED);
-        return(ERROR);
+    /* does FASTCALL variant support INVOKE? */
+
+    if ( proc->sym.langtype == LANG_FASTCALL && fastcall_tab[Options.fastcall].invokestart == NULL ) {
+        AsmError( FASTCALL_VARIANT_NOT_SUPPORTED );
+        return( ERROR );
     }
+
     /* get the number of parameters */
 
-    for (curr = info->paralist, numParam = 0 ; curr ; curr = curr->nextparam, numParam++);
-    DebugMsg(("PushInvokeParam: numparams=%u\n", numParam));
+    for ( curr = info->paralist, numParam = 0 ; curr ; curr = curr->nextparam, numParam++ );
+    DebugMsg(("PushInvokeParam: numparams=%u\n", numParam ));
 
     curr = info->paralist;
 
     PushLineQueue();
 
+    if ( proc->sym.langtype == LANG_FASTCALL ) {
+        fcscratch = 0;
+        fastcall_tab[Options.fastcall].invokestart( proc, numParam, buffer );
+    }
+
     if (!(info->is_vararg)) {
         /* check if there is a superfluous parameter in the INVOKE call */
-        if (PushInvokeParam( NULL, i, numParam, procuse32, &eaxused) != ERROR) {
+        if (PushInvokeParam( proc, NULL, i, numParam, procuse32, &r0used) != ERROR) {
             DebugMsg(("PushInvokeParam: superfluous argument, i=%u\n", i));
             AsmErr(TOO_MANY_ARGUMENTS_TO_INVOKE);
             return( ERROR );
@@ -717,7 +895,7 @@ ret_code InvokeDirective( int i )
         size_vararg = 0; /* reset the VARARG parameter size count */
         DebugMsg(("PushInvokeParam: VARARG proc, numparams=%u, actual (max) params=%u, parasize=%u\n", numParam, j, info->parasize));
         for (;j >= numParam; j--)
-            PushInvokeParam( curr, i, j, procuse32, &eaxused);
+            PushInvokeParam( proc, curr, i, j, procuse32, &r0used);
         /* VARARG procs have at least 1 param, the VARARG param */
         curr = curr->nextparam;
     }
@@ -726,18 +904,22 @@ ret_code InvokeDirective( int i )
 
     if (sym->langtype == LANG_STDCALL ||
         sym->langtype == LANG_C ||
-        sym->langtype == LANG_WATCOM_C ||
+#if AMD64_SUPPORT
+        (sym->langtype == LANG_FASTCALL && procuse32 != USE64) ||
+#else
+        sym->langtype == LANG_FASTCALL ||
+#endif
         sym->langtype == LANG_SYSCALL) {
         for ( ; curr ; curr = curr->nextparam ) {
             numParam--;
-            if (PushInvokeParam( curr, i, numParam, procuse32, &eaxused) == ERROR) {
+            if (PushInvokeParam( proc, curr, i, numParam, procuse32, &r0used) == ERROR) {
                 DebugMsg(("PushInvokeParam(curr=%u, i=%u, numParam=%u) failed\n", curr, i, numParam));
                 AsmErr( TOO_FEW_ARGUMENTS_TO_INVOKE, sym->name );
             }
         }
     } else {
         for ( numParam = 0 ; curr ; curr = curr->nextparam, numParam++ ) {
-            if ( PushInvokeParam( curr, i, numParam, procuse32, &eaxused ) == ERROR) {
+            if ( PushInvokeParam( proc, curr, i, numParam, procuse32, &r0used ) == ERROR) {
                 DebugMsg(("PushInvokeParam(curr=%u, i=%u, numParam=%u) failed\n", curr, i, numParam));
                 AsmErr( TOO_FEW_ARGUMENTS_TO_INVOKE, sym->name );
             }
@@ -757,12 +939,14 @@ ret_code InvokeDirective( int i )
 
     if (( sym->langtype == LANG_C || sym->langtype == LANG_SYSCALL ) &&
         ( info->parasize || ( info->is_vararg && size_vararg ) )) {
-        if (info->is_vararg) {
+        if ( info->is_vararg ) {
             DebugMsg(("PushInvokeParam: size of fix args=%u, var args=%u\n", info->parasize, size_vararg));
-            sprintf( buffer, " add %s, %u", ModuleInfo.Use32 ? "esp" : "sp", info->parasize + size_vararg );
+            sprintf( buffer, " add %s, %u", ModuleInfo.Ofssize ? "esp" : "sp", info->parasize + size_vararg );
         } else
-            sprintf( buffer, " add %s, %u", ModuleInfo.Use32 ? "esp" : "sp", info->parasize );
+            sprintf( buffer, " add %s, %u", ModuleInfo.Ofssize ? "esp" : "sp", info->parasize );
         AddLineQueue( buffer );
+    } else if ( sym->langtype == LANG_FASTCALL ) {
+        fastcall_tab[Options.fastcall].invokeend( proc, numParam, buffer );
     }
 
     LstWrite( LSTTYPE_DIRECTIVE, GetCurrOffset(), NULL );

@@ -53,7 +53,8 @@
  assembly time variables.
  */
 
-void SaveEquateState(asm_sym *sym)
+static void SaveEquateState(asm_sym *sym)
+/********************************/
 {
     equ_item *p;
     sym->saved = TRUE;
@@ -77,7 +78,7 @@ void SaveEquateState(asm_sym *sym)
 // '=':     redefine = TRUE
 
 asm_sym * CreateConstant( bool redefine )
-/**********************************************************************************************/
+/***************************************/
 {
     struct asm_sym      *sym;
     char                *name = AsmBuffer[0]->string_ptr;
@@ -342,7 +343,7 @@ noerr:
 // this is used for some internally generated variables.
 
 asm_sym * CreateConstantEx( char *name, int value )
-/**********************************************************************************************/
+/*************************************************/
 {
     struct asm_sym      *sym;
 
@@ -379,7 +380,7 @@ asm_sym * CreateConstantEx( char *name, int value )
 //   '=':    redefine=TRUE
 
 ret_code DefineConstant( bool redefine )
-/***********************************************************/
+/**************************************/
 {
     asm_sym *sym;
 

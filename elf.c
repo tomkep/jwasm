@@ -16,11 +16,12 @@
 #include "symbols.h"
 #include "mangle.h"
 #include "memalloc.h"
-#include "fixup.h"
 #include "directiv.h"
+#include "fixup.h"
 #include "segment.h"
 #include "queues.h"
 #include "elf.h"
+#include "elfspec.h"
 #include "fatal.h"
 
 #if ELF_SUPPORT
@@ -52,6 +53,11 @@ static char *srcname; /* name of source module (name + extension) */
 static uint_32 data_pos;
 #endif
 
+#ifdef __I86__
+extern uint_32 _hwrite( int fh, uint_8 huge *pBuffer, uint_32 size );
+#define _write _hwrite
+#endif
+
 typedef struct _intseg {
     char * name;
     uint type;
@@ -78,6 +84,7 @@ static intseg internal_segs[] = {
 // CONST -> .rdata
 
 static char * ElfConvertSectionName(asm_sym * sym)
+/************************************************/
 {
     static char name[MAX_ID_LEN+1];
 
@@ -112,6 +119,7 @@ static char * ElfConvertSectionName(asm_sym * sym)
 }
 
 static int get_num_reloc_sections( void )
+/***************************************/
 {
     dir_node    *curr;
     int num = 0;
@@ -131,7 +139,8 @@ typedef struct localname {
 /* calculate size of .symtab + .strtab section.
    set content of these sections
 */
-static void set_symtab_values()
+static void set_symtab_values( void )
+/*****************************/
 {
     uint_32 entries;
     uint_32 strsize = 1;
@@ -167,7 +176,7 @@ static void set_symtab_values()
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
         if (curr->e.seginfo->num_relocs) {
             struct asmfixup * fix = curr->e.seginfo->FixupListHeadGen;
-            for ( ; fix; fix = fix->next2 ) {
+            for ( ; fix; fix = fix->nextrlc ) {
                 /* if it's not EXTERNAL/PUBLIC, add symbol. */
                 /* however, if it's an assembly time variable */
                 /* use a raw section reference */
@@ -417,7 +426,8 @@ static void set_symtab_values()
 // set content + size of .shstrtab section
 // alloc .shstrtab
 
-void set_shstrtab_values()
+void set_shstrtab_values( void )
+/************************/
 {
     intseg      *seg;
     dir_node    *curr;
@@ -462,11 +472,12 @@ void set_shstrtab_values()
 
 
 static unsigned int Get_Num_Relocs(dir_node *curr)
+/************************************************/
 {
     unsigned relocs;
     struct asmfixup *fix;
 
-    for (relocs = 0, fix = curr->e.seginfo->FixupListHeadGen; fix ; fix = fix->next2, relocs++);
+    for (relocs = 0, fix = curr->e.seginfo->FixupListHeadGen; fix ; fix = fix->nextrlc, relocs++);
 
     return( relocs );
 }
@@ -481,6 +492,7 @@ static unsigned int Get_Alignment(dir_node *curr)
 /* write ELF section table */
 
 static int elf_write_section_table( int fh )
+/******************************************/
 {
     dir_node    *curr;
     uint_8      *p;
@@ -512,7 +524,7 @@ static int elf_write_section_table( int fh )
         memset(&shdr, 0, sizeof(shdr));
 
         shdr.sh_name = p - (uint_8 *)internal_segs[SHSTRTAB_IDX].data;
-        p += strlen(p) + 1;
+        p += strlen( (char *)p ) + 1;
         shdr.sh_type = SHT_PROGBITS;
         if (curr->e.seginfo->segtype == SEGTYPE_BSS) {
             shdr.sh_flags = SHF_WRITE | SHF_ALLOC;
@@ -528,18 +540,18 @@ static int elf_write_section_table( int fh )
         if (curr->e.seginfo->segtype != SEGTYPE_BSS) {
             shdr.sh_offset = offset; /* start of section in file */
             /* size of section in file */
-            shdr.sh_size = curr->e.seginfo->segrec->d.segdef.seg_length;
+            shdr.sh_size = curr->sym.max_offset;
         }
         shdr.sh_link = 0;
         shdr.sh_info = 0;
         shdr.sh_addralign = Get_Alignment( curr );
         shdr.sh_entsize = 0;
 
-        if ( _write(fh, &shdr, sizeof(shdr)) != sizeof(shdr) )
+        if ( _write( fh, &shdr, sizeof(shdr) ) != sizeof(shdr) )
             WriteError();
 
         /* save the file offset in the segment item */
-        curr->e.seginfo->start_loc = offset;
+        curr->e.seginfo->fileoffset = offset;
 
         curr->e.seginfo->num_relocs = Get_Num_Relocs(curr);
 
@@ -555,7 +567,7 @@ static int elf_write_section_table( int fh )
     /* write headers of internal sections */
     for (seg = internal_segs ; seg->name; seg++) {
         shdr.sh_name = p - (uint_8 *)internal_segs[SHSTRTAB_IDX].data;
-        p += strlen(p) + 1;
+        p += strlen( (char *)p ) + 1;
         shdr.sh_type = seg->type;
         shdr.sh_flags = 0;
         shdr.sh_offset = offset; /* start of section in file */
@@ -586,7 +598,7 @@ static int elf_write_section_table( int fh )
         memset(&shdr, 0, sizeof(shdr));
 
         shdr.sh_name = p - (uint_8 *)internal_segs[SHSTRTAB_IDX].data;
-        p += strlen(p) + 1;
+        p += strlen( (char *)p ) + 1;
         shdr.sh_type = SHT_REL;
         shdr.sh_flags = 0;
         shdr.sh_addr = 0;
@@ -615,7 +627,8 @@ static int elf_write_section_table( int fh )
 // write ELF header
 // total_segs has been set by the caller
 
-ret_code elf_write_header( int fh )
+ret_code elf_write_header( module_info *ModuleInfo )
+/**************************************************/
 {
     //dir_node   *dir;
 
@@ -659,21 +672,21 @@ ret_code elf_write_header( int fh )
     ehdr.e_shnum = 1 + total_segs + 3 + get_num_reloc_sections();
     ehdr.e_shstrndx = 1 + total_segs + SHSTRTAB_IDX;
 
-    _lseek(fh, 0, SEEK_SET);
-    if ( _write(fh, &ehdr, sizeof(ehdr)) != sizeof(ehdr) )
+    _lseek( ModuleInfo->obj_fh, 0, SEEK_SET );
+    if ( _write( ModuleInfo->obj_fh, &ehdr, sizeof(ehdr)) != sizeof(ehdr) )
         WriteError();
 
-    elf_write_section_table( fh );
+    elf_write_section_table( ModuleInfo->obj_fh );
 
     DebugMsg(("elf_write_header: exit\n"));
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 // write ELF symbol table
 // contents of the table:
 #if 0
-ret_code elf_write_symbols( int fh )
-/**********************************************/
+ret_code elf_write_symbols( module_info *ModuleInfo )
+/***************************************************/
 {
     dir_node    *curr;
     void        *vp;
@@ -684,39 +697,42 @@ ret_code elf_write_symbols( int fh )
     DebugMsg(("elf_write_symbols: enter\n"));
 
     DebugMsg(("elf_write_symbols: exit\n"));
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 #endif
 
 // write section contents and fixups
 // this is done after the last step only!
 
-ret_code elf_write_data( int fh )
+ret_code elf_write_data( module_info *ModuleInfo )
+/*************************************************/
 {
     dir_node *curr;
     //int seg_index;
     //uint_32 offset = 0;
-    //uint_32 index;
+    uint_32     size;
     intseg      *seg;
 
     DebugMsg(("elf_write_data: enter\n"));
 
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
-        DebugMsg(("elf_write_data: program data at ofs=%X, size=%X\n", curr->e.seginfo->start_loc, curr->e.seginfo->segrec->d.segdef.seg_length));
-        if (curr->e.seginfo->segtype != SEGTYPE_BSS && curr->e.seginfo->segrec->d.segdef.seg_length != 0) {
-            _lseek(fh, curr->e.seginfo->start_loc, SEEK_SET);
-            if ( _write(fh, curr->e.seginfo->CodeBuffer,
-                      curr->e.seginfo->segrec->d.segdef.seg_length) != curr->e.seginfo->segrec->d.segdef.seg_length )
-                WriteError();
+        size = curr->sym.max_offset - curr->e.seginfo->start_loc;
+        DebugMsg(("elf_write_data: program data at ofs=%X, size=%X\n", curr->e.seginfo->fileoffset, size ));
+        if (curr->e.seginfo->segtype != SEGTYPE_BSS && curr->sym.max_offset != 0) {
+            _lseek( ModuleInfo->obj_fh, curr->e.seginfo->fileoffset + curr->e.seginfo->start_loc, SEEK_SET );
+            if ( curr->e.seginfo->CodeBuffer ) {
+                if ( _write( ModuleInfo->obj_fh, curr->e.seginfo->CodeBuffer, size ) != size )
+                    WriteError();
+            }
         }
     }
 
     /* write internal sections */
-    for (seg = internal_segs ; seg->name; seg++) {
-        if (seg->data) {
+    for ( seg = internal_segs ; seg->name; seg++ ) {
+        if ( seg->data ) {
             DebugMsg(("elf_write_data: internal at ofs=%X, size=%X\n", seg->offset, seg->size));
-            _lseek( fh, seg->offset, SEEK_SET );
-            if ( _write( fh, seg->data, seg->size ) != seg->size )
+            _lseek( ModuleInfo->obj_fh, seg->offset, SEEK_SET );
+            if ( _write( ModuleInfo->obj_fh, seg->data, seg->size ) != seg->size )
                 WriteError();
         }
     }
@@ -727,8 +743,8 @@ ret_code elf_write_data( int fh )
             struct asmfixup *fixup;
             Elf32_Rel reloc;
             DebugMsg(("elf_write_data: relocs at ofs=%X, size=%X\n", curr->e.seginfo->reloc_offset, curr->e.seginfo->num_relocs * sizeof(Elf32_Rel)));
-            _lseek( fh, curr->e.seginfo->reloc_offset, SEEK_SET );
-            for ( fixup = curr->e.seginfo->FixupListHeadGen; fixup; fixup = fixup->next2) {
+            _lseek( ModuleInfo->obj_fh, curr->e.seginfo->reloc_offset, SEEK_SET );
+            for ( fixup = curr->e.seginfo->FixupListHeadGen; fixup; fixup = fixup->nextrlc ) {
                 uint_8 elftype;
                 reloc.r_offset = fixup->fixup_loc;
                 switch (fixup->type) {
@@ -761,7 +777,7 @@ ret_code elf_write_data( int fh )
                 /* the low 8 bits of info are type */
                 /* the high 24 bits are symbol table index */
                 reloc.r_info = ELF32_R_INFO(fixup->sym->idx, elftype);
-                if ( _write( fh, &reloc, sizeof(reloc) ) != sizeof(reloc) )
+                if ( _write( ModuleInfo->obj_fh, &reloc, sizeof(reloc) ) != sizeof(reloc) )
                     WriteError();
             }
         }
@@ -769,6 +785,6 @@ ret_code elf_write_data( int fh )
 
     DebugMsg(("elf_write_data: exit\n"));
 
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 #endif

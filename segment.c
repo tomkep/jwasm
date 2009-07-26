@@ -46,7 +46,7 @@
 #include "fastpass.h"
 #include "macro.h"
 #include "fixup.h"
-#include "coff.h"
+#include "coffspec.h"
 #include "assume.h"
 #include "listing.h"
 #include "msgtext.h"
@@ -83,9 +83,12 @@ static typeinfo SegAttr[] = {
     { "COMMON",       COMB_COMMON,    INIT_COMBINE    },
     { "MEMORY",       COMB_ADDOFF,    INIT_COMBINE    },
     { "AT",           COMB_INVALID,   INIT_COMBINE | INIT_AT },
-    { "USE16",        FALSE,          INIT_SEGSIZE    },
-    { "USE32",        TRUE,           INIT_SEGSIZE    },
-    { "FLAT",         TRUE,           INIT_SEGSIZE | INIT_FLAT },
+    { "USE16",        USE16,          INIT_SEGSIZE    },
+    { "USE32",        USE32,          INIT_SEGSIZE    },
+#if AMD64_SUPPORT
+    { "USE64",        USE64,          INIT_SEGSIZE    },
+#endif
+    { "FLAT",         USE32,          INIT_SEGSIZE | INIT_FLAT },
     { "INFO",         1,                                    INIT_CHAR },
     { "DISCARD",      IMAGE_SCN_MEM_DISCARDABLE >> 24,      INIT_CHAR },
     { "NOCACHE",      IMAGE_SCN_MEM_NOT_CACHED  >> 24,      INIT_CHAR },
@@ -119,8 +122,9 @@ static uint             grpdefidx;      // Number of Group definition
 uint                    LnamesIdx;      // Number of LNAMES definition
 
 
-seg_item                *CurrSeg;       // points to stack of opened segments
-//bool                    Use32;          // if current segment is 32-bit
+dir_node                *CurrSeg;       // currently active segment
+static dir_node         *SegStack[MAX_SEG_NESTING]; // stack of open segments
+static int              stkindex;       // current top of stack
 
 char first_issued;                      // flags if seg is initialized
 
@@ -148,7 +152,8 @@ static last_seg_info    lastseg;        // last opened simplified segment
 #if FASTPASS
 // saved state
 static last_seg_info    saved_lastseg; 
-static int              saved_NumSegs;
+static dir_node         *saved_CurrSeg;
+static int              saved_stkindex;
 static dir_node         **saved_SegStack;
 static char             *saved_CurSeg_name;
 static char             saved_first_issued;
@@ -162,35 +167,34 @@ static uint_8           codebuf[ 1024 ];
 #define ROUND_UP( i, r ) (((i)+((r)-1)) & ~((r)-1))
 
 static void push_seg( dir_node *seg )
-/**********************************/
+/************************************/
 /* Push a segment into the current segment stack */
 {
-#if 0 /* it's valid to open a segment which is open already */
-    seg_item    *curr;
-    for( curr = CurrSeg; curr; curr = curr->next ) {
-        if( curr->seg == seg ) {
-            DebugMsg(("push_seg: segment is already pushed\n"));
-            AsmErr( BLOCK_NESTING_ERROR, curr->seg->sym.name );
-            return( ERROR );
-        }
+    //pushitem( &CurrSeg, seg ); //changed in v1.96
+    if ( stkindex >= MAX_SEG_NESTING ) {
+        AsmError( NESTING_LEVEL_TOO_DEEP );
+        return;
     }
-#endif
-
-    pushitem( &CurrSeg, seg );
+    SegStack[stkindex] = CurrSeg;
+    stkindex++;
+    CurrSeg = seg;
     SetAssumeCSCurrSeg();
     return;
 }
 
-static dir_node *pop_seg( void )
+static void pop_seg( void )
 /******************************/
 /* Pop a segment out of the current segment stack */
 {
-    dir_node    *seg;
-
-    /**/myassert( CurrSeg != NULL );
-    seg = popitem( &CurrSeg );
+    //seg = popitem( &CurrSeg ); //changed in v1.96
+    if ( stkindex == 0) {
+        AsmError( BLOCK_NESTING_ERROR );
+        return;
+    }
+    stkindex--;
+    CurrSeg = SegStack[stkindex];
     SetAssumeCSCurrSeg();
-    return( seg );
+    return;
 }
 
 direct_idx GetLnameIdx( char *name )
@@ -242,57 +246,39 @@ static direct_idx InsertClassLname( char *name )
 }
 
 uint_32 GetCurrOffset( void )
-/*************************/
+/***************************/
 {
     if( CurrSeg )
-        return( CurrSeg->seg->e.seginfo->current_loc );
+        return( CurrSeg->e.seginfo->current_loc );
     return( 0 );
 }
 
+#if 0
 dir_node *GetCurrSeg( void )
 /**************************/
 {
-    if( CurrSeg == NULL )
-        return( NULL );
-    return( CurrSeg->seg );
+    return( CurrSeg );
 }
+#endif
 
+#if 0
 int GetCurrClass( void )
-/**************************/
+/***********************/
 {
     if( CurrSeg == NULL )
         return( 0 );
-    return( CurrSeg->seg->e.seginfo->segrec->d.segdef.class_name_idx );
+    return( CurrSeg->e.seginfo->segrec->d.segdef.class_name_idx );
 }
+#endif
 
 uint_32 GetCurrSegAlign( void )
 /*****************************/
 {
     if( CurrSeg == NULL )
         return( 0 );
-#if 0
-    switch( CurrSeg->seg->e.seginfo->segrec->d.segdef.align ) {
-    case ALIGN_ABS: // same as byte aligned ?
-    case ALIGN_BYTE:
-        return( 1 );
-    case ALIGN_WORD:
-        return( 2 );
-    case ALIGN_DWORD:
-        return( 4 );
-    case ALIGN_PARA:
-        return( 16 );
-    case ALIGN_PAGE:
-        return( 256 );
-    case ALIGN_4KPAGE:
-        return( 4096 );
-    default:
-        return( 0 );
-    }
-#else
-    if ( CurrSeg->seg->e.seginfo->alignment == MAX_SEGALIGNMENT ) // ABS?
+    if ( CurrSeg->e.seginfo->alignment == MAX_SEGALIGNMENT ) // ABS?
         return( 0x10 ); // assume PARA alignment for AT segments
-    return( 1 << CurrSeg->seg->e.seginfo->alignment );
-#endif
+    return( 1 << CurrSeg->e.seginfo->alignment );
 }
 
 uint_32 GetCurrSegStart( void )
@@ -301,10 +287,10 @@ uint_32 GetCurrSegStart( void )
     if( CurrSeg == NULL )
         return( 0 );
 #if 0
-    /**/myassert(( CurrSeg->seg->e.seginfo->current_loc - BufSize )
-                  == CurrSeg->seg->e.seginfo->start_loc );
+    /**/myassert(( CurrSeg->e.seginfo->current_loc - BufSize )
+                  == CurrSeg->e.seginfo->start_loc );
 #endif
-    return( CurrSeg->seg->e.seginfo->start_loc );
+    return( CurrSeg->e.seginfo->start_loc );
 }
 
 static dir_node *CreateGroup( char *name )
@@ -333,7 +319,7 @@ static dir_node *CreateGroup( char *name )
 // handle GROUP directive
 
 ret_code GrpDef( int i )
-/*****************/
+/**********************/
 {
     char        *name;
     dir_node    *grp;
@@ -348,8 +334,11 @@ ret_code GrpDef( int i )
     }
 
     /* GROUP valid for OMF + BIN only */
-    if (Options.output_format == OFORMAT_COFF ||
-        Options.output_format == OFORMAT_ELF) {
+    if (Options.output_format == OFORMAT_COFF
+#if ELF_SUPPORT
+        || Options.output_format == OFORMAT_ELF
+#endif
+       ) {
         AsmError(GROUP_DIRECTIVE_INVALID_FOR_COFF);
         return( ERROR );
     }
@@ -384,11 +373,11 @@ ret_code GrpDef( int i )
                 seg = dir_insert( name, SYM_SEG );
                 /* inherit the offset magnitude from the group */
                 if ( grp->e.grpinfo->seglist )
-                    seg->e.seginfo->Use32 = grp->sym.use32;
+                    seg->e.seginfo->Ofssize = grp->sym.Ofssize;
             } else if( seg->sym.state == SYM_UNDEFINED ) {
                 dir_settype( seg, SYM_SEG );
                 if ( grp->e.grpinfo->seglist )
-                    seg->e.seginfo->Use32 = grp->sym.use32;
+                    seg->e.seginfo->Ofssize = grp->sym.Ofssize;
             } else if( seg->sym.state != SYM_SEG ) {
                 AsmErr( SYMBOL_PREVIOUSLY_DEFINED, name );
                 return( ERROR );
@@ -401,8 +390,8 @@ ret_code GrpDef( int i )
             }
             /* the first segment will define the group's word size */
             if( grp->e.grpinfo->seglist == NULL ) {
-                grp->sym.use32 = seg->e.seginfo->Use32;
-            } else if ( grp->sym.use32 != seg->e.seginfo->Use32) {
+                grp->sym.Ofssize = seg->e.seginfo->Ofssize;
+            } else if ( grp->sym.Ofssize != seg->e.seginfo->Ofssize ) {
                 AsmErr( GROUP_SEGMENT_SIZE_CONFLICT, grp->sym.name, seg->sym.name );
                 return( ERROR );
             }
@@ -450,28 +439,36 @@ ret_code GrpDef( int i )
     return( NOT_ERROR );
 }
 
-ret_code SetUse32( void )
-/*************************/
+ret_code SetOfssize( void )
+/***********************/
 {
     if( CurrSeg == NULL ) {
-        ModuleInfo.Use32 = ModuleInfo.defUse32;
-    } else {
-        GlobalVars.code_seg = SEGISCODE( CurrSeg );
-        ModuleInfo.Use32 = CurrSeg->seg->e.seginfo->Use32;
-        if( ModuleInfo.Use32 && ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) ) {
+        ModuleInfo.Ofssize = ModuleInfo.defOfssize;
+    } else {                  
+        GlobalVars.code_seg = (CurrSeg->e.seginfo->segtype == SEGTYPE_CODE);
+        ModuleInfo.Ofssize = CurrSeg->e.seginfo->Ofssize;
+        if( ModuleInfo.Ofssize > USE16 && ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) ) {
+            DebugMsg(("SetOfssize, error: CurrSeg=%Xh, ModuleInfo.Ofssize=%u, curr_cpu=%X, defOfssize=%u\n", CurrSeg, ModuleInfo.Ofssize, ModuleInfo.curr_cpu, ModuleInfo.defOfssize ));
             AsmError( WRONG_CPU_FOR_32BIT_SEGMENT );
             return( ERROR );
         }
     }
-    WordSize.offset = ModuleInfo.Use32 ? 4 : 2;
+
+    WordSize.value = (2 << ModuleInfo.Ofssize);
+
+#if AMD64_SUPPORT
+    Set64Bit( ModuleInfo.Ofssize == USE64 );
+#endif
+
     return( NOT_ERROR );
 }
 
 // close segment
 
 static ret_code CloseSeg(char * name)
+/***********************************/
 {
-    struct asm_sym      *sym;
+    //struct asm_sym      *sym;
 
     DebugMsg(("CloseSeg(%s) enter\n", name));
     if( CurrSeg == NULL ) {
@@ -479,16 +476,18 @@ static ret_code CloseSeg(char * name)
         return( ERROR );
     }
 
-    if( SymCmpFunc(CurrSeg->seg->sym.name, name ) != 0 ) {
+    if( SymCmpFunc(CurrSeg->sym.name, name ) != 0 ) {
         DebugMsg(("CloseSeg(%s): ENDS segment name not on top of stack\n"));
         AsmErr( BLOCK_NESTING_ERROR, name );
         return( ERROR );
     }
 
-    DebugMsg(("CloseSeg(%s): current ofs=%X\n", name, CurrSeg->seg->e.seginfo->current_loc));
+    DebugMsg(("CloseSeg(%s): current ofs=%X\n", name, CurrSeg->e.seginfo->current_loc));
 
     if (Parse_Pass > PASS_1 && Options.output_format == OFORMAT_OMF)
-        omf_FlushCurrSeg();
+        if ( !omf_FlushCurrSeg() ) {
+            AsmErr( INTERNAL_ERROR, "CloseSeg", 1 ); /* coding error! */
+        }
 
     pop_seg();
 
@@ -498,7 +497,7 @@ static ret_code CloseSeg(char * name)
 // SEGMENT/ENDS if pass is > 1
 
 ret_code SetCurrSeg( int i )
-/**********************/
+/**************************/
 {
     char        *name;
     struct asm_sym *sym;
@@ -531,17 +530,16 @@ ret_code SetCurrSeg( int i )
         break;
     }
 
-    return( SetUse32() );
+    return( SetOfssize() );
 }
 
 
 static seg_type TypeFromClassName( dir_node * dir, char *name )
-/*****************************************/
+/**************************************************************/
 {
     int     slen;
     char    uname[257];
 
-//    if (dir->e.seginfo->segrec->d.segdef.align == SEGDEF_ALIGN_ABS)
     if ( dir->e.seginfo->alignment == MAX_SEGALIGNMENT )
         return( SEGTYPE_ABS );
 
@@ -593,7 +591,7 @@ static seg_type TypeFromClassName( dir_node * dir, char *name )
 /* this is called only if the class gives no hint */
 
 static seg_type TypeFromSegmentName( char *name )
-/*******************************************/
+/***********************************************/
 {
     int     slen;
     char    uname[257];
@@ -632,7 +630,7 @@ static seg_type TypeFromSegmentName( char *name )
 // SEGMENT and ENDS directives (Pass ONE only!)
 
 ret_code SegDef( int i )
-/*****************/
+/**********************/
 {
     char                defined;
     char                *token;
@@ -643,9 +641,9 @@ ret_code SegDef( int i )
     int                 temp;
     int                 temp2;
     uint                initstate = 0;  // to show if a field is initialized
-    char                oldreadonly;    // readonly value of a defined segment
-    char                oldsegtype;     // iscode value of a defined segment
-    char                olduse32;
+    unsigned char       oldreadonly;    // readonly value of a defined segment
+    unsigned char       oldsegtype;     // iscode value of a defined segment
+    unsigned char       oldOfssize;
     char                oldalign;
     char                oldcombine;
     uint                oldclassidx;
@@ -662,7 +660,7 @@ ret_code SegDef( int i )
 
     name = AsmBuffer[0]->string_ptr;
 
-    DebugMsg(("SegDef enter, segment=%s, cmd=%s\n", name, AsmBuffer[i]->string_ptr ));
+    DebugMsg(("SegDef enter, segment=%s, cmd=%s, ModuleInfo.Ofssize=%u\n", name, AsmBuffer[i]->string_ptr, ModuleInfo.Ofssize ));
 
     switch( AsmBuffer[i]->value ) {
     case T_SEGMENT:
@@ -670,7 +668,7 @@ ret_code SegDef( int i )
         sym = SymSearch( name );
         if( sym == NULL || sym->state == SYM_UNDEFINED) {
             // segment is not defined (yet)
-            if (sym == NULL) {
+            if ( sym == NULL ) {
                 sym = (asm_sym *)dir_insert( name, SYM_SEG );
             } else
                 dir_settype( (dir_node *)sym, SYM_SEG );
@@ -679,8 +677,14 @@ ret_code SegDef( int i )
             seg = dir->e.seginfo->segrec;
             seg->d.segdef.idx = ++segdefidx;
             defined = FALSE;
-            if (Options.output_format == OFORMAT_COFF ||
-                Options.output_format == OFORMAT_ELF) {
+            /*
+             * initialize segment with values from the one without suffix
+             */
+            if (Options.output_format == OFORMAT_COFF
+#if ELF_SUPPORT
+                || Options.output_format == OFORMAT_ELF
+#endif
+               ) {
                 char * p;
                 if (p = strchr(sym->name, '$')) {
                     char buffer[MAX_ID_LEN+1];
@@ -690,7 +694,7 @@ ret_code SegDef( int i )
                     if ((dir2 = (dir_node *)SymSearch(buffer)) && dir2->sym.state == SYM_SEG) {
                         dir->e.seginfo->readonly = dir2->e.seginfo->readonly;
                         dir->e.seginfo->segtype  = dir2->e.seginfo->segtype;
-                        dir->e.seginfo->Use32    = dir2->e.seginfo->Use32;
+                        dir->e.seginfo->Ofssize  = dir2->e.seginfo->Ofssize;
                         dir->e.seginfo->alignment= dir2->e.seginfo->alignment;
                         dir->e.seginfo->characteristics = dir2->e.seginfo->characteristics;
                         dir->e.seginfo->segrec->d.segdef.combine        = dir2->e.seginfo->segrec->d.segdef.combine;
@@ -705,7 +709,7 @@ ret_code SegDef( int i )
             defined = TRUE;
             oldreadonly = dir->e.seginfo->readonly;
             oldsegtype  = dir->e.seginfo->segtype;
-            olduse32    = dir->e.seginfo->Use32;
+            oldOfssize  = dir->e.seginfo->Ofssize;
             oldalign    = dir->e.seginfo->alignment;
             oldcharacteristics = dir->e.seginfo->characteristics;
             oldcombine  = dir->e.seginfo->segrec->d.segdef.combine;
@@ -813,7 +817,6 @@ ret_code SegDef( int i )
             } else if ( type->init & INIT_AT ) {
                 DebugMsg(("SegDef: AT found\n" ));
                 seg->d.segdef.combine = type->value;
-                //seg->d.segdef.align = SEGDEF_ALIGN_ABS;
                 dir->e.seginfo->alignment = -1;
                 i++;
                 if (EvalOperand( &i, Token_Count, &opndx, TRUE ) != ERROR) {
@@ -829,10 +832,14 @@ ret_code SegDef( int i )
                 seg->d.segdef.combine = type->value;
             } else if ( type->init & INIT_FLAT ) {
                 DefineFlatGroup();
-                dir->e.seginfo->Use32 = 1;
+#if AMD64_SUPPORT
+                dir->e.seginfo->Ofssize = ModuleInfo.defOfssize;
+#else
+                dir->e.seginfo->Ofssize = USE32;
+#endif
                 dir->e.seginfo->group = &flat_grp->sym;
             } else if ( type->init & INIT_SEGSIZE ) {
-                dir->e.seginfo->Use32 = type->value;
+                dir->e.seginfo->Ofssize = type->value;
             } else if( type->init & INIT_CHAR ) {
                 DebugMsg(("SegDef: characteristics found\n" ));
                 ; // characteristics restricted to COFF/ELF
@@ -869,7 +876,7 @@ ret_code SegDef( int i )
                 txt = TXT_ALIGNMENT;
             else if ( oldcombine  != seg->d.segdef.combine )
                 txt = TXT_COMBINE;
-            else if ( olduse32    != dir->e.seginfo->Use32 )
+            else if ( oldOfssize  != dir->e.seginfo->Ofssize )
                 txt = TXT_SEG_WORD_SIZE;
             else if ( oldclassidx != seg->d.segdef.class_name_idx )
                 txt = TXT_CLASS;
@@ -913,7 +920,7 @@ ret_code SegDef( int i )
         return( ERROR );
 #endif
     }
-    return( SetUse32() );
+    return( SetOfssize() );
 }
 
 static void input_group( int type, char *name )
@@ -924,8 +931,11 @@ static void input_group( int type, char *name )
 
     /* no DGROUP for FLAT or COFF/ELF */
     if( ModuleInfo.model == MOD_FLAT ||
-        Options.output_format == OFORMAT_COFF ||
-        Options.output_format == OFORMAT_ELF)
+       Options.output_format == OFORMAT_COFF
+#if ELF_SUPPORT
+       || Options.output_format == OFORMAT_ELF
+#endif
+      )
         return;
 
     strcpy( buffer, "DGROUP GROUP " );
@@ -954,10 +964,10 @@ static void input_group( int type, char *name )
 
 static void close_lastseg( void )
 /*******************************/
-/* close the last opened simplified segment? */
-/* sounds like a bad idea! the only segment which can be closed
- is the current one.
-*/
+/* close the last opened simplified segment?
+ * sounds like a bad idea! the only segment which can be closed
+ * is the current one.
+ */
 {
     lastseg.seg = SIM_NONE;
     DebugMsg(("close_lastseg: current seg=%s\n", sym_CurSeg->string_ptr));
@@ -971,14 +981,15 @@ static void close_lastseg( void )
 
 
 static char * SetSimSeg(int segm, char * name, char * buffer)
+/***********************************************************/
 {
     char *pAlign = "WORD";
     char *pAlignSt = "PARA";
     char *pUse = "";
     char *pCC = "CODE";
 
-    if ( ModuleInfo.defUse32 ) {
-        if ( ModuleInfo.model == MOD_FLAT)
+    if ( ModuleInfo.defOfssize ) {
+        if ( ModuleInfo.model == MOD_FLAT )
             pUse = "FLAT";
         else
             pUse = "USE32";
@@ -1048,7 +1059,6 @@ ret_code SimplifiedSegDir( int i )
         AsmError( MODEL_IS_NOT_DECLARED );
         return( ERROR );
     }
-    ModuleInfo.cmdline = FALSE;
 
     PushLineQueue();
 
@@ -1212,11 +1222,10 @@ void set_def_seg_name( void )
 void DefineFlatGroup( void )
 /***********************/
 {
-
     if( ModuleInfo.flatgrp_idx == 0 ) {
         flat_grp = CreateGroup( "FLAT" );
         if( flat_grp != NULL ) {
-            flat_grp->sym.use32 = TRUE;
+            flat_grp->sym.Ofssize = ModuleInfo.defOfssize;
             ModuleInfo.flatgrp_idx = GetGrpIdx( &flat_grp->sym );
         }
     }
@@ -1254,31 +1263,31 @@ extern struct asm_sym *GetGrp( struct asm_sym *sym )
     return( NULL );
 }
 
-int SymIs32( struct asm_sym *sym )
-/********************************/
-/* get sym's offset size (32=1, 16=0) */
+int GetSymOfssize( struct asm_sym *sym )
+/**************************************/
+/* get sym's offset size (64=2, 32=1, 16=0) */
 {
     dir_node            *curr;
 
     if ( sym->mem_type == MT_ABS )
-        return( FALSE );
+        return( USE16 );
 
     curr = GetSeg( sym );
     if( curr == NULL ) {
         if( sym->state == SYM_EXTERNAL || sym->state == SYM_PROC || sym->state == SYM_GRP )
-            return( sym->use32 );
+            return( sym->Ofssize );
         else if( sym->state == SYM_SEG  )
-            return( ((dir_node *)sym)->e.seginfo->Use32 );
+            return( ((dir_node *)sym)->e.seginfo->Ofssize );
     } else {
-        return( curr->e.seginfo->Use32 );
+        return( curr->e.seginfo->Ofssize );
     }
-    return( FALSE );
+    return( ModuleInfo.Ofssize );
 }
 
 void SetSymSegOfs( struct asm_sym *sym )
-/*******************************************/
+/**************************************/
 {
-    sym->segment = &GetCurrSeg()->sym;
+    sym->segment = &CurrSeg->sym;
     sym->offset = GetCurrOffset();
 }
 
@@ -1286,7 +1295,8 @@ void SetSymSegOfs( struct asm_sym *sym )
 // allowes to use simplified segment directives
 // PushLineQueue() has already been called
 
-ret_code SegmentModuleInit(int type)
+ret_code ModelSegmentInit( int type )
+/**********************************/
 {
     char        buffer[ MAX_ID_LEN+1+64 ];
 
@@ -1320,21 +1330,22 @@ ret_code SegmentModuleInit(int type)
 
 // END directive has been found, close all segments
 
-ret_code SegmentModuleExit(void)
+ret_code SegmentModuleExit( void )
+/******************************/
 {
     /* if simplified segment directives are used,
      * don't complain if a segment is still open.
      */
     if( lastseg.seg != SIM_NONE ||
-        (CurrSeg != NULL && ModuleInfo.model != MOD_NONE)) {
+        ( CurrSeg != NULL && ModuleInfo.model != MOD_NONE ) ) {
         DebugMsg(("SegmentModuleExit: segment index %u must be closed\n", lastseg.seg));
-    } else if (CurrSeg) {
-        AsmErr( BLOCK_NESTING_ERROR, CurrSeg->seg->sym.name );
+    } else if ( CurrSeg ) {
+        AsmErr( BLOCK_NESTING_ERROR, CurrSeg->sym.name );
     }
 
     /* clear segment stack */
 
-    while(CurrSeg && (CloseSeg(CurrSeg->seg->sym.name) == NOT_ERROR));
+    while( CurrSeg && ( CloseSeg( CurrSeg->sym.name ) == NOT_ERROR ) );
 
     return( NOT_ERROR );
 }
@@ -1342,12 +1353,16 @@ ret_code SegmentModuleExit(void)
 // init. called for each pass
 
 void SegmentInit( int pass )
+/**************************/
 {
     dir_node    *curr;
     uint_32     i;
-    struct asmfixup *fix;
+    //struct asmfixup *fix;
 
+    DebugMsg(("SegmentInit(%u) enter\n", pass ));
     first_issued = 0;
+    CurrSeg      = NULL;
+    stkindex     = 0;
 
     if ( pass == PASS_1 ) {
         segdefidx   = 0;
@@ -1363,28 +1378,32 @@ void SegmentInit( int pass )
         if (curr->e.seginfo->CodeBuffer == NULL) {
             switch (Options.output_format) {
             case OFORMAT_OMF:
+                /* OMF needs just one global buffer */
                 curr->e.seginfo->CodeBuffer = codebuf;
                 break;
             default: /* COFF, ELF, BIN */
+                /* added for v1.96*/
+                if ( curr->e.seginfo->bytes_written == 0 )
+                    break;
+                //i = curr->sym.max_offset;
+                i = curr->sym.max_offset - curr->e.seginfo->start_loc;
                 /* the segment can grow in step 2-n due to jump
                   modifications. worst case is no_of_short_jumps * 3 for 32bit.
                   for a quick solution just add 25% to the size if segment
                   contains labels */
-                i = curr->e.seginfo->segrec->d.segdef.seg_length;
                 if (curr->e.seginfo->labels)
                     i = i + (i >> 2);
+                DebugMsg(("SegmentInit(%u), %s: max_ofs=%lX, alloc_size=%lu\n", pass, curr->sym.name, curr->sym.max_offset, i ));
                 curr->e.seginfo->CodeBuffer = AsmAlloc(i);
                 break;
             }
         }
         if( curr->e.seginfo->segrec->d.segdef.combine != COMB_STACK ) {
-            curr->e.seginfo->segrec->d.segdef.seg_length = 0;
+            curr->sym.max_offset = 0;
         }
         curr->e.seginfo->start_loc = 0;
         curr->e.seginfo->current_loc = 0;
-#if BIN_SUPPORT
-        curr->e.seginfo->initial = FALSE;
-#endif
+        curr->e.seginfo->bytes_written = 0;
 
         if ( Options.output_format != OFORMAT_OMF ) {
             curr->e.seginfo->FixupListHeadGen = NULL;
@@ -1392,35 +1411,36 @@ void SegmentInit( int pass )
         }
     }
 
-    ModuleInfo.Use32 = FALSE;
+    ModuleInfo.Ofssize = USE16;
 
 #if FASTPASS
     if ( pass != PASS_1 && UseSavedState == TRUE ) {
-        i = saved_NumSegs;
-        while(i) {
-            i--;
-            push_seg(*(saved_SegStack+i));
-        }
+        CurrSeg = saved_CurrSeg;
+        stkindex = saved_stkindex;
+        if ( stkindex )
+            memcpy( &SegStack, saved_SegStack, stkindex * sizeof(dir_node *) );
 
         memcpy(&lastseg, &saved_lastseg, sizeof(last_seg_info));
         sym_CurSeg->string_ptr = saved_CurSeg_name;
         first_issued           = saved_first_issued;
+
+        SetAssumeCSCurrSeg();
     }
 #endif
 }
 #if FASTPASS
 void SegmentSaveState( void )
+/***************************/
 {
     int i;
-    seg_item * curr;
 
-    for (i = 0, curr = CurrSeg;curr;curr = curr->next, i++);
+    i = stkindex;
 
-    saved_NumSegs = i;
-    if (i) {
-        saved_SegStack = AsmAlloc(i*sizeof(dir_node *));
-        for (i = 0, curr = CurrSeg;curr;curr = curr->next, i++)
-            *(saved_SegStack+i) = curr->seg;
+    saved_CurrSeg = CurrSeg;
+    saved_stkindex = stkindex;
+    if ( stkindex ) {
+        saved_SegStack = AsmAlloc( stkindex * sizeof(dir_node *) );
+        memcpy( saved_SegStack, &SegStack, stkindex * sizeof(dir_node *) );
     }
 
     memcpy(&saved_lastseg, &lastseg, sizeof(last_seg_info));

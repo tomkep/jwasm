@@ -33,18 +33,17 @@
 #define _SEGMENT_H_
 
 #define GetSeg( x )     (dir_node *)x->segment
-#define SEGISCODE( x )  ( x->seg->e.seginfo->segtype == SEGTYPE_CODE )
 
-extern seg_item         *CurrSeg;       // stack of open segments
+extern dir_node         *CurrSeg;       // stack of open segments
 
 extern uint_32          GetCurrSegStart( void ); /* Get offset of segment at the start of current LEDATA record */
 extern void             SetSymSegOfs( struct asm_sym * ); /* Store location information about a symbol */
-extern int              SymIs32( struct asm_sym * );
+extern int              GetSymOfssize( struct asm_sym * );
 extern direct_idx       GetLnameIdx( char * );
-extern uint_32          GetCurrOffset( void );  // Get offset from current segment
+extern uint_32          GetCurrOffset( void );  // Get current segment's offset
 extern ret_code         SetCurrOffset( int_32, bool, bool );
-extern dir_node         *GetCurrSeg( void );  /* Get current segment; NULL means none */
-extern int              GetCurrClass( void ); /* get curr segment's class index */
+//extern dir_node         *GetCurrSeg( void );  /* Get current segment; NULL means none */
+//extern int              GetCurrClass( void ); /* get curr segment's class index */
 extern uint             GetGrpIdx( struct asm_sym * );/* get symbol's group index, from the symbol itself or from the symbol's segment */
 extern uint             GetSegIdx( struct asm_sym * );/* get symbol's segment index, from the symbol itself */
 extern ret_code         GrpDef( int );          // GROUP directive
@@ -54,9 +53,9 @@ extern ret_code         SimplifiedSegDir( int ); // .CODE, .DATA, ... directive
 extern void             SegmentInit( int );     // init segments
 extern asm_sym          *GetGrp( struct asm_sym * );
 extern uint_32          GetCurrSegAlign( void );
-extern ret_code         SetUse32( void );
+extern ret_code         SetOfssize( void );
 extern void             DefineFlatGroup( void );
-extern ret_code         SegmentModuleInit( int type );
+extern ret_code         ModelSegmentInit( int type );
 extern ret_code         SegmentModuleExit( void );
 
 #endif

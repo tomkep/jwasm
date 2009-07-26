@@ -31,6 +31,7 @@
 #define _stricmp strcasecmp
 #define _strcmpi strcasecmp
 #define _strnicmp strncasecmp
+#define _memicmp strncasecmp
 
 #define _ltoa   ltoa
 #define _strupr strupr
@@ -47,9 +48,11 @@
 #endif
 #endif
 
+#ifndef __WATCOMC__
+#define _tell( handle ) _lseek( handle, 0L, SEEK_CUR )
+#endif
+
 char *_fullpath( char *, const char *, size_t );
-char * _strdate(char *);
-char * _strtime(char *);
 
 #define _MAX_DRIVE      48      /*  maximum length of node name w/ '\0' */
 #define _MAX_DIR        256     /*  maximum length of subdirectory      */

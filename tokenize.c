@@ -36,7 +36,6 @@
 #include <ctype.h>
 
 #include "globals.h"
-#include "codegen.h"
 #include "insthash.h"
 #include "parser.h"
 #include "condasm.h"
@@ -57,7 +56,7 @@ extern int cnttok1;
 static char             token_stringbuf[MAX_LINE_LEN*MAX_SYNC_MACRO_NESTING];
 
 
-static uint_8 g_opcode; /* directive flags for current line */
+static uint_8 g_flags; /* directive flags for current line */
 
 bool expansion; /* TRUE if a % has been found as first line character */
 
@@ -69,40 +68,19 @@ typedef struct {
     char *output;
 } ioptrs;
 
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(__POCC__)
 #define tolower(c) ((c >= 'A' && c <= 'Z') ? c | 0x20 : c )
 #endif
 
 // initialize the token buffer array
 
-void InitTokenBuffer( )
+void InitTokenBuffer( void )
+/*********************/
 {
     int         count;
     for( count = 0; count < MAX_TOKEN; count ++ ) {
         AsmBuffer[count] = &tokens[count];
     }
-}
-
-// get instruction string
-
-void GetInsString( enum asm_token token, char *string, int len )
-/**************************************************************/
-{
-    const char *name;
-
-    if( len > AsmResWord[ token ].len ) {
-        len = AsmResWord[ token ].len;
-        name = AsmResWord[ token ].name;
-        if( *name == '.' ) {
-            name++;
-            len--;
-        }
-        strncpy( string, name, len );
-        string[ len ] = '\0';
-    } else {
-        *string='\0';
-    }
-    return;
 }
 
 typedef union {
@@ -111,11 +89,11 @@ typedef union {
 } NUMBERFL;
 
 static ret_code get_float( struct asm_tok *buf, ioptrs *p )
-/**********************************************************************/
+/*********************************************************/
 {
     /* valid floats look like:  (int)[.(int)][e(int)] */
 
-    char    got_decimal = FALSE;
+    //char    got_decimal = FALSE;
     char    got_e = FALSE;
     char    *ptr = p->input;
 
@@ -126,7 +104,7 @@ static ret_code get_float( struct asm_tok *buf, ioptrs *p )
             break;
         switch( tolower( *ptr ) ) {
         case '.':
-            got_decimal = TRUE;
+            //got_decimal = TRUE;
             continue;
         case 'r':
             *ptr=' ';
@@ -168,6 +146,7 @@ done_scanning_float:
 }
 
 static void array_mul_add( unsigned char *buf, unsigned base, unsigned long num, unsigned size )
+/**********************************************************************************************/
 {
     while( size-- > 0 ) {
         num += *buf * base;
@@ -177,7 +156,7 @@ static void array_mul_add( unsigned char *buf, unsigned base, unsigned long num,
 }
 
 static ret_code get_string( struct asm_tok *buf, ioptrs *p )
-/***********************************************************************/
+/**********************************************************/
 {
     char    symbol_o;
     char    symbol_c;
@@ -209,7 +188,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
         symbol_c = '}';
         break;
     default:
-        if (g_opcode & DF_CEXPR) {
+        if (g_flags & DF_CEXPR) {
             /* a C expression is likely to occur. check for &&,||,... */
             char c = *iptr;
             *optr++ = *iptr++;
@@ -308,7 +287,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
              */
         } else if( ( *iptr == '"' || *iptr == '\'' ) &&
                   symbol_c != 0 &&
-                  (g_opcode & DF_STRPARM) == 0) {
+                  (g_flags & DF_STRPARM) == 0) {
             char delim = *iptr;
             char *toptr;
             char *tiptr;
@@ -406,7 +385,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
 // o or q: base 8
 
 static ret_code get_number( struct asm_tok *buf, ioptrs *p )
-/***********************************************************************/
+/**********************************************************/
 {
     char                *ptr = p->input;
     char                *dig_start;
@@ -435,7 +414,10 @@ static ret_code get_number( struct asm_tok *buf, ioptrs *p )
             digits_seen |= 1 << (*ptr - '0');
         else {
             last_char = tolower( *ptr );
-            if ( last_char >= 'a' && last_char <= 'f' && isalnum( *(ptr+1) ) )
+            if ( last_char >= 'a' &&
+                last_char <= 'f' &&
+                ( isalnum( *(ptr+1) ) ||
+                 (last_char + 10 - 'a') < ModuleInfo.radix ) )
                 digits_seen |= 1 << (last_char + 10 - 'a');
             else
                 break;
@@ -523,9 +505,10 @@ static ret_code get_number( struct asm_tok *buf, ioptrs *p )
         }
     } else {
         buf->token = T_BAD_NUM;
+        DebugMsg(("get_number: BAD_NUMBER %s, radix=%u, base=%u, ptr=>%s<, digits_seen=%Xh\n", dig_start, ModuleInfo.radix, base, ptr, digits_seen ));
         /* swallow remainder of token */
         while( is_valid_id_char( *ptr ) ) ++ptr;
-        //AsmError( INVALID_NUMBER_DIGIT );
+        //AsmError( INVALID_NUMBER_DIGIT ); // this is done later
     }
 
     len = ptr - p->input;
@@ -540,7 +523,7 @@ static ret_code get_number( struct asm_tok *buf, ioptrs *p )
 
 #if BACKQUOTES
 static ret_code get_id_in_backquotes( struct asm_tok *buf, ioptrs *p )
-/*********************************************************************************/
+/********************************************************************/
 {
     buf->string_ptr = p->output;
     buf->token = T_ID;
@@ -564,9 +547,10 @@ static ret_code get_id_in_backquotes( struct asm_tok *buf, ioptrs *p )
 // get an ID. will always return NOT_ERROR.
 
 static ret_code get_id( struct asm_tok *buf, ioptrs *p )
-/***********************************************************************/
+/******************************************************/
 {
-    int  count;
+    struct ReservedWord *resw;
+    int  index;
 
     buf->string_ptr = p->output;
     buf->pos = p->input;
@@ -585,13 +569,14 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
         buf->token = T_QUESTION_MARK;
         return( NOT_ERROR );
     }
-    count = get_instruction_position( buf->string_ptr );
-    if( count == EMPTY || AsmOpTable[count].disabled == TRUE ) {
+    resw = FindResWord( buf->string_ptr );
+    if( resw == NULL ) {
         buf->token = T_ID;
         return( NOT_ERROR );
     }
-//  DebugMsg(("found item >%s< in instruction table, rm=%X\n", buf->string_ptr, AsmOpTable[count].rm_byte));
-    buf->value = AsmOpTable[count].token;
+    buf->value = resw - AsmResWord; /* is a enum asm_token value */
+    index = resw->position;
+//  DebugMsg(("found item >%s< in instruction table, rm=%X\n", buf->string_ptr, AsmOpTable[index].rm_byte));
 
     /* if -Zm is set, the following from the Masm docs is relevant:
      *
@@ -613,54 +598,58 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
         /* checking the cpu won't give the expected results currently since
          * some instructions in the table (i.e. MOV) start with a 386 variant!
          */
-        //if (( AsmOpTable[count].cpu & P_CPU_MASK ) > ( ModuleInfo.curr_cpu & P_CPU_MASK ) ||
-        //    ( AsmOpTable[count].cpu & P_EXT_MASK ) > ( ModuleInfo.curr_cpu & P_EXT_MASK )) {
-          if (( AsmOpTable[count].cpu & P_EXT_MASK ) > ( ModuleInfo.curr_cpu & P_EXT_MASK )) {
+#if 0 /* changed for v1.96 */
+        if (( AsmOpTable[index].cpu & P_EXT_MASK ) > ( ModuleInfo.curr_cpu & P_EXT_MASK )) {
+#else
+        if (( AsmOpTable[index].cpu & P_CPU_MASK ) > ( ModuleInfo.curr_cpu & P_CPU_MASK ) ||
+            ( AsmOpTable[index].cpu & P_EXT_MASK ) > ( ModuleInfo.curr_cpu & P_EXT_MASK )) {
+#endif
             buf->token = T_ID;
             return( NOT_ERROR );
         }
     }
 
-    if( !( AsmOpTable[count].opnd_type[OPND1] & OP_SPECIAL ) ) {
+    if( !( resw->flags & RWF_SPECIAL ) ) {
         buf->token = T_INSTRUCTION;
         return( NOT_ERROR );
     }
 
-    /* for OP_SPECIAL, field <opcode> contains further infos:
-     - OP_REGISTER:       register number
-     - OP_DIRECTIVE:      DF_xxx flags
-     - OP_UNARY_OPERATOR: operator precedence
-     - OP_TYPE:           index into SimpleType table
+    /* for RWT_SPECIAL, field <opcode> contains further infos:
+     - RWT_REGISTER:       register number (regnum)
+     - RWT_DIRECTIVE:      type of directive (dirtype)
+     - RWT_UNARY_OPERATOR: operator precedence
+     - RWT_TYPE:           index into SimpleType table
      ...
      */
-    buf->opcode = AsmOpTable[count].opcode;
+    buf->opcode = AsmOpTable[index].opcode;
 
-    switch (AsmOpTable[count].specialtype) {
-    case OP_REGISTER:
+    switch (AsmOpTable[index].specialtype) {
+    case RWT_REGISTER:
         buf->token = T_REG;
         break;
-    case OP_RES_ID:
+    case RWT_RES_ID:
         /* DUP, PTR, ADDR, FLAT, VARARG */
-        /* BASIC, C, FORTRAN, PASCAL, STDCALL, SYSCALL, WATCOM_C */
+        /* BASIC, C, FORTRAN, PASCAL, STDCALL, SYSCALL, FASTCALL */
         /* fall through */
-    case OP_TYPE:   /* BYTE, WORD, FAR, NEAR, FAR16, NEAR32 ... */
+    case RWT_TYPE:   /* BYTE, WORD, FAR, NEAR, FAR16, NEAR32 ... */
         buf->token = T_RES_ID;
-        buf->rm_byte = AsmOpTable[count].rm_byte;
+        buf->rm_byte = AsmOpTable[index].rm_byte;
         break;
-    case OP_UNARY_OPERATOR: /* OFFSET, LOW, HIGH, LOWWORD, HIGHWORD, SHORT, ... */
+    case RWT_UNARY_OP: /* OFFSET, LOW, HIGH, LOWWORD, HIGHWORD, SHORT, ... */
         buf->token  = T_UNARY_OPERATOR;
         break;
-    case OP_DIRECTIVE:
+    case RWT_DIRECTIVE:
         buf->token = T_DIRECTIVE;
-        if (g_opcode == 0) {
-            g_opcode = AsmOpTable[count].opcode;
+        buf->flags = AsmOpTable[index].opnd_type[1];
+        if ( g_flags == 0 ) {
+            g_flags = AsmOpTable[index].opnd_type[1];
         }
         break;
-    case OP_ARITHOP: /* GE, GT, LE, LT, EQ, NE, MOD */
+    case RWT_BINARY_OP: /* GE, GT, LE, LT, EQ, NE, MOD */
         buf->token = T_BINARY_OPERATOR;
         break;
     default:
-        DebugMsg(("get_id: found unknown specialtype=%u\n", AsmOpTable[count].specialtype ));
+        DebugMsg(("get_id: found unknown specialtype=%u\n", AsmOpTable[index].specialtype ));
         buf->token = T_ID; /* shouldn't happen */
         break;
     }
@@ -668,7 +657,7 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
 }
 
 static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
-/***********************************************************/
+/******************************************************************/
 {
     char    symbol;
 //    int     i;
@@ -700,7 +689,8 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
         if (*(p->input+1) != '=') {
             buf->token = T_DIRECTIVE;
             buf->value = T_EQU;
-            buf->opcode = DF_LABEL | 1; /* for EQU, bit 0 is 0 */
+            buf->dirtype = DRT_EQUALSGN; /* to make it differ from EQU directive */
+            buf->flags = DF_LABEL;
             *(p->output)++ = *(p->input)++;
             *(p->output)++ = '\0';
             break;
@@ -711,7 +701,7 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
         /* no_str_delim is TRUE if .IF, .WHILE, .ELSEIF or .UNTIL */
         /* has been detected in the current line */
         /* it will also store "<=" as a string, not as 2 tokens */
-        if (g_opcode & DF_CEXPR) {
+        if (g_flags & DF_CEXPR) {
             *(p->output)++ = *(p->input)++;
             buf->value = 1;
             if (*p->input == '=') {
@@ -731,8 +721,9 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
     default:
         /* a '<' in the source will prevent comments to be removed */
         /* so they might appear here. Remove! */
-        if ((g_opcode & DF_CEXPR) && symbol == ';') {
-            while (*p->input) *(p->input)++;
+        if ((g_flags & DF_CEXPR) && symbol == ';') {
+            //while (*p->input) *(p->input)++;// v1.96: replaced by next line
+            while (*p->input) p->input++;
             return( EMPTY );
         }
         /* anything we don't recognise we will consider a string,
@@ -748,6 +739,7 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
 // return values: NOT_ERROR, ERROR, EMPTY
 
 static ret_code GetToken(unsigned int buf_index, ioptrs *p )
+/**********************************************************/
 {
     int rc;
 
@@ -786,7 +778,7 @@ static ret_code GetToken(unsigned int buf_index, ioptrs *p )
 }
 
 int Tokenize( char *string, int index )
-/******************************************/
+/**************************************/
 /*
 - perform syntax checking on scan line;
 - pass back tokens for later use;
@@ -804,7 +796,7 @@ int Tokenize( char *string, int index )
 #endif
         CurrSource = string;
         p.output = token_stringbuf;
-        g_opcode = 0;
+        g_flags = 0;
         expansion = FALSE;
         p.input = string;
         while( isspace( *p.input )) p.input++;
@@ -859,6 +851,7 @@ int Tokenize( char *string, int index )
 /* get size of token buffer status */
 
 int GetTokenStateSize( void )
+/***************************/
 {
     return( sizeof( int ) +
             (Token_Count+1) * sizeof( struct asm_tok ) +
@@ -876,6 +869,7 @@ int GetTokenStateSize( void )
  */
 
 void SaveTokenState( unsigned char * pSave )
+/******************************************/
 {
     int i;
     *(int *)pSave = Token_Count;
@@ -893,6 +887,7 @@ void SaveTokenState( unsigned char * pSave )
 /* restore token state previously saved with SaveTokenState() */
 
 void RestoreTokenState( unsigned char * pSave )
+/*********************************************/
 {
     int i;
     Token_Count = *(int *)pSave;

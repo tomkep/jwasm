@@ -45,7 +45,7 @@ proj_obj = $(OUTD)/main.o     $(OUTD)/assemble.o $(OUTD)/assume.o  \
            $(OUTD)/omffixup.o $(OUTD)/listing.o  $(OUTD)/fatal.o   \
            $(OUTD)/autodept.o $(OUTD)/context.o  $(OUTD)/extern.o  \
            $(OUTD)/watcomc.o  \
-           $(OUTD)/msgtext.o  $(OUTD)/tbyte.o
+           $(OUTD)/backptch.o $(OUTD)/msgtext.o  $(OUTD)/tbyte.o
 ######
 
 #.c.o:
@@ -68,7 +68,7 @@ endif
 $(OUTD)/msgtext.o: msgtext.c H/msgdef.h H/usage.h
 	$(CC) -c $(inc_dirs) $(c_flags) -o $*.o msgtext.c
 
-$(OUTD)/parser.o: parser.c H/instruct.h H/reswords.h
+$(OUTD)/parser.o: parser.c H/instruct.h H/special.h
 	$(CC) -c $(inc_dirs) $(c_flags) -o $*.o parser.c
 
 ######

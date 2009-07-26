@@ -39,25 +39,25 @@
 #include "listing.h"
 
 void LabelsInit( void )
-/*************************/
+/*********************/
 {
     ModuleInfo.anonymous_label = 0;
 }
 char * GetCurrAnonLabel( char * buffer )
-/*************************/
+/**************************************/
 {
     sprintf( buffer, "L&_%04u", ModuleInfo.anonymous_label );
     return( buffer );
 }
 char * GetNextAnonLabel( char * buffer )
-/*************************/
+/**************************************/
 {
     sprintf( buffer, "L&_%04u", ModuleInfo.anonymous_label+1);
     return( buffer );
 }
 
 struct asm_sym * IsLabelType( char *name )
-/******************************/
+/****************************************/
 {
     asm_sym *sym;
 
@@ -74,7 +74,7 @@ struct asm_sym * IsLabelType( char *name )
 // bLocal: local should be defined locally if possible
 
 asm_sym *LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, bool bLocal )
-/**********************************************/
+/***********************************************************************************************/
 {
     struct asm_sym      *sym;
     int                 addr;
@@ -139,8 +139,8 @@ asm_sym *LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *varty
         /* add the label to the linked list attached to curr segment */
         /* this allows to reduce the number of passes (see fixup.c) */
         if (CurrSeg) {
-            ((dir_node *)sym)->next = (dir_node *)CurrSeg->seg->e.seginfo->labels;
-            CurrSeg->seg->e.seginfo->labels = sym;
+            ((dir_node *)sym)->next = (dir_node *)CurrSeg->e.seginfo->labels;
+            CurrSeg->e.seginfo->labels = sym;
         }
         /* a possible language type set by EXTERNDEF must be kept! */
         if (sym->langtype == LANG_NONE)
@@ -168,12 +168,13 @@ asm_sym *LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *varty
 }
 
 ret_code LabelDirective( int i )
-/*************************/
+/******************************/
 {
     asm_sym *sym;
     asm_sym *vartype;
     int ptrtype;
     int type;
+    int size;
 
     if( i != 1 ) {  /* LABEL must be preceded by an ID */
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -216,16 +217,16 @@ ret_code LabelDirective( int i )
                     i++;
                 break;
             }
-            last = FindSimpleType( AsmBuffer[i]->value );
+            last = FindStdType( AsmBuffer[i]->value );
             if ( last == -1 )
                 break;
 
             if ( type == -1 )
                 type = last;
-            else if ( ptrtype == -1 && SimpleType[last].type == ADDR_TYPE ) {
+            else if ( ptrtype == -1 && ( ( SimpleType[last].mem_type & MT_SPECIAL_MASK ) == MT_ADDRESS ) ) {
                 ptrtype = last;
             } else if ( AsmBuffer[i]->value == T_PTR )
-                if ( SimpleType[type].type == ADDR_TYPE ) {
+                if ( ( SimpleType[type].mem_type & MT_SPECIAL_MASK ) == MT_ADDRESS ) {
                     ptrtype = type;
                     type = last;
                 }
@@ -238,8 +239,8 @@ ret_code LabelDirective( int i )
             break;
 
         /* dont allow near16/far16/near32/far32 if size won't match */
-        if ( ( ModuleInfo.Use32 && SimpleType[type].ofs_size == OFSSIZE_16 ) ||
-            ( ModuleInfo.Use32 == FALSE && SimpleType[type].ofs_size == OFSSIZE_32 )) {
+        if ( ( ModuleInfo.Ofssize > USE16 && SimpleType[type].Ofssize == USE16 ) ||
+            ( ModuleInfo.Ofssize == USE16 && SimpleType[type].Ofssize == USE32 )) {
             AsmError( OFFSET_SIZE_MISMATCH );
             return( ERROR );
         }
@@ -255,9 +256,10 @@ ret_code LabelDirective( int i )
             ptrtype = type;
 
         if ( ptrtype != -1 ) {
-            int size = SimpleType[ptrtype].size;
-            if ( size == -1 )
-                size = SizeFromMemtype( SimpleType[ptrtype].mem_type, ModuleInfo.Use32 );
+            if ( SimpleType[ptrtype].Ofssize != USE_EMPTY )
+                size = SizeFromMemtype( SimpleType[ptrtype].mem_type, SimpleType[ptrtype].Ofssize );
+            else
+                size = SizeFromMemtype( SimpleType[ptrtype].mem_type, ModuleInfo.Ofssize );
             switch ( size ) {
             case 2:
                 sym->mem_type = MT_WORD;
@@ -268,6 +270,11 @@ ret_code LabelDirective( int i )
             case 6:
                 sym->mem_type = MT_FWORD;
                 break;
+#if AMD64_SUPPORT
+            case 8:
+                sym->mem_type = MT_QWORD;
+                break;
+#endif
             }
         }
 

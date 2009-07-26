@@ -82,7 +82,10 @@ typedef struct expr_list {
             int_32          value96127; // bits 96-127 of 128bit number
         };
         struct {
+            union {
             uint_64         llvalue;
+            int_64          value64;
+            };
             uint_64         hlvalue;
         };
     };
@@ -98,7 +101,7 @@ typedef struct expr_list {
     enum exprtype   kind;           // Type of expression
     memtype         mem_type;       // Whether expr is BYTE, WORD, DWORD, etc.
     uint_8          scale;          // scaling factor 1, 2, 4, or 8 - 386 code only
-    ofssize         ofs_size;       // for MT_NEAR | MT_FAR
+    uint_8          Ofssize;        // for MT_NEAR | MT_FAR
     union {
         uint_8      flags;
         struct {

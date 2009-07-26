@@ -36,7 +36,6 @@
 
 #include "globals.h"
 #include "parser.h"
-#include "codegen.h"
 #include "fixup.h"
 #include "expreval.h"
 #include "directiv.h"
@@ -48,7 +47,10 @@
 
 #define NEEDLABEL 1
 
-//extern void     Set_Memtype( memtype mem_type, bool fix_mem_type );
+#define IS_CONDJMP( inst )  ( ( inst >= T_JA ) && ( inst <= T_JZ ) )
+
+//extern void     Set_Memtype( struct code_info *, memtype mem_type, bool fix_mem_type );
+extern unsigned int     Opnd_Count;     // operand count of current instr
 
 /* "short jump extension": extend a (conditional) jump.
  * example:
@@ -61,8 +63,8 @@
  * of 7D-7F (16bit), because the additional "jmp label" will increase
  * the code size.
  */
-static void jumpExtend( int far_flag )
-/*************************************/
+static void jumpExtend( struct code_info *CodeInfo, int far_flag )
+/****************************************************************/
 {
     uint_8 opcode;
     unsigned next_ins_size;
@@ -70,18 +72,18 @@ static void jumpExtend( int far_flag )
     if( Parse_Pass == PASS_2 )
         AsmWarn( 4, EXTENDING_JUMP );
 
-    DebugMsg(("%u jumpExtend(%u), curr offset=%X\n", Parse_Pass + 1, far_flag, GetCurrOffset() ));
+    DebugMsg(("jumpExtend(far=%u), pass=%u, curr offset=%X, Ofssize=%u\n", far_flag, Parse_Pass + 1, GetCurrOffset(), CodeInfo->Ofssize ));
     if( far_flag ) {
         if ( CodeInfo->prefix.opsiz ) {
             /* it's 66 EA OOOO SSSS or 66 EA OOOOOOOO SSSS */
-            next_ins_size = CodeInfo->use32 ? 6 : 8;
+            next_ins_size = CodeInfo->Ofssize ? 6 : 8;
         } else {
             /* it's EA OOOOOOOO SSSS or EA OOOO SSSS */
-            next_ins_size = CodeInfo->use32 ? 7 : 5;
+            next_ins_size = CodeInfo->Ofssize ? 7 : 5;
         }
     } else {
         /* it's E9 OOOOOOOO or E9 OOOO */
-        next_ins_size = CodeInfo->use32 ? 5 : 3;
+        next_ins_size = CodeInfo->Ofssize ? 5 : 3;
     }
 
     /* it's ensured that the short jump version is first in AsmOpTable */
@@ -89,6 +91,7 @@ static void jumpExtend( int far_flag )
     OutputCodeByte( opcode ^ 1 ); /* the negation is achieved by XOR 1 */
     OutputCodeByte( next_ins_size );
     CodeInfo->token = T_JMP;
+    CodeInfo->pcurr = &AsmOpTable[AsmResWord[T_JMP].position];
 
     return;
 }
@@ -96,8 +99,8 @@ static void jumpExtend( int far_flag )
 // "far call optimisation": a far call is done to a near label
 // optimize (call SSSS:OOOO -> PUSH CS, CALL OOOO)
 
-static void FarCallToNear( void )
-/*******************************/
+static void FarCallToNear( struct code_info *CodeInfo )
+/*****************************************************/
 {
     if( Parse_Pass == PASS_2 )
         AsmWarn( 4, CALL_FAR_TO_NEAR );
@@ -109,8 +112,8 @@ static void FarCallToNear( void )
     return;
 }
 
-ret_code branch( expr_list *opndx )
-/*******************************/
+ret_code branch( struct code_info *CodeInfo, expr_list *opndx )
+/*************************************************************/
 /*
  called by idata_fixup() and idata_nofixup().
  current instruction is CALL, JMP, Jxx, LOOPx, JCXZ or JECXZ
@@ -157,25 +160,27 @@ ret_code branch( expr_list *opndx )
     DebugMsg(("branch(%X): explicit=%u op.memtype=%X sym=>%s< sym.state=%u/mem_type=%Xh/ofs=%X\n", GetCurrOffset(), opndx->explicit, opndx->mem_type, sym->name, sym->state, sym->mem_type, sym->offset));
 
     state = sym->state;
-    seg = GetSeg( sym );
-    if( CurrSeg->seg != seg || seg == NULL ) {
-        /* if label has a different segment and jump/call is near or short,
-         report an error */
-        if ( ModuleInfo.flatgrp_idx != 0 )
-            ;
-        else if (seg != NULL && CurrSeg != NULL) {
-            /* if the segments belong to the same group, it's ok */
-            if (((dir_node *)seg)->e.seginfo->group != NULL &&
-                CurrSeg->seg->e.seginfo->group != NULL &&
-                ((dir_node *)seg)->e.seginfo->group == CurrSeg->seg->e.seginfo->group)
+    if ( state == SYM_UNDEFINED || state == SYM_INTERNAL || state == SYM_PROC || state == SYM_EXTERNAL ) {
+        seg = GetSeg( sym );
+        if( seg == NULL || ( CurrSeg != seg ) ) {
+            /* if label has a different segment and jump/call is near or short,
+             report an error */
+            if ( ModuleInfo.flatgrp_idx != 0 )
                 ;
-            else if ( opndx->mem_type == MT_NEAR || opndx->mem_type == MT_SHORT ) {
-                AsmError( NO_FAR_JUMP_TO_NEAR_LABEL );
-                return( ERROR );
+            else if (seg != NULL && CurrSeg != NULL) {
+                /* if the segments belong to the same group, it's ok */
+                if (((dir_node *)seg)->e.seginfo->group != NULL &&
+                    CurrSeg->e.seginfo->group != NULL &&
+                    ((dir_node *)seg)->e.seginfo->group == CurrSeg->e.seginfo->group)
+                    ;
+                else if ( opndx->mem_type == MT_NEAR || opndx->mem_type == MT_SHORT ) {
+                    AsmError( NO_FAR_JUMP_TO_NEAR_LABEL );
+                    return( ERROR );
+                }
             }
+            /* jumps to another segment are just like to another file */
+            state = SYM_EXTERNAL;
         }
-        /* jumps to another segment are just like to another file */
-        state = SYM_EXTERNAL;
     }
 
     if( !CodeInfo->mem_type_fixed ) {
@@ -185,7 +190,7 @@ ret_code branch( expr_list *opndx )
     fixup_type = FIX_RELOFF8;
     switch( state ) {
     case SYM_UNDEFINED:
-        SetSymSegOfs( sym );
+        SetSymSegOfs( sym ); /* set symbol's seg:ofs to current seg:ofs */
         /* fall through */
     case SYM_INTERNAL:
     case SYM_PROC:
@@ -207,7 +212,7 @@ ret_code branch( expr_list *opndx )
             * 2. it's useless because it won't occur.
             */
            && sym->mem_type != MT_WORD
-           && sym->mem_type != MT_DWORD    
+           && sym->mem_type != MT_DWORD
            && sym->mem_type != MT_FWORD
 #endif
             && CodeInfo->isfar == FALSE ) {
@@ -219,7 +224,7 @@ ret_code branch( expr_list *opndx )
             if( CodeInfo->token == T_CALL &&
                 CodeInfo->mem_type == MT_EMPTY &&
                 ( sym->mem_type == MT_FAR || CodeInfo->prefix.SegOverride ) ) {
-                FarCallToNear();
+                FarCallToNear( CodeInfo );
             }
 
             addr = sym->offset;
@@ -227,8 +232,8 @@ ret_code branch( expr_list *opndx )
             addr += CodeInfo->data[Opnd_Count];
             /*  JCXZ, LOOPW, LOOPEW, LOOPZW, LOOPNEW, LOOPNZW,
                JECXZ, LOOPD, LOOPED, LOOPZD, LOOPNED, LOOPNZD? */
-            if (( CodeInfo->use32 && AsmOpTable[opidx].byte1_info == F_16A) ||
-                ( !CodeInfo->use32 && AsmOpTable[opidx].byte1_info == F_32A))
+            if (( CodeInfo->Ofssize && AsmOpTable[opidx].byte1_info == F_16A) ||
+                ( CodeInfo->Ofssize != USE32 && AsmOpTable[opidx].byte1_info == F_32A))
                 addr--; /* 1 extra byte for ADRSIZ (0x67) */
 
             if( CodeInfo->token == T_CALL && CodeInfo->mem_type == MT_EMPTY ) {
@@ -239,20 +244,34 @@ ret_code branch( expr_list *opndx )
                 && ( addr >= SCHAR_MIN && addr <= SCHAR_MAX ) ) {
                 CodeInfo->opnd_type[Opnd_Count] = OP_I8;
             } else {
+                if ( CodeInfo->mem_type == MT_SHORT || ( IS_XCX_BRANCH( CodeInfo->token ) ) ) {
+                    /* v1.96: since JWasm's backpatch strategy is to move from
+                     * "smallest" to "largest" distance, an "out of range"
+                     * error can be detected at any time.
+                     */
+                    DebugMsg(("branch: 1, jump out of range, addr=%Xh\n", addr ));
+                    if ( addr < 0 ) {
+                        addr -= SCHAR_MIN;
+                        addr = 0 - addr;
+                    } else
+                        addr -= SCHAR_MAX;
+                    AsmErr( JUMP_OUT_OF_RANGE, addr );
+                    return( ERROR );
+                }
                 /* near destination */
                 /* is there a type coercion? */
-                if ( opndx->ofs_size != OFSSIZE_EMPTY ) {
-                    if ( opndx->ofs_size == OFSSIZE_16 ) {
+                if ( opndx->Ofssize != USE_EMPTY ) {
+                    if ( opndx->Ofssize == USE16 ) {
                         CodeInfo->opnd_type[Opnd_Count] = OP_I16;
                         addr -= 1; // 16 bit displacement
                     } else {
                         CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                         addr -= 3; // 32 bit displacement
                     }
-                    SET_OPSIZ( CodeInfo, opndx->ofs_size == OFSSIZE_32 );
+                    SET_OPSIZ( CodeInfo, opndx->Ofssize == USE32 );
                     if ( CodeInfo->prefix.opsiz )
                         addr--;
-                } else if( CodeInfo->use32 ) {
+                } else if( CodeInfo->Ofssize ) {
                     CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                     addr -= 3; // 32 bit displacement
                 } else {
@@ -267,34 +286,17 @@ ret_code branch( expr_list *opndx )
 
             /* store the displacement */
             CodeInfo->data[Opnd_Count] = addr;
+            DebugMsg(("branch: displacement=%X\n", addr ));
 
-            if ( CodeInfo->mem_type == MT_SHORT ||
-                 CodeInfo->token == T_JCXZ ||
-                 CodeInfo->token == T_JECXZ ||
-                 (CodeInfo->token >= T_LOOP &&
-                  CodeInfo->token <= T_LOOPZW) ) {
-                if( Parse_Pass > PASS_1 &&
-                   PhaseError == FALSE &&
-                   (CodeInfo->opnd_type[Opnd_Count] != OP_I8) ) {
-                    DebugMsg(("branch: 1, jump out of range, addr=%d\n", addr ));
-                    AsmErr( JUMP_OUT_OF_RANGE, addr );
-                    return( ERROR );
-                }
-                CodeInfo->opnd_type[Opnd_Count] = OP_I8;
-                break;
-            }
-            /* remaining instructions: CALL, JMP, Jxx */
-
-            /* automatic (conditional) jump expansion */
-            /* for 386 and above this is not needed, since there exists
-             an extended version of Jxx */
-            if( ( ModuleInfo.curr_cpu & P_CPU_MASK) < P_386 &&
-                CodeInfo->token != T_CALL &&
-                CodeInfo->token != T_JMP) {
+            /* automatic (conditional) jump expansion.
+             * for 386 and above this is not needed, since there exists
+             * an extended version of Jcc
+             */
+            if( ( ModuleInfo.curr_cpu & P_CPU_MASK) < P_386 && IS_JCC( CodeInfo->token ) ) {
                 /* look into jump extension */
                 if( CodeInfo->opnd_type[Opnd_Count] != OP_I8 ) {
                     if( CodeInfo->mem_type == MT_EMPTY && ModuleInfo.ljmp == TRUE ) {
-                        jumpExtend( FALSE );
+                        jumpExtend( CodeInfo, FALSE );
                         addr -= 1;
                         CodeInfo->data[Opnd_Count] = addr;
                         //return( SCRAP_INSTRUCTION );
@@ -310,6 +312,7 @@ ret_code branch( expr_list *opndx )
         }
         /* fall through, handle FAR destinations like external symbols */
     case SYM_EXTERNAL:
+        DebugMsg(("branch: SYM_EXTERNAL\n" ));
 
         /* v1.95: explicit flag to be removed! */
         //if ( opndx->explicit )
@@ -337,7 +340,7 @@ ret_code branch( expr_list *opndx )
                 break;
 #if 0
             case MT_FWORD: /* shouldn't happen! */
-                Set_Memtype( MT_FWORD, TRUE );
+                Set_Memtype( CodeInfo, MT_FWORD, TRUE );
                 break;
 #endif
             default:
@@ -348,7 +351,9 @@ ret_code branch( expr_list *opndx )
 
         /* handle far JMP + CALL? */
         if ( IS_JMPCALL( CodeInfo->token ) &&
-             ( CodeInfo->isfar == TRUE || CodeInfo->mem_type == MT_FAR )) {
+            ( CodeInfo->isfar == TRUE || CodeInfo->mem_type == MT_FAR )) {
+            CodeInfo->isfar = TRUE; /* flag isn't set if explicit is true */
+            DebugMsg(("branch: FAR call/jmp\n"));
             switch( CodeInfo->mem_type ) {
             case MT_SHORT:
             case MT_NEAR:
@@ -360,17 +365,17 @@ ret_code branch( expr_list *opndx )
             case MT_FAR:
             case MT_EMPTY:
                 /* v1.95: explicit flag to be removed! */
-                //if ( opndx->explicit && opndx->ofs_size != OFSSIZE_EMPTY )
-                if ( opndx->ofs_size != OFSSIZE_EMPTY )
-                    SET_OPSIZ( CodeInfo, opndx->ofs_size == OFSSIZE_32 );
+                //if ( opndx->explicit && opndx->Ofssize != USE_EMPTY )
+                if ( opndx->Ofssize != USE_EMPTY )
+                    SET_OPSIZ( CodeInfo, opndx->Ofssize == USE32 );
                 else
-                    SET_OPSIZ( CodeInfo, SymIs32( sym ));
+                    SET_OPSIZ( CodeInfo, GetSymOfssize( sym ));
 
                 /* set global vars Frame + Frame_Datum */
-                find_frame( sym );
-
-                if( Opnd_Count == OPND2 ) {
-                    if( oper_32( CodeInfo ) ) {
+                find_frame( CodeInfo, sym );
+#if 0 /* v1.96: removed */
+                if( Opnd_Count == OPND2 ) { /* WASM hack (call/jmp with 2 ops) */
+                    if( IS_OPER_32( CodeInfo ) ) {
                         fixup_type = FIX_OFF32;
                         CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                     } else {
@@ -378,14 +383,15 @@ ret_code branch( expr_list *opndx )
                         CodeInfo->opnd_type[Opnd_Count] = OP_I16;
                     }
                 } else {
-                    if( oper_32( CodeInfo ) ) {
+#endif
+                    if( IS_OPER_32( CodeInfo ) ) {
                         fixup_type = FIX_PTR32;
                         CodeInfo->opnd_type[Opnd_Count] = OP_J48;
                     } else {
                         fixup_type = FIX_PTR16;
-                        CodeInfo->opnd_type[Opnd_Count] = OP_J32;
+                        CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                     }
-                }
+                //}
                 break;
 #if 0
             case MT_DWORD:
@@ -399,7 +405,7 @@ ret_code branch( expr_list *opndx )
                 AsmError( INVALID_SIZE );
                 return( ERROR );
             }
-            AddFixup( sym, fixup_type, fixup_option );
+            CodeInfo->InsFixup[Opnd_Count] = AddFixup( sym, fixup_type, fixup_option );
             return( NOT_ERROR );
         }  /* end if FAR JMP/CALL */
 
@@ -410,7 +416,7 @@ ret_code branch( expr_list *opndx )
                 return( ERROR );
             } else if( CodeInfo->mem_type == MT_EMPTY ) {
                 fixup_option = OPTJ_CALL;
-                if( CodeInfo->use32 ) {
+                if( CodeInfo->Ofssize ) {
                     fixup_type = FIX_RELOFF32;
                     CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                 } else {
@@ -437,14 +443,14 @@ ret_code branch( expr_list *opndx )
                 break;
             case MT_NEAR:
                 fixup_option = OPTJ_EXPLICIT;
-                if( CodeInfo->use32 ) {
+                if( CodeInfo->Ofssize ) {
                     fixup_type = FIX_RELOFF32;
                     CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                 } else {
                     fixup_type = FIX_RELOFF16;
                     CodeInfo->opnd_type[Opnd_Count] = OP_I16;
                 }
-                find_frame( sym );/* added v1.95 (after change in fixup.c */
+                find_frame( CodeInfo, sym );/* added v1.95 (after change in fixup.c */
                 break;
 #if 0
             case MT_DWORD:
@@ -461,12 +467,9 @@ ret_code branch( expr_list *opndx )
             // deactivated because there's no override involved here
             // check_assume( sym, EMPTY );
             break;
-        default: /* JCXZ, JECXZ, LOOPxx, Jxx */
-            // JCXZ, JECXZ and LOOPxx always require SHORT label
-            if ( CodeInfo->token == T_JCXZ ||
-                 CodeInfo->token == T_JECXZ ||
-                 (CodeInfo->token >= T_LOOP &&
-                  CodeInfo->token <= T_LOOPZW) ) {
+        default: /* JxCXZ, LOOPxx, Jxx */
+            // JxCXZ and LOOPxx always require SHORT label
+            if ( IS_XCX_BRANCH( CodeInfo->token ) ) {
                 if( CodeInfo->mem_type != MT_EMPTY && CodeInfo->mem_type != MT_SHORT ) {
                     AsmError( ONLY_SHORT_DISPLACEMENT_IS_ALLOWED );
                     return( ERROR );
@@ -492,15 +495,12 @@ ret_code branch( expr_list *opndx )
                     break;
                 case MT_NEAR:
                     fixup_option = OPTJ_EXPLICIT;
-                    /* it might be useful to allow to use the
-                     16bit version of the near jump in 32bit mode
-                     since it is 1 byte shorter! */
                     /* v1.95: explicit flag to be removed! */
-                    //if ( opndx->explicit && opndx->ofs_size != OFSSIZE_EMPTY ) {
-                    if ( opndx->ofs_size != OFSSIZE_EMPTY ) {
-                        SET_OPSIZ( CodeInfo, opndx->ofs_size == OFSSIZE_32 );
-                        CodeInfo->opnd_type[Opnd_Count] = (opndx->ofs_size == OFSSIZE_32) ? OP_I32 : OP_I16;
-                    } else if( CodeInfo->use32 ) {
+                    //if ( opndx->explicit && opndx->Ofssize != USE_EMPTY ) {
+                    if ( opndx->Ofssize != USE_EMPTY ) {
+                        SET_OPSIZ( CodeInfo, opndx->Ofssize >= USE32 );
+                        CodeInfo->opnd_type[Opnd_Count] = (opndx->Ofssize >= USE32) ? OP_I32 : OP_I16;
+                    } else if( CodeInfo->Ofssize ) {
                         fixup_type = FIX_RELOFF32;
                         CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                     } else {
@@ -511,18 +511,19 @@ ret_code branch( expr_list *opndx )
                 case MT_FAR:
                     if ( ModuleInfo.ljmp ) { /* OPTION LJMP set? */
                         /* v1.95: explicit flag to be removed! */
-                        //if ( opndx->explicit && opndx->ofs_size != OFSSIZE_EMPTY )
-                        if ( opndx->ofs_size != OFSSIZE_EMPTY )
-                            SET_OPSIZ( CodeInfo, opndx->ofs_size == OFSSIZE_32 );
+                        //if ( opndx->explicit && opndx->Ofssize != USE_EMPTY )
+                        if ( opndx->Ofssize != USE_EMPTY )
+                            SET_OPSIZ( CodeInfo, opndx->Ofssize >= USE32 );
                         else
-                            SET_OPSIZ( CodeInfo, SymIs32( sym ));
-                        jumpExtend( TRUE );
-                        if( oper_32( CodeInfo ) ) {
+                            SET_OPSIZ( CodeInfo, GetSymOfssize( sym ));
+                        jumpExtend( CodeInfo, TRUE );
+                        CodeInfo->isfar = TRUE;
+                        if( IS_OPER_32( CodeInfo ) ) {
                             fixup_type = FIX_PTR32;
                             CodeInfo->opnd_type[Opnd_Count] = OP_J48;
                         } else {
                             fixup_type = FIX_PTR16;
-                            CodeInfo->opnd_type[Opnd_Count] = OP_J32;
+                            CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                         }
                         break;
                         //return( SCRAP_INSTRUCTION );
@@ -551,11 +552,12 @@ ret_code branch( expr_list *opndx )
                 case MT_FAR:
                     if ( ModuleInfo.ljmp ) {
                         if ( CodeInfo->mem_type == MT_FAR ) {
-                            jumpExtend( TRUE );
+                            jumpExtend( CodeInfo, TRUE );
                             fixup_type = FIX_PTR16;
-                            CodeInfo->opnd_type[Opnd_Count] = OP_J32;
+                            CodeInfo->isfar = TRUE;
+                            CodeInfo->opnd_type[Opnd_Count] = OP_I32;
                         } else {
-                            jumpExtend( FALSE );
+                            jumpExtend( CodeInfo, FALSE );
                             fixup_type = FIX_RELOFF16;
                             CodeInfo->opnd_type[Opnd_Count] = OP_I16;
                         }
@@ -569,11 +571,11 @@ ret_code branch( expr_list *opndx )
                 }
             }
         }
-        AddFixup( sym, fixup_type, fixup_option );
+        CodeInfo->InsFixup[Opnd_Count] = AddFixup( sym, fixup_type, fixup_option );
         break; /* end case SYM_EXTERNAL */
-    default: /* SYM_STACK, SYM_SEG, SYM_GRP, ... */
+    default: /* other types: SYM_SEG, SYM_GRP, SYM_STACK?, SYM_STRUCT_FIELD, SYM_TYPE,  ... */
         DebugMsg(("branch: error, sym=%s, state=%u, memtype=%u\n", sym->name, sym->state, sym->mem_type));
-        AsmError( NO_JUMP_TO_AUTO );
+        AsmErr( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL );
         return( ERROR );
     }
     return( NOT_ERROR );

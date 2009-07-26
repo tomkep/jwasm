@@ -28,7 +28,7 @@
 *
 ****************************************************************************/
 
-#include <fcntl.h>
+//#include <fcntl.h>
 
 #include "globals.h"
 #include "tokenize.h"
@@ -71,15 +71,18 @@ static const char usage[] = {
 };
 
 ret_code MsgInit( void )
+/**********************/
 {
     return( NOT_ERROR );
 }
 
 void MsgFini( void )
+/******************/
 {
 }
 
 char * MsgGet( int msgid, char *buffer )
+/**************************************/
 {
 #if USERESOURCES
     HRSRC hRsrc;
@@ -119,11 +122,13 @@ char * MsgGet( int msgid, char *buffer )
 }
 
 char *MsgGetEx( int msgid )
+/*************************/
 {
     return( MsgGet( msgid, NULL ) );
 }
 
 void MsgPrintf( int msgid )
+/*************************/
 {
     trademark();
     printf( MsgGet( msgid, NULL ));
@@ -131,6 +136,7 @@ void MsgPrintf( int msgid )
 
 #if 0
 void MsgPrintf1( int msgid, char *token )
+/***************************************/
 {
     trademark();
     printf( MsgGet( msgid, NULL ), token );
@@ -138,12 +144,14 @@ void MsgPrintf1( int msgid, char *token )
 #endif
 
 void MsgPrintUsage( void )
+/************************/
 {
     trademark();
     printf( "%s", usage );
 }
 
 char *MsgGetJWasmName( char * buffer )
+/************************************/
 {
     sprintf( buffer, MsgGet( MSG_JWASM, NULL ), _JWASM_VERSION_, __DATE__ );
     return( buffer );

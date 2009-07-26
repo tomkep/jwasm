@@ -34,6 +34,12 @@ typedef struct _context {
     char data[];
 } context;
 
+#if AMD64_SUPPORT
+#define NUM_STDREGS 16
+#else
+#define NUM_STDREGS 8
+#endif
+
 typedef struct _assumes_context {
     assume_info SegAssumeTable[NUM_SEGREGS];
     assume_info StdAssumeTable[NUM_STDREGS];

@@ -1,10 +1,15 @@
 "   JWasm [options] asm-file [options] [asm-file] ... [@env_var]\n"
 "\n"
 "options:\n"
-"-<0|1|2|3|4|5|6>[p] Instructions accepted for 8086(=0), 80186(=1),\n"
-"                    80286(=2), 80386(=3), 80486(=4), Pentium(=5) or\n"
-"                    Pentium Pro(=6) cpu. <p> allows privileged\n"
-"                    instructions.\n"
+#if AMD64_SUPPORT
+"-<0|1|..|7>[p]      Set CPU: 0=8086 (default), 1=80186, 2=80286, 3=80386,\n"
+"                    4=80486, 5=Pentium, 6=Pentium Pro, 7=x86-64.\n"
+"                    <p> allows privileged instructions.\n"
+#else
+"-<0|1|..|6>[p]      Set CPU: 0=8086 (default), 1=80186, 2=80286, 3=80386,\n"
+"                    4=80486, 5=Pentium, 6=Pentium Pro.\n"
+"                    <p> allows privileged instructions.\n"
+#endif
 #if BIN_SUPPORT
 "-bin                Generate plain binary file\n"
 #endif
@@ -30,8 +35,7 @@
 "-FPi                80x87 instructions with emulation fixups\n"
 "-FPi87              80x87 instructions (default)\n"
 "-fpc                Disallow floating-point instructions (.NO87)\n"
-"-fp<n>              Floating-point instructions for 8087(n=0), 80287(n=2),\n"
-"                    80387(n=3), Pentium(n=5) or Pentium Pro(n=6).\n"
+"-fp<n>              Set FPU, <n> is: 0=8087 (default), 2=80287, 3=80387\n"
 "-G<c|d|z>           Use Pascal, C or Stdcall calling convention\n"
 "-I<directory>       Add directory to list of include directories\n"
 "-j                  Force signed types to be used for signed values\n"
@@ -40,6 +44,11 @@
 #endif
 "-m<t|s|m|c|l|h|f>   Set memory model:\n"
 "                    (Tiny, Small, Medium, Compact, Large, Huge, Flat)\n"
+#if BIN_SUPPORT
+#if MZ_SUPPORT
+"-mz                 Generate binary in DOS MZ format\n"
+#endif
+#endif
 "-n<d|m|t>=<name>    Set name of data segment, module or text segment\n"
 #if COCTALS
 "-o                  Allow C form of octal constants\n"
@@ -55,12 +64,17 @@
 "-Sx                 List false conditionals\n"
 "-w                  Same as /W0 /WX\n"
 "-W<number>          Set warning level number (default=2, max=4)\n"
+#if AMD64_SUPPORT
+"-win64              Generate 64bit COFF format object file\n"
+#endif
 "-WX                 Treat all warnings as errors\n"
 "-X                  Ignore INCLUDE environment path\n"
 "-zcm                C names are decorated with '_' prefix (default)\n"
-"-zcw                No name decoration for C symbols (Watcom compatible)\n"
+"-zcw                No name decoration for C symbols\n"
 "-Zd                 Add line number debug information\n"
 "-Zf                 Make all symbols public\n"
+"-zf<0|1>            Set FASTCALL type: 0=MS VC style (default),\n"
+"                    1=OW register calling convention\n"
 "-Zg                 Generated code is to exactly match Masm's one\n"
 "-Zi                 Symbolic debug info (not implemented yet)\n"
 "-zlc                No OMF records about data in code\n"
@@ -70,8 +84,8 @@
 "-Zm                 Masm v5.1 compatibility\n"
 "-Zne                Disable syntax extensions not supported by Masm\n"
 "-Zp[n]              Set structure alignment, n=<1|2|4|8|16|32>\n"
-"-zze                No name decoration for exports\n"
-"-zzo                No name decoration for STDCALL symbols\n"
-"-zzp                No '@size' suffix for STDCALL procedure names\n"
+"-zs<0|1|2>          Set STDCALL symbol decoration: 0=No name decoration,\n"
+"                    1=No '@size' suffix for functions, 2=Full (default)\n"
+"-zze                No name decoration for exported symbols\n"
 "-zzs                Store decorated name of start address (COFF only)\n"
 "@env_var            Environment variable or file containing further commands\n"

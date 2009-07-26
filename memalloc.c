@@ -44,13 +44,15 @@
 
 #include "globals.h"
 
-// FASTMEM is a simple memory alloc approach which allocates chunks of 256 kB
-// and will release it only at MemFini()
+// FASTMEM is a simple memory alloc approach which allocates chunks of 512 kB
+// and will release it only at MemFini().
 #if FASTMEM
  #define BLKSIZE 0x80000
  #ifndef __UNIX__
-  #ifdef __OS2__
+  #if defined(__OS2__)
    #include "os2.h"
+  #elif defined(__DJGPP__)
+   #include "dpmi.h"
   #else
    #include "win32.h"
   #endif
@@ -114,13 +116,14 @@ uint_32 mymmap_size = 0;   // size in bytes
 #endif
 
 #if FASTMEM
-uint_8 * pBase;
-uint_8 * pCurr;
-int blocks;
-int currfree;
+static uint_8 *pBase;
+static uint_8 *pCurr;
+static int blocks;
+static int currfree;
 #endif
 
 void MemInit( void )
+/******************/
 {
 #ifdef TRMEM
     memFile = _open( "~jwasm.trk", O_WRONLY | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE );
@@ -142,6 +145,7 @@ void MemInit( void )
 }
 
 void MemFini( void )
+/******************/
 {
 #ifdef TRMEM
     if( memHandle != NULL ) {
@@ -162,14 +166,16 @@ void MemFini( void )
     while (pBase) {
         uint_8 * pNext = *((uint_8 * *)pBase);
 #ifndef __UNIX__
- #ifdef  __OS2__
-        DosFreeMem(pBase);
+ #if defined(__OS2__)
+        DosFreeMem( pBase );
+ #elif defined(__NT__)
+        VirtualFree( pBase, 0, MEM_RELEASE );
  #else
-        VirtualFree(pBase, 0, MEM_RELEASE);
+        free( pBase );
  #endif
 #else
   #if defined(__WATCOMC__)
-        sys_call2(SYS_munmap, (uint_32)pBase, 0);
+        sys_call2( SYS_munmap, (uint_32)pBase, 0 );
   #else
         munmap( (void *)pBase, 0 );
   #endif
@@ -180,55 +186,60 @@ void MemFini( void )
 }
 
 void *AsmAlloc( size_t size )
+/***************************/
 {
     void        *ptr;
 
 #if FASTMEM
     size = (size + 3) & ~3;
     if (currfree < size) {
-        DebugMsg(("AsmAlloc: new block, req. size=%u\n", size ));
+        DebugMsg(("AsmAlloc: new block, req. size=%Xh\n", size ));
         if (size > BLKSIZE-4) {
 #ifndef __UNIX__
- #ifdef __OS2__
+ #if defined(__OS2__)
             DosAllocMem( (void**)&pCurr, size+4, PAG_COMMIT|PAG_READ|PAG_WRITE);
- #else
+ #elif defined(__NT__)
             pCurr = (uint_8 *)VirtualAlloc(NULL, size+4, MEM_COMMIT, PAGE_READWRITE);
+ #else
+            pCurr = malloc( size+4 );
  #endif
 #else
-  #if defined(__GNUC__)
+ #if defined(__GNUC__)
             mymmap_size = size+4;
             pCurr = (char *)mmap( 0, mymmap_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0 );
             if ( pCurr == MAP_FAILED )
                 pCurr = NULL;
-  #else
+ #else
             mymmap.size = size+4;
             pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
-  #endif
+ #endif
 #endif
             currfree = size;
         } else {
 #ifndef __UNIX__
- #ifdef __OS2__
-            DosAllocMem( (void **)&pCurr, BLKSIZE, PAG_COMMIT|PAG_READ|PAG_WRITE);
- #else
+ #if defined(__OS2__)
+            DosAllocMem( (void **)&pCurr, BLKSIZE, PAG_COMMIT|PAG_READ|PAG_WRITE );
+ #elif defined(__NT__)
             pCurr = (uint_8 *)VirtualAlloc(NULL, BLKSIZE, MEM_COMMIT, PAGE_READWRITE);
-  #endif
+ #else
+            pCurr = malloc( BLKSIZE );
+ #endif
 #else
-  #if defined(__GNUC__)
+ #if defined(__GNUC__)
             mymmap_size = BLKSIZE;
             pCurr = (char *)mmap( 0, mymmap_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0 );
             if ( pCurr == MAP_FAILED )
                 pCurr = NULL;
-  #else
+ #else
             mymmap.size = BLKSIZE;
             pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
-  #endif
+ #endif
 #endif
             currfree = BLKSIZE - sizeof(uint_8 *);
         }
         if (!pCurr) {
             currfree = 0;
-            Fatal( MSG_OUT_OF_MEMORY );
+            Fatal( FATAL_OUT_OF_MEMORY );
         }
         *(uint_8 * *)pCurr = pBase;
         pBase = pCurr;
@@ -246,7 +257,7 @@ void *AsmAlloc( size_t size )
     ptr = malloc( size );
 #endif
     if( ptr == NULL ) {
-        Fatal( MSG_OUT_OF_MEMORY );
+        Fatal( FATAL_OUT_OF_MEMORY );
     }
 #endif
     return( ptr );
@@ -254,6 +265,7 @@ void *AsmAlloc( size_t size )
 
 #if FASTMEM==0
 void AsmFree( void *ptr )
+/***********************/
 {
     if( ptr != NULL ) {
 #ifdef TRMEM
@@ -266,29 +278,32 @@ void AsmFree( void *ptr )
 #endif
 
 void *MemAlloc( size_t size )
+/***************************/
 {
     void        *ptr;
     ptr = malloc( size );
     if( ptr == NULL ) {
-        Fatal( MSG_OUT_OF_MEMORY );
+        Fatal( FATAL_OUT_OF_MEMORY );
     }
     return( ptr );
 }
 
 void MemFree( void *ptr )
+/***********************/
 {
     free( ptr );
     return;
 }
 
 #if 0
-void *MemRealloc( void *ptr, size_t size ) {
+void *MemRealloc( void *ptr, size_t size )
 /****************************************/
+{
     void *new;
 
     new = realloc( ptr, size );
     if( new == NULL && size != 0 ) {
-        Fatal( MSG_OUT_OF_MEMORY );
+        Fatal( FATAL_OUT_OF_MEMORY );
     }
     return( new );
 }

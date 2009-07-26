@@ -37,6 +37,7 @@ extern void     AddLineQueue( char *line );
 extern void     AddMacroLineQueue( char *line );
 extern ret_code InputQueueFile( char *path, FILE * *pfile );
 extern char     *GetTextLine( char *string, int max );
+extern void     RestoreLineNumber( void );
 extern void     PushMacro( struct asm_sym *sym );
 extern void     PushMacroGoto( struct asm_sym *sym, int lineno );
 extern void     AddStringToIncludePath( char *string );

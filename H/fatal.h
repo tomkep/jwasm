@@ -33,8 +33,9 @@
 
 enum {
 #undef fix
-#define fix( cmd, argc, act, ret ) MSG_ ## cmd
+#define fix( cmd, argc, act, ret ) FATAL_ ## cmd,
 #include "fatalmsg.h"
+    FATAL_LAST
 };
 
 extern void   Fatal( unsigned msg, ... );

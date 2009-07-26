@@ -1,6 +1,98 @@
 
    Changelog
 
+   07/26/2009, v1.96:
+
+   Bugfixes:
+
+   -  BIN format: fixups related to $ were always resolved to 0.
+   -  offset <seg_name> didn't return the segment's highest offset.
+   -  if ASSUME forward referenced a type, the type's validity wasn't
+      checked in pass 2 if the directive was located before any code
+      or data definitions.
+   -  BIN format: in v1.95, a stack segment generally wasn't written, but
+      this rule has turned out to be too simple. Now a segment isn't written
+      if the segment itself AND all segments following it don't contain
+      initialized data.
+   -  BIN format: if .DOSSEG was set, segments might have got lost in the
+      binary.
+   -  if a macro which contained EXITM was placed behind a code label, the
+      code label was duplicated, giving error msg "symbol already defined".
+   -  INVOKE directive, cpu 8086: if ADDR operator was used to push the
+      direct address of a memory variable, a "PUSH OFFSET <address>" was
+      generated. However, push with immediate operands isn't supported by
+      this cpu.
+   -  BIN output format: operators LOW and HIGH were rejected.
+   -  OMF output format: in code lines, the HIGH operator was ignored,
+      resulting in a wrong fixup type.
+   -  cmdline "-Fo<directory>\ *.asm" didn't work reliably, the <directory>
+      information got lost after the first file had been assembled. Same for
+      -Fr and -Fl.
+   -  the JWasm versions for DOS 16-bit, OS/2 and Linux had problems if a
+      cmdline option and its argument were separated by a white space
+      (i.e.: -Fo Sample.com).
+   -  nesting of response files wasn't handled properly.
+   -  if name of response file contained spaces, it wasn't parsed correctly.
+   -  type coercion within () did force the whole operand to this type.
+      example: mov (<type PTR ds:[mem_addr]).<struct_field>, ax
+   -  a macro function invoked by EXITM might have caused a line number mess.
+   -  JWasm did complain if a character was found in a number without 'h'
+      suffix. This is too rigid if current radix is > 10.
+   -  output format COFF, ELF: a buffer was allocated for segments which
+      contain just uninitialized data. This isn't necessary.
+   -  output format COFF: segments with combine type STACK were marked as
+      'uninitialized', even if they contained initialized data.
+   -  no error msg was displayed if a non-segment register was on the left
+      side of the ':' operator.
+   -  no error msg was displayed if a segment register which was assumed to
+      error was used in an expression.
+   -  if a data label was defined more than once, an error was displayed.
+      However, this is to happen only if the label's address or type differs
+      from the previous definition.
+   -  (invalid) fixups were created for data items consisting of a
+      segment override and a number (i.e. "dw ds:[12h]").
+   -  -fpc option was virtually ineffective because cpu directives also
+      set a default fpu mode.
+   -  SYSENTER was erroneously marked as a privileged instruction.
+   -  in v1.95, there was a regression if a literal enclosed in <> contained
+      (double) quotes and was used as a parameter for FORC,IRPC.
+   -  OPTION PROC:PUBLIC caused a syntax error.
+   -  EXITM did restore the line number too late. Thus the macro's line number
+      was displayed in error msgs, although the macro function itself ran
+      successfully.
+   -  regressions in v1.95: for SSE2 instructions CMPSD/MOVSD, the code
+      which was generated wasn't correct.
+   -  no check was done to ensure that index for ST(n) doesn't exceed 7.
+   -  there was no error msg if a third argument was given for instructions
+      which accept two arguments at most.
+   -  INVOKE: a general-purpose register which was assumed to be a function
+      pointer wasn't accepted as first argument.
+   -  OPTION OLDSTRUCTS didn't work the way it does in Masm.
+
+   Other changes:
+   -  -mz format option added.
+   -  directive OPTION MZ added.
+   -  a segment map was added to the listing file of binary formats.
+   -  undocumented (and useless) cmdline option -7 removed.
+   -  samples Mixed216 and Mixed232 added.
+   -  invalid cmdline options don't abort the assembly process anymore,
+      just a warning is displayed.
+   -  GccDos.MAK, PellesC.MAK, BCC.MAK and TCC.MAK added.
+   -  the 16bit version, JWASMR, no longer supports -coff and -elf. It 
+      didn't work reliably in v1.95.
+   -  Makefile: creating JWASMD.EXE now also works with OW v1.8.
+   -  OW v1.8 used to create the JWasm binaries. Previously it was v1.7a.
+   -  INVOKE: extending a memory argument from word to dword won't destroy
+      content of register EAX if option -Zg is set.
+   -  experimental support for x86-64 added to the source (not active in
+      the binaries).
+   -  support for FASTCALL implemented, replaces language WATCOM_C.
+   -  options -zf0 and -zf1 added.
+   -  options -zzo and -zzp renamed to -zs0 and -zs1 for better
+      name consistency. Option -zs2 added.
+   -  options -fp5 and -fp6 removed. They were useless.
+   -  instruction UD2 added (requires cpu .686)
+
    05/26/2009, v1.95:
 
    Bugfixes:

@@ -36,12 +36,15 @@
 #include "listing.h"
 
 #ifdef DEBUG_OUT
-uint_32 catstrcnt;
-uint_32 substrcnt;
-uint_32 sizstrcnt;
-uint_32 instrcnt;
-uint_32 equcnt;
+static uint_32 catstrcnt;
+static uint_32 substrcnt;
+static uint_32 sizstrcnt;
+static uint_32 instrcnt;
+static uint_32 equcnt;
 #endif
+
+/* use this version to ensure that uppercase letters are used! */
+void myltoa(long value, char *buffer, int radix);
 
 // CatStr()
 // defines a text equate
@@ -49,7 +52,7 @@ uint_32 equcnt;
 // TEXTEQU is an alias for CATSTR
 
 ret_code CatStrDef( int i )
-/********************/
+/*************************/
 {
     asm_sym *sym;
     int count;
@@ -128,6 +131,7 @@ ret_code CatStrDef( int i )
  used by EQU if the value to be assigned to a symbol is text.
 */
 asm_sym * SetTextMacro( asm_sym *sym, char *name, char *value )
+/*************************************************************/
 {
     int count;
     char buffer[MAX_LINE_LEN];
@@ -197,7 +201,7 @@ asm_sym * SetTextMacro( asm_sym *sym, char *name, char *value )
 // syntax: name SUBSTR <string>, pos [, size]
 
 ret_code SubStrDef( int i )
-/********************/
+/*************************/
 {
     struct asm_sym      *sym;
     char                *name;
@@ -349,6 +353,7 @@ ret_code SubStrDef( int i )
 // defines a numeric variable which contains size of a string
 
 ret_code SizeStrDef( int i )
+/**************************/
 {
     asm_sym *sym;
     int sizestr;
@@ -390,6 +395,7 @@ ret_code SizeStrDef( int i )
 // name INSTR [pos,]string,substr
 
 ret_code InStrDef( int i )
+/************************/
 {
     asm_sym *sym;
     int sizestr;
@@ -485,6 +491,7 @@ ret_code InStrDef( int i )
 // internal @CatStr macro function
 
 static ret_code CatStrFunc( char * buffer, char * *params )
+/*********************************************************/
 {
     char **end = params + CATSTRMAX;
 
@@ -505,6 +512,7 @@ static ret_code CatStrFunc( char * buffer, char * *params )
 /* convert string to a number */
 
 static ret_code GetNumber( char * string, int * pi )
+/**************************************************/
 {
     expr_list opndx;
     int i;
@@ -527,6 +535,7 @@ static ret_code GetNumber( char * string, int * pi )
 // the result is returned as string in current radix
 
 static ret_code InStrFunc( char * buffer, char * *params )
+/********************************************************/
 {
     int pos = 1;
     char *p;
@@ -555,7 +564,7 @@ static ret_code InStrFunc( char * buffer, char * *params )
     p = strstr(*(params+1)+pos-1, *(params+2));
     if (p) {
         found = p - *(params+1) + 1;
-        _ltoa( found, buffer, ModuleInfo.radix );
+        myltoa( found, buffer, ModuleInfo.radix );
     }
 
     DebugMsg(( "@InStrFunc()=>%s<\n", buffer ));
@@ -567,10 +576,11 @@ static ret_code InStrFunc( char * buffer, char * *params )
 // the result is returned as string in current radix
 
 static ret_code SizeStrFunc( char * buffer, char * *params )
+/**********************************************************/
 {
     DebugMsg(("@SizeStr(%s)\n", *params ? *params : "" ));
     if ( *params )
-        _ltoa( strlen( *params ), buffer, ModuleInfo.radix );
+        myltoa( strlen( *params ), buffer, ModuleInfo.radix );
     else {
         buffer[0] = '0';
         buffer[1] = NULLC;
@@ -581,6 +591,7 @@ static ret_code SizeStrFunc( char * buffer, char * *params )
 // internal @SubStr macro function
 
 static ret_code SubStrFunc( char * buffer, char * *params )
+/*********************************************************/
 {
     int pos;
     int size;
@@ -636,6 +647,7 @@ static char * parmnames[] = {"p1","p2","p3"};
 // this proc is called once per module
 
 void StringInit( void )
+/*********************/
 {
     int i;
     dir_node *macro;
@@ -714,6 +726,7 @@ void StringInit( void )
 }
 #ifdef DEBUG_OUT
 void StringFini( void )
+/*********************/
 {
     if ( Options.quiet == FALSE )
         printf("invokation CATSTR=%u SUBSTR=%u SIZESTR=%u INSTR=%u EQU(text)=%u\n", catstrcnt, substrcnt, sizstrcnt, instrcnt, equcnt );

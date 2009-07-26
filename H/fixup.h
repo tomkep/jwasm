@@ -33,37 +33,57 @@
 
 #include "operands.h"
 
+/* RELOFF8 - RELOFF32 must be consecutive */
+
 enum fixup_types {
-        FIX_SEG,       /* 0 */
-        FIX_LOBYTE,    /* 1, OMF only */
-        FIX_HIBYTE,    /* 2, OMF only */
-        FIX_RELOFF8,   /* 3 */
-        FIX_RELOFF16,  /* 4 */
-        FIX_RELOFF32,  /* 5 */
-        FIX_OFF16,     /* 6 */
-        FIX_OFF32,     /* 7 */
-        FIX_PTR16,     /* 8, OMF only */
-        FIX_PTR32,     /* 9, OMF only */
-        FIX_OFF32_IMGREL, /* 10, COFF+ELF only */
-        FIX_OFF32_SECREL  /* 11, COFF+ELF only */
+        FIX_VOID = 0,       /*  0, fixup is to be ignored */
+        FIX_RELOFF8,        /*  1, 1 byte */
+        FIX_RELOFF16,       /*  2, 2 byte */
+        FIX_RELOFF32,       /*  3, 4 byte */
+        FIX_LOBYTE,         /*  4, 1 byte, OMF only */
+        FIX_OFF16,          /*  5, 2 byte */
+        FIX_OFF32,          /*  6, 4 byte */
+#if AMD64_SUPPORT
+        FIX_OFF64,          /*  7, 8 byte, COFF64+BIN only */
+#endif
+        FIX_SEG,            /*  8, 2 byte */
+        FIX_PTR16,          /*  9, 4 byte, OMF only */
+        FIX_PTR32,          /* 10, 6 byte, OMF only */
+        FIX_HIBYTE,         /* 11, 1 byte, OMF only */
+        FIX_OFF32_IMGREL,   /* 12, 4 byte, COFF+ELF only */
+        FIX_OFF32_SECREL,   /* 13, 4 byte, COFF+ELF only */
 };
+
+/* fixups are also used for backpatching of forward references in pass one.
+ * the instructions which depend on the distance are CALL, JMP, PUSH <imm>.
+ * OPTJ_EXPLICIT: JMP SHORT <label> or Jcc SHORT <label>, size cannot change
+ * OPTJ_EXTEND:   Jcc <label> for cpu < 80386, size may change (2 -> 5/7 or 8/10)
+ * OPTJ_JXX:      Jcc <label> for cpu >= 80386, size may change (2 -> 5 )
+ * OPTJ_CALL:     call <label>, may become push cs, call NEAR or call FAR
+ */
 
 enum fixup_options {
         OPTJ_NONE,               /* normal jump */
-        OPTJ_EXPLICIT,           /* forward reference explicit J... SHORT */
-        OPTJ_EXTEND,             /* forward reference JXX (SHORT 8086), can be extend by JMP NEAR */
-        OPTJ_JXX,                /* forward reference JXX (SHORT/NEAR 386) */
-        OPTJ_CALL                /* forward reference CALL (NEAR or converted FAR to NEAR) */
+        OPTJ_EXPLICIT,
+        OPTJ_EXTEND,
+        OPTJ_JXX,
+        OPTJ_CALL
 };
 
 struct asmfixup {
-    struct asmfixup         *next1;        /* linked list backpatch */
-    struct asmfixup         *next2;        /* linked list relocs */
+    struct asmfixup         *nextbp;       /* PASS 1: linked list backpatch */
+    struct asmfixup         *nextrlc;      /* PASS >1: linked list relocs */
     uint_32                 offset;        /* symbol's offset */
     uint_32                 fixup_loc;     /* location of fixup */
     enum fixup_types        type;
     enum fixup_options      option;
-    unsigned loader_resolved:1;
+#if AMD64_SUPPORT
+    /* the IP relative addressing needs to know where the instruction ends.
+     * the result <end of instruction> - <fixup location> is stored here.
+     */
+    uint_8                  addbytes;
+#endif
+    unsigned char loader_resolved:1;        /* operator LROFFSET */
 
     union {
         struct {
@@ -77,10 +97,10 @@ struct asmfixup {
 };
 
 extern struct asmfixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
+//extern void             mark_fixupp( struct asmfixup *, OPNDTYPE determinant );
+extern struct fixup     *CreateOmfFixupRec( struct asmfixup * );
+extern ret_code         store_fixup( struct code_info *, int index );
+
 extern ret_code         BackPatch( struct asm_sym *sym );
-extern void             mark_fixupp( OPNDTYPE determinant, int index );
-extern struct fixup     *CreateOmfFixupRec( int index );
-extern ret_code         store_fixup( int index );
-extern ret_code         MakeFpFixup( struct asm_sym *sym );
 
 #endif

@@ -23,7 +23,6 @@
 #include "directiv.h"
 #include "queues.h"
 #include "equate.h"
-#include "mangle.h"
 #include "labels.h"
 #include "input.h"
 #include "expreval.h"
@@ -48,8 +47,6 @@
 #define LABELFIRST 0
 #define LABELTEST  1
 #define LABELEXIT  2
-
-#define IS_SIGNED(x)  x & MT_SIGNED
 
 typedef enum {
     HLL_UNDEF,
@@ -96,6 +93,7 @@ typedef enum {
 static hll_list     *HllStack; // for .WHILE, .IF, .REPEAT
 
 static char * MakeAnonymousLabel(void)
+/************************************/
 {
     char *p = AsmAlloc( LABELSIZE );
     sprintf(p, "@C%04X", ModuleInfo.hll_label);
@@ -111,6 +109,7 @@ static char * MakeAnonymousLabel(void)
 // detected
 
 static c_bop GetCOp(int * i)
+/**************************/
 {
     int size = 0;
     c_bop rc;
@@ -172,6 +171,7 @@ static c_bop GetCOp(int * i)
 // render an instruction operand
 
 static void RenderOpnd(expr_list * op, char * buffer, int start, int end)
+/***********************************************************************/
 {
     /* just copy the operand's tokens into the buffer */
     for (;start < end;start++) {
@@ -184,6 +184,7 @@ static void RenderOpnd(expr_list * op, char * buffer, int start, int end)
 // a "token" in a C expression actually is a set of ASM tokens
 
 static ret_code GetToken(hll_list * hll, int *i, bool is_true, expr_list * opndx)
+/*******************************************************************************/
 {
     int end_tok;
 
@@ -203,6 +204,7 @@ static ret_code GetToken(hll_list * hll, int *i, bool is_true, expr_list * opndx
 }
 
 static char * GetLabel(hll_list *hll, int label)
+/**********************************************/
 {
     if ( label == LABELFIRST )
         return( hll->symfirst );
@@ -213,6 +215,7 @@ static char * GetLabel(hll_list *hll, int label)
 }
 
 static void SetLabel(hll_list *hll, int label, char * labelname)
+/**************************************************************/
 {
     if ( label == LABELFIRST )
         hll->symfirst = labelname;
@@ -229,6 +232,7 @@ static void SetLabel(hll_list *hll, int label, char * labelname)
 // 4. one token (short form for "<token> != 0")
 
 static ret_code GetSimpleExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **jmp, expr_list *opndx )
+/*********************************************************************************************************************************/
 {
     //expr_list opndx;
     expr_list op2;
@@ -549,6 +553,7 @@ done:
 }
 
 static void InvertJmp(char * p)
+/*****************************/
 {
     if (*p == 'e' || *p == 'z' || *p == 'c' || *p == 's' || *p == 'p' || *p == 'o') {
         *(p+1) = *p;
@@ -577,6 +582,7 @@ static void InvertJmp(char * p)
 }
 
 static void ReplaceLabel(char * p, char * olabel, char * nlabel)
+/**************************************************************/
 {
     int i = strlen(nlabel);
 
@@ -589,6 +595,7 @@ static void ReplaceLabel(char * p, char * olabel, char * nlabel)
 // operator &&, which has the second lowest precedence, is handled here
 
 static ret_code GetAndExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp, expr_list *opndx )
+/**********************************************************************************************************************************/
 {
     c_bop op;
     int cur_pos;
@@ -633,6 +640,7 @@ static ret_code GetAndExpression(hll_list * hll, int *i, int ilabel, bool is_tru
 // operator ||, which has the lowest precedence, is handled here
 
 static ret_code GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp, expr_list *opndx )
+/*******************************************************************************************************************************/
 {
     c_bop op;
     int cur_pos;
@@ -698,6 +706,7 @@ static ret_code GetExpression(hll_list * hll, int *i, int ilabel, bool is_true, 
 // update hll->condlines
 
 static ret_code WriteExprSrc(hll_list * hll, char * buffer)
+/*********************************************************/
 {
     int size;
     char *p;
@@ -728,6 +737,7 @@ static ret_code WriteExprSrc(hll_list * hll, char * buffer)
 // is_true: TRUE/FALSE
 
 static ret_code EvaluateHllExpression(hll_list * hll, int *i, int ilabel, bool is_true)
+/*************************************************************************************/
 {
     char *lastjmp = NULL;
     expr_list opndx;
@@ -750,6 +760,7 @@ static ret_code EvaluateHllExpression(hll_list * hll, int *i, int ilabel, bool i
 // write ASM test lines
 
 static ret_code HllPushTestLines(hll_list * hll)
+/**********************************************/
 {
     char *p = hll->condlines;
     char *p2;
@@ -779,6 +790,7 @@ static ret_code HllPushTestLines(hll_list * hll)
 // for .UNTILCXZ check if expression is simple enough
 
 static ret_code HllCheckTestLines(hll_list * hll)
+/***********************************************/
 {
     int lines = 0;
     int i;
@@ -811,7 +823,7 @@ static ret_code HllCheckTestLines(hll_list * hll)
 // Start a .IF, .WHILE, .REPEAT item
 
 ret_code HllStartDef( int i )
-/********************/
+/***************************/
 {
     struct hll_list      *hll;
     int                  cmd = AsmBuffer[i]->value;
@@ -952,7 +964,7 @@ ret_code HllStartDef( int i )
 // that is: .ENDIF, .ENDW, .UNTIL and .UNTILCXZ are handled here
 
 ret_code HllEndDef( int i )
-/********************/
+/*************************/
 {
     //struct asm_sym      *sym;
     struct hll_list     *hll;
@@ -1090,7 +1102,7 @@ ret_code HllEndDef( int i )
 // that is: .ELSE, .ELSEIF, .CONTINUE and .BREAK are handled here
 
 ret_code HllExitDef( int i )
-/********************/
+/**************************/
 {
     //int                 level;
     //struct asm_sym      *sym;
@@ -1199,6 +1211,7 @@ ret_code HllExitDef( int i )
 }
 
 void HllCheckOpen( void )
+/***********************/
 {
     if ( HllStack ) {
         AsmErr( BLOCK_NESTING_ERROR, ".if-.repeat-.while" );
@@ -1206,6 +1219,7 @@ void HllCheckOpen( void )
 }
 
 void HllInit()
+/************/
 {
     HllStack = NULL;
     ModuleInfo.hll_label = 0;

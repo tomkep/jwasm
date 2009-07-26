@@ -30,7 +30,6 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "mangle.h"
 #include "parser.h"
 #include "directiv.h"
 #include "segment.h"
@@ -106,6 +105,7 @@ void AddPublicData( asm_sym *sym )
 // get (next) PUBLIC item
 
 dir_node * GetPublicData( queuenode * *curr)
+/******************************************/
 {
     if (PubQueue == NULL)
         return( NULL );
@@ -145,8 +145,12 @@ static void FreePubQueue( void )
 {
     if( PubQueue != NULL ) {
         while( PubQueue->head != NULL ) {
+#if FASTMEM /* for FASTMEM, AsmFree() will vanish, so avoid unused p var */
+            QDequeue( PubQueue );
+#else
             void *p = QDequeue( PubQueue );
             AsmFree( p );
+#endif
         }
         AsmFree( PubQueue );
         PubQueue = NULL;
@@ -320,7 +324,7 @@ void AddLinnumData( struct line_num_info *data )
     else {
 #if COFF_LINNUM
         /* this isn't fully implemented yet */
-        dir_node *seg = GetCurrSeg();
+        dir_node *seg = CurrSeg;
         if (seg) {
             /* COFF line numbers must be preceded by a function symbol table
                index.  */

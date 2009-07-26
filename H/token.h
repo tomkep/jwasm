@@ -67,15 +67,19 @@ struct asm_tok {
         char            *string_ptr;
         union {
             struct {
-                long      value;
+                int_32     value;
                 union {
-                    char  *pos;   /* ptr in src line */
-                    long  hvalue; /* for T_NUM only */
+                    char   *pos;   /* ptr in src line (to be changed to a 32bit offset) */
+                    int_32 hvalue; /* for T_NUM only */
                 };
-                short     xvalue; /* for T_NUM only */
-                char      rm_byte;/* for T_RES_ID only */
                 union {
-                    unsigned char  opcode; /* for T_DIRECTIVE, T_RES_ID */
+                    uint_16    flags;  /* for T_DIRECTIVE only */
+                    short      xvalue; /* for T_NUM only */
+                    uint_8     rm_byte;/* for T_RES_ID only */
+                };
+                union {
+                    unsigned char  dirtype; /* T_DIRECTIVE: type */
+                    unsigned char  opcode;  /* for T_RES_ID */
                     unsigned char  precedence; /* for T_UNARY_OPERATOR/T_BINARY_OPERATOR */
                     char  string_delim; /* for T_STRING only */
                 };

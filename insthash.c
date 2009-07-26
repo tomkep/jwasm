@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  instruction search functions
+* Description:  instruction hash table access
 *
 ****************************************************************************/
 
@@ -32,13 +32,9 @@
 #include "parser.h"
 #include "insthash.h"
 
-#ifdef __USE_BSD
-#define strnicmp strncasecmp
-#endif
-
 //#define HASH_TABLE_SIZE 211
 #define HASH_TABLE_SIZE 599
-//#define HASH_TABLE_SIZE 811
+//#define HASH_TABLE_SIZE 701
 //#define HASH_TABLE_SIZE 2003
 
 //static struct ReservedWord *inst_table[ HASH_TABLE_SIZE ] = { NULL };
@@ -60,7 +56,7 @@ static unsigned int hashpjw( const char *s )
     return( h % HASH_TABLE_SIZE );
 }
 
-static struct ReservedWord *InstrFind( char *name )
+struct ReservedWord *FindResWord( char *name )
 /********************************************/
 /* find an instruction in the hash table */
 {
@@ -78,11 +74,27 @@ static struct ReservedWord *InstrFind( char *name )
     return( NULL );
 }
 
-static struct ReservedWord *InstrAdd( struct ReservedWord *inst )
+/* returns index of instruction in AsmOpTable */
+
+#if 0
+int get_instruction_position( char *string )
+/******************************************/
+{
+    struct ReservedWord *inst;
+
+    inst = FindResWord( string );
+    if( inst ) return( inst->position );
+    return( EMPTY );
+}
+#endif
+
+/* add reserved word to hash table */
+
+struct ReservedWord *AddResWord( struct ReservedWord *inst )
 /********************************************************/
 {
     struct ReservedWord  **location;
-    char buffer[20];
+    char buffer[MAX_RESW_LEN];
 
     memcpy( buffer, inst->name, inst->len );
     buffer[ inst->len ] = NULLC;
@@ -92,6 +104,7 @@ static struct ReservedWord *InstrAdd( struct ReservedWord *inst )
     /* sort the items of a line by length! */
 
     for( ; *location && (*location)->len <= inst->len; location = &((*location)->next) ) {
+#if 0 /* this isn't needed anymore, a duplicate entry would cause a compile error */
         /* to be safe check if the name is already in there */
         if( inst->len == (*location)->len &&
             memcmp( buffer, (*location)->name, inst->len ) == 0 ) {
@@ -99,6 +112,7 @@ static struct ReservedWord *InstrAdd( struct ReservedWord *inst )
             AsmErr( SYMBOL_ALREADY_DEFINED, buffer );
             return( NULL );
         }
+#endif
     }
 
     inst->next = *location;
@@ -107,59 +121,31 @@ static struct ReservedWord *InstrAdd( struct ReservedWord *inst )
     return( inst );
 }
 
-/* entry points */
-
-/* returns index of instruction in AsmOpTable */
-
-int get_instruction_position( char *string )
-/******************************************/
-{
-    struct ReservedWord *inst;
-
-    inst = InstrFind( string );
-    if( inst ) return( inst->position );
-    return( EMPTY );
-}
-
-// make this whole table static? use indices instead of pointers
-
-void make_inst_hash_table( void )
-/*******************************/
-{
-    unsigned i;
-
-    for( i = 0; i != T_NULL; i++ ) {
-        InstrAdd( &AsmResWord[i] );
-    }
-    return;
-}
-
-#if 0
 // remove a reserved word from the hash table.
-// no longer needed, there's now a flag in AsmOpCode which
-// tells whether the keyword is valid or not.
 
-struct ReservedWord *InstrRemove( char *string )
+int RemoveResWord( struct ReservedWord *inst )
 {
     struct ReservedWord  *prev = NULL;
     struct ReservedWord  *curr;
     int i;
+    char buffer[MAX_RESW_LEN];
 
-    i = hashpjw( string );
+    memcpy( buffer, inst->name, inst->len );
+    buffer[ inst->len ] = NULLC;
+    i = hashpjw( buffer );
     curr = inst_table[i];
 
     for( ; curr ; prev = curr, curr = curr->next)  {
-        if( strnicmp( string, curr->name, curr->len ) == 0 && *(string + curr->len) == '\0' ) {
-            if (prev)
+        if( curr == inst ) {
+            if ( prev )
                 prev->next = curr->next;
             else
                 inst_table[i] = curr->next;
-            return( curr );
+            return( TRUE );
         }
     }
-    return( NULL );
+    return( FALSE );
 }
-#endif
 
 #ifdef DEBUG_OUT
 void DumpInstrStats( void )

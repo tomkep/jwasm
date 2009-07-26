@@ -1,7 +1,6 @@
 
-// this is a rudimentary Win32 include file.
-// It contains prototypes of all Win32 functions which are
-// called directly by JWasm.
+// this file contains prototypes of the Win32 functions which are
+// called directly by JWasm (mostly memalloc.c if FASTMEM=1).
 // using this header file makes JWasm's source independant from
 // the MS Platform SDK.
 
@@ -19,7 +18,5 @@
 #define MEM_RELEASE    0x8000
 #define PAGE_READWRITE 0x0004
 
-//WINBASEAPI uint_32 WINAPI GetTickCount( void );
-WINBASEAPI char *  WINAPI GetCommandLineA( void );
 WINBASEAPI void *  WINAPI VirtualAlloc( void *, uint_32, uint_32, uint_32 );
 WINBASEAPI int     WINAPI VirtualFree( void *, uint_32, uint_32 );

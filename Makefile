@@ -1,37 +1,45 @@
 
 # this makefile creates JWASM.EXE (Win32) and optionally JWASMD.EXE (DOS).
 # tools used:
-# - Open Watcom v1.7a
+# - Open Watcom v1.8
 # - HXDEV (optionally, only if DOS=1 is set below to create JWASMD.EXE)
 #
-# WARNING: OW v1.8 can create JWASM.EXE, but it's unable to create a valid
-# JWASMD.EXE!
+# is's also possible to create a debug version (debug=1) or the
+# 64bit aware version (amd64=1)
 
 name = JWasm
 
 DOS=1
 WIN=1
 
-# if DOS=1, the Open Watcom and HX directories must be set below.
-
 WATCOM = \Watcom
+
+# if DOS=1, the HX directory must be set below.
+
 HXDIR = \HX
+
+# support for 64bit?
+!ifdef AMD64
+c_flags64=-DAMD64_SUPPORT=1
+!endif
 
 !ifndef DEBUG
 DEBUG=0
 !endif
 
+!ifndef OUTD
 !if $(DEBUG)
 OUTD=Debug
 !else
 OUTD=Release
+!endif
 !endif
 
 # calling convention for compiler: s=Stack, r=register
 # r will create a slightly smaller binary
 CCV=r
 
-inc_dirs  = -IH
+inc_dirs  = -IH -I$(WATCOM)\H
 
 # to track memory leaks, the Open Watcom TRMEM module can be included.
 # it's useful only if FASTMEM=0 is set, though, otherwise most allocs 
@@ -49,7 +57,7 @@ extra_c_flags =
 !if $(TRMEM)
 extra_c_flags += -od -d2 -DDEBUG_OUT -DTRMEM -DFASTMEM=0
 !else
-extra_c_flags += -od -d2 -DDEBUG_OUT
+extra_c_flags += -od -d2 -w3 -DDEBUG_OUT
 !endif
 !else
 extra_c_flags += -obmilrt -s -DNDEBUG
@@ -59,16 +67,17 @@ extra_c_flags += -obmilrt -s -DNDEBUG
 
 LOPT = op quiet
 !if $(DEBUG)
-LOPTD = debug dwarf op symfile
+# for OW v1.8, the debug version needs user32.lib to resolve CharUpperA()
+# without it, WD(W) will crash immediately.
+LOPTD = debug dwarf op symfile lib user32.lib
 !endif
 
-lflagsd = $(LOPTD) format windows nt runtime console Libpath $(HXDIR)\Lib Libpath $(WATCOM)\lib386 Libpath $(WATCOM)\lib386\nt library dkrnl32s.lib libfile cstrtwhx.obj $(LOPT) op map=$^* op stub=$(HXDIR)\Bin\loadpex.bin, stack=0x40000
 lflagsw = $(LOPTD) system nt $(LOPT) op map=$^*
 
-CC=wcc386 -q -3$(CCV) -bc -bt=nt $(inc_dirs) $(extra_c_flags) -fo$@
+CC=$(WATCOM)\binnt\wcc386 -q -3$(CCV) -bc -bt=nt $(inc_dirs) $(extra_c_flags) $(c_flags64) -fo$@
 
 .c{$(OUTD)}.obj:
-   $(CC) $<
+	$(CC) $<
 
 proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj &
@@ -91,7 +100,8 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/trmem.obj    &
 !endif
 !endif
-           $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj
+           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   &
+           $(OUTD)/apiemu.obj
 ######
 
 !if $(WIN)
@@ -117,16 +127,27 @@ $(lflagsw) file { $(proj_obj) } name $@ op stack=0x20000 op norelocs com stack=0
 
 $(OUTD)/$(name)d.exe: $(proj_obj)
 	$(linker) @<<
-$(lflagsd) file { $(proj_obj) } name $@
+$(LOPTD)
+format windows nt 
+runtime console 
+file { $(proj_obj) }
+name $@
+Libpath $(WATCOM)\lib386 
+Libpath $(WATCOM)\lib386\nt
+Libpath $(HXDIR)\lib
+Library imphlp.lib, dkrnl32s.lib 
+Libfile cstrtwhx.obj 
+$(LOPT)
+op map=$^*, stub=$(HXDIR)\Bin\loadpex.bin, stack=0x40000
 <<
 	@$(HXDIR)\Bin\patchpe.exe $@
 
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/reswords.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
 	$(CC) parser.c
-    
+
 ######
 
 clean:

@@ -51,7 +51,7 @@ typedef struct {
 
 static const Msg_Struct Fatal_Msg[] = {
 #undef fix
-#define fix( cmd, argc, act, ret )     { cmd, argc, act, ret }
+#define fix( cmd, argc, act, ret )     { cmd, argc, act, ret },
 #include "fatalmsg.h"
 };
 
@@ -59,7 +59,7 @@ static const Msg_Struct Fatal_Msg[] = {
 // don't use functions which need to alloc memory here!
 
 void Fatal( unsigned msg, ... )
-/******************************/
+/*****************************/
 {
     va_list     args;
     //int         i;
@@ -71,6 +71,9 @@ void Fatal( unsigned msg, ... )
     printf(": ");
 
     va_start( args, msg );
+
+    if ( msg >= FATAL_LAST )
+        exit(-1);
 
     PutMsg( stdout, NULL, Fatal_Msg[msg].message, args );
 
@@ -87,16 +90,16 @@ void Fatal( unsigned msg, ... )
 }
 
 void SeekError( void )
-/************************/
+/********************/
 {
     DebugMsg(("SeekError occured\n"));
-    Fatal( MSG_FILE_LSEEK_ERROR, FileInfo.fname[OBJ], errno );
+    Fatal( FATAL_FILE_LSEEK_ERROR, FileInfo.fname[OBJ], errno );
 };
 
 void WriteError( void )
-/************************/
+/*********************/
 {
     DebugMsg(("WriteError occured\n"));
-    Fatal( MSG_FILE_WRITE_ERROR, FileInfo.fname[OBJ], errno );
+    Fatal( FATAL_FILE_WRITE_ERROR, FileInfo.fname[OBJ], errno );
 };
 

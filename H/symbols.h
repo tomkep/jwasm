@@ -40,9 +40,9 @@
 enum sym_state {
         SYM_UNDEFINED,
         SYM_INTERNAL,       /* 1 internal var   */
-        SYM_EXTERNAL,       /* 2 external       */
-        SYM_STACK,          /* 3 stack variable */
-        SYM_PROC,           /* 4 procedure      */
+        SYM_PROC,           /* 2 procedure      */
+        SYM_EXTERNAL,       /* 3 external       */
+        SYM_STACK,          /* 4 stack variable */
         SYM_SEG,            /* 5 segment        */
         SYM_GRP,            /* 6 group          */
         SYM_CLASS_LNAME,    /* 7 lname entry for segment class ... not in symbol table */
@@ -55,29 +55,37 @@ enum sym_state {
 };
 
 typedef enum {
-        MT_EMPTY = 0x00,
-        MT_BYTE  = 0x01,
-        MT_SBYTE = 0x41,
-        MT_WORD  = 0x02,
-        MT_SWORD = 0x42,
-        MT_DWORD = 0x04,
-        MT_SDWORD= 0x44,
-        MT_FWORD = 0x06,
-        MT_QWORD = 0x08,
-        MT_TBYTE = 0x0A,
-        MT_OWORD = 0x10,
-        MT_PROC  = 0x81,
-        MT_NEAR  = 0x82,
-        MT_FAR   = 0x84,
-        MT_SHORT = 0x88,
-        MT_PTR   = 0x89,
-        MT_TYPE  = 0x8A,
-        MT_BITS  = 0x8B,
-        MT_ABS   = 0x8C,
-        MT_SIZE_MASK = 0x3F,
-        MT_SIGNED  = 0x40, /* bit 6 */
-        MT_SPECIAL = 0x80  /* bit 7 */
+        MT_BYTE  = 0x00,
+        MT_SBYTE = 0x40,
+        MT_WORD  = 0x01,
+        MT_SWORD = 0x41,
+        MT_DWORD = 0x03,
+        MT_REAL4 = 0x23,
+        MT_SDWORD= 0x43,
+        MT_FWORD = 0x05,
+        MT_QWORD = 0x07,
+        MT_REAL8 = 0x27,
+        MT_TBYTE = 0x09,
+        MT_REAL10= 0x29,
+        MT_OWORD = 0x0F,
+        MT_PROC  = 0x80,
+        MT_NEAR  = 0x81,
+        MT_FAR   = 0x82,
+        MT_PTR   = 0x83,
+        MT_EMPTY = 0xC0,
+        MT_BITS  = 0xC1,
+        MT_ABS   = 0xC2,
+        MT_SHORT = 0xC3,
+        MT_TYPE  = 0xC4,
+        MT_FLOAT   = 0x20, /* bit 5 */
+        MT_SPECIAL = 0x80, /* bit 7 */
+        MT_SPECIAL_MASK = 0xC0, /* bit 6+7 */
+        MT_SIGNED  = 0x40, /* bit 6=1, bit 7 = 0 */
+        MT_ADDRESS = 0x80, /* bit 7=1, bit 6 = 0 */
+        MT_SIZE_MASK = 0x1F
 } memtype;
+
+#define IS_SIGNED(x)  (((x) & MT_SPECIAL_MASK) == MT_SIGNED)
 
 // symbols can be
 // - "labels" (data or code, internal, external, stack)
@@ -94,29 +102,30 @@ typedef struct asm_sym {
         struct asm_sym  *next;
         char            *name;
 
-        struct asm_sym  *segment;      /* for SYM_INTERNAL, SYM_EXTERNAL */
+        struct asm_sym  *segment;      /* for SYM_INTERNAL, SYM_EXTERNAL, SYM_PROC */
         union {
             int_32          offset;    /* used by SYM_INTERNAL */
             int_32          value;     /* used by MT_ABS */
             char *          string_ptr;/* used by SYM_TMACRO */
             macro_func      func_ptr;  /* used by SYM_MACRO */
+            int_32          max_offset;/* used by SYM_SEG */
         };
         union {
             /* for SYM_INTERNAL, SYM_STRUCT_FIELD */
             uint_32         first_size;   /* size of 1st initializer in bytes */
             /* for SYM_EXTERNAL, SYM_PROC ( + SYM_TYPE (typedefs) ) */
             struct {
-                unsigned    use32:1;   /* also for SYM_TYPE + SYM_GRP */
-                unsigned    comm:1;    /* is communal */
-                unsigned    weak:1;    /* 1 if an unused "externdef" */
-                unsigned    isfar:1;   /* for communal + SYM_TYPE */
-                unsigned    isproc:1;  /* PROTO=0, PROC=1 */
+                unsigned char   Ofssize;   /* also for SYM_TYPE + SYM_GRP */
+                unsigned char   comm:1;    /* is communal */
+                unsigned char   weak:1;    /* 1 if an unused "externdef" */
+                unsigned char   isfar:1;   /* for communal + SYM_TYPE */
+                unsigned char   isproc:1;  /* SYM_PROC: PROTO=0, PROC=1 */
             };
             /* for SYM_MACRO */
             struct {
-                unsigned    vararg:1;   // accept additional params
-                unsigned    isfunc:1;   // it's a macro function
-                unsigned    runsync:1;  // run macro synchronous
+                unsigned char   vararg:1;   // accept additional params
+                unsigned char   isfunc:1;   // it's a macro function
+                unsigned char   runsync:1;  // run macro synchronous
             };
         };
         /* first_length is used for data items only
@@ -137,20 +146,20 @@ typedef struct asm_sym {
             struct asm_sym *altname;     /* SYM_EXTERNAL: alternative name */
         };
         char            *(*mangler)( struct asm_sym *sym, char *buffer );
-        unsigned        used:1;       /* symbol has been referenced */
-        unsigned        defined:1;    /* symbol has been defined */
-        unsigned        scoped:1;     /* symbol is local label or LOCAL */
-        unsigned        global:1;     /* symbol is global */
-        unsigned        equate:1;     /* symbol has been defined with EQU */
-        unsigned        predefined:1; /* symbol is predefined */
-        unsigned        variable:1;   /* symbol is variable (redef) */
-        unsigned        public:1;     /* symbol is to make public */
-        unsigned        list:1;       /* symbol is to be listed */
-        unsigned        isarray:1;    /* symbol is an array */
-        unsigned        included:1;   /* symbol is in COFF symbol table */
-        unsigned        saved:1;      /* symbol has been saved ("fast pass") */
+        unsigned short  used:1;       /* symbol has been referenced */
+        unsigned short  defined:1;    /* symbol has been defined */
+        unsigned short  scoped:1;     /* symbol is local label or LOCAL */
+        unsigned short  global:1;     /* symbol is global */
+        unsigned short  equate:1;     /* symbol has been defined with EQU */
+        unsigned short  predefined:1; /* symbol is predefined */
+        unsigned short  variable:1;   /* symbol is variable (redef) */
+        unsigned short  public:1;     /* symbol is to make public */
+        unsigned short  list:1;       /* symbol is to be listed */
+        unsigned short  isarray:1;    /* symbol is an array */
+        unsigned short  included:1;   /* symbol is in COFF symbol table */
+        unsigned short  saved:1;      /* symbol has been saved ("fast pass") */
 #if FASTMEM==0
-        unsigned        staticmem:1;  /* symbol stored in static memory */
+        unsigned short  staticmem:1;  /* symbol stored in static memory */
 #endif
         lang_type       langtype;
         enum sym_state  state;
@@ -174,7 +183,7 @@ extern  void            SymFini( void );
 extern  void            SymPassInit( int pass );
 extern  struct asm_sym **SymSort( unsigned int * );
 extern  void            SymMakeAllSymbolsPublic( void );
-extern  void            SymSetCurrPC( void );
+//extern  void            SymSetCurrPC( void );
 
 #ifdef __WATCOMC__
 typedef int (__watcall * StrCmpFunc)(const char *, const char * );
@@ -188,5 +197,12 @@ extern  struct asm_sym  *SymLCreate( const char * );
 extern  void             SymClearLocal( void );
 extern  void             SymSetLocal( asm_sym * );
 extern  void             SymGetLocal( asm_sym * );
+
+// defined in assemble.c
+
+extern struct asm_sym LineItem;
+#define LineNumber LineItem.value
+extern struct asm_sym WordSize;
+#define CurrWordSize WordSize.value
 
 #endif

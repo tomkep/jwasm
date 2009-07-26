@@ -39,23 +39,28 @@
 
 static carve_t  myCarver;
 
-void FixInit( void ) {
-/******************/
+void OmfFixInit( void )
+/*********************/
+{
     myCarver = CarveCreate( sizeof( fixup ), 64 );
 }
 
-void FixFini( void ) {
-/******************/
+void OmfFixFini( void )
+/*********************/
+{
     CarveDestroy( myCarver );
 }
 
-fixup *FixNew( void ) {
-/*******************/
+fixup *OmfFixNew( void )
+/**********************/
+{
     return( CarveAlloc( myCarver ) );
 }
 
-fixup *FixDup( const fixup *fix ) {
-/*********************************/
+#if 0
+fixup *OmfFixDup( const fixup *fix )
+/**********************************/
+{
     fixup *new;
 
     if( fix == NULL ) {
@@ -65,13 +70,17 @@ fixup *FixDup( const fixup *fix ) {
     *new = *fix;
     return( new );
 }
+#endif
 
-void FixKill( fixup *fix ) {
-/************************/
+void OmfFixKill( fixup *fix )
+/***************************/
+{
     CarveFree( myCarver, fix );
 }
 
-static uint_8 *putIndex( uint_8 *p, uint_16 index ) {
+static uint_8 *putIndex( uint_8 *p, uint_16 index )
+/*************************************************/
+{
 
     if( index > 0x7f ) {
         *p++ = 0x80 | ( index >> 8 );
@@ -80,19 +89,25 @@ static uint_8 *putIndex( uint_8 *p, uint_16 index ) {
     return( p );
 }
 
-static uint_8 *put16( uint_8 *p, uint_16 word ) {
+static uint_8 *put16( uint_8 *p, uint_16 word )
+/*********************************************/
+{
 
     WriteU16( p, word );
     return( p + 2 );
 }
 
-static uint_8 *put32( uint_8 *p, uint_32 dword ) {
+static uint_8 *put32( uint_8 *p, uint_32 dword )
+/**********************************************/
+{
 
     WriteU32( p, dword );
     return( p + 4 );
 }
 
-static uint_8 *putFrameDatum( uint_8 *p, uint_8 method, uint_16 datum ) {
+static uint_8 *putFrameDatum( uint_8 *p, uint_8 method, uint_16 datum )
+/*********************************************************************/
+{
 
 /**/myassert( p != NULL );
     switch( method ) {
@@ -107,8 +122,9 @@ static uint_8 *putFrameDatum( uint_8 *p, uint_8 method, uint_16 datum ) {
     return( p );
 }
 
-static uint_8 *putTargetDatum( uint_8 *p, uint_8 method, uint_16 datum ) {
-
+static uint_8 *putTargetDatum( uint_8 *p, uint_8 method, uint_16 datum )
+/**********************************************************************/
+{
 /**/myassert( p != NULL );
     if( ( method & 0x03 ) == TARGET_ABSWD ) {
         return( put16( p, datum ) );
@@ -116,8 +132,9 @@ static uint_8 *putTargetDatum( uint_8 *p, uint_8 method, uint_16 datum ) {
     return( putIndex( p, datum ) );
 }
 
-size_t FixGenLRef( logref *log, uint_8 *buf, int type ) {
-/*****************************************************/
+size_t OmfFixGenLRef( logref *log, uint_8 *buf, int type )
+/********************************************************/
+{
     uint_8  *p;
     uint_8  target;
 
@@ -148,8 +165,9 @@ size_t FixGenLRef( logref *log, uint_8 *buf, int type ) {
     return( p - buf );
 }
 
-size_t FixGenPRef( physref *ref, uint_8 *buf, int type ) {
-/******************************************************/
+size_t OmfFixGenPRef( physref *ref, uint_8 *buf, int type )
+/*********************************************************/
+{
     uint_8  *p;
 
 /**/myassert( ref != NULL );
@@ -160,19 +178,21 @@ size_t FixGenPRef( physref *ref, uint_8 *buf, int type ) {
     return( p - buf );
 }
 
-size_t FixGenRef( logphys *ref, int is_logical, uint_8 *buf, int type ) {
-/*********************************************************************/
+size_t OmfFixGenRef( logphys *ref, int is_logical, uint_8 *buf, int type )
+/************************************************************************/
+{
 /**/myassert( ref != NULL );
 /**/myassert( buf != NULL );
 /**/myassert( type == FIX_GEN_INTEL || type == FIX_GEN_MS386 );
     if( is_logical ) {
-        return( FixGenLRef( &ref->log, buf, type ) );
+        return( OmfFixGenLRef( &ref->log, buf, type ) );
     }
-    return( FixGenPRef( &ref->phys, buf, type ) );
+    return( OmfFixGenPRef( &ref->phys, buf, type ) );
 }
 
-size_t FixGenFix( fixup *fix, uint_8 *buf, int type ) {
-/***************************************************/
+size_t OmfFixGenFix( fixup *fix, uint_8 *buf, int type )
+/******************************************************/
+{
     uint_8  *p;
     uint_8  byte;
     uint_16 data_rec_offset;
@@ -220,7 +240,7 @@ size_t FixGenFix( fixup *fix, uint_8 *buf, int type ) {
     byte |= data_rec_offset >> 8;
     *p++ = byte;
     *p++ = (uint_8)data_rec_offset;
-    p += FixGenLRef( &fix->lr, p, type );
+    p += OmfFixGenLRef( &fix->lr, p, type );
     return( p - buf );
 }
 

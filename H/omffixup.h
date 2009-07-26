@@ -110,87 +110,35 @@ enum fixgen_types {
 };
 #define FIX_GEN_MAX     11          /* max number of bytes FixGenFix requires */
 
-extern void FixInit( void );
-extern void FixFini( void );
+extern void OmfFixInit( void );
+extern void OmfFixFini( void );
 /*
-    FixInit must be called before any other routines in this modules.
-    FixFini free's any memory used by this module, along with all the
+    OmfFixInit must be called before any other routines in this modules.
+    OmfFixFini free's any memory used by this module, along with all the
     outstanding fixups.
 */
 
-extern fixup *FixNew( void );
-/*
-    Allocate memory for a new fixup.
-*/
+extern fixup *OmfFixNew( void );
+/* Allocate memory for a new fixup. */
 
+extern fixup *OmfFixDup( const fixup *fix );
+/* Allocate a new fixup, and copy fix into it. */
 
-extern fixup *FixDup( const fixup *fix );
-/*
-    Allocate a new fixup, and copy fix into it.
-*/
-
-
-extern void FixKill( fixup *fix );
-/*
-    Free the memory used by fix.
-*/
-
-
-/********** the following are used for parsing fixups *************/
-
-extern fixinfo *FixBegin( void );
-/*
-    Begin parsing fixups.  The structure returned contains state
-    information to deal with threads.
-*/
-
-extern fixup *FixGetFix( fixinfo *info, obj_rec *objr );
-/*
-    Read a fixup.
-*/
-
-
-extern void FixGetLRef( fixinfo *info, obj_rec *objr, logref *log );
-/*
-    Read a logical reference.
-*/
-
-
-extern void FixGetPRef( fixinfo *info, obj_rec *objr, physref *phys );
-/*
-    Read a physical reference.
-*/
-
-
-extern void FixGetRef( fixinfo *info, obj_rec *objr, logphys *lp,
-        int is_logical );
-/*
-    Read a logical or a physical reference depending on is_logical.
-*/
-
-
-extern void FixEnd( fixinfo *info );
-/*
-    Called to free the memory allocated by FixBegin.
-*/
-
+extern void OmfFixKill( fixup *fix );
+/* Free the memory used by fix. */
 
 /********** the following are used for generating fixups *************/
 
-extern size_t FixGenFix( fixup *fix, uint_8 *buf, int type );
+extern size_t OmfFixGenFix( fixup *fix, uint_8 *buf, int type );
 /*
     Create the binary representation of fix, for the OMF described by
     fixgen_type type, into buf.  Returns the number of bytes written.
     buf must be at least FIX_GEN_MAX bytes large.
 */
 
-
-extern size_t FixGenLRef( logref *log, uint_8 *buf, int type );
-extern size_t FixGenPRef( physref *phys, uint_8 *buf, int type );
-extern size_t FixGenRef( logphys *lp, int is_logical, uint_8 *buf, int type );
-/*
-    Generate references.  See FixGenFix comment for details.
-*/
-
+extern size_t OmfFixGenLRef( logref *log, uint_8 *buf, int type );
+extern size_t OmfFixGenPRef( physref *phys, uint_8 *buf, int type );
+extern size_t OmfFixGenRef( logphys *lp, int is_logical, uint_8 *buf, int type );
+/* Generate references.  See FixGenFix comment for details. */
 
 #endif

@@ -32,8 +32,9 @@
 #ifndef _INSTHASH_H_INCLUDED
 #define _INSTHASH_H_INCLUDED
 
-extern void             make_inst_hash_table( void );
-extern int              get_instruction_position( char *string );
-//extern void             *InstrRemove( char * );
+//extern int                  get_instruction_position( char * );
+extern struct ReservedWord *AddResWord( struct ReservedWord * );
+extern struct ReservedWord *FindResWord( char * );
+extern int                  RemoveResWord( struct ReservedWord * );
 
 #endif

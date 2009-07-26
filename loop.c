@@ -45,7 +45,7 @@
 #define USELOCALMAC 1 /* 1=create the macro onto the stack */
 
 ret_code LoopDirective( int i, int directive )
-/*************************************/
+/********************************************/
 {
     int start = i - 1; /* location of "directive name .. after any labels" */
     int arg_loc;
@@ -235,9 +235,14 @@ ret_code LoopDirective( int i, int directive )
         for( ptr = parmstring; *ptr; ) {
             char * ptr2 = line;
             *ptr2++ = '<';
-            //if (*ptr == '!' || *ptr == '<' || *ptr == '>')
-            if (*ptr == '!' || *ptr == '<' || *ptr == '>' || *ptr == '%')
+            /* v1.96: '"' and '\'' added, '!' removed */
+            if (*ptr == '<' || *ptr == '>' || *ptr == '%' || *ptr == '"' || *ptr == '\'')
                 *ptr2++ = '!';
+            else if (*ptr == '!' ) { /* v1.96: handling of ! changed */
+                *ptr2++ = *ptr++;
+                if ( *ptr == NULLC )
+                    ptr = "\t";  /* make sure there's something != NULLC */
+            }
             *ptr2++ = *ptr++;
             *ptr2++ = '>';
             *ptr2 = NULLC;

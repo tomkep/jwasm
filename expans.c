@@ -34,25 +34,41 @@
 
 extern bool   expansion;
 extern int    CurrIfState;
-extern bool   EndDirectiveFound;
 
 int   MacroLocals;  /* counter for LOCAL names */
 bool  SkipMacroMode;
 
-// C _ltoa() isn't fully compatible since hex digits are lower case
+static const char __digits[] = "0123456789ABCDEF";
 
-void myltoa(long value, char *buffer, int radix)
+// C ltoa() isn't fully compatible since hex digits are lower case.
+// for JWasm, it's ensured that 2 <= radix <= 16.
+
+char *myltoa( int_32 value, char *buffer, int radix )
+/***************************************************/
 {
-    _ltoa(value, buffer, radix);
-    if (radix > 10)
-        strupr(buffer);
-    return;
+    char   *p;
+    char   *dst = buffer;
+    char   tmpbuf[34];
+
+    tmpbuf[33] = '\0';
+    if ( value < 0 ) {
+        *dst++ = '-';
+        value = 0 - value;
+    } else if ( value == 0 ) {
+        *dst++ = '0';
+        *dst = NULLC;
+        return( buffer );
+    }
+    for ( p = &tmpbuf[32]; value; value = value / radix )
+        *p-- = __digits[value % radix];
+    strcpy( dst, p + 1 );
+    return( buffer );
 }
 
 // make room (or delete items) in the token buffer
 
 static void AddTokens( int start, int count )
-/************************************************************/
+/*******************************************/
 {
     int i;
 
@@ -134,6 +150,7 @@ static void fill_placeholders( char *dst, char *src, uint argc, uint localstart,
 // messed.
 
 static ret_code SkipMacro( char * buffer )
+/****************************************/
 {
     int lvl = 1;
     int i;
@@ -152,8 +169,8 @@ static ret_code SkipMacro( char * buffer )
             AsmError( UNEXPECTED_END_OF_FILE );
             break;
         }
-        if (Token_Count > 0 &&  AsmBuffer[0]->token == T_DIRECTIVE) {
-            if (AsmBuffer[0]->opcode & DF_LOOPDIR)
+        if ( Token_Count > 0 &&  AsmBuffer[0]->token == T_DIRECTIVE ) {
+            if (AsmBuffer[0]->dirtype == DRT_LOOPDIR)
                 lvl++;
             else if (AsmBuffer[0]->value == T_ENDM)
                 lvl--;
@@ -169,6 +186,7 @@ static ret_code SkipMacro( char * buffer )
 }
 
 static void AddBrackets(char *dest, char *src)
+/********************************************/
 {
     *dest++ = '<';
     while (*src) {
@@ -188,6 +206,7 @@ static void AddBrackets(char *dest, char *src)
  * - olelen = length of old item i
 */
 static void RebuildLine(char * newstring, int i, char * string, int oldlen, bool addbrackets )
+/********************************************************************************************/
 {
     char buffer[MAX_LINE_LEN];
     char * dest = buffer;
@@ -201,13 +220,14 @@ static void RebuildLine(char * newstring, int i, char * string, int oldlen, bool
     dest += len;
     newlen = strlen(newstring);
     if ((len + newlen + 1) > sizeof(buffer)) {
-        Fatal( MSG_EXPANDED_LINE_TOO_LONG, string );
+        Fatal( FATAL_EXPANDED_LINE_TOO_LONG, string );
     }
     if (addbrackets) {
 #ifdef DEBUG_OUT
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(__TINYC__)
         /* check buffer overflow */
         if ( (len + newlen + 2 + strlen(src+oldlen) + 1) > MAX_LINE_LEN ) {
+            DebugMsg(("RebuildLine: buffer overflow error\n"));
             _asm int 3;
         }
 #endif
@@ -224,9 +244,10 @@ static void RebuildLine(char * newstring, int i, char * string, int oldlen, bool
 #else
         char * p = newstring;
 #ifdef DEBUG_OUT
-#ifndef __GNUC__
+#if !defined(__GNUC__) && !defined(__TINYC__)
         /* check buffer overflow */
         if ( (len + newlen + strlen(src+oldlen) + 1) > MAX_LINE_LEN ) {
+            DebugMsg(("RebuildLine: buffer overflow error\n"));
             _asm int 3;
         }
 #endif
@@ -262,6 +283,7 @@ static void RebuildLine(char * newstring, int i, char * string, int oldlen, bool
 // returns number of characters processed or -1 on errors
 
 int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool insert, bool addbrackets )
+/*******************************************************************************************************/
 {
     char        *newline = CurrSource + strlen( CurrSource ) + 1;
     char        *orgsrc = params;
@@ -281,7 +303,7 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
     char        **parm_array = NULL;
     char        line[MAX_LINE_LEN];
 
-    DebugMsg(("RunMacro(%s) enter, src=>%s<, run=%u, insert=%u [MacroLocals=%04u]\n", macro->sym.name, params, runit, insert, MacroLocals ));
+    DebugMsg(("%lu. RunMacro(%s) enter, src=>%s<, run=%u, insert=%u [MacroLocals=%04u]\n", LineNumber, macro->sym.name, params, runit, insert, MacroLocals ));
 
     info = macro->e.macroinfo;
 
@@ -308,7 +330,7 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
         }
     }
 
-    DebugMsg(( "RunMacro(%s): params=>%s< \n", macro->sym.name, params ));
+    DebugMsg(( "%lu. RunMacro(%s): params=>%s< \n", LineNumber, macro->sym.name, params ));
 
     if ( info->parmcnt )
         parm_array = (char **)AsmTmpAlloc( info->parmcnt * sizeof( char * ) );
@@ -357,12 +379,15 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
             /* the % operator can be inside a string enclosed in <>! */
 #ifdef QUOTE_PATCH /* PK!!! */
             if (*params == '<' && quote_ch == NULLC) {
-#else
-            if (*params == '<') {
-#endif
                 str_level++;
                 params++;
             }
+#else
+            if (*params == '<') {
+                str_level++;
+                params++;
+            }
+#endif
 
             /* handle expansion of macro parameters.
              the expansion operator does
@@ -666,9 +691,11 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
     }
 
     /* if there's a label before the macro, write it */
-    if ( macro->sym.isfunc == FALSE && prefix )
+    if ( macro->sym.isfunc == FALSE && prefix ) {
+        DebugMsg(("RunMacro(%s): isfunc=FALSE, prefix >%s< queued\n", macro->sym.name, prefix ));
         AddLineQueue( prefix );
-
+        *prefix = NULLC; /* added v1.96 */
+    }
     localstart = MacroLocals;
     MacroLocals += info->localcnt; /* adjust global variable MacroLocals */
 
@@ -688,15 +715,20 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
         char *OldSource = CurrSource;
         AddLineQueue( "endm" );
 //        line_queue->tail->macrolevel = MacroLevel+1;
-        DebugMsg(("RunMacro(%s): enter assembly loop\n", macro->sym.name ));
-        /* move the current line queue to the file stack */
+        DebugMsg(("%lu. RunMacro(%s): enter assembly loop\n", LineNumber, macro->sym.name ));
+        /*
+         * move the current line queue to the file stack!
+         * Also reset the current linenumber!
+         */
         PushMacro( (asm_sym *)macro );
         /* run the assembler until we hit EXITM or ENDM. */
         /* also handle GOTO! */
         for(;;) {
             int i;
             while (0 == (i = GetPreprocessedLine( newline )));
+            /* i < 0 probably cannot happen at all */
             if (i < 0) {
+                DebugMsg(("%lu. RunMacro(%s): Internal error, i < 0 occured!\n", LineNumber, macro->sym.name ));
                 CurrSource = OldSource;
                 return( -1 );
             }
@@ -708,7 +740,7 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
                 if (AsmBuffer[0]->value == T_EXITM) {
                     //int pos;
                     i = 1;
-                    DebugMsg(("RunMacro(%s): lvl=%u, EXITM detected\n", macro->sym.name, MacroLevel ));
+                    DebugMsg(("%lu. RunMacro(%s): lvl=%u, EXITM detected\n", LineNumber, macro->sym.name, MacroLevel ));
                     if ( ModuleInfo.list && ModuleInfo.list_macro == LM_LISTMACROALL )
                         LstWriteSrcLine();
                     if (prefix) {
@@ -735,7 +767,7 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
                                 *p2 = NULLC;
                             }
                         }
-                        DebugMsg(("RunMacro(%s): prefix=%s, exitm-str=%s, suffix=%s\n", macro->sym.name, prefix, AsmBuffer[i]->string_ptr, params));
+                        DebugMsg(("%lu. RunMacro(%s): prefix=%s, exitm-str=%s, suffix=%s\n", LineNumber, macro->sym.name, prefix, AsmBuffer[i]->string_ptr, params));
                         strcat(prefix, line);
 //                        strcat(prefix, params);
                     }
@@ -743,11 +775,11 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
                     MacroLevel--;
                     CurrSource = OldSource;
                     AsmBuffer[0]->value = T_EXITM;
-                    DebugMsg(("RunMacro(%s): EXITM, new MacroLevel=%u >%s<\n", macro->sym.name, MacroLevel, prefix ));
+                    DebugMsg(("%lu. RunMacro(%s): EXITM, new MacroLevel=%u >%s<\n", LineNumber, macro->sym.name, MacroLevel, prefix ));
                     break;
                 } else if (AsmBuffer[0]->value == T_ENDM) {
                     MacroLevel--;
-                    DebugMsg(("RunMacro(%s): ENDM, new MacroLevel=%u\n", macro->sym.name, MacroLevel));
+                    DebugMsg(("%lu. RunMacro(%s): ENDM, new MacroLevel=%u\n", LineNumber, macro->sym.name, MacroLevel));
                     CurrSource = OldSource;
                     break;
                 } else if (AsmBuffer[0]->value == T_GOTO) {
@@ -793,16 +825,21 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
                 WritePreprocessedLine( newline );
 
             /* the macro might contain an END directive */
-            if ( EndDirectiveFound ) {
+            if ( ModuleInfo.EndDirectiveFound ) {
                 MacroLevel--;
                 AsmBuffer[0]->token = T_EXITM; /* force loop exit */
                 while ( GetTextLine( newline, sizeof( newline ) ) );
                 break;
             }
         } /* end for */
+        /* restore the line number now! If this isn't done here, the
+         * assembler might display the "current" macro line number instead
+         * of the "true" number if a macro function was executed.
+         */
+        RestoreLineNumber();
     }
 
-    DebugMsg(("RunMacro(%s) exit\n", macro->sym.name));
+    DebugMsg(("%lu. RunMacro(%s) exit\n", LineNumber, macro->sym.name));
 
     return( params - orgsrc );
 }
@@ -817,6 +854,7 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
  */
 
 static ret_code ExpandText(char * line, bool substitute, bool addbrackets )
+/*************************************************************************/
 {
     char *pSrc;
     char *pDst;
@@ -932,7 +970,7 @@ static ret_code ExpandText(char * line, bool substitute, bool addbrackets )
 // string: full line
 
 static ret_code ExpandTextMacro( dir_node * dir, int pos, char * string, int addbrackets)
-/******************************************************************/
+/***************************************************************************************/
 {
     int count;
     int i;
@@ -944,7 +982,7 @@ static ret_code ExpandTextMacro( dir_node * dir, int pos, char * string, int add
     char buffer3[MAX_LINE_LEN];
 #endif
 
-    DebugMsg(("ExpandTextMacro(sym=%s, pos=%u, addbr=%u) enter [tokens=%u]\n", dir->sym.name, pos, addbrackets, Token_Count));
+    DebugMsg(("%lu. ExpandTextMacro(sym=%s, pos=%u, addbr=%u) enter [tokens=%u]\n", LineNumber, dir->sym.name, pos, addbrackets, Token_Count));
 
     count = 0;
     for (;;) {
@@ -989,7 +1027,7 @@ static ret_code ExpandTextMacro( dir_node * dir, int pos, char * string, int add
         }
         break;
     }
-    DebugMsg(("ExpandTextMacros: replace >%s< by >%s<\n", AsmBuffer[pos]->string_ptr, dir->sym.string_ptr));
+    DebugMsg(("%lu. ExpandTextMacros: replace >%s< by >%s<\n", LineNumber, AsmBuffer[pos]->string_ptr, dir->sym.string_ptr));
     RebuildLine(dir->sym.string_ptr,
                 pos, string,
                 strlen(AsmBuffer[pos]->string_ptr), addbrackets);
@@ -1001,6 +1039,7 @@ static ret_code ExpandTextMacro( dir_node * dir, int pos, char * string, int add
 // string:
 
 ret_code ExpandToken(int count, char * string, bool addbrackets, bool Equ_Mode)
+/*****************************************************************************/
 {
     int pos;
     int i;
@@ -1062,7 +1101,7 @@ ret_code ExpandToken(int count, char * string, bool addbrackets, bool Equ_Mode)
 
     if( AsmBuffer[count]->token == T_ID ||
         (expansion == TRUE && AsmBuffer[count]->token == T_STRING))  {
-        DebugMsg(("ExpandToken: testing id >%s< equ_mode=%u\n", AsmBuffer[count]->string_ptr, Equ_Mode ));
+        DebugMsg(("%lu. ExpandToken: testing id >%s< equ_mode=%u\n", LineNumber, AsmBuffer[count]->string_ptr, Equ_Mode ));
         dir = (dir_node *)SymSearch( AsmBuffer[count]->string_ptr );
         if( dir != NULL) {
             if (dir->sym.state == SYM_MACRO &&
@@ -1083,7 +1122,7 @@ ret_code ExpandToken(int count, char * string, bool addbrackets, bool Equ_Mode)
                     i = RunMacro(dir, AsmBuffer[count]->pos, buffer, TRUE, TRUE, addbrackets);
                     CurrIfState = savedIfState;
                     if ( i != -1 ) {
-                        DebugMsg(("ExpandToken: back from RunMacro(%s), string=>%s<\n", dir->sym.name, buffer));
+                        DebugMsg(("%lu. ExpandToken: back from RunMacro(%s), string=>%s<\n", LineNumber, dir->sym.name, buffer));
                         strcat(buffer, cmd + i);
                         strcpy(string, buffer);
                         rc = STRING_EXPANDED;
@@ -1092,7 +1131,7 @@ ret_code ExpandToken(int count, char * string, bool addbrackets, bool Equ_Mode)
                 } else {
                     //bool runit = dir->sym.runsync || MacroLevel > 0;
                     if ( count > 0 && AsmBuffer[count-1]->token != T_COLON ) {
-                        DebugMsg(("macro called without brackets at operand location\n"));
+                        DebugMsg(("ExpandToken: macro called without brackets at operand location\n"));
                         AsmError( SYNTAX_ERROR );
                         Token_Count = 0;
                         return( ERROR );
@@ -1102,7 +1141,7 @@ ret_code ExpandToken(int count, char * string, bool addbrackets, bool Equ_Mode)
                      */
                     //i = RunMacro( dir, AsmBuffer[count]->pos, buffer, runit, TRUE, FALSE );
                     i = RunMacro( dir, AsmBuffer[count]->pos, buffer, TRUE, TRUE, FALSE );
-                    DebugMsg(("ExpandToken: back from RunMacro(%s) - called as Proc\n", dir->sym.name));
+                    DebugMsg(("%lu. ExpandToken: back from RunMacro(%s) - called as Proc\n", LineNumber, dir->sym.name));
                     if ( i != -1 ) {
                         if ( AsmBuffer[0]->value == T_EXITM ) {
                             strcat(buffer, cmd + i);
@@ -1122,7 +1161,7 @@ ret_code ExpandToken(int count, char * string, bool addbrackets, bool Equ_Mode)
                 Token_Count = 0; /* AsmBuffer is destroyed, exit */
 //            } else if( dir->sym.state == SYM_TMACRO && dir->sym.defined == TRUE) {
             } else if( dir->sym.state == SYM_TMACRO) {
-                DebugMsg(("ExpandToken: text macro %s to be expanded\n", dir->sym.name ));
+                DebugMsg(("%lu. ExpandToken: text macro %s to be expanded\n", LineNumber, dir->sym.name ));
                 rc = ExpandTextMacro( dir, count, string, addbrackets );
             }
         }
@@ -1133,6 +1172,7 @@ ret_code ExpandToken(int count, char * string, bool addbrackets, bool Equ_Mode)
 // special handling for SIZESTR and INSTR
 
 static ret_code FullExpandToken( int i, char *string)
+/***************************************************/
 {
     char buffer[MAX_LINE_LEN];
 
@@ -1151,11 +1191,11 @@ static ret_code FullExpandToken( int i, char *string)
 // scan current line for (text) macros and expand them.
 
 ret_code ExpandLine( char * string)
-/*****************************/
+/*********************************/
 {
     int count = 0;
     int addbrackets = FALSE;
-    int Equ_Mode = FALSE;
+    //int Equ_Mode = FALSE;
     asm_sym *sym;
     ret_code rc;
     int i,j;
@@ -1165,11 +1205,11 @@ ret_code ExpandLine( char * string)
     /* addbrackets: for preprocessor directives which expect a string
      parameter, the string has to be enclosed in '<>' again.
      */
-    DebugMsg(( "ExpandLine(%s) enter\n", string ));
+    DebugMsg(( "%lu. ExpandLine(%s) enter\n", LineNumber, string ));
     if ( AsmBuffer[0]->token == T_DIRECTIVE ) {
-        if ( AsmBuffer[0]->opcode & DF_STRPARM )
+        if ( AsmBuffer[0]->flags & DF_STRPARM )
             addbrackets = TRUE;
-        else if ( AsmBuffer[0]->opcode & DF_NOEXPAND ) {
+        else if ( AsmBuffer[0]->flags & DF_NOEXPAND ) {
             /* PURGE, IF[N]DEF, .ERR[N]DEF, ECHO, FOR[C]? */
             /* for these directives don't expand strings! */
             if (AsmBuffer[0]->value == T_PURGE || expansion == FALSE)
@@ -1237,7 +1277,7 @@ ret_code ExpandLine( char * string)
                 return (ExpandToken( 0, string, FALSE, FALSE ));
             return( NOT_ERROR );
         case T_EQU:
-            if (AsmBuffer[1]->opcode & 1) /* ignore '='! */
+            if ( AsmBuffer[1]->dirtype == DRT_EQUALSGN ) /* ignore '=' directive */
                 break;
             /* EQU is a special case. If the - expanded - expression is
              a number, then the value for EQU is numeric. Else the
@@ -1247,15 +1287,15 @@ ret_code ExpandLine( char * string)
             sym = SymSearch(AsmBuffer[0]->string_ptr);
             if ( sym == NULL || sym->state == SYM_TMACRO ) {
                 if (expansion == FALSE) {
-                    DebugMsg(( "ExpandLine(%s) exit\n", string ));
+                    DebugMsg(( "%lu. ExpandLine(%s) exit\n", LineNumber, string ));
                     return(NOT_ERROR);
                 } else {
                     /* expand text macros and macro functions */
                     /* ignore the % before items */
                     /* with "%" as first character, even the equate's name
-                     is to be expanded!
+                     * is to be expanded!
                      */
-                    Equ_Mode = TRUE;
+                    //Equ_Mode = TRUE;
                     count = 2;
                 }
             }
@@ -1264,11 +1304,11 @@ ret_code ExpandLine( char * string)
                AsmBuffer[1]->token == T_COLON &&
                AsmBuffer[2]->token == T_DIRECTIVE ) {
         /* skip the code label */
-        if ( AsmBuffer[2]->opcode & DF_STRPARM )
+        if ( AsmBuffer[2]->flags & DF_STRPARM )
             addbrackets = TRUE;
-        else if ( AsmBuffer[2]->opcode & DF_NOEXPAND )
+        else if ( AsmBuffer[2]->flags & DF_NOEXPAND )
             if (AsmBuffer[2]->value == T_PURGE || expansion == FALSE) {
-                DebugMsg(( "ExpandLine(%s) exit\n", string ));
+                DebugMsg(( "%lu. ExpandLine(%s) exit\n", LineNumber, string ));
                 return( NOT_ERROR );
             }
     }
@@ -1276,7 +1316,7 @@ ret_code ExpandLine( char * string)
     if (expansion == TRUE) {
 //        expansion = FALSE;
         if (STRING_EXPANDED == ExpandText(string, TRUE, addbrackets )) {
-            DebugMsg(( "ExpandLine(%s) exit, STRING_EXPANDED\n", string ));
+            DebugMsg(( "%lu. ExpandLine(%s) exit, STRING_EXPANDED\n", LineNumber, string ));
             return(STRING_EXPANDED);
         }
     }
@@ -1293,7 +1333,7 @@ std_expansion:
         if (ExpandToken( count, string, addbrackets, FALSE ) == STRING_EXPANDED )
             rc = STRING_EXPANDED;
     }
-    DebugMsg(( "ExpandLine(%s) exit, rc=%u\n", string, rc ));
+    DebugMsg(( "%lu. ExpandLine(%s) exit, rc=%u\n", LineNumber, string, rc ));
     return( rc );
 }
 
@@ -1301,6 +1341,7 @@ std_expansion:
 /* returns no of characters copied into buffer (without terminating 00) */
 
 int GetTextMacroValue( char * p, char * buffer )
+/**********************************************/
 {
     char *dest = buffer;
     if (p)

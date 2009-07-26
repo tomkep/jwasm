@@ -49,26 +49,24 @@
 
 dir_node *CurrStruct;
 static dir_node *redef_struct;
-static int level;  /* current nesting level if a field is searched */
 
 void TypesInit()
 {
     CurrStruct   = NULL;
     redef_struct = NULL;
-    level = 0;
 }
 
 // search a name in a struct's fieldlist
 
-struct asm_sym *SearchNameInStruct( asm_sym *tstruct, const char *name, unsigned int * poffset )
+struct asm_sym *SearchNameInStruct( asm_sym *tstruct, const char *name, unsigned int * poffset, int level )
 {
     int len = strlen( name );
     field_list * fl = ((dir_node *)tstruct)->e.structinfo->head;
     asm_sym *sym = NULL;
 
-    if (ModuleInfo.oldstructs == TRUE) {
-        return( SymSearch( name ) );
-    }
+    //if (ModuleInfo.oldstructs == TRUE) {
+    //    return( SymSearch( name ) );
+    //}
     if ( level >= MAX_STRUCT_NESTING ) {
         AsmError( NESTING_LEVEL_TOO_DEEP );
         return( NULL );
@@ -80,13 +78,13 @@ struct asm_sym *SearchNameInStruct( asm_sym *tstruct, const char *name, unsigned
         if ( *( fl->sym->name ) == 0 ) {
             /* there are 2 cases: an anonymous inline struct ... */
             if (fl->sym->state == SYM_TYPE) {
-                if (sym = SearchNameInStruct(fl->sym, name, poffset)) {
+                if ( sym = SearchNameInStruct(fl->sym, name, poffset, level ) ) {
                     *poffset += fl->sym->offset;
                     break;
                 }
             /* or an anonymous structured field */
             } else if ( fl->sym->mem_type == MT_TYPE ) {
-                if (sym = SearchNameInStruct( fl->sym->type, name, poffset ) ) {
+                if (sym = SearchNameInStruct( fl->sym->type, name, poffset, level ) ) {
                     *poffset += fl->sym->offset;
                     break;
                 }
@@ -97,7 +95,6 @@ struct asm_sym *SearchNameInStruct( asm_sym *tstruct, const char *name, unsigned
             break;
         }
     }
-    level--;
     return( sym );
 }
 
@@ -141,7 +138,7 @@ static bool AreStructsEqual(dir_node *newstr, dir_node *oldstr)
 }
 
 // handle STRUCT, STRUC, UNION directives
-// i is index of cmd token
+// i = index of directive token
 
 ret_code StructDirective( int i )
 /********************/
@@ -155,7 +152,7 @@ ret_code StructDirective( int i )
     asm_sym *sym;
     dir_node *dir;
 
-	DebugMsg(("StructDirective enter, i=%u, CurrStruct=%s\n", i, CurrStruct ? CurrStruct->sym.name : "NULL" ));
+    DebugMsg(("StructDirective(%s) enter, i=%u, CurrStruct=%s\n", AsmBuffer[i]->string_ptr, i, CurrStruct ? CurrStruct->sym.name : "NULL" ));
 
     /* top level structs/unions must have a name at pos 0 */
     if (( i == 1 && CurrStruct == NULL ) ||
@@ -213,7 +210,9 @@ ret_code StructDirective( int i )
             i++;
             if ( AsmBuffer[i]->token == T_ID &&
                 (_stricmp(AsmBuffer[i]->string_ptr, "NONUNIQUE") == 0)) {
-                /* currently NONUNIQUE is just skipped */
+                /* currently NONUNIQUE is ingored */
+                _strupr( AsmBuffer[i]->string_ptr );
+                AsmWarn( 2, TOKEN_IGNORED, AsmBuffer[i]->string_ptr );
                 i++;
             }
         }
@@ -230,7 +229,7 @@ ret_code StructDirective( int i )
             sym = SymSearch( name );
             DebugMsg(("StructDirective: SymSearch (%s)=%X (curr struct=%X)\n", name, sym, CurrStruct ));
         } else {
-            sym = SearchNameInStruct( (asm_sym *)CurrStruct, name, &offset );
+            sym = SearchNameInStruct( (asm_sym *)CurrStruct, name, &offset, 0 );
             DebugMsg(("StructDirective(%s): SearchNameInStruc()=%X\n", name, sym));
             if ( Parse_Pass > PASS_1 && sym && sym->mem_type == MT_TYPE )
                 sym = sym->type;
@@ -398,21 +397,11 @@ ret_code EndstructDirective( int i )
 #if 1
     /* to allow direct structure access */
     switch (dir->sym.total_size) {
-    case 1:
-        dir->sym.mem_type = MT_BYTE;
-        break;
-    case 2:
-        dir->sym.mem_type = MT_WORD;
-        break;
-    case 4:
-        dir->sym.mem_type = MT_DWORD;
-        break;
-    case 6:
-        dir->sym.mem_type = MT_FWORD;
-        break;
-    case 8:
-        dir->sym.mem_type = MT_QWORD;
-        break;
+    case 1:  dir->sym.mem_type = MT_BYTE;   break;
+    case 2:  dir->sym.mem_type = MT_WORD;   break;
+    case 4:  dir->sym.mem_type = MT_DWORD;  break;
+    case 6:  dir->sym.mem_type = MT_FWORD;  break;
+    case 8:  dir->sym.mem_type = MT_QWORD;  break;
     default:
         /* set something which cannot be accessed by a reg */
         /* there might exist a better solution, once the mess
@@ -476,12 +465,12 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
         name = AsmBuffer[name_loc]->string_ptr;
         /* check if field name is already used */
         /* RECORD fields names, which are global, aren't handled here */
-        sym = SearchNameInStruct((asm_sym *)CurrStruct, name, (unsigned int *)&i);
+        sym = SearchNameInStruct((asm_sym *)CurrStruct, name, (unsigned int *)&i, 0 );
         if (sym) {
-            if ( ModuleInfo.oldstructs &&
-                 sym->state == SYM_STRUCT_FIELD &&
-                 redef_struct != NULL ) {
-            } else
+            //if ( ModuleInfo.oldstructs &&
+            //     sym->state == SYM_STRUCT_FIELD &&
+            //     redef_struct != NULL ) {
+            //} else
                 AsmErr( SYMBOL_ALREADY_DEFINED, sym->name );
             name = "";
         }
@@ -490,17 +479,27 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
 
     /* alloc the items needed */
 
-    if ( ModuleInfo.oldstructs == TRUE && *name != NULLC )
-        sym = SymCreate(name, TRUE);
-    else
-        sym = SymCreate(name, FALSE);
+    if ( ModuleInfo.oldstructs == TRUE && *name != NULLC ) {
+        sym  = SymLookup( name );
+        if ( sym ) {
+            if ( sym->state == SYM_UNDEFINED )
+                sym->state = SYM_STRUCT_FIELD;
+            if ( sym->state == SYM_STRUCT_FIELD ) {
+                sym->mem_type = mem_type;
+                sym->type = &vartype->sym;
+                sym->defined = TRUE;
+            }
+        }
+    }
+
+    sym = SymCreate(name, FALSE);
 
     sym->state = SYM_STRUCT_FIELD;
     sym->defined = TRUE;
     sym->mem_type = mem_type;
     sym->type = &vartype->sym;
     // ok to do?
-    // sym->total_size = SizeFromMemtype(mem_type, ModuleInfo.Use32);
+    // sym->total_size = SizeFromMemtype( mem_type, ModuleInfo.Ofssize );
 
     f = AsmAlloc( sizeof( field_list ) );
 
@@ -644,7 +643,7 @@ asm_sym *CreateTypeDef(char * name, int * pi)
     if( sym == NULL ) {
         dir = dir_insert( name, SYM_TYPE );
         sym = &dir->sym;
-        sym->use32 = ModuleInfo.Use32;
+        sym->Ofssize = ModuleInfo.Ofssize;
     } else {
         dir = (dir_node *)sym;
         if (sym->state == SYM_UNDEFINED) {
@@ -674,9 +673,10 @@ asm_sym *CreateTypeDef(char * name, int * pi)
     if (AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_COMMA)
         type = ST_NULL;
     else if ( AsmBuffer[i]->token == T_RES_ID || AsmBuffer[i]->token == T_DIRECTIVE )
-        type = FindSimpleType( AsmBuffer[i]->value );
+        type = FindStdType( AsmBuffer[i]->value );
 
     if( type == -1 ) {
+        DebugMsg(("CreateTypeDef: arbitrary type\n" ));
         /* it's not a simple type, check for PROTO qualifier */
         if (AsmBuffer[i]->value == T_PROTO) {
             dir_node * dir2;  /* create a PROTOtype item without name */
@@ -707,7 +707,7 @@ asm_sym *CreateTypeDef(char * name, int * pi)
         else if (sym->mem_type == MT_EMPTY)
             size = oldsize;
         else
-            size = SizeFromMemtype(sym->mem_type, ModuleInfo.Use32);
+            size = SizeFromMemtype( sym->mem_type, ModuleInfo.Ofssize );
 
         if (size != oldsize) {
             DebugMsg(("CreateTypeDef error, newsize=%u, oldsize=%u\n", size, oldsize));
@@ -729,9 +729,16 @@ asm_sym *CreateTypeDef(char * name, int * pi)
         DebugMsg(("CreateTypeDef ok, size=%u, mem_type=MT_TYPE, type=%X, i=%u\n", sym->total_size, sym->type, i ));
     } else {
         /* it's a simple or void type */
-        size = SimpleType[type].size;
-        if (size == -1) /* if it's a pointer, get true size */
-            size = SizeFromMemtype(SimpleType[type].mem_type, ModuleInfo.Use32);
+#if 0 /* v1.96: removed */
+        if ( ( SimpleType[type].mem_type & MT_SPECIAL ) == 0 )
+            size = (SimpleType[type].mem_type & MT_SIZE_MASK) + 1;
+        else  /* if it's a more special type, get true size */
+#endif
+             if ( SimpleType[type].Ofssize == USE_EMPTY )
+                 size = SizeFromMemtype( SimpleType[type].mem_type, ModuleInfo.Ofssize );
+             else
+                 size = SizeFromMemtype( SimpleType[type].mem_type, SimpleType[type].Ofssize );
+        DebugMsg(("CreateTypeDef: size %u\n", size ));
 #if 1
         /* just check size, not mem_type */
         oldsize = sym->total_size;
@@ -767,19 +774,21 @@ asm_sym *CreateTypeDef(char * name, int * pi)
             case T_NEAR32:
                 if (ptrqual == EMPTY) {
                     ptrqual = AsmBuffer[i]->value;
-                    type = FindSimpleType( ptrqual );
-                    size = SimpleType[type].size;
+                    type = FindStdType( ptrqual );
+                    if ( SimpleType[type].Ofssize != USE_EMPTY )
+                        size = SizeFromMemtype( SimpleType[type].mem_type, SimpleType[type].Ofssize );
+                    else
+                        size = SizeFromMemtype( SimpleType[type].mem_type, ModuleInfo.Ofssize );
 
                     if ( ptrqual == T_NEAR16 || ptrqual == T_FAR16 )
-                        dir->sym.use32 = FALSE;
+                        dir->sym.Ofssize = USE16;
                     else if ( ptrqual == T_NEAR32 || ptrqual == T_FAR32 )
-                        dir->sym.use32 = TRUE;
+                        dir->sym.Ofssize = USE32;
+
                     if ( ptrqual == T_FAR || ptrqual == T_FAR16 || ptrqual == T_FAR32 )
                         dir->sym.isfar = TRUE;
                     else
                         dir->sym.isfar = FALSE;
-                    if (size == -1)
-                        size = SizeFromMemtype(SimpleType[type].mem_type, ModuleInfo.Use32);
                 }
                 i++;
                 if (indirection == 0 &&
@@ -801,7 +810,7 @@ asm_sym *CreateTypeDef(char * name, int * pi)
 
         dir->e.structinfo->indirection = indirection;
 
-        DebugMsg(("CreateTypeDef: i=%u, token=%u\n", i, AsmBuffer[i]->token));
+        DebugMsg(("CreateTypeDef: memtype=%Xh, size=%u i=%u, token=%u\n", sym->mem_type, size, i, AsmBuffer[i]->token));
         if ((AsmBuffer[i]->token == T_ID) || (AsmBuffer[i]->token == T_RES_ID)) {
             symtype = SymSearch( AsmBuffer[i]->string_ptr );
 #ifdef DEBUGOUT
@@ -829,7 +838,7 @@ asm_sym *CreateTypeDef(char * name, int * pi)
             i++;
         }
         sym->total_size = size;
-        DebugMsg(("CreateTypeDef ok, size=%u, mem_type=%u, indirection=%u\n", size, sym->mem_type, indirection ));
+        DebugMsg(("CreateTypeDef ok, size=%u, mem_type=%Xh, indirection=%u\n", size, sym->mem_type, indirection ));
     }
     *pi = i;
     return((asm_sym *)dir);

@@ -38,22 +38,27 @@
 #include "omfio.h"
 #include "fatal.h"
 
-static void safeSeek( int fh, long offset, int mode ) {
+static void safeSeek( int fh, long offset, int mode )
+/***************************************************/
+{
 
     if( _lseek( fh, offset, mode ) == -1 ) {
         SeekError();
     }
 }
 
-static void safeWrite( int fh, const uint_8 *buf, size_t len ) {
+static void safeWrite( int fh, const uint_8 *buf, size_t len )
+/************************************************************/
+{
 
     if( _write( fh, buf, len ) != len ) {
         WriteError();
     }
 }
 
-OBJ_WFILE *OmfWriteOpen( int fh ) {
-/*********************************************/
+OBJ_WFILE *OmfWriteOpen( int fh )
+/*******************************/
+{
     OBJ_WFILE    *new;
 
     new = AsmAlloc( sizeof( *new ) + OBJ_BUFFER_SIZE );
@@ -64,8 +69,9 @@ OBJ_WFILE *OmfWriteOpen( int fh ) {
     return( new );
 }
 
-void OmfWriteClose( OBJ_WFILE *obj ) {
+void OmfWriteClose( OBJ_WFILE *obj )
 /**********************************/
+{
 
     /**/myassert( obj != NULL );
 
@@ -80,8 +86,9 @@ void OmfWriteClose( OBJ_WFILE *obj ) {
     AsmFree( obj );
 }
 
-void OmfWBegRec( OBJ_WFILE *obj, uint_8 command ) {
+void OmfWBegRec( OBJ_WFILE *obj, uint_8 command )
 /***********************************************/
+{
     uint_8  buf[3];
 
 /**/myassert( obj != NULL && !obj->in_rec );
@@ -96,8 +103,9 @@ void OmfWBegRec( OBJ_WFILE *obj, uint_8 command ) {
     obj->length = 0;
 }
 
-void OmfWFlushBuffer( OBJ_WFILE *obj ) {
+void OmfWFlushBuffer( OBJ_WFILE *obj )
 /*******************************************/
+{
     size_t  len_to_write;
     uint_8  checksum;
     uint_8  *p;
@@ -116,8 +124,9 @@ void OmfWFlushBuffer( OBJ_WFILE *obj ) {
     obj->in_buf = 0;
 }
 
-void OmfWEndRec( OBJ_WFILE *obj ) {
+void OmfWEndRec( OBJ_WFILE *obj )
 /*******************************/
+{
     uint_8  buf[2];
     uint_8  checksum;
 
@@ -139,8 +148,9 @@ void OmfWEndRec( OBJ_WFILE *obj ) {
     obj->in_rec = 0;
 }
 
-void OmfWrite8( OBJ_WFILE *obj, uint_8 byte ) {
+void OmfWrite8( OBJ_WFILE *obj, uint_8 byte )
 /*******************************************/
+{
 /**/myassert( obj != NULL && obj->in_rec );
 
     if( obj->in_buf == OBJ_BUFFER_SIZE ) {
@@ -149,8 +159,9 @@ void OmfWrite8( OBJ_WFILE *obj, uint_8 byte ) {
     obj->buffer[ obj->in_buf++ ] = byte;
 }
 
-void OmfWrite16( OBJ_WFILE *obj, uint_16 word ) {
+void OmfWrite16( OBJ_WFILE *obj, uint_16 word )
 /*********************************************/
+{
 /**/myassert( obj != NULL && obj->in_rec );
 
     if( obj->in_buf >= OBJ_BUFFER_SIZE - 1 ) {
@@ -160,8 +171,9 @@ void OmfWrite16( OBJ_WFILE *obj, uint_16 word ) {
     obj->in_buf += sizeof( uint_16 );
 }
 
-void OmfWrite32( OBJ_WFILE *obj, uint_32 dword ) {
+void OmfWrite32( OBJ_WFILE *obj, uint_32 dword )
 /**********************************************/
+{
 /**/myassert( obj != NULL && obj->in_rec );
 
     if( obj->in_buf >= OBJ_BUFFER_SIZE - 3 ) {
@@ -171,16 +183,18 @@ void OmfWrite32( OBJ_WFILE *obj, uint_32 dword ) {
     obj->in_buf += sizeof( uint_32 );
 }
 
-void OmfWriteIndex( OBJ_WFILE *obj, uint_16 index ) {
+void OmfWriteIndex( OBJ_WFILE *obj, uint_16 index )
 /*************************************************/
+{
     if( index > 0x7f ) {
         OmfWrite8( obj, 0x80 | ( index >> 8 ) );
     }
     OmfWrite8( obj, index & 0xff );
 }
 
-void OmfWrite( OBJ_WFILE *obj, const uint_8 *buf, size_t length ) {
+void OmfWrite( OBJ_WFILE *obj, const uint_8 *buf, size_t length )
 /***************************************************************/
+{
     const uint_8    *write;
     size_t          amt;
 
@@ -203,8 +217,9 @@ void OmfWrite( OBJ_WFILE *obj, const uint_8 *buf, size_t length ) {
     }
 }
 
-static uint_8 checkSum( const uint_8 *buf, uint_16 length ) {
-/***********************************************************/
+static uint_8 checkSum( const uint_8 *buf, uint_16 length )
+/*********************************************************/
+{
     uint_8 checksum;
 
     checksum = 0;
@@ -216,8 +231,9 @@ static uint_8 checkSum( const uint_8 *buf, uint_16 length ) {
     return( checksum );
 }
 
-void OmfWriteRec( OBJ_WFILE *obj, uint_8 command, size_t length, const uint_8 *contents ) {
-/***************************************************************/
+void OmfWriteRec( OBJ_WFILE *obj, uint_8 command, size_t length, const uint_8 *contents )
+/***************************************************************************************/
+{
 /*
     Contents and length don't include checksum
 */

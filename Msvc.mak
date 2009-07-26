@@ -1,9 +1,14 @@
 
-# this makefile (NMake) creates JWasm Windows and DOS binaries with MSVC.
+# this makefile (NMake) creates the JWasm Win32 binary with MSVC.
 # it has been tested with:
 # - MS VC++ Toolkit 2003
 # - MS VC++ 6
 # - MS VC++ 2005 EE (not recommended, also see definition of c_flags below)
+#
+# By setting DOS=1 one can additionally create a 32bit DOS binary.
+# This requires the HXDEV package.
+#
+# with nmake -f msvc.mak amd64=1 one can create the 64bit aware version
 
 name = jwasm
 
@@ -20,14 +25,21 @@ VCDIR  = \msvc8
 W32LIB = \Win32Inc\Lib
 HXDIR  = \HX
 
+# support for 64bit?
+!ifdef AMD64
+c_flags64=-DAMD64_SUPPORT=1
+!endif
+
 !ifndef DEBUG
 DEBUG=0
 !endif
 
+!ifndef OUTD
 !if $(DEBUG)
 OUTD=MSVCD
 !else
 OUTD=MSVCR
+!endif
 !endif
 
 inc_dirs  = -IH -I"$(VCDIR)\include"
@@ -46,7 +58,8 @@ extra_c_flags = -Zd -Od -DDEBUG_OUT
 extra_c_flags = -Oty2 -Gs -DNDEBUG
 !endif
 
-c_flags =-D__NT__ $(extra_c_flags)
+c_flags =-D__NT__ $(extra_c_flags) $(c_flags64)
+
 # if MSVC++ 2005 EE is used:
 # 1. define __STDC_WANT_SECURE_LIB__=0 to avoid "deprecated" warnings
 # 2. define -GS- to disable security checks
@@ -65,7 +78,7 @@ lflagsw = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /OPT:NOWIN98
 CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(c_flags)
 
 .c{$(OUTD)}.obj:
-	 $(CC) -Fo$* $<
+	$(CC) -Fo$* $<
 
 proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
@@ -86,11 +99,11 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
 !endif
-           $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj    
+           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj
 ######
 
 !if $(WIN)
-TARGET1=$(OUTD)\$(name).exe 
+TARGET1=$(OUTD)\$(name).exe
 !endif
 !if $(DOS)
 TARGET2=$(OUTD)\$(name)d.exe
@@ -115,10 +128,10 @@ libc.lib oldnames.lib /LIBPATH:$(HXDIR)\Lib dkrnl32s.lib imphlp.lib /STUB:$(HXDI
 <<
 	@$(HXDIR)\bin\patchpe $@
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) -Fo$* msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/reswords.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
 	$(CC) -Fo$* parser.c
 
 ######

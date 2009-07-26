@@ -38,14 +38,6 @@
 #define NOT_BIT_345     0xC7
 #define NOT_BIT_67      0x3F
 
-#define IS_CALL( inst )     ( inst == T_CALL )
-#define IS_JMPCALL( inst )  ( inst == T_CALL || inst == T_JMP )
-#define IS_JMP( inst )      ( inst >= T_JA && inst <= T_JZ )
-#define IS_BRANCH( inst )   ( IS_JMP( inst ) || IS_CALL( inst ) )
-#define IS_ANY_BRANCH( inst )    \
-            ( IS_BRANCH( inst ) || ( ( inst >= T_LOOP ) && ( inst <= T_LOOPZW ) ) )
-#define IS_CONDJMP( inst )  ( ( inst != T_JMP ) && ( inst >= T_JA ) && ( inst <= T_JZ ) && ( inst != T_JCXZ ) && ( inst != T_JECXZ ) )
-
 #define MOD_00          0x00
 #define MOD_01          0x40
 #define MOD_10          0x80
@@ -54,10 +46,6 @@
 #define W_BIT           0x01
 #define NOT_W_BIT       0xFE
 
-#define OPND1           0
-#define OPND2           1
-#define OPND3           2
-
 #define ADRSIZ          0x67
 #define OPSIZ           0x66
 #define OP_WAIT         0x9B
@@ -65,8 +53,8 @@
 #define OP_NOP          0x90
 
 #define S_I_B           0x04
-#define D32             0x05
-#define D16             0x06
+#define D32             0x05  /* direct 32 */
+#define D16             0x06  /* direct 16 */
 
 //#define ESP             0x04
 //#define EBP             0x05
@@ -85,21 +73,8 @@
 #define FPE_MIN         0xD8
 #define FPE_MAX         0xDF
 
-#define SET_ADRSIZ( s, x ) ( s->prefix.adrsiz = (( x ) ^ ( s->use32 )) ? TRUE : FALSE )
-#define SET_ADRSIZ_32( s ) ( s->prefix.adrsiz = ( s->use32 ) ? FALSE : TRUE )
-#define SET_ADRSIZ_16( s ) ( s->prefix.adrsiz = ( s->use32 ) ? TRUE : FALSE )
-#define SET_ADRSIZ_NO( s ) ( s->prefix.adrsiz = FALSE )
+#define IS_MEM_TYPE( op, typ ) ( (op) == MT_##typ || (op) == MT_S##typ )
 
-#define SET_OPSIZ( s, x ) ( s->prefix.opsiz = (( x ) ^ ( s->use32 )) ? TRUE : FALSE )
-#define SET_OPSIZ_32( s ) ( s->prefix.opsiz = ( s->use32 ) ? FALSE : TRUE )
-#define SET_OPSIZ_16( s ) ( s->prefix.opsiz = ( s->use32 ) ? TRUE : FALSE )
-#define SET_OPSIZ_NO( s ) ( s->prefix.opsiz = FALSE )
-
-#define addr_32( s )     ( s->use32 ? ( s->prefix.adrsiz == FALSE ) : ( s->prefix.adrsiz == TRUE ))
-#define oper_32( s )     ( s->use32 ? ( s->prefix.opsiz == FALSE ) : ( s->prefix.opsiz == TRUE ))
-
-#define MEM_TYPE( op, typ ) ( (op) == MT_##typ || (op) == MT_S##typ )
-
-extern ret_code         match_phase_1( struct asm_code * );
+extern ret_code         match_phase_1( struct code_info * );
 
 #endif

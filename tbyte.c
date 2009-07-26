@@ -40,7 +40,7 @@
 #include "globals.h"
 #include "tbyte.h"
 
-#if defined(LLONG_MAX) || defined(__GNUC__)
+#if defined(LLONG_MAX) || defined(__GNUC__) || defined(__TINYC__)
 #define MAXUI64BIT 0x8000000000000000ULL
 #define MAXUI64    0xffffffffffffffffULL
 #else

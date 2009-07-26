@@ -50,13 +50,18 @@ extern struct asm_sym   symPC; /* '$' symbol */
 extern dir_node         *flat_grp;
 
 // table SegAssume is for the segment registers:
-// DS=0, ES=1, SS=2, FS=3, GS=4, CS=5
 
 assume_info      SegAssumeTable[NUM_SEGREGS];
 
 // table StdAssume is for the standard registers:
 // (E)AX=0, (E)CX=1, (E)DX=2, (E)BX=3
 // (E)SP=4, (E)BP=5, (E)SI=6, (E)DI=7
+
+#if AMD64_SUPPORT
+#define NUM_STDREGS 16
+#else
+#define NUM_STDREGS 8
+#endif
 
 static assume_info      StdAssumeTable[NUM_STDREGS];
 
@@ -66,24 +71,29 @@ static assume_info saved_StdAssumeTable[NUM_STDREGS];
 #endif
 
 void SetSegAssumeTable( void *savedstate )
+/****************************************/
 {
     memcpy( &SegAssumeTable, savedstate, sizeof(SegAssumeTable) );
 }
 void GetSegAssumeTable( void *savedstate )
+/****************************************/
 {
     memcpy( savedstate, &SegAssumeTable, sizeof(SegAssumeTable) );
 }
 void SetStdAssumeTable( void *savedstate )
+/****************************************/
 {
     memcpy( &StdAssumeTable, savedstate, sizeof(StdAssumeTable) );
 }
 void GetStdAssumeTable( void *savedstate )
+/****************************************/
 {
     memcpy( savedstate, &StdAssumeTable, sizeof(StdAssumeTable) );
 }
 
 #if FASTPASS
 void AssumeSaveState( )
+/*********************/
 {
     GetSegAssumeTable( &saved_SegAssumeTable );
     GetStdAssumeTable( &saved_StdAssumeTable );
@@ -91,7 +101,7 @@ void AssumeSaveState( )
 #endif
 
 void AssumeInit( )
-/*********************/
+/****************/
 {
     int reg;
 
@@ -116,7 +126,7 @@ void AssumeInit( )
 // PushLineQueue() has already been called
 
 void ModelAssumeInit( void )
-/**********************************/
+/**************************/
 {
     char *pCS;
     char buffer[ 128 ];
@@ -147,27 +157,14 @@ void ModelAssumeInit( void )
     }
 }
 
-// convert a standard register token to an index.
-
-static int GetRegisterIndex(int reg, bool * is32)
-{
-    int j;
-
-    j = AsmOpTable[AsmResWord[reg].position].opnd_type[1];
-    if ( j & OP_R1632 ) {
-        *is32 = (j & OP_R32) ? TRUE : FALSE;
-        return( AsmOpTable[AsmResWord[reg].position].opcode );
-    }
-    return( ERROR );
-}
-
 struct asm_sym * GetStdAssume(int reg)
+/************************************/
 {
     return (StdAssumeTable[reg].symbol);
 }
 
 ret_code AssumeDirective( int i )
-/********************/
+/*******************************/
 /* Handles ASSUME
  * syntax is :
  * assume segregister : seglocation [, segregister : seglocation ]
@@ -180,14 +177,13 @@ ret_code AssumeDirective( int i )
     int             reg;
     int             j;
     int             type;
+    int             flags;
     int             indirection;
     assume_info     *info;
     struct asm_sym  *sym;
     bool            segtable;
-    bool            is32;
-    static int segidx[NUM_SEGREGS] = {T_DS, T_ES, T_SS, T_FS, T_GS, T_CS};
 
-    DebugMsg(("AssumeDirective enter\n"));
+    DebugMsg(( "AssumeDirective(%u) enter\n", Parse_Pass+1 ));
 
     for( i++; i < Token_Count; i++ ) {
         indirection = 0;
@@ -206,32 +202,21 @@ ret_code AssumeDirective( int i )
         /*---- get the info ptr for the register ----*/
 
         info = NULL;
-        for (j = 0; j < NUM_SEGREGS; j++)
-            if ( segidx[j] == reg ) {
-                info = &SegAssumeTable[j];
-                if( ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 )
-                    && ( ( reg == T_FS ) || ( reg == T_GS ) ) ) {
-                    AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
-                    return( ERROR );
-                }
-                segtable = TRUE;
-                break;
-            }
-
-        if (info == NULL) {
+        j = AsmOpTable[AsmResWord[reg].position].opcode;
+        flags = AsmOpTable[AsmResWord[reg].position].opnd_type[1];
+        if ( flags & OP_SR ) {
+            info = &SegAssumeTable[j];
+            segtable = TRUE;
+        } else if ( flags & OP_RGT8 ) {
+            info = &StdAssumeTable[j];
             segtable = FALSE;
-            /* convert T_xxx to an index */
-            j = GetRegisterIndex( reg, &is32 );
-            if ( j != ERROR ) {
-                if( is32 && ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
-                    AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
-                    return( ERROR );
-                }
-                info = &StdAssumeTable[j];
-            }
         }
         if (info == NULL) {
             AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            return( ERROR );
+        }
+        if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < AsmOpTable[AsmResWord[reg].position].cpu ) {
+            AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
             return( ERROR );
         }
 
@@ -256,11 +241,11 @@ ret_code AssumeDirective( int i )
         }
 
         segloc = i;
-        i++;
-        if( AsmBuffer[segloc]->string_ptr == '\0' ) {
-            AsmError( SEGLOCATION_EXPECTED );
+        if( AsmBuffer[i]->token == T_FINAL ) {
+            AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
+        i++;
 
         /*---- Now store the information ----*/
 
@@ -270,7 +255,7 @@ ret_code AssumeDirective( int i )
             info->symbol = NULL;
         } else if(0 == _stricmp( AsmBuffer[segloc]->string_ptr, "FLAT" )) {
             if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
-                AsmError( REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+                AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                 return( ERROR );
             } else if (segtable == FALSE) {
                 AsmErr( SYNTAX_ERROR_EX, AsmBuffer[segloc]->string_ptr );
@@ -289,23 +274,30 @@ ret_code AssumeDirective( int i )
                 type = -1;
                 sym = NULL;
                 if (AsmBuffer[segloc]->token == T_RES_ID) {
-                    type = FindSimpleType( AsmBuffer[segloc]->value );
+                    type = FindStdType( AsmBuffer[segloc]->value );
                 }
                 if ( type == -1 ) {
                     sym = SymSearch( AsmBuffer[segloc]->string_ptr );
-                    if ( sym == NULL ) {/* a forward reference is allowed */
+                    if ( sym == NULL ) {/* in pass 1 a forward reference is allowed */
                         sym = SymCreate( AsmBuffer[segloc]->string_ptr, TRUE );
+#if FASTPASS
+                        /* ensure that directive is rerun in pass 2 */
+                        if ( StoreState == FALSE )
+                            SaveState();
+#endif
                     }
                     if ( sym->state == SYM_UNDEFINED ) {
+                        DebugMsg(("AssumeDirective: forward referenced symbol %s\n", sym->name ));
                         /* change symbol to a type.
                          * It still has type TYPE_NONE */
                         dir_settype( (dir_node *)sym, SYM_TYPE );
                     }
-                    if ( sym->state != SYM_TYPE ) {
+                    if ( sym->state != SYM_TYPE ||
+                       ( Parse_Pass != PASS_1 && ((dir_node *)sym)->e.structinfo->typekind == TYPE_NONE )) {
                         AsmErr( QUALIFIED_TYPE_EXPECTED, segloc );
                         return( ERROR );
                     }
-                    if ( indirection == 0 && sym->total_size > (is32 ? 4 : 2)) {
+                    if ( indirection == 0 && sym->total_size > OperandSize( flags, NULL ) ) {
                         AsmError( TYPE_IS_WRONG_SIZE_FOR_REGISTER );
                         return( ERROR );
                     }
@@ -341,7 +333,7 @@ ret_code AssumeDirective( int i )
  */
 
 void SetAssumeCSCurrSeg( void )
-/*************************************/
+/*****************************/
 {
     assume_info     *info;
 
@@ -355,16 +347,16 @@ void SetAssumeCSCurrSeg( void )
     } else {
         info->flat = FALSE;
         info->error = FALSE;
-        if( CurrSeg->seg->e.seginfo->group != NULL ) {
-            info->symbol = GetGrp( &CurrSeg->seg->sym );
+        if( CurrSeg->e.seginfo->group != NULL ) {
+            info->symbol = GetGrp( &CurrSeg->sym );
             if ( info->symbol == &flat_grp->sym )
                 info->flat = TRUE;
         } else {
-            info->symbol = &CurrSeg->seg->sym;
+            info->symbol = &CurrSeg->sym;
         }
-        sym_CurSeg->string_ptr = CurrSeg->seg->sym.name;
-        symPC.segment = &CurrSeg->seg->sym;
-        DebugMsg(("SetAssumeCSCurrSeg: current segment=%s\n", CurrSeg->seg->sym.name));
+        sym_CurSeg->string_ptr = CurrSeg->sym.name;
+        symPC.segment = &CurrSeg->sym;
+        DebugMsg(("SetAssumeCSCurrSeg: current segment=%s\n", CurrSeg->sym.name));
     }
     return;
 }
@@ -430,7 +422,7 @@ enum assume_segreg search_assume( struct asm_sym *sym,
 */
 
 asm_sym *GetOverrideAssume( enum assume_segreg override )
-/****************************************************************************/
+/*******************************************************/
 {
     if( SegAssumeTable[override].flat ) {
         return( (asm_sym *)flat_grp );
@@ -440,12 +432,14 @@ asm_sym *GetOverrideAssume( enum assume_segreg override )
 }
 
 /*
- in: CodeInfo->prefix.SegOverride = ???
- def: default segment assume value
+ * in:
+ * override: CodeInfo->prefix.SegOverride
+ * sym: symbol in current memory operand
+ * def: default segment assume value
  */
 
-enum assume_segreg GetAssume( struct asm_sym *sym, enum assume_segreg def, asm_sym * *passume )
-/*******************************************************************/
+enum assume_segreg GetAssume( struct asm_sym *override, struct asm_sym *sym, enum assume_segreg def, asm_sym * *passume )
+/*********************************************************************************************/
 {
     enum assume_segreg  reg;
 
@@ -453,8 +447,8 @@ enum assume_segreg GetAssume( struct asm_sym *sym, enum assume_segreg def, asm_s
         *passume = (asm_sym *)flat_grp;
         return( def );
     }
-    if( CodeInfo->prefix.SegOverride != NULL ) {
-        reg = search_assume( CodeInfo->prefix.SegOverride, def, FALSE );
+    if( override != NULL ) {
+        reg = search_assume( override, def, FALSE );
     } else {
         reg = search_assume( sym->segment, def, TRUE );
     }

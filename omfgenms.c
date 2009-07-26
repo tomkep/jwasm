@@ -49,7 +49,9 @@ typedef struct {
 
 extern OBJ_WFILE *file_out;
 
-static int writeMisc( obj_rec *objr, OBJ_WFILE *out ) {
+static int writeMisc( obj_rec *objr, OBJ_WFILE *out )
+/***************************************************/
+{
 /*
     For 16-bit records which are the same under Intel and MS OMFs
 */
@@ -69,7 +71,9 @@ static int writeMisc( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static int writeMisc32( obj_rec *objr, OBJ_WFILE *out ) {
+static int writeMisc32( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
 /*
     For 32-bit records which are the same under Intel and MS OMFs
 */
@@ -94,8 +98,9 @@ static int writeMisc32( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static int writeComent( obj_rec *objr, OBJ_WFILE *out ) {
-
+static int writeComent( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
     uint_8  *ptr;
     size_t len;
     size_t save;
@@ -115,8 +120,9 @@ static int writeComent( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static int writeSegdef( obj_rec *objr, OBJ_WFILE *out ) {
-
+static int writeSegdef( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
     int         is32;
     uint_8      acbp;
     uint_8      align;
@@ -170,8 +176,9 @@ static int writeSegdef( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static int writeFixup( obj_rec *objr, OBJ_WFILE *out ) {
-
+static int writeFixup( obj_rec *objr, OBJ_WFILE *out )
+/****************************************************/
+{
     int         is32;
     fixup       *walk;
     size_t      len;
@@ -193,7 +200,7 @@ static int writeFixup( obj_rec *objr, OBJ_WFILE *out ) {
         len_written = 0;
         OmfWBegRec( out, is32 ? CMD_FIXU32 : CMD_FIXUP );
         while( walk != NULL && len_written < 1024 - FIX_GEN_MAX ) {
-            len = FixGenFix( walk, buf, is32 ? FIX_GEN_MS386 : FIX_GEN_INTEL );
+            len = OmfFixGenFix( walk, buf, is32 ? FIX_GEN_MS386 : FIX_GEN_INTEL );
             OmfWrite( out, buf, len );
             walk = walk->next;
             len_written += len;
@@ -203,8 +210,9 @@ static int writeFixup( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static int writeLedata( obj_rec *objr, OBJ_WFILE *out ) {
-
+static int writeLedata( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
     size_t      save;
     size_t      len;
     uint_8      *ptr;
@@ -231,8 +239,9 @@ static int writeLedata( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static int writeLidata( obj_rec *objr, OBJ_WFILE *out ) {
-
+static int writeLidata( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
     size_t      save;
     size_t      len;
     uint_8      *ptr;
@@ -259,16 +268,18 @@ static int writeLidata( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static int writeTheadr( obj_rec *objr, OBJ_WFILE *out ) {
-
+static int writeTheadr( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
 /**/myassert( objr != NULL );
 /**/myassert( objr->command == CMD_THEADR );
 
     return( writeMisc( objr, out ) );
 }
 
-static int writeModend( obj_rec *objr, OBJ_WFILE *out ) {
-
+static int writeModend( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
     size_t  len;
     int     is32;
     uint_8  is_log;
@@ -283,7 +294,7 @@ static int writeModend( obj_rec *objr, OBJ_WFILE *out ) {
     if( objr->d.modend.start_addrs ) {
         is_log = objr->d.modend.is_logical ? 1 : 0;
         buf[0] |= 0x40 | is_log;
-        len += FixGenRef( &objr->d.modend.ref, is_log, buf + 1,
+        len += OmfFixGenRef( &objr->d.modend.ref, is_log, buf + 1,
             is32 ? FIX_GEN_MS386 : FIX_GEN_INTEL );
     }
     if( buf[0] == 0 ) {
@@ -295,8 +306,9 @@ static int writeModend( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static void writeBase( obj_rec *objr, OBJ_WFILE *out ) {
-
+static void writeBase( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
     size_t grp_idx;
     size_t seg_idx;
 
@@ -309,8 +321,9 @@ static void writeBase( obj_rec *objr, OBJ_WFILE *out ) {
     }
 }
 
-static int writeComdat( obj_rec *objr, OBJ_WFILE *out ) {
-
+static int writeComdat( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
     uint_8      *ptr;
     size_t      len;
     size_t      save;
@@ -345,8 +358,9 @@ static int writeComdat( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static int writePubdef( obj_rec *objr, OBJ_WFILE *out ) {
-
+static int writePubdef( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
     int         is32;
     const char  *name;
     size_t      name_len;
@@ -381,8 +395,9 @@ static int writePubdef( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static void writeLinnumData( obj_rec *objr, OBJ_WFILE *out ) {
-
+static void writeLinnumData( obj_rec *objr, OBJ_WFILE *out )
+/**********************************************************/
+{
     int is32;
 
 /**/myassert( objr != NULL );
@@ -427,7 +442,9 @@ static void writeLinnumData( obj_rec *objr, OBJ_WFILE *out ) {
 #endif
 }
 
-static int writeLinnum( obj_rec *objr, OBJ_WFILE *out ) {
+static int writeLinnum( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
 
 /**/myassert( objr != NULL );
 /**/myassert( objr->command == CMD_LINNUM );
@@ -439,7 +456,9 @@ static int writeLinnum( obj_rec *objr, OBJ_WFILE *out ) {
     return( 0 );
 }
 
-static int writeLinsym( obj_rec *objr, OBJ_WFILE *out ) {
+static int writeLinsym( obj_rec *objr, OBJ_WFILE *out )
+/*****************************************************/
+{
 
 /**/myassert( objr != NULL );
 /**/myassert( objr->command == CMD_LINSYM );
@@ -489,7 +508,7 @@ static pobj_filter      jumpTable[ CMD_MAX_CMD - CMD_POBJ_MIN_CMD + 1 ];
 // call a function
 
 void omf_write_record( obj_rec *objr, char kill )
-/*******************************************/
+/***********************************************/
 {
 
 /**/myassert( objr != NULL );
@@ -502,7 +521,7 @@ void omf_write_record( obj_rec *objr, char kill )
 }
 
 static void RegList( const pobj_list *list, size_t len )
-/***************************************************/
+/******************************************************/
 {
     size_t  i;
 
@@ -512,16 +531,18 @@ static void RegList( const pobj_list *list, size_t len )
 }
 
 static void UnRegList( const pobj_list *list, size_t len )
-/*****************************************************/
+/********************************************************/
 {
 }
 
-void omf_GenMSInit( void ) {
-/***********************/
+void omf_GenMSInit( void )
+/************************/
+{
     RegList( myFuncs, NUM_FUNCS );
 }
 
-void omf_GenMSFini( void ) {
-/***********************/
+void omf_GenMSFini( void )
+/************************/
+{
     UnRegList( myFuncs, NUM_FUNCS );
 }

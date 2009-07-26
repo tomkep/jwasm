@@ -63,7 +63,7 @@ typedef union {
     time_t timet;
 } DOS_DATETIME;
 
-time_t _timet2dos(time_t x)
+time_t timet2dostime(time_t x)
 /******************************************************************/
 {
     struct tm *    ltime;
@@ -139,7 +139,7 @@ void _TimeToDOSStamp( time_t x, unsigned short *date, unsigned short *time )
 }
 #endif
 
-char *_getFilenameFullPath( char *buff, char const *name, size_t max )
+char *GetFilenameFullPath( char *buff, char const *name, size_t max )
 /*********************************************************************/
 {
     char        *p;
@@ -148,7 +148,7 @@ char *_getFilenameFullPath( char *buff, char const *name, size_t max )
     if( p == NULL )
         p = (char *)name;
 
-#ifdef __UNIX__
+#if defined(__UNIX__)
     if( (p[0] == '/' && p[1] == '/') && (name[0] != '/' || name[1] != '/') ) {
         //
         // if the _fullpath result has a node number and
@@ -162,9 +162,14 @@ char *_getFilenameFullPath( char *buff, char const *name, size_t max )
     return( p );
 }
 
-time_t _getFilenameTimeStamp( char const *filename )
+time_t GetFilenameTimeStamp( char const *filename )
 {
+#ifdef __POCC__
+    struct _stat statbuf;
+#define stat _stat
+#else
     struct stat statbuf;
+#endif
 
     if( stat( filename, &statbuf ) != 0 ) {
         return( 0 );

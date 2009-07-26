@@ -46,9 +46,7 @@
 
 extern char             *MsgGet( int resourceid, char *buffer );
 extern char             banner_printed;
-extern bool             EndDirectiveFound;
 
-void                    OpenErrFile( void );
 void                    print_include_file_nesting_structure( void );
 
 //    WngLvls[level] // warning levels associated with warning messages
@@ -119,7 +117,7 @@ void AsmErr( int msgnum, ... )
         /* Just simulate the END directive, don't do a fatal exit!
          This allows to continue to assemble further modules.
          */
-        EndDirectiveFound = TRUE;
+        ModuleInfo.EndDirectiveFound = TRUE;
     }
 }
 
@@ -147,6 +145,15 @@ void AsmWarn( int level, int msgnum, ... )
     }
 }
 
+static void OpenErrFile( void )
+/**********************/
+{
+//    if( !isatty( fileno( errout ) ) ) return;
+    if( FileInfo.fname[ERR] != NULL ) {
+        ErrFile = fopen( FileInfo.fname[ERR], "w" );
+    }
+}
+
 static void PrtMsg( char *prefix, int msgnum, va_list args1, va_list args2 )
 /***************************************************************************/
 {
@@ -169,15 +176,6 @@ void InitErrFile( void )
     remove( FileInfo.fname[ERR] );
     ErrFile = NULL;
     //Errfile_Written = FALSE;
-}
-
-void OpenErrFile( void )
-/**********************/
-{
-//    if( !isatty( fileno( errout ) ) ) return;
-    if( FileInfo.fname[ERR] != NULL ) {
-        ErrFile = fopen( FileInfo.fname[ERR], "w" );
-    }
 }
 
 void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args )
@@ -227,7 +225,7 @@ int InternalError( const char *file, unsigned line )
     ModuleInfo.error_count++;
     GetCurrSrcPos( buffer );
     fprintf( errout, "%s", buffer );
-    fprintf( errout, MsgGetEx( MSG_INTERNAL_ERROR ), file, line );
+    fprintf( errout, MsgGetEx( INTERNAL_ERROR ), file, line );
     CloseFiles();
     exit( EXIT_FAILURE );
     return(0);

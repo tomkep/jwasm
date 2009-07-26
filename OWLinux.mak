@@ -4,25 +4,34 @@
 
 name = JWasm
 
+# support for 64bit?
+!ifdef AMD64
+c_flags64=-DAMD64_SUPPORT=1
+!endif
+
 !ifndef DEBUG
 DEBUG=0
 !endif
 
+!ifndef OUTD
 !if $(DEBUG)
 OUTD=OWLinuxD
 !else
 OUTD=OWLinuxR
 !endif
+!endif
 
 # calling convention for compiler: s=Stack, r=Register
 CCV=r
 
-inc_dirs  = -IH -I\Watcom\LH
+WATCOM=\Watcom
+
+inc_dirs  = -IH -I$(WATCOM)\LH
 
 # to track memory leaks, the Open Watcom TRMEM module can be included
 TRMEM=0
 
-linker = wlink.exe
+linker = $(WATCOM)\Binnt\wlink.exe
 
 #cflags stuff
 #########
@@ -35,14 +44,11 @@ extra_c_flags += -ot -s -DNDEBUG
 
 #lflags stuff
 #########
-LOPT = op quiet
 !if $(DEBUG)
 LOPTD = debug dwarf op symfile
 !endif
 
-lflagsl = $(LOPTD) sys linux $(LOPT) op map=$^*
-
-CC = wcc386 -q -3$(CCV) -bc -bt=linux $(inc_dirs) $(extra_c_flags) -fo$@
+CC = $(WATCOM)\Binnt\wcc386 -q -3$(CCV) -bc -bt=linux $(inc_dirs) $(extra_c_flags) $(c_flags64) -fo$@
 
 .c{$(OUTD)}.obj:
 	$(CC) $<
@@ -66,7 +72,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif
-           $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj    
+           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj    
 ######
 
 ALL: $(OUTD) $(OUTD)/$(name)
@@ -75,15 +81,21 @@ $(OUTD):
 	@if not exist $(OUTD) mkdir $(OUTD)
 
 $(OUTD)/$(name) : $(proj_obj)
-	@%write  $^*.lnk $(lflagsl)
-	@%append $^*.lnk file { $(proj_obj) }
-	@%append $^*.lnk name $@.
-	$(linker) @$^*.lnk
+	$(linker) @<<
+format elf
+runtime linux
+$(LOPTD) $(LOPT) op map=$^*
+libpath $(WATCOM)/lib386
+libpath $(WATCOM)/lib386/linux
+op exportall, norelocs, quiet, stack=0x20000 
+file { $(proj_obj) }
+name $@.
+<<
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/reswords.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
 	$(CC) parser.c
 
 ######

@@ -65,8 +65,6 @@ typedef struct mlocal_list {
     char                label[];         // name of local
 } mlocal_list;
 
-extern bool   EndDirectiveFound;
-
 static int replace_parm( char *line, char *start, int len, int parmcnt, mparm_list *parms , mlocal_list *locals )
 /*************************************************************************************/
 {
@@ -199,7 +197,7 @@ static int store_placeholders( char *line, int cnt, mparm_list *parms, mlocal_li
 /* check if <string> starts with <substr> */
 
 static bool lineis( char *string, char *substr, int len )
-/********************************************/
+/*******************************************************/
 {
     if( string[len] != '\0' && !isspace( string[len] ) ) {
         return( FALSE );
@@ -214,7 +212,7 @@ static bool lineis( char *string, char *substr, int len )
 // i = start index of macro params
 
 ret_code StoreMacro( dir_node * macro, int i, bool store_data )
-/****************************/
+/*************************************************************/
 {
     macro_info          *info;
     char                *string;
@@ -324,7 +322,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
         string = GetTextLine( buffer, sizeof(buffer) );
         if( string == NULL ) {
             AsmError( UNMATCHED_MACRO_NESTING );
-            EndDirectiveFound = TRUE; /* avoid error "END not found" */
+            ModuleInfo.EndDirectiveFound = TRUE; /* avoid error "END not found" */
             return( ERROR );
         }
 
@@ -506,6 +504,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 // create a macro symbol
 
 dir_node *CreateMacro( char *name )
+/*********************************/
 {
     dir_node *macro;
     if (macro = (dir_node *)SymCreate( name, *name != NULLC )) {
@@ -525,6 +524,7 @@ dir_node *CreateMacro( char *name )
 // clear macro data
 
 void ReleaseMacroData( dir_node *macro )
+/**************************************/
 {
     int             i;
     asmlines        *datacurr;
@@ -566,7 +566,7 @@ void ReleaseMacroData( dir_node *macro )
 // i: index of macro name (is always 0)
 
 ret_code MacroDef( int i )
-/********************************/
+/************************/
 {
     char                *name;
     bool                store_data;
@@ -614,7 +614,7 @@ ret_code MacroDef( int i )
  Text macros cannot be purged, because the PURGE arguments are expanded.
 */
 ret_code PurgeDef( int i)
-/*****************************/
+/***********************/
 {
     dir_node *dir;
 
@@ -649,6 +649,7 @@ ret_code PurgeDef( int i)
 // internal @Environ macro function
 
 static ret_code EnvironFunc(char * buffer, char * *params)
+/********************************************************/
 {
     char * p = getenv( *params );
     if (p)
@@ -667,6 +668,7 @@ static char * parmnames[] = {"p1"};
 // this proc is called once per pass
 
 ret_code MacroInit( int pass)
+/***************************/
 {
     dir_node *macro;
 
@@ -693,6 +695,7 @@ ret_code MacroInit( int pass)
 }
 #ifdef DEBUG_OUT
 void MacroFini( void )
+/********************/
 {
     StringFini();
 }

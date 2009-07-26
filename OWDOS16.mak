@@ -1,7 +1,7 @@
 
 # this makefile creates a DOS 16-bit real-mode version of JWasm (JWASMR.EXE).
 # tools used:
-# - Open Watcom v1.7a
+# - Open Watcom v1.7a/v1.8
 
 name = JWasm
 
@@ -17,7 +17,7 @@ OUTD=OWDOS16D
 OUTD=OWDOS16R
 !endif
 
-inc_dirs  = -IH
+inc_dirs  = -IH -I$(WATCOM)\H
 
 # to track memory leaks, the Open Watcom TRMEM module can be included.
 # it's useful only if FASTMEM=0 is set, though, otherwise most allocs 
@@ -26,7 +26,7 @@ inc_dirs  = -IH
 TRMEM=0
 !endif
 
-linker = wlink.exe
+linker = $(WATCOM)\binnt\wlink.exe
 
 #cflags stuff
 #########
@@ -49,7 +49,7 @@ LOPTD = debug dwarf op symfile
 
 lflagsd = $(LOPTD) sys dos op map=$^*, stack=0x4000
 
-CC=wcc -q -0 -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -zt=10000
+CC=$(WATCOM)\binnt\wcc -q -0 -w3 -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -zt=10000
 
 .c{$(OUTD)}.obj:
    $(CC) $<
@@ -75,7 +75,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/trmem.obj    &
 !endif
 !endif
-           $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj
+           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj
 ######
 
 TARGET=
@@ -93,9 +93,9 @@ $(lflagsd) file { $(proj_obj) } name $@
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/reswords.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
 	$(CC) parser.c
-    
+
 ######
 
 clean:

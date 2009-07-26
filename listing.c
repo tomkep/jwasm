@@ -97,10 +97,13 @@ static char *typestr[] = {
 
 /* don't change this order, must match enum lang_type in globals.h */
 static char *langstr[] = {
-    "", "C", "SYSCALL", "STDCALL", "PASCAL", "FORTRAN", "BASIC", "WATCOM_C"
+    "", "C", "SYSCALL", "STDCALL", "PASCAL", "FORTRAN", "BASIC", "FASTCALL"
 };
 
+static char basereg[] = {' ', 'e', 'r' };
+
 void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
+/*******************************************************************/
 {
     unsigned int newofs;
     asm_sym * sym = value;
@@ -148,13 +151,14 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
 
         if (CurrSeg == NULL)
             break;
-        if ( write_to_file == FALSE )
+        //if ( write_to_file == FALSE )
+        if ( Parse_Pass == PASS_1 )  /* changed v1.96 */
             break;
 
         len = CODEBYTES;
         p2 = buffer + 8 + 2;
 
-        if ( CurrSeg->seg->e.seginfo->segtype == SEGTYPE_BSS ) {
+        if ( CurrSeg->e.seginfo->CodeBuffer == NULL ) {
             while (oldofs < newofs && len) {
                 *p2++ = '0';
                 *p2++ = '0';
@@ -166,11 +170,11 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
 
         /* OMF hold just a small buffer for one LEDATA record */
         /* if it has been flushed, use LastCodeBufSize */
-        idx = (CurrSeg->seg->e.seginfo->current_loc - CurrSeg->seg->e.seginfo->start_loc)
+        idx = (CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc)
             - (newofs - oldofs);
         if (Options.output_format == OFORMAT_OMF) {
             while (idx < 0 && len) {
-                sprintf( p2, "%02X", CurrSeg->seg->e.seginfo->CodeBuffer[idx+LastCodeBufSize] );
+                sprintf( p2, "%02X", CurrSeg->e.seginfo->CodeBuffer[idx+LastCodeBufSize] );
                 p2 += 2;
                 idx++;
                 oldofs++;
@@ -180,7 +184,7 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
             idx = 0;
 
         while ( oldofs < newofs && len ) {
-            sprintf( p2, "%02X", CurrSeg->seg->e.seginfo->CodeBuffer[idx] );
+            sprintf( p2, "%02X", CurrSeg->e.seginfo->CodeBuffer[idx] );
             p2 += 2;
             idx++;
             oldofs++;
@@ -257,12 +261,13 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
 }
 
 void LstWriteSrcLine( void )
+/**************************/
 {
     LstWrite( LSTTYPE_MACRO, 0, NULL );
 }
 
 void LstPrintf( const char *format, ... )
-/************************************/
+/***************************************/
 {
     va_list     args;
 
@@ -273,7 +278,7 @@ void LstPrintf( const char *format, ... )
     }
 }
 void LstNL( void )
-/************************************/
+/****************/
 {
     if( FileInfo.file[LST] ) {
         fwrite( NLSTR, 1, NLSIZ, FileInfo.file[LST] );
@@ -282,7 +287,7 @@ void LstNL( void )
 }
 
 static char *get_seg_align( seg_info *seg, char * buffer )
-/****************************************/
+/********************************************************/
 {
     switch( seg->alignment ) {
     case 0:    return( typestr[TS_BYTE]  );
@@ -309,6 +314,7 @@ static const char *get_seg_combine( seg_info *seg )
 }
 
 static void log_macro( struct asm_sym *sym )
+/******************************************/
 {
     int i = strlen ( sym->name);
     char *pdots = dots + i + 1;
@@ -328,34 +334,35 @@ static void log_macro( struct asm_sym *sym )
 // that is, the symbol is ensured to be a TYPE!
 
 static char * GetMemtypeString(asm_sym * sym, char * buffer)
+/**********************************************************/
 {
-    switch (sym->mem_type) {
-    case MT_BYTE:
-    case MT_SBYTE:
-        return( typestr[TS_BYTE] );
-    case MT_WORD:
-    case MT_SWORD:
-        return( typestr[TS_WORD] );
-    case MT_DWORD:
-    case MT_SDWORD:
-        return( typestr[TS_DWORD] );
-    case MT_FWORD:
-        return( typestr[TS_FWORD] );
-    case MT_QWORD:
-        return( typestr[TS_QWORD] );
-    case MT_TBYTE:
-        return( typestr[TS_TBYTE] );
-    case MT_OWORD:
-        return( typestr[TS_OWORD] );
+    if ( (sym->mem_type & MT_SPECIAL) == 0 ) {
+        int size = (sym->mem_type & MT_SIZE_MASK) + 1;
+        switch ( size ) {
+        case 1: return( typestr[TS_BYTE] );
+        case 2: return( typestr[TS_WORD] );
+        case 4: return( typestr[TS_DWORD] );
+        case 6: return( typestr[TS_FWORD] );
+        case 8: return( typestr[TS_QWORD] );
+        case 10:return( typestr[TS_TBYTE] );
+        case 16:return( typestr[TS_OWORD] );
+        }
+    }
+    switch ( sym->mem_type ) {
     case MT_PTR:
         if ( buffer ) {
+#if AMD64_SUPPORT
+            if ( sym->Ofssize == USE64 )
+                strcat( buffer, typestr[TS_NEAR] );
+            else
+#endif
             if ( sym->isfar )
-                if ( sym->use32 )
+                if ( sym->Ofssize )
                     strcat( buffer, typestr[TS_FAR32] );
                 else
                     strcat( buffer, typestr[TS_FAR16] );
             else
-                if ( sym->use32 )
+                if ( sym->Ofssize )
                     strcat( buffer, typestr[TS_NEAR32] );
                 else
                     strcat( buffer, typestr[TS_NEAR16] );
@@ -368,7 +375,7 @@ static char * GetMemtypeString(asm_sym * sym, char * buffer)
     is_far:
         if ( sym->segment )
             return( typestr[TS_LFAR] );
-        if ( SymIs32( sym ) )
+        if ( GetSymOfssize( sym ) > USE16 )
             return( typestr[TS_LFAR32] );
         return( typestr[TS_LFAR16] );
     case MT_PROC:
@@ -380,7 +387,7 @@ static char * GetMemtypeString(asm_sym * sym, char * buffer)
     case MT_NEAR:
         if ( sym->segment )
             return( typestr[TS_LNEAR] );
-        if ( SymIs32( sym ) )
+        if ( GetSymOfssize( sym ) > USE16 )
             return( typestr[TS_LNEAR32] );
         return( typestr[TS_LNEAR16] );
     case MT_TYPE:
@@ -395,7 +402,7 @@ static char * GetMemtypeString(asm_sym * sym, char * buffer)
 }
 
 static const char *GetLanguage( struct asm_sym *sym )
-/****************************************************/
+/***************************************************/
 {
     if (sym->langtype <= 7 )
         return( langstr[sym->langtype] );
@@ -463,7 +470,7 @@ static void log_struct( char * name, struct asm_sym *sym, int ofs )
 }
 
 static void log_record( struct asm_sym **syms, struct asm_sym *sym )
-/*****************************************************************/
+/******************************************************************/
 {
     unsigned        mask;
     dir_node    *dir = (dir_node *)sym;
@@ -494,6 +501,7 @@ static void log_record( struct asm_sym **syms, struct asm_sym *sym )
 // a typedef is a simple struct with no fields. Size might be 0.
 
 static void log_typedef( struct asm_sym **syms, struct asm_sym *sym )
+/*******************************************************************/
 {
     dir_node    *dir = (dir_node *)sym;
     struct_info  *si = dir->e.structinfo;
@@ -510,7 +518,7 @@ static void log_typedef( struct asm_sym **syms, struct asm_sym *sym )
             strcat(buffer, typestr[TS_PROC] );
             strcat(buffer, " " );
             if ( *si->target->name ) {  /* the name may be "" */
-                strcat( buffer, si->target->name);
+                strcat( buffer, si->target->name );
                 strcat( buffer," ");
             }
             strcat(buffer, GetMemtypeString( si->target, NULL ) );
@@ -519,7 +527,7 @@ static void log_typedef( struct asm_sym **syms, struct asm_sym *sym )
             p = buffer;
         } else
             p = GetMemtypeString( sym, buffer);
-        LstPrintf( "%s %s    %8u %s", sym->name, pdots, sym->total_size, p );
+        LstPrintf( "%s %s    %8u  %s", sym->name, pdots, sym->total_size, p );
         LstNL();
     }
 }
@@ -537,12 +545,16 @@ static void log_segment( struct asm_sym *sym, struct asm_sym *group )
         if (i >= DOTSMAX)
             pdots = "";
         LstPrintf( "%s %s        ", sym->name, pdots );
-        if( seg->Use32 ) {
+        if( seg->Ofssize == USE32 ) {
             //LstPrintf( "32 Bit   %08lX ", seg->current_loc );
-            LstPrintf( "32 Bit   %08lX ", seg->segrec->d.segdef.seg_length );
+            LstPrintf( "32 Bit   %08lX ", sym->max_offset );
+#if AMD64_SUPPORT
+        } else if( seg->Ofssize == USE64 ) {
+            LstPrintf( "64 Bit   %08lX ", sym->max_offset );
+#endif
         } else {
             //LstPrintf( "16 Bit   %04lX     ", seg->current_loc );
-            LstPrintf( "16 Bit   %04lX     ", seg->segrec->d.segdef.seg_length );
+            LstPrintf( "16 Bit   %04lX     ", sym->max_offset );
         }
         LstPrintf( "%-7s %-8s", get_seg_align( seg, buffer ), get_seg_combine( seg ) );
         LstPrintf( "'%s'", GetLname( seg->segrec->d.segdef.class_name_idx ) );
@@ -555,7 +567,7 @@ static void log_segment( struct asm_sym *sym, struct asm_sym *group )
 }
 
 static void log_group( struct asm_sym *grp )
-/*****************************************************************/
+/******************************************/
 {
     unsigned i;
     char *pdots;
@@ -576,11 +588,11 @@ static const char *get_proc_type( struct asm_sym *sym )
     switch( sym->mem_type ) {
     case MT_NEAR:
         if ( sym->segment == NULL )
-            return( SymIs32( sym ) ? typestr[TS_NEAR32] : typestr[TS_NEAR16] );
+            return( GetSymOfssize( sym ) ? typestr[TS_NEAR32] : typestr[TS_NEAR16] );
         return( typestr[TS_NEAR] );
     case MT_FAR:
         if ( sym->segment == NULL )
-            return( SymIs32( sym ) ? typestr[TS_FAR32] : typestr[TS_FAR16] );
+            return( GetSymOfssize( sym ) ? typestr[TS_FAR32] : typestr[TS_FAR16] );
         return( typestr[TS_FAR] );
     }
     return( " " );
@@ -666,9 +678,9 @@ static void log_proc( struct asm_sym *sym )
     int i = strlen( sym->name );
     char *pdots = dots + i + 1;
 
-    if (i >= DOTSMAX)
+    if ( i >= DOTSMAX )
         pdots = "";
-    if (sym->use32)
+    if ( sym->Ofssize )
         p = "%s %s        P %-6s %08X %-8s ";
     else
         p = "%s %s        P %-6s %04X     %-8s ";
@@ -678,7 +690,7 @@ static void log_proc( struct asm_sym *sym )
             get_proc_type( sym ),
             sym->offset,
             get_sym_seg_name( sym ));
-    if (sym->use32)
+    if ( sym->Ofssize )
         LstPrintf( "%08X ", sym->total_size );
     else
         LstPrintf( "%04X     ", sym->total_size );
@@ -696,7 +708,7 @@ static void log_proc( struct asm_sym *sym )
         if (dir->sym.langtype == LANG_C ||
             dir->sym.langtype == LANG_SYSCALL ||
             dir->sym.langtype == LANG_STDCALL ||
-            dir->sym.langtype == LANG_WATCOM_C) {
+            dir->sym.langtype == LANG_FASTCALL) {
             int cnt;
             /* position f2 to last param */
             for ( cnt = 0, f = dir->e.procinfo->paralist; f; f = f->nextparam )
@@ -708,11 +720,11 @@ static void log_proc( struct asm_sym *sym )
                 pdots = dots + i + 1 + 2;
                 if (i >= DOTSMAX)
                     pdots = "";
-                /* WATCOM_C: parameter may be a text macro (=register name) */
-                if ( f->sym.state == SYM_TMACRO)
+                /* FASTCALL: parameter may be a text macro (=register name) */
+                if ( f->sym.state == SYM_TMACRO )
                     LstPrintf( "  %s %s        %-17s %s", f->sym.name, pdots, GetMemtypeString( &f->sym, NULL), f->sym.string_ptr);
                 else
-                    LstPrintf( "  %s %s        %-17s bp +%04X", f->sym.name, pdots, GetMemtypeString( &f->sym, NULL), f->sym.offset);
+                    LstPrintf( "  %s %s        %-17s %cbp +%04X", f->sym.name, pdots, GetMemtypeString( &f->sym, NULL), basereg[dir->sym.Ofssize], f->sym.offset);
                 LstNL();
             }
         } else {
@@ -721,7 +733,7 @@ static void log_proc( struct asm_sym *sym )
                 pdots = dots + i + 1 + 2;
                 if (i >= DOTSMAX)
                     pdots = "";
-                LstPrintf( "  %s %s        %-17s bp +%04X", f->sym.name, pdots, GetMemtypeString( &f->sym, NULL), f->sym.offset);
+                LstPrintf( "  %s %s        %-17s %cbp +%04X", f->sym.name, pdots, GetMemtypeString( &f->sym, NULL), basereg[dir->sym.Ofssize], f->sym.offset);
                 LstNL();
             }
         }
@@ -735,7 +747,7 @@ static void log_proc( struct asm_sym *sym )
                 sprintf( buffer, "%s[%u]", GetMemtypeString(&l->sym, NULL), l->sym.total_length );
             else
                 strcpy( buffer, GetMemtypeString(&l->sym, NULL) );
-            LstPrintf( "  %s %s        %-17s bp -%04X", l->sym.name, pdots, buffer, - l->sym.offset);
+            LstPrintf( "  %s %s        %-17s %cbp -%04X", l->sym.name, pdots, buffer, basereg[dir->sym.Ofssize], - l->sym.offset);
             LstNL();
         }
         for ( l = dir->e.procinfo->labellist; l ; l = l->nextll ) {
@@ -748,7 +760,7 @@ static void log_proc( struct asm_sym *sym )
                 pdots = dots + i + 1 + 2;
                 if (i >= DOTSMAX)
                     pdots = "";
-                if ( sym->use32 )
+                if ( sym->Ofssize )
                     p = "  %s %s        L %-6s %08X %s";
                 else
                     p = "  %s %s        L %-6s %04X     %s";
@@ -765,6 +777,7 @@ static void log_proc( struct asm_sym *sym )
 }
 
 static void LstCaption( char *caption, int prefNL )
+/*************************************************/
 {
     for (; prefNL; prefNL--)
         LstNL();
@@ -924,7 +937,7 @@ void LstOpenFile( void )
         int namelen;
         FileInfo.file[LST] = fopen( FileInfo.fname[LST], "wb" );
         if ( FileInfo.file[LST] == NULL )
-            Fatal( MSG_CANNOT_OPEN_FILE, FileInfo.fname[LST], errno );
+            Fatal( FATAL_CANNOT_OPEN_FILE, FileInfo.fname[LST], errno );
 
         MsgGetJWasmName( buffer );
         list_pos = strlen( buffer );
@@ -940,7 +953,7 @@ void LstOpenFile( void )
 }
 
 void LstCloseFile( void )
-/**********************/
+/***********************/
 {
     if( FileInfo.file[LST] != NULL ) {
         fclose( FileInfo.file[LST] );

@@ -37,6 +37,9 @@
 #include "fixup.h"
 #include "mangle.h"
 #include "myassert.h"
+#include "segment.h"
+
+extern int_8           Frame;          // Frame of current fixup
 
 typedef enum {
     FPP_NONE,
@@ -75,7 +78,20 @@ static char *FPPatchAltName[] = {
     "FJGRQQ"
 };
 
-ret_code AddFloatingPointEmulationFixup( const struct asm_ins *ins, bool secondary )
+static ret_code MakeFpFixup( struct code_info *CodeInfo, struct asm_sym *sym )
+/*************************************/
+{
+    if ( write_to_file ) {
+        CodeInfo->InsFixup[2] = AddFixup( sym, FIX_OFF16, OPTJ_NONE );
+        CodeInfo->InsFixup[2]->frame = FRAME_LOC;
+        CodeInfo->InsFixup[2]->fixup_loc = GetCurrOffset();
+        CodeInfo->data[2] = 0;
+        return ( store_fixup( CodeInfo, 2 ) );
+    }
+    return( NOT_ERROR );
+}
+
+ret_code AddFloatingPointEmulationFixup( struct code_info *CodeInfo, bool secondary )
 /************************************************************************************/
 {
     fp_patches patch;
@@ -84,7 +100,7 @@ ret_code AddFloatingPointEmulationFixup( const struct asm_ins *ins, bool seconda
 
     patch_name_array = ( secondary ? FPPatchAltName : FPPatchName );
 
-    if( ins->token == T_FWAIT ) {
+    if( CodeInfo->token == T_FWAIT ) {
         patch = FPP_WAIT;
     } else {
         switch( CodeInfo->prefix.RegOverride ) {
@@ -119,11 +135,8 @@ ret_code AddFloatingPointEmulationFixup( const struct asm_ins *ins, bool seconda
         return( NOT_ERROR );
     sym = SymSearch( patch_name_array[patch] );
     if( sym == NULL ) {
-        sym = MakeExtern( patch_name_array[patch], MT_FAR, NULL, NULL, FALSE );
+        sym = MakeExtern( patch_name_array[patch], MT_FAR, NULL, NULL, USE16 );
         SetMangler( sym, NULL, LANG_NONE );
     }
-    if( MakeFpFixup( sym ) == ERROR )
-        return( ERROR );
-
-    return( NOT_ERROR );
+    return( MakeFpFixup( CodeInfo, sym ) );
 }

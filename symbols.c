@@ -106,6 +106,7 @@ static unsigned int hashpjw( const char *s )
 }
 
 void SymSetCmpFunc( void )
+/************************/
 {
     if ( ModuleInfo.case_sensitive == TRUE )
         SymCmpFunc = strcmp;
@@ -117,6 +118,7 @@ void SymSetCmpFunc( void )
 /* reset local hash table */
 
 void SymClearLocal( void )
+/************************/
 {
     memset( &lsym_table, 0, sizeof( lsym_table ) );
     return;
@@ -125,6 +127,7 @@ void SymClearLocal( void )
 /* store local hash table in proc's list of local symbols */
 
 void SymGetLocal( asm_sym *proc )
+/*******************************/
 {
     int i;
     dir_node  **l = &((dir_node *)proc)->e.procinfo->labellist;
@@ -145,6 +148,7 @@ void SymGetLocal( asm_sym *proc )
  */
 
 void SymSetLocal( asm_sym *proc )
+/*******************************/
 {
     int i;
     dir_node  *l;
@@ -167,6 +171,7 @@ static struct asm_sym *SymAlloc( const char *name )
     memset( sym, 0, sizeof( dir_node ) );
     sym->name_size = strlen( name );
     sym->list = ModuleInfo.cref;
+    sym->mem_type = MT_EMPTY;
     sym->name = AsmAlloc( sym->name_size + 1 );
     memcpy( sym->name, name, sym->name_size + 1 );
     return( sym );
@@ -204,7 +209,8 @@ static struct asm_sym **SymFind( const char *name )
     return( gsym );
 }
 
-void SymSetCurrPC( void )
+static void SymSetCurrPC( void )
+/***********************/
 {
     if( CurrStruct ) {
         //symPC.segment = NULL;
@@ -249,7 +255,7 @@ struct asm_sym *SymLookup( const char *name )
 // of the current procedure if bLocal==TRUE.
 
 struct asm_sym *SymLookupLabel( const char *name, int bLocal )
-/*******************************************/
+/************************************************************/
 {
     struct asm_sym      **sym_ptr;
     struct asm_sym      *sym;
@@ -300,7 +306,7 @@ static void FreeASym( struct asm_sym *sym )
 
 //    DebugMsg(("FreeASym: delete %s, state=%X\n", sym->name, sym->state));
     for(curr = sym->fixup ;curr; ) {
-        next = curr->next1;
+        next = curr->nextbp;
         AsmFree( curr );
         curr = next;
     }
@@ -325,8 +331,8 @@ void SymFree( struct asm_sym *sym)
 // this function is called for symbols which are to be moved
 // to the local namespace ( PROC parameters ).
 
-void SymSetName( struct asm_sym *sym, const char * name)
-/*********************************/
+void SymSetName( struct asm_sym *sym, const char * name )
+/*******************************************************/
 {
     struct asm_sym  **location;
 
@@ -351,7 +357,7 @@ void SymSetName( struct asm_sym *sym, const char * name)
 /* add a symbol to the global symbol table */
 
 static struct asm_sym *SymAddToTable( struct asm_sym *sym )
-/*****************************************************/
+/*********************************************************/
 {
     struct asm_sym  **location;
 
@@ -404,7 +410,7 @@ struct asm_sym *SymLCreate( const char *name )
 }
 
 struct asm_sym *SymSearch( const char *name )
-/**********************************************/
+/*******************************************/
 {
     struct asm_sym  **sym_ptr;
 
@@ -417,6 +423,7 @@ struct asm_sym *SymSearch( const char *name )
 }
 
 void SymMakeAllSymbolsPublic( void )
+/**********************************/
 {
     int i;
     struct asm_sym  *sym;
@@ -435,11 +442,11 @@ void SymMakeAllSymbolsPublic( void )
 }
 
 #ifdef DEBUG_OUT
-void DumpSymbols( void );
+static void DumpSymbols( void );
 #endif
 
 void SymFini( void )
-/*********************/
+/******************/
 {
 #if FASTMEM==0
     unsigned i;
@@ -470,9 +477,11 @@ void SymFini( void )
 
 }
 void SymInit( )
-/*********************/
+/*************/
 {
     asm_sym * sym;
+    time_t    time_of_day;
+    struct tm *now;
 
     SymCount = 0;
 
@@ -493,16 +502,20 @@ void SymInit( )
     sym->string_ptr = "615";
 
     /* @Date and @Time */
+    time_of_day = time( NULL );
+    now = localtime( &time_of_day );
     sym = SymCreate( "@Date", TRUE );
     sym->state = SYM_TMACRO;
     sym->defined = TRUE;
     sym->predefined = TRUE;
-    sym->string_ptr = _strdate(szDate);
+    strftime( szDate, 9, "%D", now );
+    sym->string_ptr = szDate;
     sym = SymCreate( "@Time", TRUE );
     sym->state = SYM_TMACRO;
     sym->defined = TRUE;
     sym->predefined = TRUE;
-    sym->string_ptr = _strtime(szTime);
+    strftime( szTime, 9, "%T", now );
+    sym->string_ptr = szTime;
 
     /* @FileName and @FileCur */
     sym = SymCreate( "@FileName", TRUE );
@@ -529,6 +542,7 @@ void SymInit( )
     symPC.state = SYM_INTERNAL;
     symPC.defined = TRUE;
     symPC.predefined = TRUE;
+    symPC.variable = TRUE; /* added v1.96. Important for fixup creation */
 #if FASTMEM==0
     symPC.staticmem = TRUE;
 #endif
@@ -572,7 +586,7 @@ void SymInit( )
 }
 
 void SymPassInit( int pass )
-/*********************/
+/**************************/
 {
     unsigned            i;
 
@@ -606,7 +620,7 @@ void SymPassInit( int pass )
 static int compare_fn( const void *p1, const void *p2 )
 /*****************************************************/
 {
-#if defined(__WATCOMC__) || defined(__GNUC__)
+#if defined(__WATCOMC__) || defined(__GNUC__) || defined(__POCC__) || defined(__DMC__)
     struct asm_sym * const *sym1 = p1;
     struct asm_sym * const *sym2 = p2;
 #else
@@ -621,7 +635,7 @@ static int compare_fn( const void *p1, const void *p2 )
 /* possible speedup: filter the symbols with list=false */
 
 struct asm_sym **SymSort( unsigned int *count )
-/*****************************************/
+/*********************************************/
 {
     struct asm_sym      **syms;
     struct asm_sym      *sym;
@@ -723,8 +737,8 @@ static void DumpSymbol( struct asm_sym *sym )
 }
 #endif
 
-void DumpSymbols( void )
-/*******************/
+static void DumpSymbols( void )
+/**********************/
 {
     struct asm_sym      *sym;
     unsigned            i;
