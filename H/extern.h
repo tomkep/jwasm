@@ -9,7 +9,7 @@
 
 /*---------------------------------------------------------------------------*/
 
-extern struct asm_sym   *MakeExtern( char *name, memtype type, struct asm_sym * vartype, struct asm_sym *, unsigned char );
+extern struct asm_sym   *MakeExtern( const char *name, memtype type, struct asm_sym * vartype, struct asm_sym *, unsigned char );
 
 extern ret_code CommDirective( int );
 extern ret_code ExterndefDirective( int i );

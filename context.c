@@ -25,6 +25,7 @@ enum {
     CONT_RADIX,
     CONT_LISTING,
     CONT_CPU,
+    CONT_ALIGNMENT, /* new for v2.0 */
     CONT_ALL
 };
 
@@ -47,10 +48,10 @@ typedef struct _assumes_context {
 
 typedef struct _listing_context {
     enum listmacro list_macro;
-    unsigned list:1;
-    unsigned cref:1;
-    unsigned listif:1;
-    unsigned list_generated_code:1;
+    unsigned char list:1;
+    unsigned char cref:1;
+    unsigned char listif:1;
+    unsigned char list_generated_code:1;
 } listing_context;
 
 typedef struct _cpu_context {
@@ -62,9 +63,15 @@ typedef struct _radix_context {
     uint_8 radix; /* saved ModuleInfo.radix */
 } radix_context;
 
+typedef struct _alignment_context {
+    uint_8 fieldalign; /* saved ModuleInfo.fieldalign */
+    uint_8 procalign;  /* saved ModuleInfo.procalign */
+} alignment_context;
+
 typedef struct _all_context {
     assumes_context ac;
     radix_context   rc;
+    alignment_context alc;
     listing_context lc;
     cpu_context     cc;
 } all_context;
@@ -79,6 +86,7 @@ static context *saved_contexts;
 #endif
 
 ret_code ContextDirective( int directive, int i )
+/***********************************************/
 {
     int type;
     context *pcontext;
@@ -86,9 +94,10 @@ ret_code ContextDirective( int directive, int i )
     listing_context *lcontext = NULL;
     cpu_context     *ccontext = NULL;
     radix_context   *rcontext = NULL;
+    alignment_context *icontext = NULL;
     all_context     *alcontext;
 
-    static char *context[] = { "ASSUMES", "RADIX", "LISTING", "CPU", "ALL", NULL };
+    static char *context[] = { "ASSUMES", "RADIX", "LISTING", "CPU", "ALIGNMENT", "ALL", NULL };
 
     DebugMsg(( "xxxCONTEXT directive enter\n"));
     i++;
@@ -97,6 +106,8 @@ ret_code ContextDirective( int directive, int i )
         for (p = context, type = CONT_ASSUMES; *p ; p++, type++) {
             if (_stricmp(*p, AsmBuffer[i]->string_ptr) == 0) {
                 i++;
+                if ( type == CONT_ALIGNMENT && ( Options.strict_masm_compat ) )
+                    break;
                 if (AsmBuffer[i]->token == T_FINAL) {
                     if (directive == T_POPCONTEXT) {
                         DebugMsg(( "POPCONTEXT %s\n", AsmBuffer[i-1]->string_ptr ));
@@ -116,6 +127,9 @@ ret_code ContextDirective( int directive, int i )
                         case CONT_RADIX:
                             rcontext = (radix_context *)&pcontext->data;
                             break;
+                        case CONT_ALIGNMENT:
+                            icontext = (alignment_context *)&pcontext->data;
+                            break;
                         case CONT_LISTING:
                             lcontext = (listing_context *)&pcontext->data;
                             break;
@@ -126,6 +140,7 @@ ret_code ContextDirective( int directive, int i )
                             alcontext = (all_context *)&pcontext->data;
                             acontext = &alcontext->ac;
                             rcontext = &alcontext->rc;
+                            icontext = &alcontext->alc;
                             lcontext = &alcontext->lc;
                             ccontext = &alcontext->cc;
                         }
@@ -135,6 +150,10 @@ ret_code ContextDirective( int directive, int i )
                         }
                         if (rcontext) {
                             ModuleInfo.radix = rcontext->radix;
+                        }
+                        if (icontext && ( Options.strict_masm_compat == FALSE ) ) {
+                            ModuleInfo.fieldalign = icontext->fieldalign;
+                            ModuleInfo.procalign = icontext->procalign;
                         }
                         if (lcontext) {
                             ModuleInfo.list_macro = lcontext->list_macro;
@@ -163,6 +182,10 @@ ret_code ContextDirective( int directive, int i )
                             pcontext = AsmAlloc(sizeof(context) + sizeof(radix_context));
                             rcontext = (radix_context *)&pcontext->data;
                             break;
+                        case CONT_ALIGNMENT:
+                            pcontext = AsmAlloc(sizeof(context) + sizeof(alignment_context));
+                            icontext = (alignment_context *)&pcontext->data;
+                            break;
                         case CONT_LISTING:
                             pcontext = AsmAlloc(sizeof(context) + sizeof(listing_context));
                             lcontext = (listing_context *)&pcontext->data;
@@ -176,6 +199,7 @@ ret_code ContextDirective( int directive, int i )
                             alcontext = (all_context *)pcontext->data;
                             acontext = &alcontext->ac;
                             rcontext = &alcontext->rc;
+                            icontext = &alcontext->alc;
                             lcontext = &alcontext->lc;
                             ccontext = &alcontext->cc;
                             break;
@@ -189,6 +213,10 @@ ret_code ContextDirective( int directive, int i )
                         }
                         if (rcontext) {
                             rcontext->radix = ModuleInfo.radix;
+                        }
+                        if (icontext) {
+                            icontext->fieldalign = ModuleInfo.fieldalign;
+                            icontext->procalign = ModuleInfo.procalign;
                         }
                         if (lcontext) {
                             lcontext->list_macro = ModuleInfo.list_macro;
@@ -219,6 +247,7 @@ ret_code ContextDirective( int directive, int i )
 // save current context status
 
 void ContextSaveState( void )
+/***************************/
 {
     int i;
     context *p;
@@ -236,6 +265,7 @@ void ContextSaveState( void )
 // restore context status
 
 static void ContextRestoreState( void )
+/*************************************/
 {
     int i;
     context *p;
@@ -252,6 +282,7 @@ static void ContextRestoreState( void )
 // init context, called once per pass
 
 void ContextInit( int pass )
+/**************************/
 {
     ContextStack = NULL;
 #if FASTPASS

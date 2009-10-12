@@ -41,6 +41,7 @@
 #include "macro.h"
 #include "types.h"
 #include "proc.h"
+#include "input.h"
 
 #if defined(__WATCOMC__) && !defined(__FLAT__)
 #define HASH_MAGNITUDE 12  /* for 16bit model */
@@ -68,6 +69,10 @@
 #else
 #define STRCMP( x, y, z ) SymCmpFunc( x, y )
 #endif
+
+extern struct asm_sym FileCur;  /* @FileCur symbol */
+extern struct asm_sym LineCur;  /* @Line symbol    */
+extern uint_32 GetLineNumber( struct asm_sym * );
 
 struct asm_sym *sym_CurSeg;  /* the @CurSeg symbol */
 struct asm_sym symPC;        /* the '$' symbol     */
@@ -163,7 +168,7 @@ void SymSetLocal( asm_sym *proc )
 }
 
 static struct asm_sym *SymAlloc( const char *name )
-/**************************************************/
+/*************************************************/
 {
     struct asm_sym *sym;
 
@@ -210,7 +215,7 @@ static struct asm_sym **SymFind( const char *name )
 }
 
 static void SymSetCurrPC( void )
-/***********************/
+/******************************/
 {
     if( CurrStruct ) {
         //symPC.segment = NULL;
@@ -390,7 +395,7 @@ struct asm_sym *SymCreate( const char *name, bool add_table )
 }
 
 struct asm_sym *SymLCreate( const char *name )
-/***********************************************************/
+/********************************************/
 /* Create symbol and insert it into the local symbol table */
 {
     struct asm_sym  *sym;
@@ -476,6 +481,9 @@ void SymFini( void )
 #endif
 
 }
+
+/* initialize global symbol table */
+
 void SymInit( )
 /*************/
 {
@@ -483,6 +491,7 @@ void SymInit( )
     time_t    time_of_day;
     struct tm *now;
 
+    DebugMsg(("SymInit() enter\n"));
     SymCount = 0;
 
     memset( gsym_table, 0, sizeof(gsym_table) );
@@ -517,27 +526,27 @@ void SymInit( )
     strftime( szTime, 9, "%T", now );
     sym->string_ptr = szTime;
 
-    /* @FileName and @FileCur */
+    /* @FileName */
     sym = SymCreate( "@FileName", TRUE );
     sym->state = SYM_TMACRO;
     sym->defined = TRUE;
     sym->predefined = TRUE;
     sym->string_ptr = ModuleInfo.name;
-    sym = SymCreate( "@FileCur", TRUE );
-    sym->state = SYM_TMACRO;
-    sym->defined = TRUE;
-    sym->predefined = TRUE;
-    sym->string_ptr = ModuleInfo.name;
+
+    /* @FileCur */
+    //filecur = SymCreate( "@FileCur", TRUE );
+    FileCur.state = SYM_TMACRO;
+    FileCur.defined = TRUE;
+    FileCur.predefined = TRUE;
+#if FASTMEM==0
+    FileCur.staticmem = TRUE;
+#endif
+    FileCur.mem_type = MT_EMPTY;
+    FileCur.string_ptr = ModuleInfo.name;
+    FileCur.name_size = 8; /* sizeof("@FileCur") */
+    SymAddToTable( &FileCur );
 
     /* add $ symbol */
-#if 0
-    sym = SymCreate( "$", TRUE );
-    sym->state = SYM_INTERNAL;
-    sym->defined = TRUE;
-    sym->predefined = TRUE;
-    sym->mem_type = MT_NEAR;
-    sym->list = FALSE; /* don't display the '$' symbol in symbol list */
-#else
     symPC.name = "$";
     symPC.state = SYM_INTERNAL;
     symPC.defined = TRUE;
@@ -550,19 +559,19 @@ void SymInit( )
     symPC.name_size = 1;
     symPC.list = FALSE; /* don't display the '$' symbol in symbol list */
     SymAddToTable(&symPC);
-#endif
 
     /* add @Line numeric equate */
-    LineItem.mem_type = MT_ABS;
-    LineItem.state = SYM_INTERNAL;
-    LineItem.defined = TRUE;
-    LineItem.predefined = TRUE;
+    LineCur.sfunc_ptr = &GetLineNumber;
+    LineCur.mem_type = MT_ABS;
+    LineCur.state = SYM_INTERNAL;
+    LineCur.defined = TRUE;
+    LineCur.predefined = TRUE;
 #if FASTMEM==0
-    LineItem.staticmem = TRUE;
+    LineCur.staticmem = TRUE;
 #endif
-    LineItem.variable = TRUE;
-    LineItem.name_size = strlen(LineItem.name);
-    SymAddToTable(&LineItem);
+    LineCur.variable = TRUE; /* ??? */
+    LineCur.name_size = strlen( LineCur.name ); /* sizeof @Line */
+    SymAddToTable( &LineCur );
 
     /* add @WordSize numeric equate */
     WordSize.mem_type = MT_ABS;
@@ -572,15 +581,16 @@ void SymInit( )
 #if FASTMEM==0
     WordSize.staticmem = TRUE;
 #endif
-    WordSize.variable = TRUE;
-    WordSize.name_size = strlen(WordSize.name);
-    SymAddToTable(&WordSize);
+    WordSize.variable = TRUE; /* ??? */
+    WordSize.name_size = strlen( WordSize.name );
+    SymAddToTable( &WordSize );
 
     sym_CurSeg = SymCreate("@CurSeg", TRUE );
     sym_CurSeg->state = SYM_TMACRO;
     sym_CurSeg->defined = TRUE;
     sym_CurSeg->predefined = TRUE;
 
+    DebugMsg(("SymInit() exit\n"));
     return;
 
 }
@@ -656,6 +666,30 @@ struct asm_sym **SymSort( unsigned int *count )
     return( syms );
 }
 
+// enum all symbols in global hash table
+
+int SymEnum( struct asm_sym * *psym, int *pi )
+/********************************************/
+{
+    unsigned            i;
+    struct asm_sym      *sym;
+
+    if ( *psym == NULL ) {
+        i = 0;
+        sym = gsym_table[i];
+    } else {
+        i = *pi;
+        sym = *psym;
+        sym = sym->next;
+    }
+
+    for( ; sym == NULL && i < GHASH_TABLE_SIZE; i++ )
+        sym = gsym_table[i];
+    *psym = sym;
+    *pi = i;
+    return( sym != NULL );
+}
+
 #if defined( DEBUG_OUT )
 
 #ifdef TRMEM
@@ -696,17 +730,10 @@ static void DumpSymbol( struct asm_sym *sym )
         break;
     case SYM_TYPE:
         switch ( dir->e.structinfo->typekind ) {
-        case TYPE_UNION:
-            type = "UNION";
-            break;
-        case TYPE_TYPEDEF:
-            type = "TYPEDEF";
-            break;
-        case TYPE_RECORD:
-            type = "RECORD";
-            break;
-        default:
-            type = "STRUCTURE";
+        case TYPE_UNION:   type = "UNION";     break;
+        case TYPE_TYPEDEF: type = "TYPEDEF";   break;
+        case TYPE_RECORD:  type = "RECORD";    break;
+        default:           type = "STRUCTURE"; break;
         }
         break;
     case SYM_CLASS_LNAME:
@@ -719,7 +746,7 @@ static void DumpSymbol( struct asm_sym *sym )
         type = "UNDEFINED";
         break;
     case SYM_INTERNAL:
-        if (dir->sym.mem_type == MT_ABS) {
+        if ( dir->sym.mem_type == MT_ABS ) {
             type = "NUMBER";
         } else
             type = "INTERNAL";
@@ -733,12 +760,12 @@ static void DumpSymbol( struct asm_sym *sym )
     } else {
         visibility = "";
     }
-    DoDebugMsg( "%8X: %-30s %-12s  %8X  %8X %8X %s\n", sym, sym->name, type, sym->offset, dir->e, sym->name, visibility );
+    DebugMsg(( "%8X: %-30s %-12s  %8X  %8X %8X %s\n", sym, sym->name, type, sym->offset, dir->e, sym->name, visibility ));
 }
 #endif
 
 static void DumpSymbols( void )
-/**********************/
+/*****************************/
 {
     struct asm_sym      *sym;
     unsigned            i;

@@ -29,40 +29,30 @@
 ****************************************************************************/
 
 #include <stdarg.h>
-#include <fcntl.h>
 #include <ctype.h>
 #include <signal.h>
-#include <sys/stat.h>   /* _S_IREAD ... */
 
 #include "globals.h"
-#include "myunistd.h"
 #include "memalloc.h"
 #include "parser.h"
 #include "directiv.h"
 #include "fatal.h"
-#include "equate.h"
-#include "omf.h"
-#include "input.h"
 #include "errmsg.h"
-#include "macro.h"
-#include "listing.h"
 #include "msgtext.h"
 
-#ifdef __OSI__
-  #include "ostype.h"
-#endif
+//#ifdef __OSI__
+//  #include "ostype.h"
+//#endif
 
 #if defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__)
+
 #define WILDCARDS 0
 #define CATCHBREAK 0
 #define HANDLECTRLZ 0
 #define HANDLESWITCHCHAR 0
-#ifndef __DJGPP
-#define OPENBINARY 0
+
 #else
-#define OPENBINARY 1
-#endif
-#else
+
 #define WILDCARDS 1
 #ifdef __POCC__
 #define CATCHBREAK 0
@@ -71,27 +61,15 @@
 #endif
 #define HANDLECTRLZ 1
 #define HANDLESWITCHCHAR 1
-#define OPENBINARY 1
+
 #endif
 
-#if OPENBINARY
-
-#define OP_MODE         (O_RDWR | O_CREAT | O_TRUNC | O_BINARY)
-#ifdef __WATCOMC__
-#define OP_PERM         (S_IREAD | S_IWRITE)
+#if WILDCARDS
+#ifdef __UNIX__
+ #include <unistd.h>
 #else
- #ifdef __DJGPP__
-#define OP_PERM         (S_IRUSR | S_IWUSR)
- #else
-#define OP_PERM         (_S_IREAD | _S_IWRITE)
- #endif
+ #include <io.h>
 #endif
-
-#else
-
-#define OP_MODE         (O_RDWR | O_CREAT | O_TRUNC)
-#define OP_PERM         (0666)
-
 #endif
 
 extern char     banner_printed;
@@ -113,17 +91,17 @@ static unsigned         OptValue;  /* value of option's numeric argument  */
 static char             *OptParm;
 static char             *FileDir[NUM_FILE_TYPES];
 static char             ParamBuf[ BUF_SIZE ];
-static char             *cmdsave[MAX_RSP_NESTING]; /* response files */
-static char             *cmdbuffers[MAX_RSP_NESTING]; /* response files */
+static const char       *cmdsave[MAX_RSP_NESTING]; /* response files */
+static const char       *cmdbuffers[MAX_RSP_NESTING]; /* response files */
 static int              rspidx = 0; /* response file level */
 #if HANDLESWITCHCHAR
 static unsigned char    SwitchChar = '/';
 #endif
 
 global_options Options = {
-    /* sign_value       */          FALSE,
     /* quiet            */          FALSE,
     /* line_numbers     */          FALSE,
+    /* debug_symbols    */          FALSE,
     /* floating_point   */          FPO_NO_EMULATION,
 
     /* error_limit      */          50,
@@ -141,14 +119,14 @@ global_options Options = {
     /* data_seg         */          NULL,
     /* text_seg         */          NULL,
     /* module_name      */          NULL,
-    /* forced include  */           NULL,
-    /* symbol queue  */             NULL,
+    /* forced include   */          NULL,
+    /* symbol queue     */          NULL,
     /* include path queue */        NULL,
 #if COCTALS
     /* allow_c_octals        */     FALSE,
 #endif
     /* no_comment_data_in_code_records */   FALSE,
-    /* no_dependencies       */     FALSE,
+    /* no_dependencies       */ //    FALSE,
     /* no_file_entry         */     FALSE,
     /* no_section_aux_entry  */     FALSE,
     /* no_cdecl_decoration   */     FALSE,
@@ -169,6 +147,7 @@ global_options Options = {
     /* no_symbol_listing     */     FALSE,
 
     /* all_symbols_public    */     FALSE,
+    /* safeseh               */     FALSE,
     /* ignore_include        */     FALSE,
     /* output_format         */     OFORMAT_OMF,
     /* header_format         */     HFORMAT_NONE,
@@ -177,9 +156,21 @@ global_options Options = {
     /* model                 */     MOD_NONE,
     /* cpu                   */     P_86,
     /* fastcall type         */     FCT_MS32,
+    /* syntax check only     */     FALSE,
 #if MANGLERSUPP
     /* default_name_mangler  */     NULL,
     /* naming_convention*/          NC_DO_NOTHING,
+#endif
+};
+
+/* array for options -0 ... -10 */
+static const unsigned cpuoption[] = {
+     P_86, P_186, P_286, P_386,  /* 0-3 */
+    P_486, P_586, P_686, P_686 | P_MMX, /* 4-7 */
+    P_686 | P_MMX | P_SSE1,  /* 8 */
+    P_686 | P_MMX | P_SSE1 | P_SSE2,  /* 9 */
+#if AMD64_SUPPORT
+    P_64, /* 10 */
 #endif
 };
 
@@ -245,15 +236,14 @@ static void SetTargName( char *name, unsigned len )
 }
 #endif
 
-/* called by -0, -1, ... -6 argument */
+/* called by -0, -1, ... argument */
 
-static void SetCPUCmdline( void )
-/*******************************/
+static void SetCpuCmdline( unsigned value, const char *parm )
+/***********************************************************/
 {
-    char  *tmp;
 
-    Options.cpu &= ~(P_CPU_MASK | P_PM);
-    Options.cpu |= OptValue;
+    Options.cpu &= ~(P_CPU_MASK | P_EXT_MASK | P_PM);
+    Options.cpu |= value;
 #if 0 //AMD64_SUPPORT
     /* implicitely set model flat if cpu is set to x86-64 via
      * commandline. This is deactive, because it's intransparent.
@@ -262,30 +252,26 @@ static void SetCPUCmdline( void )
         if ( Options.model == MOD_NONE )
             Options.model = MOD_FLAT;
 #endif
-    for( tmp = OptParm; *tmp ; tmp++ ) {
-        if( *tmp == 'p' ) {
-            if( Options.cpu >= P_286 ) {         // set privileged mode
-                Options.cpu |= P_PM;
-            } else {
-                AsmErr( CPU_OPTION_INVALID, CopyOfParm() );
-            }
+    for( ; *parm ; parm++ ) {
+        if( *parm == 'p' && Options.cpu >= P_286 ) {
+            Options.cpu |= P_PM;      // set privileged mode
 #if MANGLERSUPP
-        } else if( *tmp == '"' ) {       // set default mangler
+        } else if( *parm == '"' ) {       // set default mangler
             char *dest;
-            tmp++;
-            dest = strchr(tmp, '"');
+            parm++;
+            dest = strchr( parm, '"' );
             if( Options.default_name_mangler != NULL ) {
                 AsmFree( Options.default_name_mangler );
             }
-            Options.default_name_mangler = MemAlloc( dest - tmp + 1 );
+            Options.default_name_mangler = MemAlloc( dest - parm + 1 );
             dest = Options.default_name_mangler;
-            for( ; *tmp != '"'; dest++, tmp++ ) {
-                *dest = *tmp;
+            for( ; *parm != '"'; dest++, parm++ ) {
+                *dest = *parm;
             }
             *dest = NULLC;
 #endif
         } else {
-            AsmWarn( 1, INVALID_CMDLINE_OPTION, CopyOfParm() );
+            AsmWarn( 1, CPU_OPTION_INVALID, parm );
             break;
         }
     }
@@ -295,8 +281,8 @@ static void SetCPUCmdline( void )
    this is called for cmdline options -D and -I
  */
 
-static void queue_item( struct qitem * *start, char *string )
-/***********************************************************/
+static void queue_item( struct qitem * *start, const char *string )
+/*****************************************************************/
 {
     struct qitem *p;
     struct qitem *q;
@@ -339,8 +325,8 @@ static char *GetExt( int type )
     return( NULL );
 }
 
-static void GetDefaultFilenames( char *name )
-/*******************************************/
+static void GetDefaultFilenames( const char *name )
+/*************************************************/
 {
     int i;
     char fnamesrc[_MAX_FNAME];
@@ -377,8 +363,8 @@ static void GetDefaultFilenames( char *name )
     return;
 }
 
-static void get_fname( char *token, int type )
-/********************************************/
+static void get_fname( const char *token, int type )
+/**************************************************/
 /*
  * called for .OBJ, .ERR, .LST and .ASM filenames.
  * for ASM, figure out the source file name & store it in FileInfo
@@ -435,8 +421,8 @@ static void get_fname( char *token, int type )
     }
 }
 
-static void set_some_kinda_name( char token, char *name )
-/*******************************************************/
+static void set_some_kinda_name( char token, const char *name )
+/*************************************************************/
 /* option -n: set name of
  * - nd: data seg
  * - nm: module name
@@ -468,17 +454,15 @@ static void set_some_kinda_name( char token, char *name )
         return;
     }
 
-    /* these params are valid for ONE module only */
-
     if( *tmp != NULL ) {
-        AsmFree(*tmp);
+        MemFree(*tmp);
     }
-    *tmp = AsmAlloc( strlen( name ) + 1 );
+    *tmp = MemAlloc( strlen( name ) + 1 );
     strcpy( *tmp, name );
 }
 
 static void usagex_msg( void )
-/***************************/
+/****************************/
 {
     MsgPrintUsage();
     exit(1);
@@ -501,6 +485,21 @@ static void Set_coff( void ) {
 static void Set_elf( void ) {
     Options.output_format = OFORMAT_ELF;
 }
+#if AMD64_SUPPORT
+static void Set_elf64( void ) {
+    Options.output_format = OFORMAT_ELF;
+    Options.header_format = HFORMAT_ELF64;
+    if ( Options.model == MOD_NONE )  /* default to model FLAT */
+        Options.model = MOD_FLAT;
+    //if ( Options.langtype == LANG_NONE ) /* default to language SYSCALL */
+    //    Options.langtype = LANG_FASTCALL;
+    //Options.fastcall = FCT_WIN64;     /* FASTCALL is Win64 register ABI */
+    /* set CPU if output format is for 64bit */
+    if ( (Options.cpu & P_CPU_MASK) < P_64 ) {
+        SetCpuCmdline( P_64, "" );
+    }
+}
+#endif
 #endif
 #if BIN_SUPPORT
 static void Set_bin( void ) {
@@ -519,6 +518,7 @@ static void Set_Cu( void ) { Options.case_sensitive = FALSE;  Options.convert_up
 static void Set_Cx( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = FALSE; }
 
 static void Set_Zd( void ) { Options.line_numbers = TRUE; }
+static void Set_Zi( void ) { Set_Zd(); Options.debug_symbols = TRUE; }
 
 static void Set_Zm( void ) { Options.masm51_compat = TRUE; }
 
@@ -530,12 +530,13 @@ static void Set_Zf( void ) { Options.all_symbols_public = TRUE; }
 
 static void Set_Zp( void ) {
     uint_8 power;
-    for (power = 1;power < OptValue && power < MAX_STRUCT_ALIGN; power = power << 1);
-    if (power == OptValue)
-        Options.alignment_default = OptValue;
-    else {
-        AsmWarn(1, INVALID_CMDLINE_VALUE, "/Zp");
-    }
+    for ( power = 0; (1 << power) <= MAX_STRUCT_ALIGN; power++ )
+        if ( ( 1 << power ) == OptValue ) {
+            Options.fieldalign = power;
+            return;
+        }
+    AsmWarn( 1, INVALID_CMDLINE_VALUE, "-Zp" );
+    return;
 }
 
 //static void DefineMacro( void ) { queue_item( &Options.SymQueue, CopyOfParm() ); }
@@ -556,14 +557,9 @@ static void Set_Fl( void ) { get_fname( GetAFileName(), LST ); Options.write_lis
 static void Set_Fo( void ) { get_fname( GetAFileName(), OBJ ); }
 static void Set_fp( void ) { Options.cpu &= ~P_FPU_MASK; Options.cpu = OptValue; }
 static void Set_FPx( void ) { Options.floating_point = OptValue; }
-
-static void Set_Gc( void ) { Options.langtype = LANG_PASCAL; }
-static void Set_Gd( void ) { Options.langtype = LANG_C; }
-static void Set_Gz( void ) { Options.langtype = LANG_STDCALL; }
+static void Set_G( void ) { Options.langtype = OptValue; }
 
 static void SetInclude( void ) { queue_item( &Options.IncQueue, GetAFileName() ); }
-
-static void Set_j( void ) { Options.sign_value = TRUE; }
 
 #ifdef DEBUG_OUT
 static void Set_ls( void ) { Options.print_linestore = TRUE; };
@@ -578,15 +574,9 @@ static void Set_Sa( void )
 static void Set_Sg( void ) { Options.list_generated_code = TRUE; }
 static void Set_Sn( void ) { Options.no_symbol_listing = TRUE; }
 static void Set_Sx( void ) { Options.listif = TRUE; }
+static void Set_safeseh( void ) { Options.safeseh = TRUE; }
 
-static void Set_mt( void ) { Options.model = MOD_TINY; }
-static void Set_ms( void ) { Options.model = MOD_SMALL; }
-static void Set_mm( void ) { Options.model = MOD_MEDIUM; }
-static void Set_mc( void ) { Options.model = MOD_COMPACT; }
-static void Set_ml( void ) { Options.model = MOD_LARGE; }
-static void Set_mh( void ) { Options.model = MOD_HUGE; }
-static void Set_mf( void ) { Options.model = MOD_FLAT; }
-
+static void Set_m( void ) { Options.model = OptValue; }
 static void Set_n( void ) { set_some_kinda_name( OptValue, CopyOfParm() ); }
 
 #if COCTALS
@@ -601,7 +591,13 @@ static void Set_WX( void ) { Options.warning_error = TRUE; }
 
 static void Set_w( void ) { Set_WX(); Options.warning_level = 0; }
 
-static void SetWarningLevel( void ) { Options.warning_level = OptValue; }
+static void SetWarningLevel( void )
+{
+    if ( OptValue <= 4 )
+        Options.warning_level = OptValue;
+    else
+        AsmWarn( 1, INVALID_CMDLINE_VALUE, "/W" );
+}
 
 static void Set_X( void ) { Options.ignore_include = TRUE; }
 #if AMD64_SUPPORT
@@ -616,29 +612,28 @@ static void Set_win64( void )
     Options.fastcall = FCT_WIN64;     /* FASTCALL is Win64 register ABI */
     /* set CPU if output format is for 64bit */
     if ( (Options.cpu & P_CPU_MASK) < P_64 ) {
-        OptValue = P_64;
-        OptParm = "";
-        SetCPUCmdline();
+        SetCpuCmdline( P_64, "" );
     }
 }
 #endif
 static void Set_zcm( void ) { Options.no_cdecl_decoration = FALSE; }
 static void Set_zcw( void ) { Options.no_cdecl_decoration = TRUE; }
-static void Set_zf0( void ) { Options.fastcall = FCT_MS32; }
-static void Set_zf1( void ) { Options.fastcall = FCT_WATCOMC; }
+static void Set_zf( void ) { Options.fastcall = OptValue; }
 
-static void Set_Zi( void ) { }
 
 static void Set_zlc( void ) { Options.no_comment_data_in_code_records = TRUE; }
-static void Set_zld( void ) { Options.no_dependencies       = TRUE; }
+//static void Set_zld( void ) { Options.no_dependencies       = TRUE; }
+#if COFF_SUPPORT
 static void Set_zlf( void ) { Options.no_file_entry         = TRUE; }
 static void Set_zls( void ) { Options.no_section_aux_entry  = TRUE; }
+#endif
 
-static void Set_zs0( void ) { Options.stdcall_decoration    = STDCALL_NONE; }
-static void Set_zs1( void ) { Options.stdcall_decoration    = STDCALL_HALF; }
-static void Set_zs2( void ) { Options.stdcall_decoration    = STDCALL_FULL; }
+static void Set_Zs( void ) { Options.syntax_check_only    = TRUE; }
+static void Set_zt( void ) { Options.stdcall_decoration    = OptValue; }
 static void Set_zze( void ) { Options.no_export_decoration  = TRUE; }
+#if COFF_SUPPORT
 static void Set_zzs( void ) { Options.entry_decorated       = TRUE; }
+#endif
 
 static void HelpUsage( void ) { usagex_msg();}
 
@@ -651,16 +646,6 @@ static void Set_d6( void )
 #endif
 
 static struct cmdloption const cmdl_options[] = {
-    { "0$",     P_86,     SetCPUCmdline },
-    { "1$",     P_186,    SetCPUCmdline },
-    { "2$",     P_286,    SetCPUCmdline },
-    { "3$",     P_386,    SetCPUCmdline },
-    { "4$",     P_486,    SetCPUCmdline },
-    { "5$",     P_586,    SetCPUCmdline },
-    { "6$",     P_686,    SetCPUCmdline },
-#if AMD64_SUPPORT
-    { "7$",     P_64,     SetCPUCmdline },
-#endif
     { "?",      0,        HelpUsage },
 #if BIN_SUPPORT
     { "bin",    0,        Set_bin },
@@ -680,6 +665,9 @@ static struct cmdloption const cmdl_options[] = {
 #endif
     { "D^$",    0,        DefineMacro },
 #if ELF_SUPPORT
+#if AMD64_SUPPORT
+    { "elf64",  0,        Set_elf64 },
+#endif
     { "elf",    0,        Set_elf },
 #endif
     { "EP",     0,        Set_EP },
@@ -698,22 +686,21 @@ static struct cmdloption const cmdl_options[] = {
 #endif
     { "fpc",    P_NO87,   Set_fp },
     { "Fr=^@",  0,        Set_Fr },
-    { "Gc",     0,        Set_Gc },
-    { "Gd",     0,        Set_Gd },
-    { "Gz",     0,        Set_Gz },
+    { "Gc",     LANG_PASCAL,  Set_G },
+    { "Gd",     LANG_C,       Set_G },
+    { "Gz",     LANG_STDCALL, Set_G },
     { "h",      0,        HelpUsage },
     { "I=^@",   0,        SetInclude },
-    { "j",      0,        Set_j },
 #ifdef DEBUG_OUT
     { "ls",     0,        Set_ls },
 #endif
-    { "mc",     0,        Set_mc },
-    { "mf",     0,        Set_mf },
-    { "mh",     0,        Set_mh },
-    { "ml",     0,        Set_ml },
-    { "mm",     0,        Set_mm },
-    { "ms",     0,        Set_ms },
-    { "mt",     0,        Set_mt },
+    { "mc",     MOD_COMPACT, Set_m },
+    { "mf",     MOD_FLAT,    Set_m },
+    { "mh",     MOD_HUGE,    Set_m },
+    { "ml",     MOD_LARGE,   Set_m },
+    { "mm",     MOD_MEDIUM,  Set_m },
+    { "ms",     MOD_SMALL,   Set_m },
+    { "mt",     MOD_TINY,    Set_m },
 #if BIN_SUPPORT
 #if MZ_SUPPORT
     { "mz",     0,        Set_mz },
@@ -736,6 +723,7 @@ static struct cmdloption const cmdl_options[] = {
     { "Sg",     0,        Set_Sg },
     { "Sn",     0,        Set_Sn },
     { "Sx",     0,        Set_Sx },
+    { "safeseh",0,        Set_safeseh },
     { "WX",     0,        Set_WX },
     { "W=#",    0,        SetWarningLevel },
 #if AMD64_SUPPORT
@@ -752,17 +740,22 @@ static struct cmdloption const cmdl_options[] = {
     { "Zp=#",   0,        Set_Zp },
     { "zcm",    0,        Set_zcm },
     { "zcw",    0,        Set_zcw },
-    { "zf0",    0,        Set_zf0 },
-    { "zf1",    0,        Set_zf1 },
+    { "zf0",    FCT_MS32,    Set_zf },
+    { "zf1",    FCT_WATCOMC, Set_zf },
     { "zlc",    0,        Set_zlc },
-    { "zld",    0,        Set_zld },
+//    { "zld",    0,        Set_zld },
+#if COFF_SUPPORT
     { "zlf",    0,        Set_zlf },
     { "zls",    0,        Set_zls },
-    { "zs0",    0,        Set_zs0 },
-    { "zs1",    0,        Set_zs1 },
-    { "zs2",    0,        Set_zs2 },
+#endif
+    { "Zs",     0,        Set_Zs },
+    { "zt0",    STDCALL_NONE, Set_zt },
+    { "zt1",    STDCALL_HALF, Set_zt },
+    { "zt2",    STDCALL_FULL, Set_zt },
     { "zze",    0,        Set_zze },
+#if COFF_SUPPORT
     { "zzs",    0,        Set_zzs },
+#endif
     { NULL,     0,        0 }
 };
 
@@ -779,32 +772,22 @@ static int OptionDelimiter( char c )
     return( 0 );
 }
 
-static void free_names( void )
-/****************************/
-/* Free names set as cmdline options */
+static void free_strings( void )
+/******************************/
+/* Free strings set by cmdline options */
 {
 #if BUILD_TARGET
-    if( Options.build_target != NULL ) {
+    if( Options.build_target != NULL )
         AsmFree( Options.build_target );
-        Options.build_target = NULL;
-    }
 #endif
-    if( Options.code_class != NULL ) {
-        AsmFree( Options.code_class );
-        Options.code_class = NULL;
-    }
-    if( Options.data_seg != NULL ) {
-        AsmFree( Options.data_seg );
-        Options.data_seg = NULL;
-    }
-    if( Options.module_name != NULL ) {
-        AsmFree( Options.module_name );
-        Options.module_name = NULL;
-    }
-    if( Options.text_seg != NULL ) {
-        AsmFree( Options.text_seg );
-        Options.text_seg = NULL;
-    }
+    if( Options.code_class != NULL )
+        MemFree( Options.code_class );
+    if( Options.data_seg != NULL )
+        MemFree( Options.data_seg );
+    if( Options.module_name != NULL )
+        MemFree( Options.module_name );
+    if( Options.text_seg != NULL )
+        MemFree( Options.text_seg );
 }
 
 #if BUILD_TARGET
@@ -850,75 +833,11 @@ static void set_default_build_target( void )
 }
 #endif
 
-void CloseFiles( void )
-/**********************/
-{
-    /* close ASM file */
-    if( FileInfo.file[ASM] != NULL ) {
-        if( fclose( FileInfo.file[ASM] ) != 0 ) {
-            FileInfo.file[ASM] = NULL;
-            Fatal( FATAL_CANNOT_CLOSE_FILE, FileInfo.fname[ASM] );
-        }
-    }
-    LstCloseFile();
-
-    if ( Options.output_format == OFORMAT_OMF )
-        omf_fini();
-
-    /* close OBJ file */
-    if ( ModuleInfo.obj_fh != -1 ) {
-        _close( ModuleInfo.obj_fh );
-        ModuleInfo.obj_fh = -1;
-    }
-
-    if( ModuleInfo.error_count > 0 ) {
-        remove( FileInfo.fname[OBJ] );
-    }
-    AsmFree( FileInfo.fname[ASM] );
-    AsmFree( FileInfo.fname[ERR] );
-    AsmFree( FileInfo.fname[LST] );
-    AsmFree( FileInfo.fname[OBJ] );
-    MemFini();
-}
-
-static void open_files( void )
-/****************************/
-{
-    /* open ASM file */
-    DebugMsg(("open_files() enter\n" ));
-
-//    FileInfo.file[ASM] = fopen( FileInfo.fname[ASM], "r" );
-    FileInfo.file[ASM] = fopen( FileInfo.fname[ASM], "rb" );
-
-    if( FileInfo.file[ASM] == NULL ) {
-        DebugMsg(("open_files(): fopen(%s) failed\n", FileInfo.fname[ASM] ));
-        Fatal( FATAL_CANNOT_OPEN_FILE, FileInfo.fname[ASM], errno );
-    }
-
-    /* open OBJ file */
-#ifdef __BORLANDC__
-    /* borland known both open() and _open()! */
-    ModuleInfo.obj_fh = open( FileInfo.fname[OBJ], OP_MODE, OP_PERM );
-#else
-    ModuleInfo.obj_fh = _open( FileInfo.fname[OBJ], OP_MODE, OP_PERM );
-#endif
-    if( ModuleInfo.obj_fh < 0 ) {
-        DebugMsg(("open_files(): fopen(%s) failed\n", FileInfo.fname[OBJ] ));
-        Fatal( FATAL_CANNOT_OPEN_FILE, FileInfo.fname[OBJ], errno );
-    }
-
-    if ( Options.output_format == OFORMAT_OMF )
-        omf_init( ModuleInfo.obj_fh );
-
-    /* delete any existing ERR file */
-    InitErrFile();
-}
-
 /*
  * get a "filename" or "macro"
  */
-static char *GetToken( char *dst, char *str, int max, bool isequate )
-/*******************************************************************/
+static const char *GetToken( char *dst, const char *str, int max, bool isequate )
+/*******************************************************************************/
 {
     bool equatefound = FALSE;
 
@@ -967,30 +886,30 @@ is_quote:
  * so check if it is a file and, if yes, read it.
  */
 
-static char *ReadParamFile( char *name )
-/**************************************/
+static char *ReadParamFile( const char *name )
+/********************************************/
 {
     char        *env;
     char        *str;
-    FILE        *fh;
+    FILE        *file;
     int         len;
     char        ch;
 
     env = NULL;
-    fh = fopen( name, "rb" );
-    if( fh == NULL ) {
+    file = fopen( name, "rb" );
+    if( file == NULL ) {
         Fatal( FATAL_CANNOT_OPEN_FILE, name, errno );
         return( NULL );
     }
     len = 0;
-    if ( fseek( fh, 0, SEEK_END ) == 0 ) {
-        len = ftell( fh );
-        rewind( fh );
+    if ( fseek( file, 0, SEEK_END ) == 0 ) {
+        len = ftell( file );
+        rewind( file );
         env = MemAlloc( len + 1 );
-        fread( env, 1, len, fh );
+        fread( env, 1, len, file );
         env[len] = NULLC;
     }
-    fclose( fh );
+    fclose( file );
     if ( len == 0)
         return( NULL );
     // zip through characters changing \r, \n etc into ' '
@@ -1013,17 +932,17 @@ static char *ReadParamFile( char *name )
 
 /* current cmdline string is done, get the next one! */
 
-static char *getnextcmdstring( char **cmdline )
-/*********************************************/
+static const char *getnextcmdstring( const char **cmdline )
+/*********************************************************/
 {
-    char **src;
-    char **dst;
+    const char **src;
+    const char **dst;
 
     /* something onto the response file stack? */
     if ( rspidx ) {
         rspidx--;
         if ( cmdbuffers[rspidx] )
-            AsmFree( cmdbuffers[rspidx] );
+            AsmFree( (void *)cmdbuffers[rspidx] );
         return( cmdsave[rspidx] );
     }
     for ( dst = cmdline, src = cmdline+1; *src; )
@@ -1032,19 +951,41 @@ static char *getnextcmdstring( char **cmdline )
     return( *cmdline );
 }
 
+static const char * GetNumber( const char * p )
+/*********************************************/
+{
+    OptValue = 0;
+    for( ;*p >= '0' && *p <= '9'; p++ )
+        OptValue = OptValue * 10 + *p - '0';
+    return( p );
+}
+
 /* scan option table and if option is known, process it */
 
-static void ProcessOption( char **cmdline, char *buffer )
-/*******************************************************/
+static void ProcessOption( const char **cmdline, char *buffer )
+/*************************************************************/
 {
     int   i;
     int   j;
-    char  *p = *cmdline;
+    const char *p = *cmdline;
     char  *opt;
-    char  c;
+    //char  c;
 
     numArgs++;
     DebugMsg(("ProcessOption(%s)\n", p ));
+
+    /* numeric option (-0, -1, ... ) handled separately since
+     * the value can be >= 10.
+     */
+    if ( *p >= '0' && *p <= '9' ) {
+        p = GetNumber( p );
+        if ( OptValue < sizeof(cpuoption)/sizeof(cpuoption[0]) ) {
+            p = GetToken( buffer, p, 16, FALSE ); /* get optional 'p' */
+            *cmdline = p;
+            SetCpuCmdline( cpuoption[OptValue], buffer );
+            return;
+        }
+    }
     for( i = 0; cmdl_options[i].name; i++ ) {
         opt = cmdl_options[i].name;
         //DebugMsg(("ProcessOption(%s): %s\n", p, opt ));
@@ -1067,16 +1008,8 @@ static void ProcessOption( char **cmdline, char *buffer )
                     return; /* option processed successfully */
                     break;
                 case '#':             // collect a number
-                    if( *p >= '0' && *p <= '9' ) {
-                        OptValue = 0;
-                        for( ;; ) {
-                            c = *p;
-                            if( c < '0' || c > '9' )
-                                break;
-                            OptValue = OptValue * 10 + c - '0';
-                            p++;
-                        }
-                    }
+                    if( *p >= '0' && *p <= '9' )
+                        p = GetNumber( p );
                     break;
                 case '$':      // collect an identifer+value
                 case '@':      // collect a filename
@@ -1105,6 +1038,7 @@ static void ProcessOption( char **cmdline, char *buffer )
                     break;
                 default:
                     /* internal error: unknown format of option item! */
+                    DebugMsg(( "ProcessOption: unknown option specifier: %s\n", opt ));
                     break;
                 }
             }
@@ -1112,7 +1046,7 @@ static void ProcessOption( char **cmdline, char *buffer )
     }
 opt_error_exit:
     AsmWarn( 1, INVALID_CMDLINE_OPTION, *cmdline );
-    **cmdline = NULLC;
+    *cmdline = "";
     return;
 }
 
@@ -1122,10 +1056,10 @@ opt_error_exit:
  * - get filename argument
  */
 
-static void parse_cmdline( char **cmdline )
-/*****************************************/
+static void parse_cmdline( const char **cmdline )
+/***********************************************/
 {
-    char *str = *cmdline;
+    const char *str = *cmdline;
     char paramfile[_MAX_PATH];
 
     for( ; str; ) {
@@ -1189,7 +1123,7 @@ static void parse_cmdline( char **cmdline )
 }
 
 static void genfailure(int signo)
-/************************/
+/*******************************/
 {
 #if CATCHBREAK
     if (signo != SIGBREAK)
@@ -1197,7 +1131,7 @@ static void genfailure(int signo)
     if (signo != SIGTERM)
 #endif
         AsmError( GENERAL_FAILURE );
-    CloseFiles();
+    close_files();
     exit ( EXIT_FAILURE );
 }
 
@@ -1210,7 +1144,6 @@ static void main_init( void )
 
     MemInit();
     memset( &ModuleInfo, 0, sizeof(ModuleInfo));
-    ModuleInfo.obj_fh = -1;
     for( i = 0; i < NUM_FILE_TYPES; i++ ) {
         FileInfo.file[i] = NULL;
         FileInfo.fname[i] = NULL;
@@ -1220,8 +1153,11 @@ static void main_init( void )
 static void main_fini( void )
 /***************************/
 {
-    free_names();
-    CloseFiles();
+    int i;
+    for( i = 0; i < NUM_FILE_TYPES; i++ ) {
+        AsmFree( FileInfo.fname[i] );
+    }
+    MemFini();
 }
 
 int main( int argc, char **argv )
@@ -1269,7 +1205,7 @@ int main( int argc, char **argv )
 #ifdef DEBUG_OUT
         ModuleInfo.cref = TRUE; /* enable debug displays */
 #endif
-        parse_cmdline( argv );
+        parse_cmdline( (const char **)argv );
         if( FileInfo.fname[ASM] == NULL ) /* source file name supplied? */
             break;
         trademark();
@@ -1289,8 +1225,7 @@ int main( int argc, char **argv )
             _makepath( FileInfo.fname[ASM], drv, dir, finfo.name, NULL );
 #endif
             GetDefaultFilenames( FileInfo.fname[ASM] );
-            open_files();
-            AssembleModule();     // main body: parse the source file
+            AssembleModule();     // assemble source module
             main_fini();
 #if WILDCARDS
             if ( _findnext( fh, &finfo ) == -1 ) {
@@ -1301,12 +1236,13 @@ int main( int argc, char **argv )
         _findclose( fh );
 #endif
     };
+    free_strings();
     if ( numArgs == 0 ) {
         MsgPrintf( MSG_USAGE );
     } else if ( numFiles == 0 )
         AsmError( NO_FILENAME_SPECIFIED );
 
     MsgFini();
-    return( ModuleInfo.error_count != 0); /* zero if no errors */
+    return( ModuleInfo.error_count != 0 ); /* zero if no errors */
 }
 

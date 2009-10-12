@@ -156,85 +156,78 @@ enum {
  */
 
 typedef enum {
-    CMD_MIN_CMD         = 0x6e,     /* minimum cmd enum                 */
-    CMD_RHEADR          = 0x6e,
-    CMD_REGINT          = 0x70,
-    CMD_REDATA          = 0x72,
-    CMD_RIDATA          = 0x74,
-    CMD_OVLDEF          = 0x76,
-    CMD_ENDREC          = 0x78,
-    CMD_BLKDEF          = 0x7a,     /* block definition record          */
-    CMD_BLKDEF32        = 0x7b,     /* weird extension for QNX MAX assembler */
+#if 0 /* these cmds aren't used (and ignored by MS link) */
+    CMD_MIN_CMD         = 0x6e,     /* minimum cmd enum                  */
+    CMD_RHEADR          = 0x6e,     /* R-Module Header                   */
+    CMD_REGINT          = 0x70,     /* Register Initialization           */
+    CMD_REDATA          = 0x72,     /* Relocatable Enumerated Data       */
+    CMD_RIDATA          = 0x74,     /* Relocatable Iterated Data         */
+    CMD_OVLDEF          = 0x76,     /* Overlay Definition                */
+    CMD_ENDREC          = 0x78,     /* End                               */
+    CMD_BLKDEF          = 0x7a,     /* block definition                  */
     CMD_BLKD32          = 0x7b,     /* weird extension for QNX MAX assembler */
-    CMD_BLKEND          = 0x7c,     /* block end record                 */
-    CMD_BLKEND32        = 0x7d,     /* _might_ be used by QNX MAX assembler */
+    CMD_BLKEND          = 0x7c,     /* block end                         */
     CMD_BLKE32          = 0x7d,     /* _might_ be used by QNX MAX assembler */
-    CMD_DEBSYM          = 0x7e,
-    CMD_THEADR          = 0x80,     /* header record                    */
-    CMD_LHEADR          = 0x82,
-    CMD_PEDATA          = 0x84,
-    CMD_PIDATA          = 0x86,
+    CMD_DEBSYM          = 0x7e,     /* Debug Symbols                     */
+#else
+    CMD_MIN_CMD         = 0x80,     /* minimum cmd enum                 */
+#endif
+    CMD_THEADR          = 0x80,     /* translator header                */
+    CMD_LHEADR          = 0x82,     /* library header                   */
+//  CMD_PEDATA          = 0x84,     /* physical enumerated data         */
+//  CMD_PIDATA          = 0x86,     /* physical iterated data           */
     CMD_COMENT          = 0x88,     /* comment record                   */
     CMD_MODEND          = 0x8a,     /* end of module record             */
-    CMD_MODEND32        = 0x8b,     /* 32-bit end of module record      */
     CMD_MODE32          = 0x8b,     /* 32-bit end of module record      */
     CMD_EXTDEF          = 0x8c,     /* import names record              */
     CMD_TYPDEF          = 0x8e,     /* type definition record           */
     CMD_PUBDEF          = 0x90,     /* public names record              */
-    CMD_PUBDEF32        = 0x91,     /* 32-bit export names record       */
-    CMD_PUBD32          = 0x91,     /* 32-bit export names record       */
-    CMD_LOCSYM          = 0x92,
+    CMD_PUBD32          = 0x91,     /* 32-bit version                   */
+//  CMD_LOCSYM          = 0x92,     /* local symbols                    */
     CMD_LINNUM          = 0x94,     /* line number record               */
-    CMD_LINNUM32        = 0x95,     /* 32-bit line number record.       */
-    CMD_LINN32          = 0x95,     /* 32-bit line number record.       */
+    CMD_LINN32          = 0x95,     /* 32-bit version                   */
     CMD_LNAMES          = 0x96,     /* list of names record             */
     CMD_SEGDEF          = 0x98,     /* segment definition record        */
-    CMD_SEGDEF32        = 0x99,     /* 32-bit segment definition        */
-    CMD_SEGD32          = 0x99,     /* 32-bit segment definition        */
+    CMD_SEGD32          = 0x99,     /* 32-bit version                   */
     CMD_GRPDEF          = 0x9a,     /* group definition record          */
     CMD_FIXUP           = 0x9c,     /* relocation record                */
-    CMD_FIXUPP          = 0x9c,     /* for those who stuttttttter       */
-    CMD_FIXUPP32        = 0x9d,     /* 32-bit relocation record         */
-    CMD_FIXU32          = 0x9d,     /* 32-bit relocation record         */
-    CMD_LEDATA          = 0xa0,     /* object record                    */
-    CMD_LEDATA32        = 0xa1,     /* 32-bit object record             */
-    CMD_LEDA32          = 0xa1,     /* 32-bit object record             */
-    CMD_LIDATA          = 0xa2,     /* repeated data record             */
-    CMD_LIDATA32        = 0xa3,     /* 32-bit repeated data record      */
-    CMD_LIDA32          = 0xa3,     /* 32-bit repeated data record      */
-    CMD_LIBHED          = 0xa4,
-    CMD_LIBNAM          = 0xa6,
-    CMD_LIBLOC          = 0xa8,
-    CMD_LIBDIC          = 0xaa,
+    CMD_FIXU32          = 0x9d,     /* 32-bit version                   */
+    CMD_LEDATA          = 0xa0,     /* logical enumerated data          */
+    CMD_LEDA32          = 0xa1,     /* 32-bit version                   */
+    CMD_LIDATA          = 0xa2,     /* logical iterated data            */
+    CMD_LIDA32          = 0xa3,     /* 32-bit version                   */
+//  CMD_LIBHED          = 0xa4,     /* library header                   */
+//  CMD_LIBNAM          = 0xa6,     /* library module names             */
+//  CMD_LIBLOC          = 0xa8,     /* library module locations         */
+//  CMD_LIBDIC          = 0xaa,     /* library dictionary               */
     CMD_COMDEF          = 0xb0,     /* communal definition              */
-    CMD_BAKPAT          = 0xb2,     /* backpatch record (for Quick C) */
-    CMD_BAKPAT32        = 0xb3,
+    CMD_BAKPAT          = 0xb2,     /* backpatch record (for Quick C)   */
     CMD_BAKP32          = 0xb3,
-    CMD_LEXTDEF         = 0xb4,     /*  local import names record */
+    CMD_LEXTDEF         = 0xb4,     /* local import names record        */
     CMD_STATIC_EXTDEF   = 0xb4,
-    CMD_LEXTDEF32       = 0xb5,     /*  32-bit local import names record */
+    CMD_LEXTDEF32       = 0xb5,     /* 32-bit local import names record */
     CMD_STATIC_EXTD32   = 0xb5,
-    CMD_LPUBDEF         = 0xb6,     /* local public names def record */
+    CMD_LPUBDEF         = 0xb6,     /* local public names def record    */
     CMD_LPUBDEF32       = 0xb7,
-    CMD_LCOMDEF         = 0xb8,     /* local comdev */
+    CMD_LCOMDEF         = 0xb8,     /* local comdev                     */
     CMD_STATIC_COMDEF   = 0xb8,
-    CMD_CEXTDF          = 0xbc,     /* external reference to a COMDAT */
+    CMD_CEXTDF          = 0xbc,     /* external reference to a COMDAT   */
     CMD_COMDAT          = 0xc2,     /* initialized communal data record */
-    CMD_COMDAT32        = 0xc3,     /* initialized 32-bit communal data record */
-    CMD_COMD32          = 0xc3,     /* initialized 32-bit communal data record */
-    CMD_LINSYM          = 0xc4,     /* LINNUM for a COMDAT */
-    CMD_LINSYM32        = 0xc5,     /* 32-bit LINNUM for a COMDAT */
-    CMD_LINS32          = 0xc5,     /* 32-bit LINNUM for a COMDAT */
+    CMD_COMD32          = 0xc3,     /* 32-bit version                   */
+    CMD_LINSYM          = 0xc4,     /* symbol line numbers              */
+    CMD_LINS32          = 0xc5,     /* 32-bit version                   */
     CMD_ALIAS           = 0xc6,     /* alias definition record          */
     CMD_NBKPAT          = 0xc8,     /* named backpatch record (quick c?) */
-    CMD_NBKPAT32        = 0xc9,     /* 32-bit named backpatch record */
-    CMD_NBKP32          = 0xc9,     /* 32-bit named backpatch record */
+    CMD_NBKP32          = 0xc9,     /* 32-bit version                   */
     CMD_LLNAME          = 0xca,     /* a "local" lnames */
     CMD_LLNAMES         = 0xca,
+    CMD_MAX_CMD         = 0xca      /* maximum cmd enum                 */
+#if 0
     CMD_VERNUM          = 0xcc,     /* TIS version number record        */
     CMD_VENDEXT         = 0xce,     /* TIS vendor extension record      */
     CMD_MAX_CMD         = 0xce      /* maximum cmd enum                 */
-}cmd_omf;
+#endif
+} cmd_omf;
 
 enum {
     LOC_OFFSET_LO       = 0,        /* relocate lo byte of offset       */
@@ -267,8 +260,13 @@ enum {
     CMT_TNL = 0x40,   /* no list bit */
 };
 /*
-    Comment classes
-*/
+ * Comment classes
+ * JWasm uses: CMT_DOSSEG, CMT_DEFAULT_LIBRARY, CMT_DLL_ENTRY,
+ *             CMT_MS_END_PASS_1, CMT_DEPENDENCY, CMT_LINKER_DIRECTIVE
+ *             CMT_DISASM_DIRECTIVE.
+ * Should also use CMT_MS_OMF, at least if codeview debug info is
+ * written!
+ */
 enum {
     CMT_LANGUAGE_TRANS  = 0x00, /* Language translator comment          */
     CMT_INTEL_COPYRIGHT = 0x01, /* INTEL Copyright record               */
@@ -326,8 +324,9 @@ typedef struct {
 } cpu_data;
 
 /*
-    Linker directives (mostly WLINK directives)
-*/
+ *  Linker directives (mostly WLINK directives)
+ *  JWasm uses LDIR_OPT_FAR_CALLS only
+ */
 enum {
     LDIR_SOURCE_LANGUAGE= 'D',  /* dbg maj/min and source language      */
     LDIR_DEFAULT_LIBRARY= 'L',  /* default library cmd                  */

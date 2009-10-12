@@ -11,14 +11,14 @@ pick( MSG_ASSEMBLY_RESULTS,
       "%s: %lu lines, %u passes, %u ms, %u warnings, %u errors" ,
       "%s: %lu lines, %u passes, %u ms, %u warnings, %u errors" )
 pick( MSG_ERROR_PREFIX,
-      "Error!",
-      "Error!" )
+      "Error",
+      "Error" )
 pick( MSG_WARNING_PREFIX,
-      "Warning!",
-      "Warning!" )
+      "Warning",
+      "Warning" )
 pick( MSG_FATAL_PREFIX,
-      "Fatal!" ,
-      "Fatal!" )
+      "Fatal error" ,
+      "Fatal error" )
 pick( MSG_JWASM,
       "JWasm v%s, %s" ,
       "JWasm v%s, %s" )
@@ -130,6 +130,12 @@ pick( CANNOT_USE_386_REGISTER_WITH_CURRENT_CPU_SETTING,
       "Cannot use 386 register with current CPU setting" ,
       "現在のCPUの設定では386レジスタは使用できません" )
 #endif
+pick( MUST_BE_INDEX_OR_BASE_REGISTER,
+      "Must be index or base register" ,
+      "Must be index or base register" )
+pick( MULTIPLE_INDEX_REGISTERS_NOT_ALLOWED,
+      "Multiple index registers not allowed" ,
+      "Multiple index registers not allowed" )
 pick( TOO_MANY_BASE_REGISTERS,
       "Too many base registers" ,
       "ベースレジスタが多すぎます" )
@@ -142,12 +148,15 @@ pick( SCALE_FACTOR_MUST_BE_1_2_4_OR_8,
 pick( CANNOT_BE_USED_AS_INDEX_REGISTER,
       "Cannot be used as index register: %s" ,
       "Cannot be used as index register: %s" )
-pick( TOO_MANY_BASE_INDEX_REGISTERS,
-      "Too many base/index registers" ,
-      "ベース／インデックス レジスタが多すぎます" )
+#if AMD64_SUPPORT
+pick( CANNOT_MIX_16_AND_32_BIT_REGISTERS,
+      "Base and index register differ in size" ,
+      "Base and index register differ in size" )
+#else
 pick( CANNOT_MIX_16_AND_32_BIT_REGISTERS,
       "Cannot mix 16 and 32-bit registers" ,
       "16ビットレジスタと32ビットレジスタは混在できません" )
+#endif
 pick( EXPECTING_COMMA,
       "Expecting comma" ,
       "コンマが必要です" )
@@ -196,9 +205,6 @@ pick( INVALID_INSTRUCTION_OPERANDS,
 pick( IMMEDIATE_CONSTANT_TOO_LARGE,
       "Immediate constant too large" ,
       "即値定数が大きすぎます" )
-pick( IMMEDIATE_DATA_TOO_BIG,
-      "Immediate data too large" ,
-      "即値データが大きすぎます" )
 pick( IMMEDIATE_DATA_OUT_OF_RANGE,
       "Immediate data out of range" ,
       "即値データの値が範囲外です" )
@@ -290,7 +296,7 @@ pick( CANNOT_OFFSET_GRP,
 pick( INVALID_CHARACTER,
       "Invalid character found" ,
       "使用できない文字があります" )
-pick( INVALID_SIZE,
+pick( INVALID_OPERAND_SIZE,
       "Invalid operand size for instruction" ,
       "命令に対してオペランドの大きさが不適切です" )
 pick( NOT_SUPPORTED,
@@ -326,9 +332,6 @@ pick( LNAME_TOO_LONG,
 pick( BLOCK_NESTING_ERROR,
       "Block nesting error: %s" ,
       "ブロック・ネスト・エラー" )
-pick( SEGMENT_NOT_OPENED,
-      "Ends a segment which is not opened" ,
-      "オープンされていないセグメントのendsがあります" )
 pick( UNKNOWN_SEGMENT_ATTRIBUTE,
       "Segment attribute is unknown: %s" ,
       "Segment attribute is unknown: %s" )
@@ -362,24 +365,15 @@ pick( CANNOT_OPEN_INCLUDE_FILE,
 pick( LIBRARY_NAME_MISSING,
       "Library name is missing" ,
       "ライブラリ名がありません" )
-pick( DATA_EMITTED_WITH_NO_SEGMENT,
-      "Data emitted with no segment" ,
-      "データがセグメントに属していません" )
 pick( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS,
       "Cannot access label through segment registers: %s" ,
       "Cannot access label through segment registers: %s" )
 pick( INVALID_START_ADDRESS,
       "Invalid start address" ,
       "無効なスタートアドレスです" )
-pick( TOKEN_TOO_LONG,
-      "Token is too long" ,
-      "トークンが長すぎます" )
 pick( EXPANDED_LINE_TOO_LONG,
       "Line too long after expansion: %40s" ,
       "エクスパンジョンの後の行が長すぎます" )
-pick( LABEL_EXPECTED_AFTER_COLON,
-      "A label is expected after colon" ,
-      "コロン(:)の後にはラベルが必要です" )
 pick( MUST_BE_ASSOCIATED_WITH_CODE,
       "Must be associated with code" ,
       "コードと関係していなければなりません" )
@@ -443,18 +437,15 @@ pick( CANNOT_CLOSE_FILE,
 pick( FILE_WRITE_ERROR,
       "File write error: %s [%u]",
       "File write error: %s [%u]" )
-pick( FILE_LSEEK_ERROR,
-      "File lseek error: %s [%u]" ,
-      "File lseek error: %s [%u]" )
+pick( FILE_SEEK_ERROR,
+      "File seek error: %s [%u]" ,
+      "File seek error: %s [%u]" )
 pick( INVALID_CMDLINE_OPTION,
       "Invalid command-line option: -%s" ,
       "Invalid command-line option: -%s" )
 pick( INTERNAL_ERROR,
       "Internal error in %s(%u)\n" ,
       "Internal error in %s(%u)\n" )
-pick( PARM_REQUIRED,
-      "Parameter Required" ,
-      "パラメータが必要です" )
 pick( EXPECTED_CL_SQ_BRACKET,
       "Expecting closing square bracket" ,
       "右鍵括弧が必要です" )
@@ -477,7 +468,7 @@ pick( STRANGE_PARM_TYPE,
       "Parameter type not recognised" ,
       "パラメータ型が判りません" )
 #endif
-pick( FORCED,
+pick( FORCED_ERR,
       "forced error" ,
       "forced error")
 pick( FORCED_ARBITRARY,
@@ -513,6 +504,9 @@ pick( NOTE_INCLUDED_BY,
 pick( NOTE_MACRO_CALLED_FROM,
       "%*s%s(%u)[%s]: Macro called from" ,
       "%*s%s(%u)[%s]: Macro called from" )
+pick( NOTE_ITERATION_MACRO_CALLED_FROM,
+      "%*s%s(%u): iteration %u: Macro called from" ,
+      "%*s%s(%u): iteration %u: Macro called from" )
 pick( NOTE_MAIN_LINE_CODE,
       "%*s%s(%u): Main line code" ,
       "%*s%s(%u): Main line code" )
@@ -522,12 +516,14 @@ pick( EXTENDING_JUMP,
 pick( DIRECTIVE_IGNORED,
       "Directive ignored: %s" ,
       "Directive ignored: %s" )
+#if MANGLERSUPP
 pick( UNKNOWN_MANGLER,
       "Unknown symbol class '%s'" ,
       "未知のシンボルクラス '%s'" )
 pick( CONFLICTING_MANGLER,
       "Symbol class for '%s' already established" ,
       "'%s' のシンボルクラスは既に確定しています" )
+#endif
 pick( POWER_OF_2,
       "number must be a power of 2",
       "数値は2のべき乗でなければなりません" )
@@ -549,9 +545,6 @@ pick( CPU_OPTION_INVALID,
 pick( SEGMENT_IN_ANOTHER_GROUP,
       "Segment '%s' is in another group already" ,
       "Segment '%s' is in another group already" )
-pick( LABEL_OUTSIDE_SEGMENT,
-      "Label is defined outside segment" ,
-      "Label is defined outside segment" )
 pick( SIZEOF_NEEDS_TYPE_OR_DATA_LABEL,
       "SIZEOF needs type or data label as argument" ,
       "SIZEOF needs type or data label as argument" )
@@ -594,6 +587,11 @@ pick( TOO_FEW_ARGUMENTS_TO_INVOKE,
 pick( VARARG_PARAMETER_MUST_BE_LAST,
       "VARARG parameter must be last" ,
       "VARARG parameter must be last" )
+#if MACROLABEL
+pick( LABEL_PARAMETER_MUST_BE_FIRST,
+      "LABEL parameter must be first" ,
+      "LABEL parameter must be first" )
+#endif
 pick( TOO_MANY_ARGUMENTS_IN_MACRO_CALL,
       "Too many arguments in macro call: %s" ,
       "Too many arguments in macro call: %s" )
@@ -604,8 +602,8 @@ pick( UNEXPECTED_LITERAL_FOUND_IN_EXPRESSION,
       "Unexpected literal found in expression: %s" ,
       "Unexpected literal found in expression: %s" )
 pick( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM,
-      "Initializer must be a string or single item" ,
-      "Initializer must be a string or single item" )
+      "Initializer must be a string or single item: %s" ,
+      "Initializer must be a string or single item: %s" )
 pick( TOO_MANY_INITIAL_VALUES_FOR_STRUCTURE,
       "Too many initial values for structure: %s" ,
       "Too many initial values for structure: %s" )
@@ -645,7 +643,7 @@ pick( SEGMENT_MISSING_FOR_FIXUP,
 pick( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE,
       "Register value overwritten by INVOKE" ,
       "Register value overwritten by INVOKE" )
-pick( MISSING_QUOTE_IN_STRING,
+pick( MISSING_QUOTATION_MARK_IN_STRING,
       "Missing quotation mark in string" ,
       "Missing quotation mark in string" )
 pick( DIVIDE_BY_ZERO_IN_EXPR,
@@ -702,7 +700,7 @@ pick( USE_OF_REGISTER_ASSUMED_TO_ERROR,
 pick( INITIALIZED_DATA_NOT_SUPPORTED_IN_SEGMENT,
       "Instructions and initialized data not supported in %s segments" ,
       "Instructions and initialized data not supported in %s segments" )
-pick( LITERAL_EXPECTED,
+pick( LITERAL_EXPECTED_AFTER_EQ,
       "Literal expected after '='" ,
       "Literal expected after '='" )
 pick( FASTCALL_VARIANT_NOT_SUPPORTED,
@@ -711,9 +709,11 @@ pick( FASTCALL_VARIANT_NOT_SUPPORTED,
 pick( NO_4KPAGE_ALIGNED_SEGMENTS,
       "No 4k Page-aligned segments in MS386 OMF" ,
       "MS386 OMFには4Kページ整列セグメントがありません" )
+#if 0
 pick( ACCESS_CLASSES_NOT_SUPPORTED,
       "Access classes (RW, EO, RO, ER) not supported in MS386 OMF" ,
       "MS386 OMFではアクセスクラス(RW,EO,RO,ER)はサポートされていません" )
+#endif
 pick( GROUP_DIRECTIVE_INVALID_FOR_COFF,
       "GROUP directive invalid for COFF and ELF format" ,
       "GROUP directive invalid for COFF and ELF format" )
@@ -735,9 +735,11 @@ pick( OPERANDS_MUST_BE_IN_SAME_SEGMENT,
 pick( INVALID_USE_OF_EXTERNAL_SYMBOL,
       "Invalid use of external symbol: %s" ,
       "Invalid use of external symbol: %s" )
+#if COFF_SUPPORT
 pick( LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL,
       "For -coff leading underscore required for start label: %s" ,
       "For -coff leading underscore required for start label: %s" )
+#endif
 pick( UNKNOWN_FIXUP_TYPE,
       "Unknown fixup type found: %u" ,
       "Unknown fixup type found: %u" )
@@ -748,8 +750,8 @@ pick( UNSUPPORTED_FIXUP_TYPE,
       "Unsupported fixup type for %s: %s" ,
       "Unsupported fixup type for %s: %s" )
 pick( INVALID_FIXUP_TYPE,
-      "Fixup invalid for %s: %u" ,
-      "Fixup invalid for %s: %u" )
+      "Fixup invalid for %s: location %X" ,
+      "Fixup invalid for %s: location %X" )
 pick( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE,
       "Syntax error in control-flow directive" ,
       "Syntax error in control-flow directive" )
@@ -758,11 +760,8 @@ pick( INVALID_MODEL_PARAM_FOR_FLAT,
       "Invalid .model parameter for flat model" )
 #if BIN_SUPPORT
 pick( FORMAT_DOESNT_SUPPORT_EXTERNALS,
-      "Output format doesn't support externals" ,
-      "Output format doesn't support externals" )
-pick( SEGMENT_FIXUPS_INVALID,
-      "Segment fixups invalid for BIN format: %u" ,
-      "Segment fixups invalid for BIN format: %u" )
+      "Output format doesn't support externals: %s" ,
+      "Output format doesn't support externals: %s" )
 pick( START_LABEL_INVALID,
       "Invalid start label for -bin",
       "Invalid start label for -bin" )
@@ -923,4 +922,33 @@ pick( INVALID_COPROCESSOR_REGISTER,
 pick( INVALID_USAGE_OF_AHBHCHDH,
       "Registers AH-DH may not be used with SPL-DIL or R8-R15" ,
       "Registers AH-DH may not be used with SPL-DIL or R8-R15" )
+pick( ENDPROLOG_FOUND_BEFORE_EH_DIRECTIVES,
+      ".ENDPROLOG found before EH directives" ,
+      ".ENDPROLOG found before EH directives" )
+pick( MISSING_FRAME_IN_PROC,
+      "Missing FRAME in PROC, no unwind code will be generated",
+      "Missing FRAME in PROC, no unwind code will be generated" )
+pick( BAD_ALIGNMENT_FOR_OFFSET_IN_UNWIND_CODE,
+      "Bad alignment for offset in unwind code",
+      "Bad alignment for offset in unwind code" )
+pick( NONZERO_VALUE_EXPECTED,
+      "Nonzero value expected",
+      "Nonzero value expected" )
+pick( SIZE_OF_PROLOG_TOO_BIG,
+      "Size of prolog too big, must be < 256 bytes",
+      "Size of prolog too big, must be < 256 bytes" )
+pick( MISSING_ENDPROLOG,
+      "Missing .ENDPROLOG: %s",
+      "Missing .ENDPROLOG: %s" )
+#endif
+pick( SAFESEH_ARGUMENT_MUST_BE_A_PROC,
+      ".SAFESEH argument must be a PROC",
+      ".SAFESEH argument must be a PROC" )
+pick( DIRECTIVE_IGNORED_WITHOUT_X,
+      "directive ignored without -%s switch",
+      "directive ignored without -%s switch" )
+#if ELF_SUPPORT
+pick( ELF_GNU_EXTENSIONS_USED,
+      "ELF GNU extensions (8/16-bit relocations) used",
+      "ELF GNU extensions (8/16-bit relocations) used" )
 #endif

@@ -75,7 +75,8 @@ static char *Check4Mangler( int *i )
 }
 #endif
 
-static asm_sym *CreateGlobal( asm_sym *sym, char * name )
+static asm_sym *CreateGlobal( asm_sym *sym, const char * name )
+/*************************************************************/
 {
     if ( sym == NULL )
         sym = SymCreate( name, *name != NULLC );
@@ -89,7 +90,8 @@ static asm_sym *CreateGlobal( asm_sym *sym, char * name )
     return( sym );
 }
 
-static asm_sym *CreateExternal( asm_sym *sym, char *name )
+static asm_sym *CreateExternal( asm_sym *sym, const char *name )
+/**************************************************************/
 {
     if ( sym == NULL )
         sym = SymCreate( name, *name != NULLC );
@@ -103,7 +105,8 @@ static asm_sym *CreateExternal( asm_sym *sym, char *name )
     return( sym );
 }
 
-static asm_sym *CreateComm( asm_sym *sym, char *name)
+static asm_sym *CreateComm( asm_sym *sym, const char *name)
+/*********************************************************/
 {
     if ( sym == NULL )
         sym = SymCreate( name, *name != NULLC );
@@ -122,7 +125,7 @@ static asm_sym *CreateComm( asm_sym *sym, char *name)
 // called during Pass 1 only
 
 ret_code ExterndefDirective( int i )
-/********************/
+/**********************************/
 {
     char                *token;
     char                *mangle_type = NULL;
@@ -292,7 +295,7 @@ ret_code ExterndefDirective( int i )
 
 // helper for EXTERN directive
 
-asm_sym *MakeExtern( char *name, memtype mem_type, struct asm_sym * vartype, asm_sym * sym, uint_8 Ofssize )
+asm_sym *MakeExtern( const char *name, memtype mem_type, struct asm_sym * vartype, asm_sym * sym, uint_8 Ofssize )
 /********************************************************************/
 {
     sym = CreateExternal( sym, name );
@@ -319,7 +322,7 @@ asm_sym *MakeExtern( char *name, memtype mem_type, struct asm_sym * vartype, asm
 // syntax: EXTERN [lang_type] name (altname) :type [, ...]
 
 ret_code ExternDirective( int i )
-/*****************/
+/*******************************/
 {
     char                *token;
     char                *mangle_type = NULL;
@@ -465,6 +468,7 @@ ret_code ExternDirective( int i )
 /* scan EXTERNS with alternative names */
 
 ret_code ExternDirective2( int i )
+/********************************/
 {
     char                *token;
     //char                *mangle_type;
@@ -505,7 +509,7 @@ ret_code ExternDirective2( int i )
 // syntax: PUBLIC [lang_type] name [, ...]
 
 ret_code PublicDirective( int i )
-/*****************/
+/*******************************/
 {
     char                *mangle_type = NULL;
     char                *token;
@@ -611,7 +615,7 @@ static asm_sym *MakeComm( char *name, asm_sym *sym, int size, int count, bool is
  */
 
 ret_code CommDirective( int i )
-/******************/
+/*****************************/
 {
     char            *token;
     char            *mangle_type = NULL;

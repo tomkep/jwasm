@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  Memory manipulation routines.
+* Description:  Memory allocation routines.
 *
 ****************************************************************************/
 
@@ -64,12 +64,19 @@
 
 #ifdef TRMEM
 #include <fcntl.h>
+#ifdef __UNIX__
+ #include <unistd.h>
+#else
+ #include <io.h>
+#endif
 #include <sys/stat.h>
-#include "myunistd.h"
 #include "trmem.h"
 
 static _trmem_hdl   memHandle;
 static int          memFile;     /* file handle we'll write() to */
+#ifdef DEBUG_OUT
+static int memcalls;
+#endif
 #endif
 
 #ifdef TRMEM
@@ -116,10 +123,10 @@ uint_32 mymmap_size = 0;   // size in bytes
 #endif
 
 #if FASTMEM
-static uint_8 *pBase;
-static uint_8 *pCurr;
-static int blocks;
-static int currfree;
+static uint_8 *pBase; /* start list of 512 kB blocks */
+static uint_8 *pCurr; /* points into current block */
+static int currfree;  /* free memory left in current block */
+static int blocks;    /* number of blocks allocated so far */
 #endif
 
 void MemInit( void )
@@ -136,6 +143,9 @@ void MemInit( void )
     if( memHandle == NULL ) {
         exit( EXIT_FAILURE );
     }
+#ifdef DEBUG_OUT
+    memcalls = 0;
+#endif
 #endif
 #if FASTMEM
     currfree = 0;
@@ -285,12 +295,20 @@ void *MemAlloc( size_t size )
     if( ptr == NULL ) {
         Fatal( FATAL_OUT_OF_MEMORY );
     }
+#ifdef TRMEM
+    memcalls++;
+    DebugMsg(("MemAlloc(%Xh)=%X cnt=%d\n", size, ptr, memcalls ));
+#endif
     return( ptr );
 }
 
 void MemFree( void *ptr )
 /***********************/
 {
+#ifdef TRMEM
+    memcalls--;
+    DebugMsg(("MemFree(%Xh) cnt=%d\n", ptr, memcalls ));
+#endif
     free( ptr );
     return;
 }

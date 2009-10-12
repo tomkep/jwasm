@@ -4,9 +4,8 @@
 #ifndef _OMF_H_INCLUDED_
 #define _OMF_H_INCLUDED_
 
-bool      omf_init( int fh );
+void      omf_init( module_info * );
 void      omf_fini( void );
-void      omf_write_record( obj_rec *objr, char kill );
 ret_code  omf_write_pub( void );
 void      omf_write_alias( void );
 ret_code  omf_write_autodep( void );
@@ -20,10 +19,15 @@ void      omf_write_export( void );
 void      omf_write_lib( void );
 void      omf_write_dosseg( void );
 void      omf_write_end_of_pass1( void );
-void      omf_write_ledata( void );
+void      omf_write_ledata( dir_node * );
 void      omf_write_linnum( void );
 void      omf_OutSelect( bool );
-int       omf_FlushCurrSeg( void );
+void      omf_FlushCurrSeg( void );
+
+struct fixup *omf_create_fixup( struct asmfixup * );
+
+void      omf_write_header_dbgcv( void );
+void      omf_write_debug_tables( void );
 
 #endif // _OMF_H_INCLUDED_
 

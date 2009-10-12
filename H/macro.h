@@ -38,11 +38,11 @@
 extern ret_code ExpandToken( int count, char * string, bool addbrackets, bool Equ_Mode );
 extern ret_code ExpandLine( char * );
 extern int      RunMacro( dir_node *, char *, char *, bool, bool, bool );
-extern int      GetTextMacroValue( char *, char * );
+extern int      GetTextMacroValue( const char *, char * );
 
 /* functions in macro.c */
 
-extern dir_node *CreateMacro( char * );     // create a macro symbol
+extern dir_node *CreateMacro( const char * );// create a macro symbol
 extern void     ReleaseMacroData( dir_node * );
 extern ret_code StoreMacro( dir_node *, int, bool );  // store macro content
 extern ret_code MacroDef( int );             // handle MACRO directive
@@ -54,7 +54,7 @@ extern void     MacroFini( void );
 
 /* functions in string.c */
 
-extern asm_sym  *SetTextMacro( asm_sym*, char *, char * ); // EQU for texts
+extern asm_sym  *SetTextMacro( asm_sym*, const char *, const char * ); // EQU for texts
 extern ret_code CatStrDef( int );            // CatStr + TEXTEQU directive
 extern ret_code SubStrDef( int );            // SubStr directive
 extern ret_code SizeStrDef( int );           // SizeStr directive

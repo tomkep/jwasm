@@ -49,7 +49,6 @@
 
 #define IS_CONDJMP( inst )  ( ( inst >= T_JA ) && ( inst <= T_JZ ) )
 
-//extern void     Set_Memtype( struct code_info *, memtype mem_type, bool fix_mem_type );
 extern unsigned int     Opnd_Count;     // operand count of current instr
 
 /* "short jump extension": extend a (conditional) jump.
@@ -87,11 +86,11 @@ static void jumpExtend( struct code_info *CodeInfo, int far_flag )
     }
 
     /* it's ensured that the short jump version is first in AsmOpTable */
-    opcode = AsmOpTable[AsmResWord[CodeInfo->token].position].opcode;
+    opcode = AsmOpTable[optable_idx[CodeInfo->token]].opcode;
     OutputCodeByte( opcode ^ 1 ); /* the negation is achieved by XOR 1 */
     OutputCodeByte( next_ins_size );
     CodeInfo->token = T_JMP;
-    CodeInfo->pcurr = &AsmOpTable[AsmResWord[T_JMP].position];
+    CodeInfo->pcurr = &AsmOpTable[optable_idx[T_JMP]];
 
     return;
 }
@@ -112,8 +111,8 @@ static void FarCallToNear( struct code_info *CodeInfo )
     return;
 }
 
-ret_code branch( struct code_info *CodeInfo, expr_list *opndx )
-/*************************************************************/
+ret_code branch( struct code_info *CodeInfo, const expr_list *opndx )
+/*******************************************************************/
 /*
  called by idata_fixup() and idata_nofixup().
  current instruction is CALL, JMP, Jxx, LOOPx, JCXZ or JECXZ
@@ -121,10 +120,6 @@ ret_code branch( struct code_info *CodeInfo, expr_list *opndx )
  possible return values are:
  - NOT_ERROR,
  - ERROR,
- - (INDIRECT_JUMP)
- INDIRECT_JUMP is handled as error by the caller, but should never occur
- because idata_fixup() and idata_nofixup() won't be called for a memory
- operand.
 */
 {
     int_32              addr;
@@ -134,7 +129,7 @@ ret_code branch( struct code_info *CodeInfo, expr_list *opndx )
     struct asm_sym      *sym;
     memtype             mem_type;
     dir_node            *seg;
-    unsigned            opidx = AsmResWord[CodeInfo->token].position;
+    unsigned            opidx = optable_idx[CodeInfo->token];
 
     CodeInfo->data[Opnd_Count] = opndx->value;
     sym = opndx->sym;
@@ -338,11 +333,6 @@ ret_code branch( struct code_info *CodeInfo, expr_list *opndx )
                     if ( IS_JMPCALL( CodeInfo->token ) )
                         CodeInfo->isfar = TRUE;
                 break;
-#if 0
-            case MT_FWORD: /* shouldn't happen! */
-                Set_Memtype( CodeInfo, MT_FWORD, TRUE );
-                break;
-#endif
             default:
                 DebugMsg(("branch: strange mem_type %Xh\n", mem_type ));
                 CodeInfo->mem_type = mem_type;
@@ -393,16 +383,8 @@ ret_code branch( struct code_info *CodeInfo, expr_list *opndx )
                     }
                 //}
                 break;
-#if 0
-            case MT_DWORD:
-            case MT_FWORD:
-            case MT_SDWORD:
-            case MT_PTR:
-                /* shouldn't happen! */
-                return( INDIRECT_JUMP );
-#endif
             default:
-                AsmError( INVALID_SIZE );
+                AsmError( INVALID_OPERAND_SIZE );
                 return( ERROR );
             }
             CodeInfo->InsFixup[Opnd_Count] = AddFixup( sym, fixup_type, fixup_option );
@@ -452,16 +434,8 @@ ret_code branch( struct code_info *CodeInfo, expr_list *opndx )
                 }
                 find_frame( CodeInfo, sym );/* added v1.95 (after change in fixup.c */
                 break;
-#if 0
-            case MT_DWORD:
-            case MT_WORD:
-            case MT_SDWORD:
-            case MT_SWORD:
-                /* shouldn't happen! */
-                return( INDIRECT_JUMP );
-#endif
             default:
-                AsmError( INVALID_SIZE );
+                AsmError( INVALID_OPERAND_SIZE );
                 return( ERROR );
             }
             // deactivated because there's no override involved here

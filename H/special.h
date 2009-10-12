@@ -54,20 +54,20 @@ res(BH,   bh, 2, RWT_REGISTER,      OP_R8,      7,       0,   P_86,    0)
 res(AX,   ax, 2, RWT_REGISTER,      OP_AX,      0,       0,   P_86,    0)
 res(CX,   cx, 2, RWT_REGISTER,      OP_R16,     1,       0,   P_86,    0)
 res(DX,   dx, 2, RWT_REGISTER,      OP_DX,      2,       0,   P_86,    0)
-res(BX,   bx, 2, RWT_REGISTER,      OP_R16,     3,       0,   P_86,    SFR_IREG)
+res(BX,   bx, 2, RWT_REGISTER,      OP_R16,     3,       0,   P_86,    SFR_IREG|SFR_SIZ2)
 res(SP,   sp, 2, RWT_REGISTER,      OP_R16,     4,       0,   P_86,    0)
-res(BP,   bp, 2, RWT_REGISTER,      OP_R16,     5,       0,   P_86,    SFR_IREG)
-res(SI,   si, 2, RWT_REGISTER,      OP_R16,     6,       0,   P_86,    SFR_IREG)
-res(DI,   di, 2, RWT_REGISTER,      OP_R16,     7,       0,   P_86,    SFR_IREG)
+res(BP,   bp, 2, RWT_REGISTER,      OP_R16,     5,       0,   P_86,    SFR_IREG|SFR_SIZ2)
+res(SI,   si, 2, RWT_REGISTER,      OP_R16,     6,       0,   P_86,    SFR_IREG|SFR_SIZ2)
+res(DI,   di, 2, RWT_REGISTER,      OP_R16,     7,       0,   P_86,    SFR_IREG|SFR_SIZ2)
 
-res(EAX, eax, 3, RWT_REGISTER,      OP_EAX,     0,       0,   P_386,   SFR_IREG)
-res(ECX, ecx, 3, RWT_REGISTER,      OP_R32,     1,       0,   P_386,   SFR_IREG)
-res(EDX, edx, 3, RWT_REGISTER,      OP_R32,     2,       0,   P_386,   SFR_IREG)
-res(EBX, ebx, 3, RWT_REGISTER,      OP_R32,     3,       0,   P_386,   SFR_IREG)
-res(ESP, esp, 3, RWT_REGISTER,      OP_R32,     4,       0,   P_386,   SFR_IREG)
-res(EBP, ebp, 3, RWT_REGISTER,      OP_R32,     5,       0,   P_386,   SFR_IREG)
-res(ESI, esi, 3, RWT_REGISTER,      OP_R32,     6,       0,   P_386,   SFR_IREG)
-res(EDI, edi, 3, RWT_REGISTER,      OP_R32,     7,       0,   P_386,   SFR_IREG)
+res(EAX, eax, 3, RWT_REGISTER,      OP_EAX,     0,       0,   P_386,   SFR_IREG|SFR_SIZ4)
+res(ECX, ecx, 3, RWT_REGISTER,      OP_R32,     1,       0,   P_386,   SFR_IREG|SFR_SIZ4)
+res(EDX, edx, 3, RWT_REGISTER,      OP_R32,     2,       0,   P_386,   SFR_IREG|SFR_SIZ4)
+res(EBX, ebx, 3, RWT_REGISTER,      OP_R32,     3,       0,   P_386,   SFR_IREG|SFR_SIZ4)
+res(ESP, esp, 3, RWT_REGISTER,      OP_R32,     4,       0,   P_386,   SFR_IREG|SFR_SIZ4)
+res(EBP, ebp, 3, RWT_REGISTER,      OP_R32,     5,       0,   P_386,   SFR_IREG|SFR_SIZ4)
+res(ESI, esi, 3, RWT_REGISTER,      OP_R32,     6,       0,   P_386,   SFR_IREG|SFR_SIZ4)
+res(EDI, edi, 3, RWT_REGISTER,      OP_R32,     7,       0,   P_386,   SFR_IREG|SFR_SIZ4)
 
 res(ES,   es, 2, RWT_REGISTER,      OP_SR86,    0,       0,   P_86,    0)
 res(CS,   cs, 2, RWT_REGISTER,      OP_SR86,    1,       0,   P_86,    0)
@@ -131,40 +131,40 @@ res(R13B,r13b,4, RWT_REGISTER,      OP_R8,     13, RWF_X64,    P_64,   0)
 res(R14B,r14b,4, RWT_REGISTER,      OP_R8,     14, RWF_X64,    P_64,   0)
 res(R15B,r15b,4, RWT_REGISTER,      OP_R8,     15, RWF_X64,    P_64,   0)
 
-res(R8W, r8w, 3, RWT_REGISTER,      OP_R16,     8, RWF_X64,    P_64,   SFR_IREG)
-res(R9W, r9w, 3, RWT_REGISTER,      OP_R16,     9, RWF_X64,    P_64,   SFR_IREG)
-res(R10W,r10w,4, RWT_REGISTER,      OP_R16,    10, RWF_X64,    P_64,   SFR_IREG)
-res(R11W,r11w,4, RWT_REGISTER,      OP_R16,    11, RWF_X64,    P_64,   SFR_IREG)
+res(R8W, r8w, 3, RWT_REGISTER,      OP_R16,     8, RWF_X64,    P_64,   0)
+res(R9W, r9w, 3, RWT_REGISTER,      OP_R16,     9, RWF_X64,    P_64,   0)
+res(R10W,r10w,4, RWT_REGISTER,      OP_R16,    10, RWF_X64,    P_64,   0)
+res(R11W,r11w,4, RWT_REGISTER,      OP_R16,    11, RWF_X64,    P_64,   0)
 res(R12W,r12w,4, RWT_REGISTER,      OP_R16,    12, RWF_X64,    P_64,   0)
-res(R13W,r13w,4, RWT_REGISTER,      OP_R16,    13, RWF_X64,    P_64,   SFR_IREG)
-res(R14W,r14w,4, RWT_REGISTER,      OP_R16,    14, RWF_X64,    P_64,   SFR_IREG)
-res(R15W,r15w,4, RWT_REGISTER,      OP_R16,    15, RWF_X64,    P_64,   SFR_IREG)
+res(R13W,r13w,4, RWT_REGISTER,      OP_R16,    13, RWF_X64,    P_64,   0)
+res(R14W,r14w,4, RWT_REGISTER,      OP_R16,    14, RWF_X64,    P_64,   0)
+res(R15W,r15w,4, RWT_REGISTER,      OP_R16,    15, RWF_X64,    P_64,   0)
 
-res(R8D, r8d, 3, RWT_REGISTER,      OP_R32,     8, RWF_X64,    P_64,   SFR_IREG)
-res(R9D, r9d, 3, RWT_REGISTER,      OP_R32,     9, RWF_X64,    P_64,   SFR_IREG)
-res(R10D,r10d,4, RWT_REGISTER,      OP_R32,    10, RWF_X64,    P_64,   SFR_IREG)
-res(R11D,r11d,4, RWT_REGISTER,      OP_R32,    11, RWF_X64,    P_64,   SFR_IREG)
+res(R8D, r8d, 3, RWT_REGISTER,      OP_R32,     8, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
+res(R9D, r9d, 3, RWT_REGISTER,      OP_R32,     9, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
+res(R10D,r10d,4, RWT_REGISTER,      OP_R32,    10, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
+res(R11D,r11d,4, RWT_REGISTER,      OP_R32,    11, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
 res(R12D,r12d,4, RWT_REGISTER,      OP_R32,    12, RWF_X64,    P_64,   0)
-res(R13D,r13d,4, RWT_REGISTER,      OP_R32,    13, RWF_X64,    P_64,   SFR_IREG)
-res(R14D,r14d,4, RWT_REGISTER,      OP_R32,    14, RWF_X64,    P_64,   SFR_IREG)
-res(R15D,r15d,4, RWT_REGISTER,      OP_R32,    15, RWF_X64,    P_64,   SFR_IREG)
+res(R13D,r13d,4, RWT_REGISTER,      OP_R32,    13, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
+res(R14D,r14d,4, RWT_REGISTER,      OP_R32,    14, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
+res(R15D,r15d,4, RWT_REGISTER,      OP_R32,    15, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
 
-res(RAX, rax, 3, RWT_REGISTER,      OP_RAX,     0, RWF_X64,    P_64,   SFR_IREG)
-res(RCX, rcx, 3, RWT_REGISTER,      OP_R64,     1, RWF_X64,    P_64,   SFR_IREG)
-res(RDX, rdx, 3, RWT_REGISTER,      OP_R64,     2, RWF_X64,    P_64,   SFR_IREG)
-res(RBX, rbx, 3, RWT_REGISTER,      OP_R64,     3, RWF_X64,    P_64,   SFR_IREG)
-res(RSP, rsp, 3, RWT_REGISTER,      OP_R64,     4, RWF_X64,    P_64,   SFR_IREG)
-res(RBP, rbp, 3, RWT_REGISTER,      OP_R64,     5, RWF_X64,    P_64,   SFR_IREG)
-res(RSI, rsi, 3, RWT_REGISTER,      OP_R64,     6, RWF_X64,    P_64,   SFR_IREG)
-res(RDI, rdi, 3, RWT_REGISTER,      OP_R64,     7, RWF_X64,    P_64,   SFR_IREG)
-res(R8,  r8,  2, RWT_REGISTER,      OP_R64,     8, RWF_X64,    P_64,   SFR_IREG)
-res(R9,  r9,  2, RWT_REGISTER,      OP_R64,     9, RWF_X64,    P_64,   SFR_IREG)
-res(R10, r10, 3, RWT_REGISTER,      OP_R64,    10, RWF_X64,    P_64,   SFR_IREG)
-res(R11, r11, 3, RWT_REGISTER,      OP_R64,    11, RWF_X64,    P_64,   SFR_IREG)
-res(R12, r12, 3, RWT_REGISTER,      OP_R64,    12, RWF_X64,    P_64,   SFR_IREG)
-res(R13, r13, 3, RWT_REGISTER,      OP_R64,    13, RWF_X64,    P_64,   SFR_IREG)
-res(R14, r14, 3, RWT_REGISTER,      OP_R64,    14, RWF_X64,    P_64,   SFR_IREG)
-res(R15, r15, 3, RWT_REGISTER,      OP_R64,    15, RWF_X64,    P_64,   SFR_IREG)
+res(RAX, rax, 3, RWT_REGISTER,      OP_RAX,     0, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(RCX, rcx, 3, RWT_REGISTER,      OP_R64,     1, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(RDX, rdx, 3, RWT_REGISTER,      OP_R64,     2, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(RBX, rbx, 3, RWT_REGISTER,      OP_R64,     3, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(RSP, rsp, 3, RWT_REGISTER,      OP_R64,     4, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(RBP, rbp, 3, RWT_REGISTER,      OP_R64,     5, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(RSI, rsi, 3, RWT_REGISTER,      OP_R64,     6, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(RDI, rdi, 3, RWT_REGISTER,      OP_R64,     7, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(R8,  r8,  2, RWT_REGISTER,      OP_R64,     8, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(R9,  r9,  2, RWT_REGISTER,      OP_R64,     9, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(R10, r10, 3, RWT_REGISTER,      OP_R64,    10, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(R11, r11, 3, RWT_REGISTER,      OP_R64,    11, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(R12, r12, 3, RWT_REGISTER,      OP_R64,    12, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(R13, r13, 3, RWT_REGISTER,      OP_R64,    13, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(R14, r14, 3, RWT_REGISTER,      OP_R64,    14, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
+res(R15, r15, 3, RWT_REGISTER,      OP_R64,    15, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ8)
 
 res(XMM8, xmm8, 4, RWT_REGISTER,    OP_XMM,     8, RWF_X64,    P_64,   0)
 res(XMM9, xmm9, 4, RWT_REGISTER,    OP_XMM,     9, RWF_X64,    P_64,   0)
@@ -191,6 +191,7 @@ res(SDWORD, sdword, 6,  RWT_TYPE,   MT_SDWORD, ST_SDWORD,  0, P_86,    0)
 res(REAL4,  real4,  5,  RWT_TYPE,   MT_REAL4,  ST_REAL4,   0, P_86,    0)
 res(FWORD,  fword,  5,  RWT_TYPE,   MT_FWORD,  ST_FWORD,   0, P_86,    0)
 res(QWORD,  qword,  5,  RWT_TYPE,   MT_QWORD,  ST_QWORD,   0, P_86,    0)
+res(SQWORD, sqword, 6,  RWT_TYPE,   MT_SQWORD, ST_SQWORD,  0, P_86,    0)
 res(REAL8,  real8,  5,  RWT_TYPE,   MT_REAL8,  ST_REAL8,   0, P_86,    0)
 res(TBYTE,  tbyte,  5,  RWT_TYPE,   MT_TBYTE,  ST_TBYTE,   0, P_86,    0)
 res(REAL10, real10, 6,  RWT_TYPE,   MT_REAL10, ST_REAL10,  0, P_86,    0)
@@ -206,6 +207,9 @@ res(FAR32,  far32,  5,  RWT_TYPE,   MT_FAR,    ST_FAR32,   0, P_386,   0)
 
 res(DOT_TYPE,   .type,       5,  RWT_UNARY_OP, AT_ALL,    14,  0,   P_86,  0)
 res(HIGH,       high,        4,  RWT_UNARY_OP, AT_TLN,     6,  0,   P_86,  0)
+#if LOHI32
+res(HIGH32,     high32,      6,  RWT_UNARY_OP, AT_CONST,   6,  0,   P_86,  0)
+#endif
 res(HIGHWORD,   highword,    8,  RWT_UNARY_OP, AT_CONST,   6,  0,   P_86,  0)
 #if IMAGERELSUPP
 res(IMAGEREL,   imagerel,    8,  RWT_UNARY_OP, AT_TLN,     5,  0,   P_86,  0)
@@ -213,12 +217,15 @@ res(IMAGEREL,   imagerel,    8,  RWT_UNARY_OP, AT_TLN,     5,  0,   P_86,  0)
 res(LENGTH,     length,      6,  RWT_UNARY_OP, AT_LF,      3,  0,   P_86,  0)
 res(LENGTHOF,   lengthof,    8,  RWT_UNARY_OP, AT_LF,      3,  0,   P_86,  0)
 res(LOW,        low,         3,  RWT_UNARY_OP, AT_TLN,     6,  0,   P_86,  0)
+#if LOHI32
+res(LOW32,      low32,       5,  RWT_UNARY_OP, AT_TLN,     6,  0,   P_86,  0)
+#endif
 res(LOWWORD,    lowword,     7,  RWT_UNARY_OP, AT_TLN,     6,  0,   P_86,  0)
 res(LROFFSET,   lroffset,    8,  RWT_UNARY_OP, AT_LFN,     5,  0,   P_86,  0)
 res(MASK,       mask,        4,  RWT_UNARY_OP, AT_TBF,     3,  0,   P_86,  0)
 res(OFFSET,     offset,      6,  RWT_UNARY_OP, AT_TLFN,    5,  0,   P_86,  0)
 res(OPATTR,     opattr,      6,  RWT_UNARY_OP, AT_ALL,    14,  0,   P_86,  0)
-#if SECRELSUPP
+#if SECTIONRELSUPP
 res(SECTIONREL, sectionrel, 10,  RWT_UNARY_OP, AT_LABEL,   5,  0,   P_86,  0)
 #endif
 res(SEG,        seg,         3,  RWT_UNARY_OP, AT_LABEL,   5,  0,   P_86,  0)
@@ -254,11 +261,7 @@ res(C,        c,           1, RWT_RES_ID, 0,   LANG_C,           0,      P_86,  
 res(FORTRAN,  fortran,     7, RWT_RES_ID, 0,   LANG_FORTRAN,     0,      P_86,  0)
 res(PASCAL,   pascal,      6, RWT_RES_ID, 0,   LANG_PASCAL,      0,      P_86,  0)
 res(STDCALL,  stdcall,     7, RWT_RES_ID, 0,   LANG_STDCALL,     0,      P_86,  0)
-#if AMD64_SUPPORT /* hack for syscall - it's become an instruction as well */
-res(SYSCALL,  syscall_,    7, RWT_RES_ID, 0,   LANG_SYSCALL,     0,      P_86,  0)
-#else
 res(SYSCALL,  syscall,     7, RWT_RES_ID, 0,   LANG_SYSCALL,     0,      P_86,  0)
-#endif
 res(FASTCALL, fastcall,    8, RWT_RES_ID, 0,   LANG_FASTCALL,    0,      P_86,  0)
 
 /* directives */
@@ -342,8 +345,8 @@ res(DOT_STACK,      .stack,     6,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
 
 /* hll directives */
 
-res(DOT_BREAK,      .break,     6,  RWT_DIRECTIVE,     DF_CEXPR,  0,  0,   P_86, 0)
-res(DOT_CONTINUE,   .continue,  9,  RWT_DIRECTIVE,     DF_CEXPR,  0,  0,   P_86, 0)
+res(DOT_BREAK,      .break,     6,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
+res(DOT_CONTINUE,   .continue,  9,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
 res(DOT_ELSE,       .else,      5,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
 res(DOT_ELSEIF,     .elseif,    7,  RWT_DIRECTIVE,     DF_CEXPR,  0,  0,   P_86, 0)
 res(DOT_ENDIF,      .endif,     6,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
@@ -359,6 +362,10 @@ res(DOT_STARTUP,    .startup,   8,  RWT_DIRECTIVE,     0,         0,  0,   P_86,
 
 res(DOT_MODEL,      .model,     6,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
 res(DOT_RADIX,      .radix,     6,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
+
+/* directives invalid for IA32+ */
+
+res(DOT_SAFESEH,    .safeseh,   8,  RWT_DIRECTIVE, 0,     0,  RWF_IA32,   P_386, 0)
 
 /* error directives, handled by preprocessor */
 
@@ -421,19 +428,30 @@ res(WHILE,        while,       5, RWT_DIRECTIVE, 0,           DRT_LOOPDIR, 0, P_
 res(MACRO,     macro,          5, RWT_DIRECTIVE, DF_LABEL,              0, 0, P_86, 0)
 res(EXITM,     exitm,          5, RWT_DIRECTIVE, DF_STRPARM,            0, 0, P_86, 0)
 res(GOTO,      goto,           4, RWT_DIRECTIVE, 0,                     0, 0, P_86, 0)
-res(INCLUDE,   include,        7, RWT_DIRECTIVE, 0,           DRT_INCLUDE, 0, P_86, 0)
+res(INCLUDE,   include,        7, RWT_DIRECTIVE, DF_NOEXPAND, DRT_INCLUDE, 0, P_86, 0)
 
 res(CATSTR,    catstr,         6, RWT_DIRECTIVE, DF_STRPARM | DF_LABEL, 0, 0, P_86, 0)
 res(INSTR,     instr,          5, RWT_DIRECTIVE, DF_STRPARM | DF_LABEL, 0, 0, P_86, 0)
 res(SIZESTR,   sizestr,        7, RWT_DIRECTIVE, DF_STRPARM | DF_LABEL, 0, 0, P_86, 0)
 res(SUBSTR,    substr,         6, RWT_DIRECTIVE, DF_STRPARM | DF_LABEL, 0, 0, P_86, 0)
 
-res(DB,        db,             2, RWT_DIRECTIVE, DF_LABEL,  DRT_DATADIR, 0, P_86,  ST_BYTE   )
-res(DD,        dd,             2, RWT_DIRECTIVE, DF_LABEL,  DRT_DATADIR, 0, P_86,  ST_DWORD  )
-res(DF,        df,             2, RWT_DIRECTIVE, DF_LABEL,  DRT_DATADIR, 0, P_86,  ST_FWORD  )
-res(DQ,        dq,             2, RWT_DIRECTIVE, DF_LABEL,  DRT_DATADIR, 0, P_86,  ST_QWORD  )
-res(DT,        dt,             2, RWT_DIRECTIVE, DF_LABEL,  DRT_DATADIR, 0, P_86,  ST_TBYTE  )
-res(DW,        dw,             2, RWT_DIRECTIVE, DF_LABEL,  DRT_DATADIR, 0, P_86,  ST_WORD   )
+res(DB,        db,             2, RWT_DIRECTIVE, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_BYTE  )
+res(DD,        dd,             2, RWT_DIRECTIVE, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_DWORD )
+res(DF,        df,             2, RWT_DIRECTIVE, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_FWORD )
+res(DQ,        dq,             2, RWT_DIRECTIVE, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_QWORD )
+res(DT,        dt,             2, RWT_DIRECTIVE, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_TBYTE )
+res(DW,        dw,             2, RWT_DIRECTIVE, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_WORD  )
+
+#if AMD64_SUPPORT
+res(DOT_ALLOCSTACK, .allocstack,11, RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 0)
+res(DOT_ENDPROLOG,  .endprolog, 10, RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 0)
+res(DOT_PUSHFRAME,  .pushframe, 10, RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 0)
+res(DOT_PUSHREG,    .pushreg,   8,  RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 0)
+res(DOT_SAVEREG,    .savereg,   8,  RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 0)
+res(DOT_SAVEXMM128, .savexmm128,11, RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 0)
+res(DOT_SETFRAME,   .setframe,  9,  RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 0)
+res(FRAME,          frame,      5,  RWT_RES_ID,    0,        0, RWF_X64,  P_64, 0)
+#endif
 
 /* other directives */
 
@@ -475,3 +493,4 @@ res(STRUCT,      struct,      6, RWT_DIRECTIVE, DF_LABEL,             0, 0,  P_8
 res(TEXTEQU,     textequ,     7, RWT_DIRECTIVE, DF_STRPARM | DF_LABEL,0, 0,  P_86, 0)
 res(TYPEDEF,     typedef,     7, RWT_DIRECTIVE, DF_LABEL,             0, 0,  P_86, 0)
 res(UNION,       union,       5, RWT_DIRECTIVE, DF_LABEL,             0, 0,  P_86, 0)
+

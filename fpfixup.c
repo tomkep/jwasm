@@ -38,6 +38,7 @@
 #include "mangle.h"
 #include "myassert.h"
 #include "segment.h"
+#include "omf.h"
 
 extern int_8           Frame;          // Frame of current fixup
 
@@ -54,7 +55,7 @@ typedef enum {
     FPP_NUMBER_OF_TYPES
 } fp_patches;
 
-static char *FPPatchName[] = {
+static const char * const FPPatchName[] = {
     NULL,
     "FIWRQQ",
     "FIDRQQ",
@@ -66,7 +67,7 @@ static char *FPPatchName[] = {
     "FIGRQQ"
 };
 
-static char *FPPatchAltName[] = {
+static const char * const FPPatchAltName[] = {
     NULL,
     NULL,
     NULL,
@@ -79,14 +80,16 @@ static char *FPPatchAltName[] = {
 };
 
 static ret_code MakeFpFixup( struct code_info *CodeInfo, struct asm_sym *sym )
-/*************************************/
+/****************************************************************************/
 {
+    struct asmfixup *fixup;
+    int_32          data;
     if ( write_to_file ) {
-        CodeInfo->InsFixup[2] = AddFixup( sym, FIX_OFF16, OPTJ_NONE );
-        CodeInfo->InsFixup[2]->frame = FRAME_LOC;
-        CodeInfo->InsFixup[2]->fixup_loc = GetCurrOffset();
-        CodeInfo->data[2] = 0;
-        return ( store_fixup( CodeInfo, 2 ) );
+        fixup = AddFixup( sym, FIX_OFF16, OPTJ_NONE );
+        fixup->frame = FRAME_LOC;
+        fixup->fixup_loc = GetCurrOffset();
+        data = 0;
+        return ( store_fixup( fixup, &data ) );
     }
     return( NOT_ERROR );
 }
@@ -96,7 +99,7 @@ ret_code AddFloatingPointEmulationFixup( struct code_info *CodeInfo, bool second
 {
     fp_patches patch;
     struct asm_sym *sym;
-    char **patch_name_array;
+    const char * const *patch_name_array;
 
     patch_name_array = ( secondary ? FPPatchAltName : FPPatchName );
 
@@ -104,27 +107,13 @@ ret_code AddFloatingPointEmulationFixup( struct code_info *CodeInfo, bool second
         patch = FPP_WAIT;
     } else {
         switch( CodeInfo->prefix.RegOverride ) {
-        case EMPTY:
-            patch = FPP_NORMAL;
-            break;
-        case PREFIX_ES:
-            patch = FPP_ES;
-            break;
-        case PREFIX_CS:
-            patch = FPP_CS;
-            break;
-        case PREFIX_SS:
-            patch = FPP_SS;
-            break;
-        case PREFIX_DS:
-            patch = FPP_DS;
-            break;
-        case PREFIX_FS:
-            patch = FPP_FS;
-            break;
-        case PREFIX_GS:
-            patch = FPP_GS;
-            break;
+        case EMPTY:      patch = FPP_NORMAL;        break;
+        case PREFIX_ES:  patch = FPP_ES;            break;
+        case PREFIX_CS:  patch = FPP_CS;            break;
+        case PREFIX_SS:  patch = FPP_SS;            break;
+        case PREFIX_DS:  patch = FPP_DS;            break;
+        case PREFIX_FS:  patch = FPP_FS;            break;
+        case PREFIX_GS:  patch = FPP_GS;            break;
         default:
             never_reach();
         }
@@ -138,5 +127,11 @@ ret_code AddFloatingPointEmulationFixup( struct code_info *CodeInfo, bool second
         sym = MakeExtern( patch_name_array[patch], MT_FAR, NULL, NULL, USE16 );
         SetMangler( sym, NULL, LANG_NONE );
     }
+    /* make sure the next 2 bytes in code stream aren't separated */
+    if( write_to_file == TRUE &&
+       Options.output_format == OFORMAT_OMF &&
+       (CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc + 2) >= MAX_LEDATA )
+        omf_FlushCurrSeg();
+
     return( MakeFpFixup( CodeInfo, sym ) );
 }

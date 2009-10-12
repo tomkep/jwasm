@@ -36,9 +36,10 @@
 #include "directiv.h"
 #include "fpfixup.h"
 #include "segment.h"
+#include "input.h"
 
 static ret_code output_3DNow( struct code_info *CodeInfo )
-/***********************************/
+/********************************************************/
 {
     if( CodeInfo->pcurr->byte1_info == F_0F0F ) {
         OutputCodeByte( CodeInfo->pcurr->opcode | CodeInfo->opcode );
@@ -47,7 +48,7 @@ static ret_code output_3DNow( struct code_info *CodeInfo )
 }
 
 static ret_code output_opc( struct code_info *CodeInfo )
-/*****************************/
+/******************************************************/
 /*
 - determine what code should be output and their order;
 - output prefix bytes ( ADRSIZ, OPSIZ, LOCK, REPxx, segment override prefix, etc )
@@ -59,12 +60,12 @@ static ret_code output_opc( struct code_info *CodeInfo )
     const struct asm_ins *ins = CodeInfo->pcurr;
     uint_8           tmp;
 
+    DebugMsg(("output_opc enter, opc=%X rm=%X, byte1_info=%X\n", ins->opcode, ins->rm_byte, ins->byte1_info ));
     /*
      * Output debug info - line numbers
      */
-    if( Options.line_numbers && write_to_file == TRUE ) {
-        AddLinnumDataRef();
-    }
+    if( Options.line_numbers )
+        AddLinnumDataRef( LineNumber );
 
     /*
      * Output FP fixup if required
@@ -74,7 +75,7 @@ static ret_code output_opc( struct code_info *CodeInfo )
         && ( ins->allowed_prefix != AP_NO_FWAIT )
         && (( ins->allowed_prefix == AP_FWAIT ) || ( ins->cpu & P_FPU_MASK ))) {
         if( AddFloatingPointEmulationFixup( CodeInfo, FALSE ) == ERROR ) {
-            DebugMsg(( "output_opc: AddFolatingPointEmulationFixup returned ERROR\n"));
+            DebugMsg(( "output_opc: AddFloatingPointEmulationFixup returned ERROR\n"));
             return( ERROR );
         }
     }
@@ -90,7 +91,7 @@ static ret_code output_opc( struct code_info *CodeInfo )
         /* if instruction is valid for 16bit cpu, but operands aren't,
          then display a more specific error message! */
         if( ins->cpu == P_386 &&
-            ( ( AsmOpTable[AsmResWord[CodeInfo->token].position].cpu & P_CPU_MASK ) <= P_386 ))
+            ( ( AsmOpTable[optable_idx[CodeInfo->token]].cpu & P_CPU_MASK ) <= P_386 ))
             AsmError( INSTRUCTION_FORM_REQUIRES_80386 );
         else
             AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
@@ -128,7 +129,7 @@ static ret_code output_opc( struct code_info *CodeInfo )
         default:
             break;
         }
-        OutputCodeByte( AsmOpTable[AsmResWord[CodeInfo->prefix.ins].position].opcode );
+        OutputCodeByte( AsmOpTable[optable_idx[CodeInfo->prefix.ins]].opcode );
     }
     /*
      * Output instruction prefix REP or REPNE for SSEx instructions
@@ -249,6 +250,9 @@ static ret_code output_opc( struct code_info *CodeInfo )
 #if AMD64_SUPPORT
     /* the REX prefix must be located after the other prefixes */
     if( CodeInfo->prefix.rex != 0 ) {
+        if ( CodeInfo->Ofssize != USE64 ) {
+            AsmError( INVALID_OPERAND_SIZE );
+        }
         OutputCodeByte( CodeInfo->prefix.rex | 0x40 );
     }
 #endif
@@ -306,12 +310,11 @@ static ret_code output_opc( struct code_info *CodeInfo )
         }
         break;
     }
-    //DebugMsg(("output_opc exit ok\n"));
     return( NOT_ERROR );
 }
 
 static void mark_fixupp( struct code_info *CodeInfo, struct asmfixup *fixup, OPNDTYPE determinant )
-/**************************************************************/
+/*************************************************************************************************/
 /*
  * called by codegen:output_data()
  * modify fixup type for immediates.
@@ -346,14 +349,13 @@ static void mark_fixupp( struct code_info *CodeInfo, struct asmfixup *fixup, OPN
 }
 
 static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int index )
-/************************************************************/
+/************************************************************************************/
 /*
  output address displacement and immediate data;
  possible return codes: NOT_ERROR
 */
 {
-    int  out = 0;
-    uint_8    *pout;
+    int       size = 0;
 
     /* skip the memory operand for XLAT and string instructions! */
     if ( CodeInfo->token == T_XLAT ||
@@ -367,32 +369,32 @@ static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int i
     if ( CodeInfo->InsFixup[index] && write_to_file ) {
         CodeInfo->InsFixup[index]->fixup_loc = GetCurrOffset();
         mark_fixupp( CodeInfo, CodeInfo->InsFixup[index], determinant );
-        store_fixup( CodeInfo, index );
+        store_fixup( CodeInfo->InsFixup[index], &CodeInfo->data[index] );
     }
 
     if( determinant & OP_I8 ) {
-        out = 1;
+        size = 1;
     } else if( determinant & OP_I16 ) {
-        out = 2;
+        size = 2;
     } else if( determinant & ( OP_I32 ) ) {
-        out = 4;
+        size = 4;
     } else if( determinant & OP_J48 ) {
-        out = 6;
+        size = 6;
 #if AMD64_SUPPORT
     } else if( determinant & OP_I64 ) {
-        out = 8;
+        size = 8;
 #endif
     } else if( determinant & OP_M_ANY ) {
         // switch on the mode ( the leftmost 2 bits )
         switch( CodeInfo->rm_byte & BIT_67 ) {
         case MOD_01:  /* displacement size is 1 */
-            out = 1;
+            size = 1;
             break;
         case MOD_00: /* direct; base and/or index with no disp */
             if( ( CodeInfo->Ofssize == USE16 && CodeInfo->prefix.adrsiz == 0 ) ||
                ( CodeInfo->Ofssize == USE32 && CodeInfo->prefix.adrsiz == 1 ) ) {
                 if( ( CodeInfo->rm_byte & BIT_012 ) == D16 ) {
-                     out = 2; /* = size of displacement */
+                     size = 2; /* = size of displacement */
                 }
             } else {
                 switch( CodeInfo->rm_byte & BIT_012 ) {
@@ -402,48 +404,38 @@ static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int i
                     }
                     // no break
                 case D32: /* 0x05 (equals register # for EBP) */
-                    out = 4; /* = size of displacement */
+                    size = 4; /* = size of displacement */
                 }
             }
             break;
         case MOD_10:  /* displacement size is 2/4 */
             if( ( CodeInfo->Ofssize == USE16 && CodeInfo->prefix.adrsiz == 0 ) ||
                ( CodeInfo->Ofssize == USE32 && CodeInfo->prefix.adrsiz == 1 ) ) {
-                out = 2;
+                size = 2;
             } else {
-                out = 4;
+                size = 4;
             }
         }
     }
-    DebugMsg(("output_data: out=%u\n", out));
+    DebugMsg(( "output_data: size=%u\n", size ));
 
-    for ( pout = (uint_8 *)&CodeInfo->data[index]; out > 0; pout++, out-- )
-        OutputCodeByte( *pout );
+    if ( size )
+        OutputBytes( (unsigned char *)&CodeInfo->data[index], size );
     return;
 }
 
 static ret_code check_3rd_operand( struct code_info *CodeInfo )
-/****************************************/
+/*************************************************************/
 {
-    OPNDTYPE    cur_opnd;
-
-    cur_opnd = CodeInfo->opnd_type[OPND3];
-    if( ( CodeInfo->pcurr->opnd_type_3rd == OP3_NONE )
-        || ( CodeInfo->pcurr->opnd_type_3rd & OP3_HID ) ) {
-        if( cur_opnd == OP_NONE ) {
-            return( NOT_ERROR );
-        } else {
-            return( ERROR );
-        }
-    } else if( cur_opnd == OP_NONE ) {
-        return( ERROR );
-    } else {
-        return( NOT_ERROR );
-    }
+    if( ( CodeInfo->pcurr->opnd_type_3rd == OP3_NONE ) ||
+       ( CodeInfo->pcurr->opnd_type_3rd & OP3_HID ) )
+        return( ( CodeInfo->opnd_type[OPND3] == OP_NONE ) ? NOT_ERROR : ERROR );
+    else
+        return( ( CodeInfo->opnd_type[OPND3] == OP_NONE ) ? ERROR : NOT_ERROR );
 }
 
 static ret_code output_3rd_operand( struct code_info *CodeInfo )
-/*****************************************/
+/**************************************************************/
 {
     if( CodeInfo->pcurr->opnd_type_3rd == OP3_NONE ) {
         return( NOT_ERROR );
@@ -464,7 +456,7 @@ static ret_code output_3rd_operand( struct code_info *CodeInfo )
 }
 
 static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant )
-/************************************************************
+/********************************************************************************
 - this routine will look up the assembler opcode table and try to match
   the second operand with what we get;
 - if second operand match then it will output code; if not, pass back to
@@ -484,7 +476,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
 
     do  {
         asm_op2 = CodeInfo->pcurr->opnd_type[OPND2];
-        DebugMsg(("match_phase_3: found op2=%X\n", asm_op2 ));
+        DebugMsg(("match_phase_3: op2=%X\n", asm_op2 ));
         switch( asm_op2 ) {
         case OP_CR:
         case OP_DR:
@@ -584,15 +576,16 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                         cur_opnd = OP_I16;
                         CodeInfo->prefix.opsiz = CodeInfo->Ofssize ? 1 : 0;
                         break;
+#if AMD64_SUPPORT
+                        /* mov [mem], imm64 doesn't exist. It's ensured that
+                         * immediate data is 32bit only
+                         */
+                    case 8:
+#endif
                     case 4:
                         cur_opnd = OP_I32;
                         CodeInfo->prefix.opsiz = CodeInfo->Ofssize ? 0 : 1;
                         break;
-#if AMD64_SUPPORT
-                    case 8: /* mov [mem], imm64 probably doesn't exist */
-                        cur_opnd = OP_I64;
-                        break;
-#endif
                     default:
                         AsmError( INVALID_INSTRUCTION_OPERANDS );
                         return( ERROR );
@@ -607,6 +600,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
             break;
 #if AMD64_SUPPORT
         case OP_I64:
+            DebugMsg(("match_phase_3: OP_I64\n"));
             if( cur_opnd & asm_op2 ) {
                 if( output_opc( CodeInfo ) == ERROR )
                     return( ERROR );
@@ -688,9 +682,8 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
             }
             break;
         case OP_M16:
-            if( cur_opnd & OP_M
-                && ( IS_MEM_TYPE( CodeInfo->mem_type, WORD )
-                || CodeInfo->mem_type == MT_EMPTY ) ) {
+            if( ( cur_opnd & OP_M ) &&
+                ( IS_MEM_TYPE( CodeInfo->mem_type, WORD ) || CodeInfo->mem_type == MT_EMPTY ) ) {
                 DebugMsg(("match_phase_3: OP_M16\n"));
                 if( output_opc( CodeInfo ) == ERROR )
                     return( ERROR );
@@ -699,24 +692,20 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                 return( NOT_ERROR );
             }
             break;
-        case OP_M:
-            if( cur_opnd & asm_op2 ) {
-                DebugMsg(("match_phase_3: OP_M\n"));
-                if( check_3rd_operand( CodeInfo ) == ERROR )
-                    break;
+        case OP_M32: /* v2.0: added for MOVD */
+            if( ( cur_opnd & OP_M ) &&
+               ( IS_MEM_TYPE( CodeInfo->mem_type, DWORD ) || CodeInfo->mem_type == MT_EMPTY ) ) {
+                DebugMsg(("match_phase_3: OP_M32\n"));
                 if( output_opc( CodeInfo ) == ERROR )
                     return( ERROR );
                 output_data( CodeInfo, last_opnd, OPND1 );
                 output_data( CodeInfo, cur_opnd, OPND2 );
-                if( output_3rd_operand( CodeInfo ) == ERROR )
-                    return( ERROR );
-                return( output_3DNow( CodeInfo ) );
+                return( NOT_ERROR );
             }
             break;
         default:
-            if( ( asm_op2 & ( OP_MMX | OP_XMM ) )
-                && ( cur_opnd & asm_op2 ) ) {
-                DebugMsg(("match_phase_3: second op=mmx/xmm\n"));
+            if( ( cur_opnd & asm_op2 ) || (CodeInfo->mem_type == MT_EMPTY && (cur_opnd & OP_M_ANY) && (asm_op2 & OP_M_ANY) )) {
+                DebugMsg(("match_phase_3: default branch\n"));
                 if( check_3rd_operand( CodeInfo ) == ERROR )
                     break;
                 if( output_opc( CodeInfo ) == ERROR )
@@ -739,19 +728,19 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
 }
 
 static ret_code match_phase_2( struct code_info *CodeInfo )
-/**************************************
+/**********************************************************
  * a routine used by match_phase_1() to determine whether both operands match
  * with that in the assembly instructions table;
  * i: pointer to index into AsmOpTable, updated!
  * possible return codes: EMPTY, ERROR, NOT_ERROR
  */
 {
-    DebugMsg(("match_phase_2( %X ) enter\n", CodeInfo ));
     if( CodeInfo->opnd_type[OPND2] != OP_NONE ) {
         // 2 opnds instruction
         ret_code rc = match_phase_3( CodeInfo, CodeInfo->pcurr->opnd_type[OPND1] );
         if ( rc == NOT_ERROR ) {
 #if AMD64_SUPPORT
+            /* for rip-relative fixups, the instruction end is needed */
             if ( CodeInfo->Ofssize == USE64 ) {
                 if ( CodeInfo->InsFixup[OPND1] && CodeInfo->InsFixup[OPND1]->type == FIX_RELOFF32 )
                     CodeInfo->InsFixup[OPND1]->addbytes = GetCurrOffset() - CodeInfo->InsFixup[OPND1]->fixup_loc;
@@ -762,11 +751,11 @@ static ret_code match_phase_2( struct code_info *CodeInfo )
         }
         return( rc );
     } else {
+        DebugMsg(("match_phase_2() enter\n" ));
         // 1 opnd instruction
         // make sure the second opnd also match, i.e. has to be OP_NONE
         if( CodeInfo->pcurr->opnd_type[OPND2] == OP_NONE ) {
             if( output_opc( CodeInfo ) == ERROR ) {
-                DebugMsg(("match_phase_2: error with op1\n"));
                 return( ERROR );
             }
             // output idata or disp ( if first opnd is OP_M / OP_I )
@@ -784,7 +773,7 @@ static ret_code match_phase_2( struct code_info *CodeInfo )
 }
 
 ret_code match_phase_1( struct code_info *CodeInfo )
-/**************************************************
+/***************************************************
 - this routine will look up the assembler opcode table and try to match
   the first operand in table with what we get;
 - if first operand match then it will call match_phase_2() to determine if the
@@ -792,87 +781,40 @@ ret_code match_phase_1( struct code_info *CodeInfo )
 */
 {
     ret_code        retcode;
-    signed char     temp_opsiz = 0;
+    //signed char     temp_opsiz = 0;
     OPNDTYPE        cur_opnd;
-    OPNDTYPE        pre_opnd;
     OPNDTYPE        asm_op1;
 
-    // if it's a FPU instr, reset opsiz
+    /* if it's a FPU instr, reset opsiz */
     if( CodeInfo->pcurr->cpu & P_FPU_MASK ) {
         CodeInfo->prefix.opsiz = FALSE;
     }
 
-    // make sure the user want 80x86 privileged mode ins
-    if( ( CodeInfo->pcurr->cpu & P_PM ) != 0 ) {
-        if( ( ModuleInfo.curr_cpu & P_PM ) == 0 ) {
-            AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
-            return( ERROR );
-        }
+    /* privileged instructions ok? */
+    if( ( CodeInfo->pcurr->cpu & P_PM ) > ( ModuleInfo.curr_cpu & P_PM ) ) {
+        AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+        return( ERROR );
     }
     cur_opnd = CodeInfo->opnd_type[OPND1];
-    pre_opnd = cur_opnd;
 
-    //if( cur_opnd & OP_M_ANY ) {
-    if( cur_opnd == OP_M ) {
-        if ( CodeInfo->mem_type == MT_EMPTY ) {
-            if ( CodeInfo->InsFixup[0] && CodeInfo->InsFixup[0]->sym )
-                CodeInfo->mem_type = CodeInfo->InsFixup[0]->sym->mem_type;
-        }
-        DebugMsg(( "match_phase_1 enter: codeinfo->mem_type=%Xh\n", CodeInfo->mem_type ));
-        if ( CodeInfo->mem_type == MT_EMPTY ) {
-            for (; (CodeInfo->pcurr+1)->first == FALSE; CodeInfo->pcurr++ )
-                if ( CodeInfo->pcurr->opnd_type[OPND1] & OP_M_ANY )
-                    break;
-            /* use the first variant with a memory operand1 */
-            if ( CodeInfo->pcurr->opnd_type[OPND1] & OP_M_ANY )
-                pre_opnd = CodeInfo->pcurr->opnd_type[OPND1];
-            else
-                pre_opnd = OP_M_B;
-        } else if ( (CodeInfo->mem_type & MT_SPECIAL) == 0 ) {
-            switch ( CodeInfo->mem_type & MT_SIZE_MASK ) {
-                /* size is encoded 0-based */
-            case  0:  pre_opnd = OP_M_B;  break;
-            case  1:  pre_opnd = OP_M_W;  break;
-            case  3:  pre_opnd = OP_M_DW; break;
-            case  5:  pre_opnd = OP_M_FW; break;
-            case  7:  pre_opnd = OP_M_QW; break;
-            case  9:  pre_opnd = OP_M_TB; break;
-            case 15:  pre_opnd = OP_M_OW; break;
-            }
-        }
-    } else if( cur_opnd & OP_I ) {
-#if 0
-        if ( CodeInfo->mem_type != MT_EMPTY ) {
-            if (CodeInfo->mem_type == MT_BYTE || CodeInfo->mem_type == MT_SBYTE)
-                pre_opnd = OP_I8;
-            else if (CodeInfo->mem_type == MT_WORD || CodeInfo->mem_type == MT_SWORD)
-                pre_opnd = OP_GE_16;
-            else
-                pre_opnd = OP_I32;
-        } else if( cur_opnd == OP_I8 ) {
-#else
+    if( cur_opnd & OP_I ) {
         if( cur_opnd == OP_I8 ) {
-#endif
-            pre_opnd = OP_GE_8;
+            cur_opnd = OP_IGE8;
         } else if( cur_opnd == OP_I16 ) {
-            pre_opnd = OP_GE_16;
+            cur_opnd = OP_IGE16;
         }
-   }
+    }
 
-    DebugMsg(("match_phase_1: cur_opnd=%X, pre_opnd=%X, codeinfo->mem_type=%Xh\n", cur_opnd, pre_opnd, CodeInfo->mem_type));
-
+#if AMD64_SUPPORT
+    DebugMsg(("match_phase_1: cur_opnd=%X, codeinfo: ofssize=%u mem_type=%Xh rex=%Xh rm=%X sib=%X\n",
+              cur_opnd, CodeInfo->Ofssize, CodeInfo->mem_type, CodeInfo->prefix.rex, CodeInfo->rm_byte, CodeInfo->sib ));
+#endif
+    /* scan the instruction table for a matching first operand */
     do  {
-        // get the operand type from the instruction table
         asm_op1 = CodeInfo->pcurr->opnd_type[OPND1];
-        cur_opnd = CodeInfo->opnd_type[OPND1];
-
-        if( cur_opnd & OP_M_ANY ) {
-            if( !( ( asm_op1 & cur_opnd ) && ( ( asm_op1 & OP_M_DFT ) == ( cur_opnd & OP_M_DFT ) ) ) )
-                cur_opnd = pre_opnd;
-        } else if ( cur_opnd & OP_I )
-            cur_opnd = pre_opnd;
 
         switch( asm_op1 ) {
+#if 0 /* v2.0: special cases no longer needed */
         case OP_MMX:
              if( cur_opnd & OP_MMX ) {
                  retcode = match_phase_2( CodeInfo );
@@ -887,7 +829,7 @@ ret_code match_phase_1( struct code_info *CodeInfo )
                      return( retcode );
              }
              break;
-        case OP_R16:
+        case OP_R16: /* ARPL, LLDT, LMSW, LTR, SLDT, SMSW, STR, VERR, VERW */
             if( cur_opnd & asm_op1 ) {
                 temp_opsiz = CodeInfo->prefix.opsiz;
                 CodeInfo->prefix.opsiz = FALSE;
@@ -897,35 +839,38 @@ ret_code match_phase_1( struct code_info *CodeInfo )
                 CodeInfo->prefix.opsiz = temp_opsiz;
             }
             break;
-        case OP_M16:
+        case OP_M16: /* value isn't used anymore as first operand type */
             if( cur_opnd & asm_op1 ) {
                 retcode = match_phase_2( CodeInfo );
                 if( retcode != EMPTY )
                     return( retcode );
             }
             break;
-        case OP_I32: /* first operand I16/I32: push, call, jmp, jxx, loopxx, jcxz */
-        case OP_I16:
+#endif
+#if 1 /* to be fixed: why is this needed?! */
+        case OP_I32: /* CALL, JMP, PUSHD */
+        case OP_I16: /* CALL, JMP, RETx, ENTER, PUSHW */
             if( cur_opnd & asm_op1 ) {
-                CodeInfo->opnd_type[OPND1] = asm_op1; /* fixme: should this be saved? */
+                CodeInfo->opnd_type[OPND1] = asm_op1;
                 retcode = match_phase_2( CodeInfo );
                 if( retcode != EMPTY )
                     return( retcode );
             }
             break;
-        case OP_I8_U:
+#endif
+        case OP_I8_U: /* INT, OUT */
             if( cur_opnd & OP_I ) {
                 if( CodeInfo->data[OPND1] <= UCHAR_MAX ) {
-                    temp_opsiz = CodeInfo->prefix.opsiz;
+                    //temp_opsiz = CodeInfo->prefix.opsiz;
                     CodeInfo->opnd_type[OPND1] = OP_I8;
                     retcode = match_phase_2( CodeInfo );
                     if( retcode != EMPTY )
                         return( retcode );
-                    CodeInfo->prefix.opsiz = temp_opsiz;
+                    //CodeInfo->prefix.opsiz = temp_opsiz;
                 }
             }
             break;
-        case OP_I_3:                    // for INT only
+        case OP_I_3: /* INT */
             if( ( ( cur_opnd & OP_I8 ) && CodeInfo->data[OPND1] == 3 ) &&
                                 CodeInfo->opnd_type[OPND2] == OP_NONE ) {
                 return( output_opc( CodeInfo ) );
@@ -937,22 +882,20 @@ ret_code match_phase_1( struct code_info *CodeInfo )
                 return( output_opc( CodeInfo ) );
             }
             break;
-        default:
-//            DebugMsg(("match_phase_1: default case\n"));
-            /*
-             - if ( asm_op1 & cur_opnd ) then types of operand 1 do match.
-             - if ( cur_opnd & OP_M_ANY == 0 ) then current operand1 is NOT
-               a memory operand.
-               if ( asm_op1 & OP_M_DFT == cur_opnd & OP_M_DFT ) then ...
-
-             */
-            if( ( asm_op1 & cur_opnd )
-                && ( ( ( cur_opnd & OP_M_ANY ) == 0 )
-                    || ( ( asm_op1 & OP_M_DFT ) == ( cur_opnd & OP_M_DFT ) ) ) ) {
+#if 1 /* can probably be removed again */
+        case OP_M:
+            if( cur_opnd & OP_M_ANY ) {
                 retcode = match_phase_2( CodeInfo );
-                if( retcode != EMPTY ) {
+                if( retcode != EMPTY )
                     return( retcode );
-                }
+            }
+            break;
+#endif
+        default:
+            if( asm_op1 & cur_opnd ) {
+                retcode = match_phase_2( CodeInfo );
+                if( retcode != EMPTY )
+                    return( retcode );
             }
             break;
         }

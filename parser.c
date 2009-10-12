@@ -31,6 +31,7 @@
 #include <ctype.h>
 
 #include "globals.h"
+#include "memalloc.h"
 #include "parser.h"
 #include "insthash.h"
 #include "codegen.h"
@@ -48,11 +49,23 @@
 #include "types.h"
 #include "listing.h"
 #include "data.h"
+#include "fastpass.h"
+#include "queue.h"
 
 #define ONEXMM 1 /* 1=use ONE .xmm directive (Masm compatible) */
 
 #define SET_ADRSIZ( s, x ) ( s->prefix.adrsiz = (( x ) ^ ( s->Ofssize )) ? TRUE : FALSE )
 #define IS_ADDR32( s )  ( s->Ofssize ? ( s->prefix.adrsiz == FALSE ) : ( s->prefix.adrsiz == TRUE ))
+
+/* the parser tables are now generated:
+ * 1. AsmOpTable: contains info for instructions and other reserved words.
+ *    instructions may have multiple entries!
+ * 2. optable_idx: array of indices for AsmOpTable.
+ * 3. AsmResWord: array of reserved words (name, name length, flags).
+ *
+ * Each reserved word has a "token" value assigned, which is a short integer.
+ * This integer can be used as index for AsmResWord and for optable_idx.
+ */
 
 // create AsmOpTable table.
 
@@ -62,9 +75,11 @@ const struct asm_ins AsmOpTable[] = {
     { {op1,op2}, 0,      1 ,0,          0,       0,   0,      cpu, opcode, rm_byte },
 #define ins(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
     { {op1,op2}, prefix, 1, byte1_info, rm_info, op3, op_dir, cpu, opcode, rm_byte },
+#define insx(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) \
+    { {op1,op2}, prefix, 1, byte1_info, rm_info, op3, op_dir, cpu, opcode, rm_byte },
 #define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
     { {op1,op2}, prefix, 0, byte1_info, rm_info, op3, op_dir, cpu, opcode, rm_byte },
-#define insx(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) \
+#define insm(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
     { {op1,op2}, prefix, 1, byte1_info, rm_info, op3, op_dir, cpu, opcode, rm_byte },
 #include "special.h"
 #include "instruct.h"
@@ -72,6 +87,7 @@ const struct asm_ins AsmOpTable[] = {
 ins (NULL,0,0,0,0,0,0,0,0,0,0,0,0)
 #undef insx
 #undef insn
+#undef insm
 #undef ins
 #undef res
 };
@@ -79,17 +95,48 @@ ins (NULL,0,0,0,0,0,0,0,0,0,0,0,0)
 // define indices for AsmOpTable
 
 enum res_idx {
-#define res(tok, string, len, rm_byte, op2, opcode, flags, cpu, op1) T_ ## tok ## _I,
-#define ins(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I,
-#define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix,
+#define  res(tok, string, len, rm_byte, op2, opcode, flags, cpu, op1) T_ ## tok ## _I,
+#define  ins(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I,
 #define insx(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) T_ ## tok ## _I,
+#define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix,
+#define insm(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix,
 #include "special.h"
 #include "instruct.h"
 #undef ins
-#define ins(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I64,
+#undef insm
+#undef insn
+#define  ins(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I64,
+#define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix ## _I64,
+#define insm(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix ## _I64,
+#include "instr64.h"
+#undef insx
+#undef insm
+#undef insn
+#undef ins
+#undef res
+T_NULL_I
+};
+
+// create optable_idx, the index array for AsmOpTable
+
+short optable_idx[] = {
+#define  res(tok, string, len, rm_byte, op2, opcode, flags, cpu, op1) T_ ## tok ## _I,
+#define  ins(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I,
+#define insx(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) T_ ## tok ## _I,
+#define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insm(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#include "special.h"
+#include "instruct.h"
+#undef ins
+#undef insm
+#undef insn
+#define  ins(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I64,
+#define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix ## _I64,
+#define insm(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix ## _I64,
 #include "instr64.h"
 #undef insx
 #undef insn
+#undef insm
 #undef ins
 #undef res
 T_NULL_I
@@ -97,53 +144,57 @@ T_NULL_I
 
 // create the strings for all reserved words
 
+static const char resw_strings[] = {
 #if AMD64_SUPPORT
 #define res(tok, string, len, rm_byte, op2, opcode, flags, cpu, op1) \
-static const char T_ ## tok ## str[sizeof(#string)-1] = { # string };
+ # string
 #else
 #define res(tok, string, len, rm_byte, op2, opcode, flags, cpu, op1) \
-static const char T_ ## tok ## str[len] = { # string };
+ # string
 #endif
 #define ins(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
-static const char T_ ## tok ## str[len] = { # string };
+ # string
 #define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insm(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
 #define insx(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) \
-static const char T_ ## tok ## str[len] = { # string };
+ # string
 #include "special.h"
 #include "instruct.h"
-static const char T_NULLstr[1] = {"."};
+};
 #undef insx
 #undef insn
+#undef insm
 #undef ins
 #undef res
 
 // create the 'reserved words' table (AsmResWord).
-// this table's entries will populate the instruction hash table.
+// this table's entries will be used to create the instruction hash table.
 
 struct ReservedWord AsmResWord[] = {
 #define res(tok, string, len, rm_byte, op2, opcode, flags, cpu, op1) \
-    { NULL, T_ ## tok ## str, len, RWF_SPECIAL | flags, T_ ## tok ## _I },
+    { 0, len, RWF_SPECIAL | flags, NULL },
 #define ins(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
-    { NULL, T_ ## tok ## str, len, 0, T_ ## tok ## _I },
+    { 0, len, 0, NULL },
 #define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insm(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
 #define insx(tok,string,len,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flags) \
-    { NULL, T_ ## tok ## str, len, flags, T_ ## tok ## _I },
+    { 0, len, flags, NULL },
 #include "special.h"
 #include "instruct.h"
 #undef insx
 #undef insn
+#undef insm
 #undef ins
 #undef res
-    { NULL, T_NULLstr, 1, 0, T_NULL_I }
+    { 0, 0, 0, NULL }
 };
 
 /* parsing of branch instructions with imm operand is in branch.c */
-extern ret_code         branch( struct code_info *, expr_list * );
+extern ret_code         branch( struct code_info *, const expr_list * );
 
 extern bool             DefineProc;
 extern struct asm_sym   symPC; /* '$' symbol */
 extern bool             in_epilogue;
-extern bool             CheckSeg;
 
 // v1.96: CodeInfo has become a stack variable.
 // it's more or less the central object for the parser and code generator.
@@ -154,17 +205,23 @@ unsigned                Opnd_Count;
 bool                    line_listed;
 #if AMD64_SUPPORT
 static bool             b64bit = FALSE;
+static const char       *syscallname;   /* "true" syscall name stored here */
 #endif
 int_8                   Frame;          // Frame of current fixup
 uint_16                 Frame_Datum;    // Frame datum of current fixup
 static enum prefix_reg  LastRegOverride;// needed for CMPS
 static bool             fInit = FALSE;
 
-/* global queue of "disabled" reserved words */
-static struct ReservedWord *RemovedFirst = NULL;
-static struct ReservedWord *RemovedTail  = NULL;
+/* global queue of "disabled" reserved words.
+ * just indices of AsmResWord[] are used.
+ */
+static short RemovedFirst = EMPTY;
+static short RemovedTail  = EMPTY;
+#if RENAMEKEY
+static qdesc renamed_keys = { NULL, NULL };
+#endif
 
-static char sr_prefix[] =
+static const char sr_prefix[] =
     { PREFIX_ES, PREFIX_CS, PREFIX_SS, PREFIX_DS, PREFIX_FS, PREFIX_GS };
 
 static int comp_mem16( int reg1, int reg2 )
@@ -336,8 +393,8 @@ static void seg_override( struct code_info *CodeInfo, int seg_reg, asm_sym *sym,
 
     /* don't touch segment overrides for string instructions */
     /* fixme: what about SSE2 CMPSD/MOVSD? */
-    if ( AsmOpTable[AsmResWord[CodeInfo->token].position].allowed_prefix == AP_REP ||
-         AsmOpTable[AsmResWord[CodeInfo->token].position].allowed_prefix == AP_REPxx )
+    if ( AsmOpTable[optable_idx[CodeInfo->token]].allowed_prefix == AP_REP ||
+         AsmOpTable[optable_idx[CodeInfo->token]].allowed_prefix == AP_REPxx )
         return;
 
     if( CodeInfo->token == T_LEA ) {
@@ -387,31 +444,32 @@ static void seg_override( struct code_info *CodeInfo, int seg_reg, asm_sym *sym,
     }
 }
 
-int OperandSize( OPNDTYPE opnd, struct code_info *CodeInfo )
-/**********************************************************/
+int OperandSize( OPNDTYPE opnd, const struct code_info *CodeInfo )
+/****************************************************************/
 {
+    /* v2.0: OP_M8_R8 and OP_M16_R16 have the DFT bit set! */
     if( opnd == OP_NONE ) {
         return( 0 );
     } else if( opnd == OP_M ) {
         return( SizeFromMemtype( CodeInfo->mem_type, CodeInfo->Ofssize ) );
-    } else if( opnd & ( OP_M8_R8 | OP_M_B | OP_I8 | OP_I_1 | OP_I_3 | OP_I8_U ) ) {
+    } else if( opnd & ( OP_R8 | OP_M8 | OP_I8 | OP_I_1 | OP_I_3 | OP_I8_U ) ) {
         return( 1 );
-    } else if( opnd & ( OP_M16_R16 | OP_M_W | OP_I16 | OP_SR ) ) {
+    } else if( opnd & ( OP_R16 | OP_M16 | OP_I16 | OP_SR ) ) {
         return( 2 );
-    } else if( opnd & ( OP_R32 | OP_M_DW | OP_I32 ) ) {
+    } else if( opnd & ( OP_R32 | OP_M32 | OP_I32 ) ) {
         return( 4 );
 #if AMD64_SUPPORT
-    } else if( opnd & ( OP_R64 | OP_M_QW | OP_MMX | OP_I64 ) ) {
+    } else if( opnd & ( OP_R64 | OP_M64 | OP_MMX | OP_I64 ) ) {
 #else
-    } else if( opnd & ( OP_M_QW | OP_MMX ) ) {
+    } else if( opnd & ( OP_M64 | OP_MMX ) ) {
 #endif
         return( 8 );
 //    } else if( opnd & ( OP_I | OP_J48 ) ) {
-    } else if( opnd & OP_J48 ) {
+    } else if( opnd & ( OP_J48 | OP_M48 ) ) {
         return( 6 );
-    } else if( opnd & ( OP_STI | OP_M_TB ) ) {
+    } else if( opnd & ( OP_STI | OP_M80 ) ) {
         return( 10 );
-    } else if( opnd & ( OP_M_OW | OP_XMM ) ) {
+    } else if( opnd & ( OP_XMM | OP_M128 ) ) {
         return( 16 );
     } else if( opnd & OP_SPEC_REG ) {
 #if AMD64_SUPPORT
@@ -450,8 +508,6 @@ int InRange( long val, unsigned bytes )
         return( (val > 65535 || val < -65535) ? 0 : 1);
 #endif
 }
-
-#define GetRegNo( x ) AsmOpTable[AsmResWord[x].position].opcode
 
 static ret_code mem2code( struct code_info *CodeInfo, char ss, int index, int base, asm_sym *sym )
 /************************************************************************************************/
@@ -622,9 +678,15 @@ static ret_code mem2code( struct code_info *CodeInfo, char ss, int index, int ba
             AsmError( INVALID_USE_OF_REGISTER );
             return( ERROR );
         default:
+#if AMD64_SUPPORT
+            if ( ( GetOpndType( base, 0 ) & GetOpndType( index, 0) & SFR_SIZMSK ) == 0 ) {
+                AsmError( CANNOT_MIX_16_AND_32_BIT_REGISTERS );
+                return( ERROR );
+#else
             if( base < T_EAX ) {
                 AsmError( CANNOT_MIX_16_AND_32_BIT_REGISTERS );
                 return( ERROR );
+#endif
             } else if( base == T_EBP ) {
                 if( mod_field == MOD_00 ) {
                     mod_field = MOD_01;
@@ -648,7 +710,7 @@ static ret_code mem2code( struct code_info *CodeInfo, char ss, int index, int ba
     } else if( Opnd_Count == OPND1 ) {
         CodeInfo->rm_byte = mod_field | rm_field;
 #if AMD64_SUPPORT
-        CodeInfo->prefix.rex = rex;
+        CodeInfo->prefix.rex |= rex;
 #endif
     }
     return( NOT_ERROR );
@@ -660,9 +722,7 @@ static ret_code mem2code( struct code_info *CodeInfo, char ss, int index, int ba
  - CodeInfo->mem_type_fixed
  - <obsolete: CodeInfo->isfar>
  - CodeInfo->prefix.opsiz
- called by
- - process_branchs
- - memory_operand
+ called by memory_operand()
 */
 static void Set_Memtype( struct code_info *CodeInfo, memtype mem_type, bool fix_mem_type )
 /****************************************************************************************/
@@ -675,51 +735,34 @@ static void Set_Memtype( struct code_info *CodeInfo, memtype mem_type, bool fix_
         CodeInfo->mem_type = mem_type;
         if( fix_mem_type ) {
             CodeInfo->mem_type_fixed = TRUE;
-            // next 2 lines commented out for v1.95
-            //if( ( mem_type == MT_FAR ) && IS_JMPCALL( CodeInfo->token ) )
-            //    CodeInfo->isfar = TRUE;
         }
     }
     if( CodeInfo->Ofssize > USE16 && ( IS_MEM_TYPE( CodeInfo->mem_type, WORD ) ) ) {
         /* if we are in use32 mode, we have to add OPSIZ prefix for
-         most of the 386 instructions ( except MOVSX and MOVZX )
-         when we find WORD PTR
+         * most of the 386 instructions when operand has type WORD.
+         * Exceptions ( MOVSX and MOVZX ) are handled in check_size().
          */
-        if( !IS_BRANCH( CodeInfo->token ) ) {
-            switch( CodeInfo->token ) {
-            case T_MOVSX:
-            case T_MOVZX:
-                break;
-            default:
-                CodeInfo->prefix.opsiz = TRUE;
-                break;
-            }
-        }
+        CodeInfo->prefix.opsiz = TRUE;
 
     } else if( CodeInfo->Ofssize == USE16 && ( IS_MEM_TYPE( CodeInfo->mem_type, DWORD ) ) ) {
 
-        /* if we are not in use32 mode, we have to add OPSIZ
-         * when we find DWORD PTR
-         * unless we have a LxS ins.
-         * which moves a DWORD ptr into SR:word reg
-         * fixme  - can this be done by breaking up the LXS instructions in
-         *          instruct.h, and then putting F_32 or F_16 to append
-         *      opsize bytes when necessary ?
+        /* in 16bit mode, a DWORD memory access usually requires an OPSIZ
+         * prefix. A few instructions, which access m16:16 operands,
+         * are exceptions.
          */
-        if( !IS_BRANCH( CodeInfo->token ) ) {
-
-            switch( CodeInfo->token ) {
-            case T_LDS:
-            case T_LES:
-            case T_LFS:
-            case T_LGS:
-            case T_LSS:
-                /* in these cases, opsize does NOT need to be changed  */
-                break;
-            default:
-                CodeInfo->prefix.opsiz = TRUE;
-                break;
-            }
+        switch( CodeInfo->token ) {
+        case T_LDS:
+        case T_LES:
+        case T_LFS:
+        case T_LGS:
+        case T_LSS:
+        case T_CALL:
+        case T_JMP:
+            /* in these cases, opsize does NOT need to be changed  */
+            break;
+        default:
+            CodeInfo->prefix.opsiz = TRUE;
+            break;
         }
     }
     return;
@@ -732,14 +775,14 @@ static void Set_Memtype( struct code_info *CodeInfo, memtype mem_type, bool fix_
  this function is also called by data_item()
  */
 
-ret_code segm_override( struct code_info *CodeInfo, expr_list *opndx )
-/********************************************************************/
+ret_code segm_override( struct code_info *CodeInfo, const expr_list *opndx )
+/**************************************************************************/
 {
     struct asm_sym      *sym;
 
     if( opndx->override != EMPTY ) {
         if( AsmBuffer[opndx->override]->token == T_REG ) {
-            int temp = AsmOpTable[AsmResWord[AsmBuffer[opndx->override]->value].position].opcode;
+            int temp = GetRegNo( AsmBuffer[opndx->override]->value );
             if ( SegAssumeTable[temp].error ) {
                 DebugMsg(("segm_override: assume error, reg=%u\n", temp ));
                 AsmError( USE_OF_REGISTER_ASSUMED_TO_ERROR );
@@ -765,13 +808,13 @@ ret_code segm_override( struct code_info *CodeInfo, expr_list *opndx )
     return( NOT_ERROR );
 }
 
-static ret_code process_branchs( struct code_info *CodeInfo, expr_list *opndx )
-/*****************************************************************************/
+static ret_code process_branchs( struct code_info *CodeInfo, const expr_list *opndx )
+/***********************************************************************************/
 /*
- parse the branchs instructions operand.
- called by idata_nofixup() and idata_fixup().
- called for CALL <imm_op>, JMP <imm_op>, Jxx, JxCXZ, LOOPxx.
-*/
+ * parse the branchs instructions operand.
+ * called by idata_nofixup() and idata_fixup().
+ * called for CALL <imm_op>, JMP <imm_op>, Jcc, JxCXZ, LOOPcc.
+ */
 {
     /*
      Masm checks overrides for branch instructions with immediate operand.
@@ -794,46 +837,51 @@ static ret_code process_branchs( struct code_info *CodeInfo, expr_list *opndx )
         }
     }
 
-    Set_Memtype( CodeInfo, opndx->mem_type, opndx->explicit );
-    if( opndx->mbr != NULL ) {
-        Set_Memtype( CodeInfo, opndx->mbr->mem_type, FALSE );
+    /* simplified Set_Memtype() */
+    if( opndx->mem_type != MT_EMPTY && CodeInfo->mem_type_fixed == FALSE ) {
+        CodeInfo->mem_type = opndx->mem_type;
+        if( opndx->explicit )
+            CodeInfo->mem_type_fixed = TRUE;
     }
-
-    if ( branch( CodeInfo, opndx ) == NOT_ERROR )
-        return( NOT_ERROR );
-    /* branch() might have returned ERROR or INDIRECT_JMP */
-    return( ERROR );
+    return( branch( CodeInfo, opndx ) );
 }
 
-static ret_code idata_nofixup( struct code_info *CodeInfo, expr_list *opndx )
-/***************************************************************************/
+static ret_code idata_nofixup( struct code_info *CodeInfo, const expr_list *opndx )
+/*********************************************************************************/
 {
     OPNDTYPE    op_type;
-#if AMD64_SUPPORT
-    int_64      value;
-#else
-    long        value;
-#endif
+    int_32      value;
     int         size;
 
-    DebugMsg(("idata_nofixup(type=%u mem_type=%u value=%X) enter [CodeInfo->mem_type=%Xh]\n", opndx->type, opndx->mem_type, opndx->value, CodeInfo->mem_type));
+    DebugMsg(("idata_nofixup(type=%u mem_type=%Xh value=%I64X) enter [CodeInfo->mem_type=%Xh]\n", opndx->type, opndx->mem_type, opndx->value64, CodeInfo->mem_type));
 
      // jmp/call/jxx/loop/jcxz/jecxz?
     if( IS_ANY_BRANCH( CodeInfo->token ) ) { 
         return( process_branchs( CodeInfo, opndx ) );
     }
-#if AMD64_SUPPORT
-    value = opndx->value64;
-#else
     value = opndx->value;
-#endif
     CodeInfo->data[Opnd_Count] = value;
 
+#if AMD64_SUPPORT
+    /* 64bit immediates are restricted to MOV <reg>,<imm64>
+     */
+    if ( opndx->hvalue != 0 && opndx->hvalue != -1 ) {
+        if ( CodeInfo->token == T_MOV && ( CodeInfo->opnd_type[OPND1] & OP_R64 ) ) {
+            CodeInfo->opcode |= W_BIT; // set w-bit
+            CodeInfo->opnd_type[Opnd_Count] = OP_I64;
+            if ( Opnd_Count < OPND3 )
+                CodeInfo->data[Opnd_Count+1] = opndx->hvalue;
+            DebugMsg(("idata_nofixup exit, op_type=OP_I64\n" ));
+            return( NOT_ERROR );
+        }
+        AsmError( CONSTANT_VALUE_TOO_LARGE );
+        return( ERROR );
+    }
+#endif
     switch( CodeInfo->mem_type ) {
     case MT_EMPTY:
-        /* don't set the CodeInfo->mem_type!
-         */
-        if( CodeInfo->token == T_PUSH ) {
+        switch ( CodeInfo->token ) {
+        case T_PUSH:
             /* PUSH <type> PTR <value>? */
             if( opndx->explicit ) {
                 if ( opndx->Ofssize != USE_EMPTY )
@@ -857,7 +905,7 @@ static ret_code idata_nofixup( struct code_info *CodeInfo, expr_list *opndx )
             }
             /* for both USE32 and USE64, an OP_I32 is max. */
             if( CodeInfo->Ofssize > USE16 ) {
-                if( (int_8)value == (int_32)value ) {
+                if( (int_8)value == value ) {
                     op_type = OP_I8;
                 } else {
                     op_type = OP_I32;
@@ -865,29 +913,31 @@ static ret_code idata_nofixup( struct code_info *CodeInfo, expr_list *opndx )
             } else {
                 /* 16bit mode without typecast. extend to DWORD only if
                  the value cannot be expressed as 16bit */
-                if( (int_8)value == (int_32)value ) {
+                //if( (int_8)value == (int_32)value ) {
+                if( (int_8)value == value ) {
                     op_type = OP_I8;
-                } else if( (unsigned long)value > USHRT_MAX ) {
+                //} else if( (unsigned long)value > USHRT_MAX ) {
+                } else if( value <= USHRT_MAX && value >= - USHRT_MAX ) {
+                    op_type = OP_I16;
+                } else {
                     SET_OPSIZ_32( CodeInfo );
                     op_type = OP_I32;
-                } else {
-                    op_type = OP_I16;
                 }
             }
             break;
-        } else if( CodeInfo->token == T_PUSHW ) {
+        case T_PUSHW:
             op_type = OP_I16;
             if( (int_8)value == (int_16)value ) {
                 op_type = OP_I8;
             }
             break;
-        } else if( CodeInfo->token == T_PUSHD ) {
+        case T_PUSHD:
             op_type = OP_I32;
             if( (int_8)value == (int_32)value ) {
                 op_type = OP_I8;
             }
             break;
-        } else {
+        default:
             if (opndx->explicit) {
                 if ( opndx->Ofssize != USE_EMPTY )
                     size = SizeFromMemtype(opndx->mem_type, opndx->Ofssize );
@@ -899,177 +949,85 @@ static ret_code idata_nofixup( struct code_info *CodeInfo, expr_list *opndx )
                     op_type = OP_I16;
                 else if (size == 4)
                     op_type = OP_I32;
-                if (size >= 1 && size <= 4) {
-                    break;
+                else {
+                    DebugMsg(("idata_nofixup: invalid operand, size=%u\n", size ));
+                    AsmError( INVALID_INSTRUCTION_OPERANDS );
+                    return( ERROR );
                 }
+                break;
+            }
+            /* use true signed values for BYTE only!
+             */
+            if ( (int_8)value == value )
+                op_type = OP_I8;
+            //else if ( value <= SHRT_MAX && value >= SHRT_MIN )
+            else if ( value <= USHRT_MAX && value >= SHRT_MIN )
+                op_type = OP_I16;
+            else {
+                op_type = OP_I32;
             }
         }
-        /* changing this code is dangerous! */
-        /* creation of the short, signed forms rely on this info */
-#if AMD64_SUPPORT
-        if( value > ULONG_MAX ) {
-            op_type = OP_I64;
-            if ( Opnd_Count < OPND3 )
-                CodeInfo->data[Opnd_Count+1] = value >> 32;
-        } else
-#endif
-        if( ( value > SHRT_MAX ) || ( value < SHRT_MIN ) ) {
-//        if( ( value > USHRT_MAX ) || ( value < SHRT_MIN ) ) {
-            op_type = OP_I32;
-        } else if( ( value > SCHAR_MAX ) || ( value < SCHAR_MIN ) ) {
-//        } else if( ( value > UCHAR_MAX ) || ( value < SCHAR_MIN ) ) {
-            op_type = OP_I16;
-        } else {
-            op_type = OP_I8;
-        }
         break;
-    case MT_FAR: /* most likely dead code */
-        DebugMsg(("idata_nofixup, MT_FAR branch\n" ));
-#if 0 /* v1.96: commented out */
-        if( CodeInfo->Ofssize == USE16 ) {
-            op_type = OP_J32;
-        } else {
-            op_type = OP_J48;
-        }
-        break;
-#endif
-    case MT_NEAR: /* most likely dead code */
-        DebugMsg(("idata_nofixup, MT_NEAR branch\n" ));
-#if 0 /* v1.96: commented out */
-        if( CodeInfo->Ofssize == USE16 ) {
-            op_type = OP_I16;
-        } else {
-            op_type = OP_I32;
-        }
-        break;
-#endif
-    case MT_SHORT:
-#if 0
-        /* v1.96: cannot imagine that SHORT is useful outside branch()
-         * instruction context (LEA?). This code is probably never reached. */
-        if( ( value > SCHAR_MAX ) || ( value < SCHAR_MIN ) ) {
-            // expect 8-bit but got 16 bit
-            DebugMsg(("idata_nofixup: jump out of range, value=%d\n", value ));
-            AsmErr( JUMP_OUT_OF_RANGE, value - SCHAR_MAX );
-            return( ERROR );
-        } else {
-            op_type = OP_I8;
-        }
-        break;
-#else
-        DebugMsg(("idata_nofixup: mem_type=MT_SHORT\n" ));
-        AsmErr( INVALID_INSTRUCTION_OPERANDS );
-        return( ERROR );
-#endif
     case MT_BYTE:
-        if( !InRange( value, 1 ) ) {
-            // expect 8-bit but got 16/32 bit
-            AsmError( IMMEDIATE_DATA_OUT_OF_RANGE );
-            return( ERROR );
-        } else {
-            op_type = OP_I8;
-        }
-        break;
     case MT_SBYTE:
-        if( ( value > SCHAR_MAX ) || ( value < SCHAR_MIN ) ) {
+        /* Masm allows to store 255 and -255 in a variable of type SBYTE.
+         */
+        if( ( value > UCHAR_MAX ) || ( value < - UCHAR_MAX ) ) {
             AsmError( IMMEDIATE_DATA_OUT_OF_RANGE );
             return( ERROR );
-        } else {
-            op_type = OP_I8;
         }
-        break;
-    case MT_SWORD:
-        if( ( value > SHRT_MAX ) || ( value < SHRT_MIN ) ) {
-            AsmError( IMMEDIATE_DATA_OUT_OF_RANGE );
-            return( ERROR );
-        } else if( ( value > SCHAR_MAX ) || ( value < SCHAR_MIN ) ) {
-            op_type = OP_I16;
-        } else {
-            op_type = OP_I8;
-        }
-        CodeInfo->opcode |= W_BIT; // set w-bit
+        op_type = OP_I8;
         break;
     case MT_WORD:
-        if( Options.sign_value ) {
-            if( !InRange( value, 2 ) ) {
-                AsmError( IMMEDIATE_DATA_OUT_OF_RANGE );
-                return( ERROR );
-            } else if( value > UCHAR_MAX ) {
-                op_type = OP_I16;
-            } else {
-                op_type = OP_I8;
-            }
-        } else {
-            if( !InRange( value, 2 ) ) {
-                AsmError( IMMEDIATE_DATA_OUT_OF_RANGE );
-                return( ERROR );
-            } else if( ( value > SCHAR_MAX ) || ( value < SCHAR_MIN ) ) {
-                op_type = OP_I16;
-            } else {
-                op_type = OP_I8;
-            }
+    case MT_SWORD:
+        /* Masm allows to store 65535 and -65535 in a variable of type SWORD.
+         * Masm v6.15 (and below) even accepts values beyond these limits!
+         */
+        //if( ( value > SHRT_MAX ) || ( value < SHRT_MIN ) ) {
+        if( ( value > USHRT_MAX ) || ( value < - USHRT_MAX ) ) {
+            AsmError( IMMEDIATE_DATA_OUT_OF_RANGE );
+            return( ERROR );
         }
-        CodeInfo->opcode |= W_BIT; // set w-bit
-        break;
-   case MT_SDWORD:
-        if( ( value > SCHAR_MAX ) || ( value < SCHAR_MIN ) ) {
-            op_type = OP_I32;
-        } else {
+        if( (int_8)value != value )
+            op_type = OP_I16;
+        else
             op_type = OP_I8;
-        }
         CodeInfo->opcode |= W_BIT; // set w-bit
         break;
+    case MT_REAL4:
     case MT_DWORD:
-        if( Options.sign_value ) {
-            if( value > UCHAR_MAX ) {
-                op_type = OP_I32;
-            } else {
-                op_type = OP_I8;
-            }
-        } else {
-            if( ( value > SCHAR_MAX ) || ( value < SCHAR_MIN ) ) {
-                op_type = OP_I32;
-            } else {
-                op_type = OP_I8;
-            }
-        }
+    case MT_SDWORD:
+        if( (int_8)value != value )
+            op_type = OP_I32;
+        else
+            op_type = OP_I8;
         CodeInfo->opcode |= W_BIT; // set w-bit
         break;
-#if AMD64_SUPPORT
     case MT_REAL8:
-        op_type = OP_I64;
-        CodeInfo->opcode |= W_BIT; // set w-bit
-        break;
-#endif
     case MT_QWORD:
-        if( Options.sign_value ) {
-            if( value > UCHAR_MAX ) {
-                op_type = OP_I32;
-            } else {
-                op_type = OP_I8;
-            }
-        } else {
-            if ( value <= UCHAR_MAX ) {
-                op_type = OP_I8;
-#if AMD64_SUPPORT
-            } else if( value > ULONG_MAX ) {
-                op_type = OP_I64;
-                if ( Opnd_Count < OPND3 )
-                    CodeInfo->data[Opnd_Count+1] = value >> 32;
-#endif
-            } else
-                op_type = OP_I32;
-        }
+    case MT_SQWORD:
+        /* QWORD is handled like DWORD. the x86-64 architecture doesn't
+         * allow 64bit immediate with one exception, and this exception
+         * is handled above.
+         */
+        if ( (int_8)value != value )
+            op_type = OP_I32;
+        else
+            op_type = OP_I8;
         CodeInfo->opcode |= W_BIT; // set w-bit
         break;
-    default: /* shouldn't happen? */
-        op_type = OP_I32;
-        CodeInfo->opcode |= W_BIT; // set w-bit
-        DebugMsg(("idata_nofixup, default branch\n" ));
-        break;
+    //case MT_FAR:
+    //    DebugMsg(("idata_nofixup, MT_FAR branch\n" ));
+    //case MT_NEAR:
+    //    DebugMsg(("idata_nofixup, MT_NEAR branch\n" ));
+    //case MT_SHORT:
+    //    DebugMsg(("idata_nofixup: mem_type=MT_SHORT\n" ));
+    default:
+        AsmErr( INVALID_INSTRUCTION_OPERANDS );
+        return( ERROR );
     }
     CodeInfo->opnd_type[Opnd_Count] = op_type;
-    DebugMsg(("idata_nofixup exit, op_type=%X [CodeInfo->mem_type=%Xh]\n", op_type, CodeInfo->mem_type));
+    DebugMsg(("idata_nofixup exit, op_type=%X\n", op_type ));
     return( NOT_ERROR );
 }
 
@@ -1119,6 +1077,12 @@ static ret_code idata_fixup( struct code_info *CodeInfo, expr_list *opndx )
         }
     }
 
+    if( opndx->mem_type == MT_SHORT ) {
+        /* short works for branch instructions only */
+        AsmErr( INVALID_INSTRUCTION_OPERANDS );
+        return( ERROR );
+    }
+
     if ( CodeInfo->mem_type == MT_EMPTY && Opnd_Count > OPND1 ) {
         size = OperandSize( CodeInfo->opnd_type[OPND1], CodeInfo );
         //if( opndx->instr != EMPTY && size && (size < 2 || ( Ofssize && size < 4 ))) {
@@ -1130,7 +1094,7 @@ static ret_code idata_fixup( struct code_info *CodeInfo, expr_list *opndx )
 #if IMAGERELSUPP
             case T_IMAGEREL:
 #endif
-#if SECRELSUPP
+#if SECTIONRELSUPP
             case T_SECTIONREL:
 #endif
                 AsmErr( OPERANDS_MUST_BE_THE_SAME_SIZE, size, ( 2 << Ofssize ) );
@@ -1157,10 +1121,6 @@ static ret_code idata_fixup( struct code_info *CodeInfo, expr_list *opndx )
                     CodeInfo->mem_type = MT_WORD;
             }
         } else {
-            if( opndx->mem_type == MT_SHORT ) {
-                AsmErr( INVALID_INSTRUCTION_OPERANDS );
-                return( ERROR );
-            }
             switch ( CodeInfo->token ) {
             case T_PUSHW:
             case T_PUSHD:
@@ -1256,7 +1216,7 @@ static ret_code idata_fixup( struct code_info *CodeInfo, expr_list *opndx )
     if (opndx->instr == T_IMAGEREL && fixup_type == FIX_OFF32)
         CodeInfo->InsFixup[Opnd_Count]->type = FIX_OFF32_IMGREL;
 #endif
-#if SECRELSUPP
+#if SECTIONRELSUPP
     if (opndx->instr == T_SECTIONREL && fixup_type == FIX_OFF32)
         CodeInfo->InsFixup[Opnd_Count]->type = FIX_OFF32_SECREL;
 #endif
@@ -1265,8 +1225,8 @@ static ret_code idata_fixup( struct code_info *CodeInfo, expr_list *opndx )
     return( NOT_ERROR );
 }
 
-static void add_frame( struct code_info *CodeInfo )
-/*************************************************/
+static void add_frame( const struct code_info *CodeInfo )
+/*******************************************************/
 /* add frame data in Frame and Frame_Datum to current fixup */
 {
     struct asmfixup     *fixup;
@@ -1296,14 +1256,29 @@ static ret_code memory_operand( struct code_info *CodeInfo, expr_list *opndx, bo
     int                 j;
     int                 size;
     struct asm_sym      *sym;
-    unsigned char       base_lock = FALSE;
-    unsigned char       Ofssize;
+    uint_8              Ofssize;
     enum fixup_types    fixup_type;
 
     DebugMsg(("memory_operand(opndx->value=%X, memtype=%Xh, fixup=%u) enter, [CodeInfo->memtype=%Xh, Ofssize=%u]\n",
               opndx->value, opndx->mem_type, with_fixup, CodeInfo->mem_type, CodeInfo->Ofssize ));
     CodeInfo->data[Opnd_Count] = opndx->value;
-    CodeInfo->opnd_type[Opnd_Count] = OP_M; //OP_M == 0x870000
+    CodeInfo->opnd_type[Opnd_Count] = OP_M;
+
+#if AMD64_SUPPORT
+    /*
+     * set rex Wide bit if a QWORD operand is found (not for FPU/MMX/SSE instr).
+     * This looks pretty hackish now and is to be cleaned!
+     */
+    if ( IS_MEM_TYPE( opndx->mem_type, QWORD ) ) {
+        if ( CodeInfo->token != T_CMPXCHG8B &&
+            CodeInfo->token != T_LEA &&
+            CodeInfo->token != T_PUSH &&
+            CodeInfo->token != T_POP &&
+            !( CodeInfo->pcurr->cpu & ( P_FPU_MASK | P_EXT_MASK ) ) )
+            CodeInfo->prefix.rex |= REX_W;
+    }
+#endif
+
     sym = opndx->sym;
 
     segm_override( CodeInfo, opndx );
@@ -1311,7 +1286,9 @@ static ret_code memory_operand( struct code_info *CodeInfo, expr_list *opndx, bo
 #if 1
     /* convert MT_PTR to MT_WORD, MT_DWORD, MT_FWORD, MT_QWORD. */
     /* MT_PTR cannot be set explicitely (by the PTR operator),
-     so this value must come from a label or a structure field.
+     * so this value must come from a label or a structure field.
+     * (above comment is most likely plain wrong, see 'PF16 ptr [reg]'!
+     * This code needs cleanup!
      */
     if ( opndx->mem_type == MT_PTR ) {
         asm_sym *sym2 = sym;
@@ -1329,6 +1306,11 @@ static ret_code memory_operand( struct code_info *CodeInfo, expr_list *opndx, bo
 
         } else if (sym2)  {
             size = sym2->total_size;
+#if 1 /* v2.0: handle PF16 ptr [ebx], which didn't work in v1.96 */
+        } else if ( opndx->explicit && opndx->type ) {
+            size = opndx->type->total_size;
+            CodeInfo->isfar = opndx->type->isfar;
+#endif
         } else {
             switch ( ModuleInfo.model ) {
             case MOD_COMPACT:
@@ -1348,32 +1330,48 @@ static ret_code memory_operand( struct code_info *CodeInfo, expr_list *opndx, bo
     Set_Memtype( CodeInfo, opndx->mem_type, opndx->explicit );
     if( opndx->mbr != NULL ) {
         /* if the struct field is just another struct, use it's total size
-         to set the operand size.
+         * to set CodeInfo->mem_type.
          */
-        if ( opndx->mbr->mem_type == MT_TYPE ) {
+        //if ( opndx->mbr->mem_type == MT_TYPE ) {
+        //v2: don't overwrite opndx->mem_type,
+        //    testcase: cmp (dword ptr <struct_field>), 0
+        if ( opndx->mbr->mem_type == MT_TYPE && opndx->mem_type == MT_EMPTY ) {
             memtype mem_type;
+            DebugMsg(("memory_operand: mbr %s has mem_type MT_TYPE, total_size=%u\n", opndx->mbr->name, opndx->mbr->total_size ));
             if ( MemtypeFromSize( opndx->mbr->total_size, &mem_type ) == NOT_ERROR )
                 Set_Memtype( CodeInfo, mem_type, FALSE );
-        } else
-            Set_Memtype( CodeInfo, opndx->mbr->mem_type, FALSE );
+        }
+        //else  /* v2: obsolete */
+        //    Set_Memtype( CodeInfo, opndx->mbr->mem_type, FALSE );
+    }
+    if ( ( CodeInfo->mem_type & MT_SPECIAL) == 0 ) {
+        switch ( CodeInfo->mem_type & MT_SIZE_MASK ) {
+            /* size is encoded 0-based */
+        case  0:  CodeInfo->opnd_type[Opnd_Count] = OP_M8;   break;
+        case  1:  CodeInfo->opnd_type[Opnd_Count] = OP_M16;  break;
+        case  3:  CodeInfo->opnd_type[Opnd_Count] = OP_M32;  break;
+        case  5:  CodeInfo->opnd_type[Opnd_Count] = OP_M48;  break;
+        case  7:  CodeInfo->opnd_type[Opnd_Count] = OP_M64;  break;
+        case  9:  CodeInfo->opnd_type[Opnd_Count] = OP_M80;  break;
+        case 15:  CodeInfo->opnd_type[Opnd_Count] = OP_M128; break;
+        }
     }
 
     // check for base registers
 
     if (opndx->base_reg != EMPTY ) {
         base = AsmBuffer[opndx->base_reg]->value;
-        j = AsmResWord[base].position;
-        if ( ( ( AsmOpTable[j].opnd_type[1] & OP_R32) && CodeInfo->Ofssize == USE32 ) ||
+        if ( ( ( GetOpndType( base, 1 ) & OP_R32) && CodeInfo->Ofssize == USE32 ) ||
 #if AMD64_SUPPORT
-            ( ( AsmOpTable[j].opnd_type[1] & OP_R64) && CodeInfo->Ofssize == USE64 ) ||
+            ( ( GetOpndType( base, 1 ) & OP_R64) && CodeInfo->Ofssize == USE64 ) ||
 #endif
-            ( ( AsmOpTable[j].opnd_type[1] & OP_R16) && CodeInfo->Ofssize == USE16 ) )
-            CodeInfo->prefix.adrsiz = 0;
+            ( ( GetOpndType( base, 1 ) & OP_R16) && CodeInfo->Ofssize == USE16 ) )
+            CodeInfo->prefix.adrsiz = FALSE;
         else {
-            CodeInfo->prefix.adrsiz = 1;
+            CodeInfo->prefix.adrsiz = TRUE;
 #if AMD64_SUPPORT
             /* 16bit addressing modes don't exist in long mode */
-            if ( ( AsmOpTable[j].opnd_type[1] & OP_R16) && CodeInfo->Ofssize == USE64 ) {
+            if ( ( GetOpndType( base, 1 ) & OP_R16) && CodeInfo->Ofssize == USE64 ) {
                 AsmError( INVALID_ADDRESSING_MODE_WITH_CURRENT_CPU_SETTING );
                 return( ERROR );
             }
@@ -1386,15 +1384,14 @@ static ret_code memory_operand( struct code_info *CodeInfo, expr_list *opndx, bo
 
     if( opndx->idx_reg != EMPTY ) {
         index = AsmBuffer[opndx->idx_reg]->value;
-        j = AsmResWord[index].position;
-        if ( ( ( AsmOpTable[j].opnd_type[1] & OP_R32) && CodeInfo->Ofssize == USE32 ) ||
+        if ( ( ( GetOpndType( index, 1 ) & OP_R32) && CodeInfo->Ofssize == USE32 ) ||
 #if AMD64_SUPPORT
-            ( ( AsmOpTable[j].opnd_type[1] & OP_R64) && CodeInfo->Ofssize == USE64 ) ||
+            ( ( GetOpndType( index, 1 ) & OP_R64) && CodeInfo->Ofssize == USE64 ) ||
 #endif
-            ( ( AsmOpTable[j].opnd_type[1] & OP_R16) && CodeInfo->Ofssize == USE16 ) ) {
-            CodeInfo->prefix.adrsiz = 0;
+            ( ( GetOpndType( index, 1 ) & OP_R16) && CodeInfo->Ofssize == USE16 ) ) {
+            CodeInfo->prefix.adrsiz = FALSE;
         } else {
-            CodeInfo->prefix.adrsiz = 1;
+            CodeInfo->prefix.adrsiz = TRUE;
         }
 #if AMD64_SUPPORT
         if( index == T_ESP || index == T_RSP ) {
@@ -1452,24 +1449,15 @@ static ret_code memory_operand( struct code_info *CodeInfo, expr_list *opndx, bo
 
     if( with_fixup ) {
 
-        if ( sym ) {
-            switch( sym->state ) {
-            case SYM_UNDEFINED:
-                // forward reference
-                break;
-            case SYM_SEG:
-            case SYM_GRP:
-                // error !!!!!
-                break;
-            default:
-                /* don't use symbol's size if OFFSET is involved! */
-                /* example: mov eax,[esi+offset buffer] */
-                // if( CodeInfo->mem_type == MT_EMPTY ) {
-                if( CodeInfo->mem_type == MT_EMPTY && opndx->instr == EMPTY ) {
-                    Set_Memtype( CodeInfo, sym->mem_type, FALSE );
-                }
-                break;
-            }
+        /* if memory operand has no mem_type, but contains a symbol
+         * with a mem_type, then use the symbol's memtype.
+         * test case: jmp [ebx*4 + label1]
+         */
+        if( CodeInfo->mem_type == MT_EMPTY &&
+           opndx->instr == EMPTY &&
+           sym &&
+           sym->mem_type != MT_EMPTY ) {
+            Set_Memtype( CodeInfo, sym->mem_type, FALSE );
         }
 
         if( opndx->abs ) {
@@ -1551,10 +1539,12 @@ static ret_code memory_operand( struct code_info *CodeInfo, expr_list *opndx, bo
         add_frame( CodeInfo );
 
     } else { /* branch without fixup */
-#if 1
+#if 0
         /* if an undefined label is moved (mov [xxx],offset yyy)
-         * change to immediate data. (this might be placed better in
-         * check_size()! )
+         * change to immediate data. this might be placed better in
+         * check_size()!
+         * v2.0 todo: check if this code runs at all. forward references
+         * will create a fixup since v2.
          */
         if (sym && sym->state == SYM_UNDEFINED &&
             CodeInfo->token == T_MOV &&
@@ -1564,8 +1554,8 @@ static ret_code memory_operand( struct code_info *CodeInfo, expr_list *opndx, bo
 #endif
         if (sym && sym->state == SYM_STACK) {
             if( base != EMPTY ) {
-                if( base_lock == TRUE ) {
-                    // [reg + data][reg + data] is not allowed
+                if( index != EMPTY ) {
+                    /* no free index register */
                     AsmError( TOO_MANY_BASE_REGISTERS );
                     return( ERROR );
                 } else {
@@ -1581,10 +1571,10 @@ static ret_code memory_operand( struct code_info *CodeInfo, expr_list *opndx, bo
             } else {
                 base = T_BP;
             }
-            base_lock = TRUE;   // add lock
-            if( CodeInfo->mem_type == MT_EMPTY ) {
-                Set_Memtype( CodeInfo, sym->mem_type, FALSE );
-            }
+            //v2.0: removed
+            //if( CodeInfo->mem_type == MT_EMPTY ) {
+            //    Set_Memtype( CodeInfo, sym->mem_type, FALSE );
+            //}
         }
         if( mem2code( CodeInfo, ss, index, base, sym ) == ERROR ) {
             return( ERROR );
@@ -1601,54 +1591,63 @@ static ret_code memory_operand( struct code_info *CodeInfo, expr_list *opndx, bo
         switch ( CodeInfo->mem_type ) {
         case MT_EMPTY:
             if (Parse_Pass > PASS_1) {
+                DebugMsg(("memory_operand: CodeInfo->memtype=empty, instruction operand must have size\n" ));
                 AsmError( INSTRUCTION_OPERAND_MUST_HAVE_SIZE );
                 return( ERROR );
             }
             /* fall through */
         case MT_NEAR:
-            //CodeInfo->mem_type = 2 << CodeInfo->Ofssize; /* might be better */
-            CodeInfo->mem_type = CodeInfo->Ofssize ? MT_DWORD : MT_WORD;
+             /* changed v2.0 */
+            CodeInfo->mem_type = (CodeInfo->Ofssize == USE64) ? MT_QWORD : (CodeInfo->Ofssize == USE32) ? MT_DWORD : MT_WORD;
+            //CodeInfo->mem_type = CodeInfo->Ofssize ? MT_DWORD : MT_WORD;
             break;
         case MT_FAR:
-            //CodeInfo->mem_type = 2 + (2 << CodeInfo->Ofssize); /* might be better */
-            CodeInfo->mem_type = CodeInfo->Ofssize ? MT_FWORD : MT_DWORD;
+             /* changed v2.0 */
+            CodeInfo->mem_type = (CodeInfo->Ofssize == USE64) ? MT_TBYTE : (CodeInfo->Ofssize == USE32) ? MT_FWORD : MT_DWORD;
+            //CodeInfo->mem_type = CodeInfo->Ofssize ? MT_FWORD : MT_DWORD;
             break;
         }
-
-        j = SizeFromMemtype(CodeInfo->mem_type, ModuleInfo.Ofssize );
-        /* the next check is probably not necessary anymore, because
-         * the entry with OP_M in instruct.h has been removed.
-         */
+        j = SizeFromMemtype( CodeInfo->mem_type, CodeInfo->Ofssize );
 #if AMD64_SUPPORT
-        if ( j == 1 || j > 8 || ( CodeInfo->Ofssize == USE64 && j == 4 ) ) {
+        if ( ( CodeInfo->Ofssize != USE64 ) && ( j == 1 || j > 6 ) ) {
 #else
         if ( j == 1 || j > 6 ) {
 #endif
             /* CALL/JMP possible for WORD/DWORD/FWORD memory operands only */
             DebugMsg(("memory_operand: invalid operand, size=%u\n", j ));
-            AsmError( INVALID_INSTRUCTION_OPERANDS );
+            AsmError( INVALID_OPERAND_SIZE );
             return( ERROR );
         }
+
         if( opndx->mem_type == MT_FAR || CodeInfo->mem_type == MT_FWORD ||
+#if AMD64_SUPPORT
+           ( CodeInfo->mem_type == MT_TBYTE && CodeInfo->Ofssize == USE64 ) ||
+#endif
             ( CodeInfo->mem_type == MT_DWORD &&
               ((CodeInfo->Ofssize == USE16 && opndx->Ofssize != USE32) ||
                (CodeInfo->Ofssize == USE32 && opndx->Ofssize == USE16 )))) {
             CodeInfo->isfar = TRUE;
         }
+        DebugMsg(("memory_operand: JMP/CALL, CodeInfo->far=%u\n", CodeInfo->isfar ));
         break;
+#if 0
+        /* v2.0: this check is no longer needed, there's a better definition
+         * in instruct.h now.
+         */
     case T_PUSH:
     case T_POP:
         j = SizeFromMemtype( CodeInfo->mem_type, ModuleInfo.Ofssize );
 #if AMD64_SUPPORT
-        if ( j == 1 || j > CurrWordSize ) {
+        if ( j == 1 || j > ( ( CodeInfo->Ofssize == USE64 ) ? 8 : 4 )) {
 #else
         if ( j == 1 || j > 4 ) {
 #endif
             /* PUSH/POP possible for WORD or DWORD|QWORD memory operands only */
-            DebugMsg(("memory_operand: PUSH/POP invalid operand, size=%u\n", size ));
-            AsmError(INVALID_INSTRUCTION_OPERANDS);
-            return(ERROR);
+            DebugMsg(("memory_operand: PUSH/POP invalid operand, size=%u\n", j ));
+            AsmError( INVALID_INSTRUCTION_OPERANDS );
+            return( ERROR );
         }
+#endif
     }
     DebugMsg(("memory_operand exit, no error, opndx.type/value=%Xh/%Xh, CodeInfo.memtype=%Xh opndtype=%Xh fix=%Xh\n",
               opndx->type, opndx->value, CodeInfo->mem_type, CodeInfo->opnd_type[Opnd_Count], CodeInfo->InsFixup[Opnd_Count] ));
@@ -1667,7 +1666,12 @@ ret_code process_address( struct code_info *CodeInfo, expr_list *opndx )
 
     if( opndx->indirect ) {  /* indirect register operand or stack var */
 
-        DebugMsg(("process_address: INDIRECT, sym=%X, adrsiz=%u\n", opndx->sym, CodeInfo->prefix.adrsiz ));
+        DebugMsg(("process_address: INDIRECT, sym=%s, adrsiz=%u\n", opndx->sym ? opndx->sym->name : "NULL", CodeInfo->prefix.adrsiz ));
+        if ( opndx->hvalue && ( opndx->hvalue != -1 || opndx->value >= 0 ) ) {
+            DebugMsg(("process_address: displacement doesn't fit in 32 bits: %I64X\n", opndx->value64 ));
+            AsmError( CONSTANT_VALUE_TOO_LARGE );
+            return( ERROR );
+        }
         if( opndx->sym == NULL || opndx->sym->state == SYM_STACK ) {
             return( memory_operand( CodeInfo, opndx, FALSE ) );
         } else {
@@ -1720,10 +1724,27 @@ ret_code process_address( struct code_info *CodeInfo, expr_list *opndx )
         case T_PUSH:
         case T_PUSHW:
         case T_PUSHD:
-            //return( idata_nofixup( CodeInfo, opndx ) ); /* v1.96: changed */
-            return( idata_fixup( CodeInfo, opndx ) );
+            /* v2.0: don't assume immediate operand if cpu is 8086 */
+            if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) > P_86 ) {
+                //return( idata_nofixup( CodeInfo, opndx ) ); /* v1.96: changed */
+                return( idata_fixup( CodeInfo, opndx ) );
+            }
+            break;
+        default:
+            /* if it is the second operand and the first one
+             is a memory reference, then assume it's an immediate!
+             example: mov [var], label
+             */
+            if ( Opnd_Count == OPND2 &&
+                ( CodeInfo->opnd_type[OPND1] & OP_M_ANY ) ) {
+                return( idata_fixup( CodeInfo, opndx ) );
+            }
         }
-        return( memory_operand( CodeInfo, opndx, FALSE ) );
+        /* v2.0: fixups should be generated for undefined operands
+         * to allow backpatching!
+         */
+        //return( memory_operand( CodeInfo, opndx, FALSE ) );
+        return( memory_operand( CodeInfo, opndx, TRUE ) );
 
     } else if( ( opndx->sym->state == SYM_SEG ) ||
                ( opndx->sym->state == SYM_GRP ) ) {
@@ -1768,15 +1789,15 @@ ret_code process_address( struct code_info *CodeInfo, expr_list *opndx )
 // handle constant operands
 // these might also need a fixup if they are externals (EXTERN:ABS!)
 
-static ret_code process_const( struct code_info *CodeInfo, expr_list *opndx )
-/***************************************************************************/
+static ret_code process_const( struct code_info *CodeInfo, const expr_list *opndx )
+/*********************************************************************************/
 {
     /* hack for IMUL: compress the operands so there are 2 only */
     if( ( CodeInfo->token == T_IMUL ) &&
        ( CodeInfo->opnd_type[OPND1] & OP_R ) ) {
         if( Opnd_Count == OPND2 ) {
 #if AMD64_SUPPORT
-            /* fixme: fill the rex prefix */
+            CodeInfo->prefix.rex |= ((CodeInfo->prefix.rex & REX_B) ? REX_R : 0);
 #endif
             CodeInfo->rm_byte = ( CodeInfo->rm_byte & ~BIT_345 )
                           | ( ( CodeInfo->rm_byte & BIT_012 ) << 3 );
@@ -1793,8 +1814,8 @@ static ret_code process_const( struct code_info *CodeInfo, expr_list *opndx )
     return( idata_nofixup( CodeInfo, opndx ) );
 }
 
-static ret_code process_register( struct code_info *CodeInfo, expr_list *opndx )
-/******************************************************************************/
+static ret_code process_register( struct code_info *CodeInfo, const expr_list *opndx )
+/************************************************************************************/
 /*
 - parse and encode direct register operands;
 */
@@ -1803,12 +1824,11 @@ static ret_code process_register( struct code_info *CodeInfo, expr_list *opndx )
     int                 reg;
 
     DebugMsg(( "process_register enter (%s)\n", AsmBuffer[opndx->base_reg]->string_ptr ));
-    temp = AsmResWord[AsmBuffer[opndx->base_reg]->value].position;
-    /* the register number is stored in opcode field */
-    reg = AsmOpTable[temp].opcode;
-    /* the "OP-name" of the register is stored in opnd_type[OPND2] */
-    CodeInfo->opnd_type[Opnd_Count] = AsmOpTable[temp].opnd_type[OPND2];
-    switch( AsmOpTable[temp].opnd_type[OPND2] ) {
+    temp = AsmBuffer[opndx->base_reg]->value;
+    reg = GetRegNo( temp );
+    /* the register's "OP-flags" are stored in opnd_type[1] */
+    CodeInfo->opnd_type[Opnd_Count] = GetOpndType( temp, 1 );
+    switch( GetOpndType( temp, 1 ) ) {
     case OP_R8:
 #if AMD64_SUPPORT
         if ( CodeInfo->Ofssize == USE64 && reg >=4 && reg <=7 )
@@ -1827,41 +1847,25 @@ static ret_code process_register( struct code_info *CodeInfo, expr_list *opndx )
     case OP_DX: /* only appears in "in" and "out" instructions  */
     case OP_R16:
         CodeInfo->opcode |= W_BIT;             // set w-bit
-        if( CodeInfo->Ofssize )
-            CodeInfo->prefix.opsiz = TRUE;
-        break;
-    case OP_EAX:
-    case OP_R32:
-        DebugMsg(("process_register, R32, reg=%u\n", reg ));
-#if 0 /* is checked in expression evaluator now */
-        if( ( ModuleInfo.curr_cpu & ( P_CPU_MASK | P_PM ) ) <= P_286p ) {
-            // 8086 ins cannot use 386 register
-            AsmError( CANNOT_USE_386_REGISTER_WITH_CURRENT_CPU_SETTING );
-            return( ERROR );
-        }
-#endif
-        CodeInfo->opcode |= W_BIT;             // set w-bit
-        if( CodeInfo->Ofssize == USE16 )
+        if( CodeInfo->Ofssize > USE16 )
             CodeInfo->prefix.opsiz = TRUE;
         break;
 #if AMD64_SUPPORT
     case OP_RAX:
     case OP_R64:
-        DebugMsg(("process_register, R64, reg=%u\n", reg ));
+        CodeInfo->prefix.rex |= REX_W;
+        /* fall through */
+#endif
+    case OP_EAX:
+    case OP_R32:
+#ifdef DEBUG_OUT
+        DebugMsg(("process_register(%s), R32/R64, reg=%u\n", AsmBuffer[opndx->base_reg]->string_ptr, reg ));
+#endif
         CodeInfo->opcode |= W_BIT;             // set w-bit
         if( CodeInfo->Ofssize == USE16 )
             CodeInfo->prefix.opsiz = TRUE;
-        CodeInfo->prefix.rex |= REX_W;
         break;
-#endif
     case OP_SR386:  // 386 segment register
-#if 0 /* is checked in expression evaluator now */
-        if( ( ModuleInfo.curr_cpu & ( P_CPU_MASK | P_PM ) ) <= P_286p ) {
-            // 8086 ins cannot use 80386 segment register
-            AsmError( CANNOT_USE_386_SEGMENT_REGISTER_WITH_CURRENT_CPU_SETTING );
-            return( ERROR );
-        }
-#endif
         /* fall through */
     case OP_SR86:   // 8086 segment register
         if( reg == 1 ) { /* 1 is CS */
@@ -1961,8 +1965,8 @@ static ret_code process_register( struct code_info *CodeInfo, expr_list *opndx )
  * <opndx> contains the last operand.
  */
 
-static void HandleStringInstructions( struct code_info *CodeInfo, expr_list *opndx )
-/**********************************************************************************/
+static void HandleStringInstructions( struct code_info *CodeInfo, const expr_list *opndx )
+/****************************************************************************************/
 {
     int opndidx = OPND1;
 
@@ -2070,8 +2074,8 @@ static void HandleStringInstructions( struct code_info *CodeInfo, expr_list *opn
     return;
 }
 
-static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
-/*************************************************************************/
+static ret_code check_size( struct code_info *CodeInfo, const expr_list * opndx )
+/*******************************************************************************/
 /*
 - use to make sure the size of first operand match the size of second operand;
 - optimize MOV instruction;
@@ -2151,7 +2155,7 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
         case 4:
             break;
         default:
-            AsmErr( OPERANDS_MUST_BE_THE_SAME_SIZE, OperandSize(op1, CodeInfo ), ModuleInfo.Ofssize ? 4 : 2);
+            AsmErr( OPERANDS_MUST_BE_THE_SAME_SIZE, OperandSize( op1, CodeInfo ), ModuleInfo.Ofssize ? 4 : 2);
             rc = ERROR;
         }
 #endif
@@ -2164,7 +2168,18 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
     case T_SAR:
     case T_SHL:
     case T_SHR:
-        // checking will be done later
+        /* v2.0: if second argument is a forward reference,
+         * change type to "immediate 1"
+         */
+        if ( opndx->kind == EXPR_ADDR &&
+            Parse_Pass == PASS_1 &&
+            Opnd_Count == OPND2 &&
+            opndx->indirect == FALSE &&
+            opndx->sym &&
+            opndx->sym->state == SYM_UNDEFINED ) {
+            CodeInfo->opnd_type[OPND2] = OP_I8;
+            CodeInfo->data[OPND2] = 1;
+        }
         break;
     case T_LDS:
     case T_LES:
@@ -2174,7 +2189,7 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
         op1_size = OperandSize( op1, CodeInfo ) + 2; /* add 2 for the impl. segment register */
         op2_size = OperandSize( op2, CodeInfo );
         if (op2_size != 0 && op1_size != op2_size) {
-            AsmErr( OPERANDS_MUST_BE_THE_SAME_SIZE, op1_size, op2_size );
+            AsmError( INVALID_OPERAND_SIZE );
             return( ERROR );
         }
         break;
@@ -2184,7 +2199,7 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
             //parse_phase_1 will treat 16-bit data as OP_I32 if CPU is 386
             if( CodeInfo->data[OPND1] > (signed long)USHRT_MAX ) {
                 // if op1 is really 32-bit data, then error
-                AsmError( IMMEDIATE_DATA_TOO_BIG );
+                AsmError( INVALID_OPERAND_SIZE );
                 rc = ERROR;
             }
         }
@@ -2193,7 +2208,7 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
         // op2 have to be 8-bit data
         if( op2 >= OP_I16 ) {
             if( CodeInfo->data[OPND2] > UCHAR_MAX ) {
-                AsmError( IMMEDIATE_DATA_TOO_BIG );
+                AsmError( INVALID_OPERAND_SIZE );
                 rc = ERROR;
             }
             CodeInfo->opnd_type[OPND2] = OP_I8;
@@ -2204,13 +2219,18 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
         CodeInfo->opcode &= NOT_W_BIT;
         op1_size = OperandSize( op1, CodeInfo );
         op2_size = OperandSize( op2, CodeInfo );
-        DebugMsg(("check_size, MOVZX/MOVSX: op2_size=%u, opndx.memtype=%u\n", op2_size, opndx->mem_type));
-        if (op2_size == 0 && Parse_Pass == PASS_2)
-            if (op1_size == 2)
-                AsmWarn(2, SIZE_NOT_SPECIFIED_ASSUMING, "BYTE" );
-            else
-                AsmWarn(2, INSTRUCTION_OPERAND_MUST_HAVE_SIZE);
+        DebugMsg(("check_size, MOVZX/MOVSX: op2_size=%u, opndx.memtype=%Xh, opndx.sym=%X\n", op2_size, opndx->mem_type, opndx->sym ));
+        if ( op2_size == 0 && Parse_Pass == PASS_2 )
+            if ( op1_size == 2 ) {
+                AsmWarn( 2, SIZE_NOT_SPECIFIED_ASSUMING, "BYTE" );
+            } else
+                AsmErr( INSTRUCTION_OPERAND_MUST_HAVE_SIZE );
         switch( op1_size ) {
+#if AMD64_SUPPORT
+        case 8:
+            //if ( CodeInfo->Ofssize == USE64 )
+            //    break;
+#endif
         case 4:
             if (op2_size < 2)
                 ;
@@ -2220,23 +2240,17 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
                 AsmError( OP2_TOO_BIG );
                 rc = ERROR;
             }
-            if( CodeInfo->Ofssize ) {
-                CodeInfo->prefix.opsiz = FALSE;     // - don't need opnd size prefix
-            }
+            CodeInfo->prefix.opsiz = CodeInfo->Ofssize ? FALSE : TRUE;
             break;
         case 2:
             if( op2_size >= 2 ) {
                 AsmError( OP2_TOO_BIG );
                 rc = ERROR;
             }
+            CodeInfo->prefix.opsiz = CodeInfo->Ofssize ? TRUE : FALSE;
             break;
-#if AMD64_SUPPORT
-        case 8:
-            if ( CodeInfo->Ofssize == USE64 )
-                break;
-#endif
         default:
-            // op1 have to be r16/r32
+            /* op1 must be r16/r32/r64 */
             AsmError( OP1_TOO_SMALL );
             rc = ERROR;
         }
@@ -2253,7 +2267,7 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
                 CodeInfo->prefix.opsiz = FALSE;
             break;
         default:
-            AsmError( INVALID_SIZE );
+            AsmError( INVALID_OPERAND_SIZE );
             return( ERROR );
         }
         op2_size = OperandSize( op2, CodeInfo );
@@ -2262,7 +2276,7 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
         case 4:
             break;
         default:
-            AsmError( INVALID_SIZE );
+            AsmError( INVALID_OPERAND_SIZE );
             rc = ERROR;
             break;
         }
@@ -2296,7 +2310,7 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
             if( ( op1_size == 2 ) || ( op1_size == 4 ) ) {
                 return( NOT_ERROR );
             }
-        } else if( ( op1 == OP_M ) || ( op2 == OP_M ) ) {
+        } else if( ( op1 & OP_M ) || ( op2 & OP_M ) ) {
             /*
              * one operand is a memory reference.
              * if address mode is indirect and the other operand is AX/EAX/RAX,
@@ -2423,12 +2437,12 @@ static ret_code check_size( struct code_info *CodeInfo, expr_list * opndx )
             }
         }
     }
-    DebugMsg(("check_size exit [CodeInfo->mem_type=%u]\n", CodeInfo->mem_type));
+    DebugMsg(("check_size exit [CodeInfo->mem_type=%Xh]\n", CodeInfo->mem_type));
     return( rc );
 }
 
 /*
- this is the parser, which scans through the tokens in AsmBuffer[]
+ this is the parser entry. It scans through the tokens in AsmBuffer[]
  and fills a CodeInfo structure. It calls
  - for code labels: LabelCreate()
  - for instructions: match_phase_1(), the code generator
@@ -2479,8 +2493,7 @@ ret_code ParseItems( void )
     CodeInfo->Ofssize        = ModuleInfo.Ofssize;
     CodeInfo->flags          = 0;
 
-    Opnd_Count = OPND1;
-    CheckSeg = TRUE;
+    Opnd_Count = OPND1; /* to be moved to CodeInfo */
     Frame = EMPTY;
     line_listed = FALSE;
     list_pos_start = list_pos;
@@ -2526,11 +2539,17 @@ ret_code ParseItems( void )
         /* a code label before a data item is only accepted in Masm5 compat mode */
         int label = -1;
         if ( AsmBuffer[i]->token == T_ID && ( i == 0 || ModuleInfo.m510 == TRUE ) ) {
-            /* if next token is a directive, it can't be an anonymous data item */
-            /* this also filters the "xxx STRUCT" and "xxx ENDS" cases */
-            if( ( AsmBuffer[i+1]->token != T_DIRECTIVE ) &&
-                ( sym = IsLabelType( AsmBuffer[i]->string_ptr ))) {
-                DebugMsg(("ParseItems anonymous data item >%s<\n", AsmBuffer[i]->string_ptr ));
+            /* if next token is a directive, it can't be an anonymous data item.
+             * this also filters the "xxx STRUCT" and "xxx ENDS" cases.
+             * v2.0: take care of special case:
+             * <label> <type> ...
+             * where both <label> and <type> are userdefined types. This is valid
+             * syntax inside a STRUCT!
+             */
+            if( AsmBuffer[i+1]->token != T_DIRECTIVE &&
+                ( sym = IsLabelType( AsmBuffer[i]->string_ptr ) ) &&
+                ( CurrStruct == NULL || ( IsLabelType( AsmBuffer[i+1]->string_ptr ) == FALSE ) ) ) {
+                DebugMsg(("ParseItems: anonymous data item >%s<\n", AsmBuffer[i]->string_ptr ));
                 return( data_init( CodeInfo, label, i, (dir_node *)sym ) );
             }
             label = i;
@@ -2538,7 +2557,7 @@ ret_code ParseItems( void )
         }
         switch ( AsmBuffer[i]->token ) {
         case T_DIRECTIVE:
-            DebugMsg(("ParseItems T_DIRECTIVE >%s<\n", AsmBuffer[i]->string_ptr ));
+            DebugMsg(("ParseItems: T_DIRECTIVE >%s<\n", AsmBuffer[i]->string_ptr ));
             if ( AsmBuffer[i]->dirtype == DRT_DATADIR ) {
                 return( data_init( CodeInfo, label, i, NULL ) );
             }
@@ -2553,23 +2572,28 @@ ret_code ParseItems( void )
                 return( ERROR );
             }
             temp = directive( i, CodeInfo );
-            if ( ModuleInfo.list && line_listed == FALSE && Parse_Pass == PASS_1 )
+            /* v2.0: for generated code it's important that list file is 
+             * written in ALL passes, to update file position! */
+            //if ( ModuleInfo.list && line_listed == FALSE && Parse_Pass == PASS_1 )
+            if ( ModuleInfo.list &&
+                line_listed == FALSE &&
+                ( Parse_Pass == PASS_1 || GeneratedCode ) )
                 LstWriteSrcLine();
             return( temp );
         case T_RES_ID:
-            DebugMsg(("ParseItems T_RES_ID >%s<\n", AsmBuffer[i]->string_ptr ));
+            DebugMsg(("ParseItems: T_RES_ID >%s<\n", AsmBuffer[i]->string_ptr ));
             if ( AsmBuffer[i]->rm_byte == RWT_TYPE )
                 return( data_init( CodeInfo, label, i, NULL ) );
             break;
         case T_ID:
-            DebugMsg(("ParseItems T_ID >%s<\n", AsmBuffer[i]->string_ptr ));
+            DebugMsg(("ParseItems: T_ID >%s<\n", AsmBuffer[i]->string_ptr ));
             if( sym = IsLabelType( AsmBuffer[i]->string_ptr ) ) {
                 return( data_init( CodeInfo, label, i, (dir_node *)sym ) );
             }
             break;
         default:
             if ( AsmBuffer[i]->token == T_COLON ) {
-                DebugMsg(("ParseItems unexpected colon\n" ));
+                DebugMsg(("ParseItems: unexpected colon\n" ));
                 AsmError( SYNTAX_ERROR_UNEXPECTED_COLON );
                 return( ERROR );
             }
@@ -2577,7 +2601,7 @@ ret_code ParseItems( void )
         } /* end switch (AsmBuffer[i]->token) */
         if ( label != -1 )
             i--;
-        DebugMsg(("ParseItems unexpected token=%u, i=%u, string=%s\n", AsmBuffer[i]->token, i, AsmBuffer[i]->string_ptr));
+        DebugMsg(("ParseItems: unexpected token=%u, i=%u, string=%s\n", AsmBuffer[i]->token, i, AsmBuffer[i]->string_ptr));
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
@@ -2585,21 +2609,16 @@ ret_code ParseItems( void )
     DebugMsg(("ParseItems: %s\n", AsmBuffer[i]->string_ptr));
 
     // instruction prefix?
-    switch( AsmBuffer[i]->value ) {
-    case T_LOCK:
-    case T_REP:
-    case T_REPE:
-    case T_REPNE:
-    case T_REPNZ:
-    case T_REPZ:
+    // T_LOCK, T_REP, T_REPE, T_REPNE, T_REPNZ, T_REPZ
+    if ( AsmBuffer[i]->value >= T_LOCK && AsmBuffer[i]->value <= T_REPZ ) {
         CodeInfo->prefix.ins = AsmBuffer[i]->value;
+        i++;
         // prefix has to be followed by an instruction
-        if( AsmBuffer[i+1]->token != T_INSTRUCTION ) {
+        if( AsmBuffer[i]->token != T_INSTRUCTION ) {
             DebugMsg(("ParseItems: unexpected token after prefix, exit, error\n"));
             AsmError( PREFIX_MUST_BE_FOLLOWED_BY_AN_INSTRUCTION );
             return( ERROR );
         }
-        i++;
         DebugMsg(("ParseItems: %s\n", AsmBuffer[i]->string_ptr));
     };
 
@@ -2633,8 +2652,21 @@ ret_code ParseItems( void )
 #endif
     CodeInfo->token = AsmBuffer[i]->value;
     // get the instruction's start position in AsmOpTable
-    CodeInfo->pcurr = &AsmOpTable[AsmResWord[CodeInfo->token].position];
+    CodeInfo->pcurr = &AsmOpTable[optable_idx[CodeInfo->token]];
     i++;
+
+    if( CurrSeg == NULL ) {
+        AsmError( MUST_BE_IN_SEGMENT_BLOCK );
+        return( ERROR );
+    }
+    if( CurrSeg->e.seginfo->segtype == SEGTYPE_UNDEF ) {
+        CurrSeg->e.seginfo->segtype = SEGTYPE_CODE;
+    }
+#if FASTPASS
+    if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
+        SaveState();
+    }
+#endif
 
     /* get the instruction's arguments */
 
@@ -2673,21 +2705,6 @@ ret_code ParseItems( void )
         switch( opndx.kind ) {
         case EXPR_ADDR:
             DebugMsg(("ParseItems(%s,%u): type ADDRESS\n", instr, Opnd_Count ));
-#if 1 /* v1.96: block moved BEFORE process_address() */
-            /* assume second operand - if it isn't defined yet and direct -
-             is a CONST if first operand is a memory reference
-             example: mov [var], label
-             */
-            if (Opnd_Count == OPND2 &&
-                opndx.sym != NULL &&
-                opndx.sym->state == SYM_UNDEFINED &&
-                Parse_Pass == PASS_1 &&
-                opndx.indirect == FALSE &&
-                (CodeInfo->opnd_type[OPND1] & OP_M_ANY)) {
-                opndx.kind = EXPR_CONST;
-                goto process_const;
-            }
-#endif
             if ( process_address( CodeInfo, &opndx ) == ERROR )
                 return( ERROR );
             break;
@@ -2702,17 +2719,15 @@ ret_code ParseItems( void )
                     break;
                 }
             }
-        process_const:
             DebugMsg(("ParseItems(%s,%u): type CONST, opndx.memtype=%Xh\n", instr, Opnd_Count, opndx.mem_type));
-            if (process_const( CodeInfo, &opndx ) == ERROR )
+            if ( process_const( CodeInfo, &opndx ) == ERROR )
                 return( ERROR );
             break;
         case EXPR_REG:
             DebugMsg(("ParseItems(%s,%u): type REG\n", instr, Opnd_Count ));
             if( opndx.indirect ) { /* indirect operand ( "[EBX+...]" )? */
-                temp  = process_address( CodeInfo, &opndx );
-                if ( temp != NOT_ERROR )
-                    return( temp );
+                if ( process_address( CodeInfo, &opndx ) == ERROR )
+                    return( ERROR );
             } else {
                 if ( process_register( CodeInfo, &opndx ) == ERROR )
                     return( ERROR );
@@ -2768,10 +2783,11 @@ ret_code ParseItems( void )
      * skip the "near" entries in AsmOpTable for CALL/JMP.
      */
     if ( CodeInfo->isfar ) {
-        if ( CodeInfo->token == T_CALL )
-            CodeInfo->pcurr += NUMCALLN;
-        else if (CodeInfo->token == T_JMP)
-            CodeInfo->pcurr += NUMJMPN;
+        if ( CodeInfo->token == T_CALL || CodeInfo->token == T_JMP ) {
+            do {
+                CodeInfo->pcurr++;
+            } while ( CodeInfo->pcurr->first == FALSE );
+        }
     }
 
     /* special handling for string instructions */
@@ -2801,17 +2817,21 @@ ret_code ParseItems( void )
         }
 #if AMD64_SUPPORT
         if ( CodeInfo->Ofssize == USE64 ) {
-            if ( CodeInfo->x86hi_used && ( CodeInfo->x64lo_used || CodeInfo->prefix.rex & 7 ))
+            //if ( CodeInfo->x86hi_used && ( CodeInfo->x64lo_used || CodeInfo->prefix.rex & 7 ))
+            if ( CodeInfo->x86hi_used && CodeInfo->prefix.rex )
                 AsmError(INVALID_USAGE_OF_AHBHCHDH );
             if ( CodeInfo->token == T_PUSH || CodeInfo->token == T_POP ) {
-                if (( OperandSize( CodeInfo->opnd_type[OPND1], CodeInfo ) == 4 ) ||
-                    ( CodeInfo->opnd_type[OPND1] & OP_SR86 ) ) {
+                //if ( ( OperandSize( CodeInfo->opnd_type[OPND1], CodeInfo ) == 4 ) ||
+                if ( ( CodeInfo->opnd_type[OPND1] & ( OP_R32 | OP_SR86 ) ) ||
+                    ( CodeInfo->opnd_type[OPND1] == OP_M32 ) ) {
                     DebugMsg(("ParseItems: PUSH/POP operand with size 4 or CS/DS/ES/SS\n"));
                     AsmError( INVALID_INSTRUCTION_OPERANDS );
                     return( ERROR );
                 }
                 if ( CodeInfo->opnd_type[OPND1] & OP_R64 )
                     CodeInfo->prefix.rex &= 0x7;
+            } else if ( CodeInfo->token == T_CALL || CodeInfo->token == T_JMP ) {
+                CodeInfo->prefix.rex = 0;
             } else if ( CodeInfo->token == T_MOV ) {
                 if ( CodeInfo->opnd_type[OPND1] & OP_SPEC_REG || CodeInfo->opnd_type[OPND2] & OP_SPEC_REG )
                     CodeInfo->prefix.rex &= 0x7;
@@ -2830,18 +2850,62 @@ ret_code ParseItems( void )
     return( match_phase_1( CodeInfo ) );
 }
 
+#if RENAMEKEY
+
+struct rename_node {
+    struct rename_node *next;
+    const char *name;
+    uint_16 token;
+    uint_8 length;
+};
+
+void RenameKeyword( uint token, const char *newname, uint_8 length )
+/******************************************************************/
+{
+    struct rename_node *rn;
+
+    RemoveResWord( &AsmResWord[token] );
+    /* if it is the first rename action for this keyword,
+     * save the original name
+     */
+    if ( AsmResWord[token].name >= resw_strings &&
+        AsmResWord[token].name < ( resw_strings + sizeof( resw_strings ) ) ) {
+        rn = AsmAlloc( sizeof( struct rename_node ) );
+        rn->next = NULL;
+        rn->name = AsmResWord[token].name;
+        rn->token = token;
+        rn->length = AsmResWord[token].len;
+        if ( renamed_keys.head == NULL ) {
+            renamed_keys.head = renamed_keys.tail = rn;
+        } else {
+            ((struct rename_node *)renamed_keys.tail)->next = rn;
+            renamed_keys.tail = rn;
+        }
+    } else {
+        AsmFree( (void *)AsmResWord[token].name );
+    }
+    AsmResWord[token].name = AsmAlloc( length );
+    memcpy( (void *)AsmResWord[token].name, newname, length );
+    AsmResWord[token].len = length;
+    AddResWord( &AsmResWord[token] );
+}
+
+#endif
+
 #if AMD64_SUPPORT
 
 static const enum asm_token patchtab64[] = {
-    T_SPL,   /* add x64 part of special.h */
-    T_JRCXZ, /* branch instructions must be grouped together */
-    T_CDQE,  /* add x64 part of instruct.h */
+    T_SPL,             /* add x64 register part of special.h */
+    T_DOT_ALLOCSTACK,  /* add x64 directive part of special.h */
+    T_JRCXZ,           /* branch instructions must be grouped together */
+    T_CDQE,            /* add x64 part of instruct.h */
     T_NULL };
 
 static const enum asm_token patchtab32[] = {
-    T_AAA,   /* instructions invalid for IA32+ */
-    T_JCXZ,  /* 1. branch instructions invalid for IA32+ */
-    T_LOOPW, /* 2. branch instructions invalid for IA32+ */
+    T_DOT_SAFESEH,  /* directives invalid for IA32+             */
+    T_AAA,          /* instructions invalid for IA32+           */
+    T_JCXZ,         /* 1. branch instructions invalid for IA32+ */
+    T_LOOPW,        /* 2. branch instructions invalid for IA32+ */
     T_NULL };
 
 struct replace_ins {
@@ -2850,9 +2914,11 @@ struct replace_ins {
     short idx64;
 };
 
-static struct replace_ins patchtabr[] = {
+static const struct replace_ins patchtabr[] = {
     { T_LGDT, T_LGDT_I, T_LGDT_I64 },
     { T_LIDT, T_LIDT_I, T_LIDT_I64 },
+    { T_CALL, T_CALL_I, T_CALL_I64 },
+    { T_JMP,  T_JMP_I,  T_JMP_I64  },
     { T_NULL}
 };
 
@@ -2864,15 +2930,22 @@ void Set64Bit( bool newmode )
 {
     struct ReservedWord *resw;
     const enum asm_token *ppt;
-    struct replace_ins  *repl;
+    const struct replace_ins  *repl;
 
     if ( newmode != b64bit ) {
         DebugMsg(("Set64Bit(%u): mode is to change\n", newmode ));
         if ( newmode != FALSE ) {
-            AsmResWord[T_INC].position++;   /* skip the one-byte register INC */
-            AsmResWord[T_DEC].position++;   /* skip the one-byte register DEC */
-            /* change calling convention syscall to syscall_ */
+            optable_idx[T_INC]++;   /* skip the one-byte register INC */
+            optable_idx[T_DEC]++;   /* skip the one-byte register DEC */
+            /* change SYSCALL to SYSCALL_ language in long mode.
+             * one cannot just change the name, since the hash value
+             * will differ!
+             */
+            RemoveResWord( &AsmResWord[T_SYSCALL] );
+            syscallname = AsmResWord[T_SYSCALL].name; /* save the "true" name */
+            AsmResWord[T_SYSCALL].name = "syscall_";
             AsmResWord[T_SYSCALL].len++;
+            AddResWord( &AsmResWord[T_SYSCALL] );
             for (ppt = patchtab64; *ppt != T_NULL; ppt++ )
                 for( resw = &AsmResWord[*ppt]; resw->flags & RWF_X64; resw++ )
                     if ( !( resw->flags & RWF_DISABLED ) )
@@ -2881,17 +2954,12 @@ void Set64Bit( bool newmode )
                 for( resw = &AsmResWord[*ppt]; resw->flags & RWF_IA32; resw++ )
                     if ( !( resw->flags & RWF_DISABLED ) )
                         RemoveResWord( resw );
-            for (ppt = patchtab32; *ppt != T_NULL; ppt++ )
-                for( resw = &AsmResWord[*ppt]; resw->flags & RWF_IA32; resw++ )
-                    if ( !( resw->flags & RWF_DISABLED ) )
-                        RemoveResWord( resw );
             for (repl = patchtabr; repl->tok != T_NULL; repl++ ) {
-                resw = &AsmResWord[repl->tok];
-                resw->position = repl->idx64;
+                optable_idx[repl->tok] = repl->idx64;
             }
         } else  {
-            AsmResWord[T_INC].position--;   /* restore the one-byte register INC */
-            AsmResWord[T_DEC].position--;   /* restore the one-byte register DEC */
+            optable_idx[T_INC]--;   /* restore the one-byte register INC */
+            optable_idx[T_DEC]--;   /* restore the one-byte register DEC */
             for (ppt = patchtab64; *ppt != T_NULL; ppt++ )
                 for( resw = &AsmResWord[*ppt]; resw->flags & RWF_X64; resw++ )
                     if ( !( resw->flags & RWF_DISABLED ) )
@@ -2901,29 +2969,31 @@ void Set64Bit( bool newmode )
                     if ( !( resw->flags & RWF_DISABLED ) )
                         AddResWord( resw );
             for (repl = patchtabr; repl->tok != T_NULL; repl++ ) {
-                resw = &AsmResWord[repl->tok];
-                resw->position = repl->idx32;
+                optable_idx[repl->tok] = repl->idx32;
             }
             /* change calling convention syscall_ back to syscall */
+            RemoveResWord( &AsmResWord[T_SYSCALL] );
+            AsmResWord[T_SYSCALL].name = syscallname; /* restore "true" name */
             AsmResWord[T_SYSCALL].len--;
+            AddResWord( &AsmResWord[T_SYSCALL] );
         }
         b64bit = newmode;
     }
 }
 #endif
 
-void DisableKeyword( struct ReservedWord *resw )
-/**********************************************/
+void DisableKeyword( uint token )
+/*******************************/
 {
-    if ( !( resw->flags & RWF_DISABLED ) ) {
-        RemoveResWord( resw );
-        resw->next = NULL;
-        resw->flags |= RWF_DISABLED;
-        if ( RemovedFirst == NULL )
-            RemovedFirst = RemovedTail = resw;
+    if ( !( AsmResWord[token].flags & RWF_DISABLED ) ) {
+        RemoveResWord( &AsmResWord[token] );
+        AsmResWord[token].next = EMPTY;
+        AsmResWord[token].flags |= RWF_DISABLED;
+        if ( RemovedFirst == EMPTY )
+            RemovedFirst = RemovedTail = token;
         else {
-            RemovedTail->next = resw;
-            RemovedTail = resw;
+            AsmResWord[RemovedTail].next = token;
+            RemovedTail = token;
         }
     }
 }
@@ -2931,49 +3001,72 @@ void DisableKeyword( struct ReservedWord *resw )
 /* check if a keyword is in the list of disabled words.
  */
 
-struct ReservedWord * IsKeywordDisabled( char *name, int len )
-/************************************************************/
+uint IsKeywordDisabled( const char *name, int len )
+/*************************************************/
 {
-    struct ReservedWord *resw;
-    for ( resw = RemovedFirst; resw; resw = resw->next )
-        if( resw->name[ len ] == NULLC && _memicmp( name, resw->name, len ) == 0)
+    uint  resw;
+    for ( resw = RemovedFirst; resw != EMPTY; resw = AsmResWord[resw].next )
+        if( AsmResWord[resw].name[ len ] == NULLC && _memicmp( name, AsmResWord[resw].name, len ) == 0 )
             return( resw );
-    return( NULL );
+    return( EMPTY );
 }
 
 /* ParseInit() is called once per module */
+
+void InitInstHashTable( void );
 
 ret_code ParseInit( void )
 /************************/
 {
     struct ReservedWord *curr;
     struct ReservedWord *last;
+#if RENAMEKEY
+    struct rename_node  *rencurr;
+#endif
 
-    DebugMsg(("ParseInit()\n"));
+    DebugMsg(("ParseInit() enter\n"));
 
     /* initialize the AsmBuffer[] table */
     InitTokenBuffer();
 
     if( fInit == FALSE ) {  // if not initialized
+        const char *p = resw_strings;
         /* if first call, initialize hash table (IA32 mode) */
         fInit = TRUE;
-        for( curr = &AsmResWord[0], last = &AsmResWord[T_NULL]; curr < last; curr++ )
-#if AMD64_SUPPORT /* don't add the words specific to x64 */
-            if ( !(curr->flags & RWF_X64 ) )
-#endif
-                AddResWord( curr );
-    } else {
-        struct ReservedWord *next;
-        /* reenter disabled keywords */
-        for( curr = RemovedFirst; curr; curr = next ) {
-            next = curr->next;
-            curr->flags &= ~RWF_DISABLED;
+        InitInstHashTable();
+        for( curr = &AsmResWord[0], last = &AsmResWord[T_NULL]; curr < last; curr++ ) {
+            curr->name = p;
+            p += curr->len;
 #if AMD64_SUPPORT /* don't add the words specific to x64 */
             if ( !(curr->flags & RWF_X64 ) )
 #endif
                 AddResWord( curr );
         }
-        RemovedFirst = RemovedTail = NULL;
+    } else {
+        short next;
+        short i;
+        /* reenter disabled keywords */
+        for( i = RemovedFirst; i != EMPTY; i = next ) {
+            next = AsmResWord[i].next;
+            AsmResWord[i].flags &= ~RWF_DISABLED;
+#if AMD64_SUPPORT /* don't add the words specific to x64 */
+            if ( !(AsmResWord[i].flags & RWF_X64 ) )
+#endif
+                AddResWord( &AsmResWord[i] );
+        }
+        RemovedFirst = RemovedTail = EMPTY;
+#if RENAMEKEY
+        /* restore renamed keywords */
+        for ( rencurr = renamed_keys.head; rencurr; ) {
+            struct rename_node *tmp = rencurr->next;
+            RenameKeyword( rencurr->token, rencurr->name, rencurr->length );
+            AsmFree( (void *)rencurr->name );
+            AsmFree( rencurr );
+            rencurr = tmp;
+        }
+        renamed_keys.head = NULL;
+#endif
     }
+    DebugMsg(("ParseInit() exit\n"));
     return( NOT_ERROR );
 }

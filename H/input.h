@@ -32,15 +32,17 @@
 #ifndef _INPUT_H_INCLUDED
 #define _INPUT_H_INCLUDED
 
+extern uint_32 GetLineNumber( asm_sym * );
+#define LineNumber GetLineNumber( NULL )
+
 extern void     PushLineQueue( void );
-extern void     AddLineQueue( char *line );
-extern void     AddMacroLineQueue( char *line );
-extern ret_code InputQueueFile( char *path, FILE * *pfile );
-extern char     *GetTextLine( char *string, int max );
-extern void     RestoreLineNumber( void );
+//extern void     PopLineQueue( void );
+extern void     AddLineQueue( const char *line );
+extern ret_code InputQueueFile( const char *path, FILE * *pfile );
+extern char     *GetTextLine( char *buffer, int max );
 extern void     PushMacro( struct asm_sym *sym );
 extern void     PushMacroGoto( struct asm_sym *sym, int lineno );
-extern void     AddStringToIncludePath( char *string );
+extern void     AddStringToIncludePath( const char *string );
 extern void     InputInit( void );
 extern void     InputPassInit( void );
 extern void     InputFini( void );
@@ -48,7 +50,11 @@ extern int      GetPreprocessedLine( char * );
 extern int      GetCurrSrcPos( char * );
 extern void     ClearFileStack( void );
 extern uint     get_curr_srcfile( void );
+extern void     set_curr_srcfile( uint, uint_32 );
 extern const FNAME  *GetFName( uint );
+#ifdef DEBUG_OUT
+extern uint_32  GetTopLine( void );
+#endif
 
 typedef struct line_list {
     struct line_list    *next;
@@ -59,6 +65,15 @@ typedef struct input_queue {
     struct line_list    *head;
     struct line_list    *tail;
 } input_queue;
+
+/* for line numbers, the source files have to be stored
+ * in a list in the very same order as they appear in
+ * the input stream.
+ */
+struct file_seq {
+    struct file_seq *next;
+    uint_16         file;           /* index of file in FNames */
+};
 
 extern input_queue *line_queue;
 extern int queue_level;

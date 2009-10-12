@@ -122,7 +122,7 @@ static char *StdcallMangler( struct asm_sym *sym, char *buffer )
  */
 
 static char *ow_decorate( struct asm_sym *sym, char *buffer )
-/********************************************************/
+/***********************************************************/
 {
     char                *name;
     enum changes        changes = NORMAL;
@@ -157,6 +157,7 @@ static char *ow_decorate( struct asm_sym *sym, char *buffer )
 /* MS FASTCALL 32bit */
 
 static char * ms32_decorate( struct asm_sym *sym, char *buffer )
+/**************************************************************/
 {
     sprintf( buffer, "@%s@%u", sym->name, ((dir_node *)sym)->e.procinfo->parasize );
     return(buffer);
@@ -167,6 +168,7 @@ static char * ms32_decorate( struct asm_sym *sym, char *buffer )
 /* MS FASTCALL 64bit */
 
 static char * ms64_decorate( struct asm_sym *sym, char *buffer )
+/**************************************************************/
 {
     strcpy( buffer, sym->name );
     return( buffer );
@@ -232,16 +234,18 @@ char *Mangle( struct asm_sym *sym, char *buffer )
             mangler = UScoreMangler; /* leading underscore (MS C) */
         break;
     case LANG_NONE:
-        mangler = sym->mangler;
 #if MANGLERSUPP
+        mangler = sym->mangler;
         if( mangler == NULL )
             mangler = GetMangler( Options.default_name_mangler );
-#endif
         if( mangler == NULL )
+#endif
             mangler = VoidMangler;
         break;
     }
+#if MANGLERSUPP
     sym->mangler = mangler;
+#endif
     return( mangler( sym, buffer ) );
 }
 

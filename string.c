@@ -44,7 +44,12 @@ static uint_32 equcnt;
 #endif
 
 /* use this version to ensure that uppercase letters are used! */
-void myltoa(long value, char *buffer, int radix);
+extern void myltoa( long value, char *buffer, int radix, bool addzero );
+
+// generic parameter names. In case the parameter name is
+// displayed in an error message ("required parameter %s missing")
+
+static const char * parmnames[] = {"p1","p2","p3"};
 
 // CatStr()
 // defines a text equate
@@ -87,7 +92,7 @@ ret_code CatStrDef( int i )
     buffer[0] = NULLC;
     for ( count = 0; i < Token_Count; ) {
         DebugMsg(("CatStrDef(%s): item=%s\n", AsmBuffer[0]->string_ptr, AsmBuffer[i]->string_ptr));
-        if (AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<') {
+        if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
             DebugMsg(("CatStrDef: bad item: token=%u\n", AsmBuffer[i]->token));
             AsmError( TEXT_ITEM_REQUIRED );
             return( ERROR );
@@ -99,8 +104,8 @@ ret_code CatStrDef( int i )
         strcpy( buffer + count, AsmBuffer[i]->string_ptr );
         count = count + AsmBuffer[i]->value;
         i++;
-        if ((AsmBuffer[i]->token != T_COMMA) &&
-            (AsmBuffer[i]->token != T_FINAL)) {
+        if ( ( AsmBuffer[i]->token != T_COMMA ) &&
+            ( AsmBuffer[i]->token != T_FINAL ) ) {
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
@@ -130,8 +135,8 @@ ret_code CatStrDef( int i )
 /*
  used by EQU if the value to be assigned to a symbol is text.
 */
-asm_sym * SetTextMacro( asm_sym *sym, char *name, char *value )
-/*************************************************************/
+asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
+/*************************************************************************/
 {
     int count;
     char buffer[MAX_LINE_LEN];
@@ -237,7 +242,7 @@ ret_code SubStrDef( int i )
 
     // third item must be a string
 
-    if (AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<') {
+    if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
         DebugMsg(("SubStrDef: error, no text item\n"));
         AsmError( TEXT_ITEM_REQUIRED );
         return( ERROR );
@@ -246,7 +251,7 @@ ret_code SubStrDef( int i )
     i++;
     DebugMsg(("SubStrDef(%s): src=>%s<\n", name, p));
 
-    if (AsmBuffer[i]->token != T_COMMA) {
+    if ( AsmBuffer[i]->token != T_COMMA ) {
         AsmError( EXPECTING_COMMA );
         return( ERROR );
     }
@@ -256,7 +261,7 @@ ret_code SubStrDef( int i )
 
     if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR ) {
         DebugMsg(("SubStrDef(%s): invalid pos value\n", name));
-        return(ERROR);
+        return( ERROR );
     }
 
     if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
@@ -288,7 +293,7 @@ ret_code SubStrDef( int i )
             return( ERROR );
         }
         size = opndx.value;
-        if (AsmBuffer[i]->token != T_FINAL) {
+        if ( AsmBuffer[i]->token != T_FINAL ) {
             DebugMsg(("SubStrDef(%s): additional items found\n", name));
             AsmError( SYNTAX_ERROR );
             return( ERROR );
@@ -338,10 +343,10 @@ ret_code SubStrDef( int i )
     p = newvalue;
 
     newvalue = AsmAlloc (size + 1);
-    memcpy(newvalue, p, size);
+    memcpy( newvalue, p, size );
     *(newvalue+size) = '\0';
     DebugMsg(("SubStrDef(%s): result=>%s<\n", sym->name, newvalue));
-    AsmFree(sym->string_ptr);
+    AsmFree( sym->string_ptr );
     sym->string_ptr = newvalue;
 
     LstWrite( LSTTYPE_EQUATE, 0, sym );
@@ -434,7 +439,7 @@ ret_code InStrDef( int i )
         start = opndx.value;
         if (start <= 0)
             start = 1;
-        if (AsmBuffer[i]->token != T_COMMA) {
+        if ( AsmBuffer[i]->token != T_COMMA ) {
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
@@ -469,7 +474,7 @@ ret_code InStrDef( int i )
     DebugMsg(("InStrDef: second string >%s< \n", buffer2));
 #endif
     i++;
-    if (AsmBuffer[i]->token != T_FINAL) {
+    if ( AsmBuffer[i]->token != T_FINAL ) {
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
@@ -501,7 +506,7 @@ static ret_code CatStrFunc( char * buffer, char * *params )
               *(params+2) ? *(params+2) : "" ));
 
     for (; params != end; params++) {
-        if (*params) {
+        if ( *params ) {
             strcpy( buffer, *params );
             buffer += strlen( buffer );
         }
@@ -551,9 +556,9 @@ static ret_code InStrFunc( char * buffer, char * *params )
     *(buffer+1) = NULLC;
 
     if ( *(params+0) ) {
-        if (GetNumber( *(params+0), &pos ) == ERROR)
+        if ( GetNumber( *(params+0), &pos ) == ERROR )
             return( ERROR );
-        if (pos == 0)
+        if ( pos == 0 )
             pos++;
     }
 
@@ -561,10 +566,10 @@ static ret_code InStrFunc( char * buffer, char * *params )
         AsmErr( INDEX_PAST_END_OF_STRING, pos );
         return( ERROR );
     }
-    p = strstr(*(params+1)+pos-1, *(params+2));
+    p = strstr( *(params+1)+pos-1, *(params+2) );
     if (p) {
         found = p - *(params+1) + 1;
-        myltoa( found, buffer, ModuleInfo.radix );
+        myltoa( found, buffer, ModuleInfo.radix, TRUE );
     }
 
     DebugMsg(( "@InStrFunc()=>%s<\n", buffer ));
@@ -580,7 +585,7 @@ static ret_code SizeStrFunc( char * buffer, char * *params )
 {
     DebugMsg(("@SizeStr(%s)\n", *params ? *params : "" ));
     if ( *params )
-        myltoa( strlen( *params ), buffer, ModuleInfo.radix );
+        myltoa( strlen( *params ), buffer, ModuleInfo. radix, TRUE );
     else {
         buffer[0] = '0';
         buffer[1] = NULLC;
@@ -608,14 +613,14 @@ static ret_code SubStrFunc( char * buffer, char * *params )
     if (pos <= 0)
         pos = 1;
 
-    size = strlen(src);
-    if (pos > size) {
+    size = strlen( src );
+    if ( pos > size ) {
         AsmErr( INDEX_PAST_END_OF_STRING, pos );
         return( ERROR );
     }
 
     if ( *(params+2) ) {
-        if ( GetNumber(*(params+2), &size) == ERROR )
+        if ( GetNumber( *(params+2), &size ) == ERROR )
             return( ERROR );
         if ( size < 0 ) {
             AsmError( COUNT_MUST_BE_POSITIVE_OR_ZERO );
@@ -625,7 +630,7 @@ static ret_code SubStrFunc( char * buffer, char * *params )
         size = size - pos + 1;
     }
 
-    for(src = src+pos-1 ; size && *src ; size--)
+    for( src = src+pos-1 ; size && *src ; size-- )
         *buffer++ = *src++;
 
     *buffer = NULLC;
@@ -637,11 +642,6 @@ static ret_code SubStrFunc( char * buffer, char * *params )
 
     return( NOT_ERROR );
 }
-
-// generic parameter names. In case the parameter name is
-// displayed in an error message ("required parameter %s missing")
-
-static char * parmnames[] = {"p1","p2","p3"};
 
 // string macro initialization
 // this proc is called once per module

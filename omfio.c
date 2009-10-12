@@ -28,41 +28,38 @@
 *
 ****************************************************************************/
 
-#include <fcntl.h>
-
 #include "globals.h"
-#include "myunistd.h"
 #include "memalloc.h"
 #include "omfrec.h"
 #include "myassert.h"
 #include "omfio.h"
 #include "fatal.h"
 
-static void safeSeek( int fh, long offset, int mode )
+static void safeSeek( FILE *file, long offset, int mode )
 /***************************************************/
 {
 
-    if( _lseek( fh, offset, mode ) == -1 ) {
+    if( fseek( file, offset, mode ) != 0 ) {
         SeekError();
     }
 }
 
-static void safeWrite( int fh, const uint_8 *buf, size_t len )
+static void safeWrite( FILE *file, const uint_8 *buf, size_t len )
 /************************************************************/
 {
 
-    if( _write( fh, buf, len ) != len ) {
+    if( fwrite( buf, 1, len, file ) != len ) {
         WriteError();
     }
 }
 
-OBJ_WFILE *OmfWriteOpen( int fh )
+OBJ_WFILE *OmfWriteOpen( FILE *file )
 /*******************************/
 {
     OBJ_WFILE    *new;
 
     new = AsmAlloc( sizeof( *new ) + OBJ_BUFFER_SIZE );
-    new->fh = fh;
+    new->file = file;
     new->in_buf = 0;
     new->in_rec = 0;
 
@@ -75,14 +72,14 @@ void OmfWriteClose( OBJ_WFILE *obj )
 
     /**/myassert( obj != NULL );
 
-    /* this function is called from inside CloseFiles(),
+    /* this function is called from inside close_files(),
      * which in turn is called on fatal errors. Therefore don't
      * access object module file if write_to_file is FALSE!
      */
     if( obj->in_rec && write_to_file ) {
         OmfWEndRec( obj );
     }
-    obj->fh = -1;
+    obj->file = NULL;
     AsmFree( obj );
 }
 
@@ -96,7 +93,7 @@ void OmfWBegRec( OBJ_WFILE *obj, uint_8 command )
     buf[0] = command;
     buf[1] = 0;
     buf[2] = 0;
-    safeWrite( obj->fh, buf, 3 );
+    safeWrite( obj->file, buf, 3 );
     obj->in_rec = 1;
     obj->checksum = command;
     obj->in_buf = 0;
@@ -120,7 +117,7 @@ void OmfWFlushBuffer( OBJ_WFILE *obj )
     }
     obj->checksum = checksum;
     obj->length += len_to_write;
-    safeWrite( obj->fh, obj->buffer, len_to_write );
+    safeWrite( obj->file, obj->buffer, len_to_write );
     obj->in_buf = 0;
 }
 
@@ -139,12 +136,12 @@ void OmfWEndRec( OBJ_WFILE *obj )
     WriteU16( buf, obj->length );
     checksum = obj->checksum + buf[0] + buf[1];
     checksum = -checksum;
-    safeWrite( obj->fh, &checksum, 1 );
+    safeWrite( obj->file, &checksum, 1 );
         /* back up to length */
-    safeSeek( obj->fh, - (int_32)obj->length - 2, SEEK_CUR );
-    safeWrite( obj->fh, buf, 2 );                   /* write the length */
-    safeSeek( obj->fh, + (int_32)obj->length, SEEK_CUR );
-//    safeSeek( obj->fh, 0L, SEEK_END );       /* move to end of file again */
+    safeSeek( obj->file, - (int_32)obj->length - 2, SEEK_CUR );
+    safeWrite( obj->file, buf, 2 );                   /* write the length */
+    safeSeek( obj->file, + (int_32)obj->length, SEEK_CUR );
+//    safeSeek( obj->file, 0L, SEEK_END );       /* move to end of file again */
     obj->in_rec = 0;
 }
 
@@ -245,10 +242,10 @@ void OmfWriteRec( OBJ_WFILE *obj, uint_8 command, size_t length, const uint_8 *c
     checksum  = buf[0] = command;
     checksum += buf[1] = ( length + 1 ) & 0xff;
     checksum += buf[2] = ( length + 1 ) >> 8;
-    safeWrite( obj->fh, buf, 3 );
+    safeWrite( obj->file, buf, 3 );
     checksum += checkSum( contents, length );
-    safeWrite( obj->fh, contents, length );
+    safeWrite( obj->file, contents, length );
     checksum = -checksum;
-    safeWrite( obj->fh, &checksum, 1 );
+    safeWrite( obj->file, &checksum, 1 );
 }
 

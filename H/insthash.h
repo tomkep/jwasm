@@ -32,9 +32,9 @@
 #ifndef _INSTHASH_H_INCLUDED
 #define _INSTHASH_H_INCLUDED
 
-//extern int                  get_instruction_position( char * );
+//extern int                  get_instruction_position( const char * );
 extern struct ReservedWord *AddResWord( struct ReservedWord * );
-extern struct ReservedWord *FindResWord( char * );
+extern struct ReservedWord *FindResWord( const char * );
 extern int                  RemoveResWord( struct ReservedWord * );
 
 #endif

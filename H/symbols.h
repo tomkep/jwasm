@@ -64,6 +64,7 @@ typedef enum {
         MT_SDWORD= 0x43,
         MT_FWORD = 0x05,
         MT_QWORD = 0x07,
+        MT_SQWORD= 0x47,
         MT_REAL8 = 0x27,
         MT_TBYTE = 0x09,
         MT_REAL10= 0x29,
@@ -96,7 +97,19 @@ typedef enum {
 // - preprocessor items (macros and text macros), which have no
 //   mem_type (MT_EMPTY).
 
-typedef ret_code (* macro_func)(char *, char * *);
+typedef ret_code (* macro_func)( char *, char * * );
+typedef uint_32 (* internal_func)( struct asm_sym * );
+
+struct debug_info {
+    uint_32 start_line;  /* procs's start line */
+    uint_32 end_line;    /* procs's last line */
+    uint_32 ln_fileofs;  /* file offset to line numbers */
+    uint_16 line_numbers;/* line numbers in function */
+    uint_16 file;        /* proc's start file */
+    uint next_proc;      /* index next proc */
+    uint next_file;      /* index next file */
+};
+
 
 typedef struct asm_sym {
         struct asm_sym  *next;
@@ -104,7 +117,7 @@ typedef struct asm_sym {
 
         struct asm_sym  *segment;      /* for SYM_INTERNAL, SYM_EXTERNAL, SYM_PROC */
         union {
-            int_32          offset;    /* used by SYM_INTERNAL */
+            int_32          offset;    /* used by SYM_INTERNAL, SYM_PROC */
             int_32          value;     /* used by MT_ABS */
             char *          string_ptr;/* used by SYM_TMACRO */
             macro_func      func_ptr;  /* used by SYM_MACRO */
@@ -126,6 +139,9 @@ typedef struct asm_sym {
                 unsigned char   vararg:1;   // accept additional params
                 unsigned char   isfunc:1;   // it's a macro function
                 unsigned char   runsync:1;  // run macro synchronous
+#if MACROLABEL
+                unsigned char   label:1;    // macro is "label-aware"
+#endif
             };
         };
         /* first_length is used for data items only
@@ -135,17 +151,20 @@ typedef struct asm_sym {
         union {
             /* for SYM_INTERNAL, SYM_STRUCT_FIELD */
             uint_32         first_length; /* size of 1st initializer--elts. dup'd */
-            /* for SYM_EXTERNAL, SYM_LNAME */
-            uint            idx;      /* (external definition) index */
+            /* for SYM_EXTERNAL, SYM_CLASS_LNAME */
+            uint            idx;          /* (external definition) index */
+            /* for SYM_TYPE ( used after assembly steps) */
+            uint_16         cv_typeref;   /* codeview type index */
+            uint_32         max_mbr_size; /* SYM_TYPE: max size members */
         };
-        /* for SYM_INTERNAL, SYM_STRUCT_FIELD, SYM_TYPE */
+        /* for SYM_INTERNAL, SYM_PROC, SYM_STRUCT_FIELD, SYM_TYPE */
         uint_32         total_size;   /* total number of bytes (sizeof) */
-        /* for SYM_INTERNAL, SYM_STRUCT_FIELD, SYM_EXERNAL */
         union {
             uint_32        total_length; /* SYM_INTERNAL, SYM_STRUCT_FIELD: total number of elements (LENGTHOF) */
             struct asm_sym *altname;     /* SYM_EXTERNAL: alternative name */
+            struct debug_info *debuginfo;/* SYM_PROC: debug info (COFF) */
+            internal_func  sfunc_ptr;    /* SYM_INTERNAL+predefined */
         };
-        char            *(*mangler)( struct asm_sym *sym, char *buffer );
         unsigned short  used:1;       /* symbol has been referenced */
         unsigned short  defined:1;    /* symbol has been defined */
         unsigned short  scoped:1;     /* symbol is local label or LOCAL */
@@ -167,6 +186,9 @@ typedef struct asm_sym {
         uint_8          name_size;
         struct asm_sym  *type;        /* set if memtype is MT_TYPE */
         struct asmfixup *fixup;
+#if 0 //MANGLERSUPP /* obsolete */
+        char            *(*mangler)( struct asm_sym *sym, char *buffer );
+#endif
 } asm_sym;
 
 extern  struct asm_sym  *SymLookup( const char *name );
@@ -184,6 +206,7 @@ extern  void            SymPassInit( int pass );
 extern  struct asm_sym **SymSort( unsigned int * );
 extern  void            SymMakeAllSymbolsPublic( void );
 //extern  void            SymSetCurrPC( void );
+extern  int             SymEnum( struct asm_sym * *, int * );
 
 #ifdef __WATCOMC__
 typedef int (__watcall * StrCmpFunc)(const char *, const char * );
@@ -197,12 +220,5 @@ extern  struct asm_sym  *SymLCreate( const char * );
 extern  void             SymClearLocal( void );
 extern  void             SymSetLocal( asm_sym * );
 extern  void             SymGetLocal( asm_sym * );
-
-// defined in assemble.c
-
-extern struct asm_sym LineItem;
-#define LineNumber LineItem.value
-extern struct asm_sym WordSize;
-#define CurrWordSize WordSize.value
 
 #endif

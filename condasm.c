@@ -47,6 +47,7 @@
 #include "expreval.h"
 #include "directiv.h"
 #include "listing.h"
+#include "input.h"
 
 extern bool SkipMacroMode;
 
@@ -76,11 +77,11 @@ static char delim_char;
 
 // fixme char *IfSymbol;        /* save symbols in IFDEF's so they don't get expanded */
 
-static int StartComment( char * p )
-/***********************************/
+static int StartComment( const char * p )
+/***************************************/
 {
     while (isspace(*p)) p++;
-    if (*p == NULLC) {
+    if ( *p == NULLC ) {
         AsmError( COMMENT_DELIMITER_EXPECTED );
         return( ERROR );
     }
@@ -108,7 +109,7 @@ static int StartComment( char * p )
 */
 
 void conditional_assembly_prepare( char *line )
-/***************************************************/
+/*********************************************/
 {
     char        *ptr;
     char        *end;
@@ -134,42 +135,48 @@ void conditional_assembly_prepare( char *line )
         while (isspace(*ptr)) ptr++;
     }
 
-    if( *ptr == NULLC )
-        return;
-    end = ptr;
-    while ( is_valid_id_char( *end )) ++end;
-    if (*end == ':') {
-        end++;
-        while (isspace(*end)) end++;
-        ptr = end;
+    fix = *ptr | 0x20;
+    /* a conditional directive must start with i[f..], e[lse../ndif] or c[omment] */
+    if( fix == 'i' || fix == 'e' || fix == 'c' ) {
+        end = ptr;
         while ( is_valid_id_char( *end )) ++end;
-    }
-    fix = *end;
-    *end = NULLC;
+        if (*end == ':') {
+            end++;
+            while (isspace(*end)) end++;
+            ptr = end;
+            while ( is_valid_id_char( *end )) ++end;
+        }
+        fix = *end;
+        *end = NULLC;
 
-//    DebugMsg(("conditional_assembly_prepare IFx (%s)\n", ptr));
+        //DebugMsg(("conditional_assembly_prepare IFx (%s)\n", ptr));
 
-    resw = FindResWord( ptr );
-    *end = fix;
+        resw = FindResWord( ptr );
+        *end = fix;
+    } else
+        resw = NULL;
+
     if( resw == NULL ||
         ( ( resw->flags & RWF_SPECIAL) == 0 ) ||
-        AsmOpTable[resw->position].specialtype != RWT_DIRECTIVE ||
-        AsmOpTable[resw->position].opcode != DRT_CONDDIR ) {
+        //AsmOpTable[optable_idx[resw - AsmResWord]].specialtype != RWT_DIRECTIVE ||
+        //AsmOpTable[optable_idx[resw - AsmResWord]].opcode != DRT_CONDDIR ) {
+        AsmOpTable[resw - AsmResWord].specialtype != RWT_DIRECTIVE ||
+        AsmOpTable[resw - AsmResWord].opcode != DRT_CONDDIR ) {
         /* it's not a conditional directive or COMMENT */
         if(( CurrIfState == BLOCK_INACTIVE ) || ( CurrIfState == BLOCK_DONE ) ) {
-            DebugMsg(("%lu. suppressed: >%s<\n", LineNumber, line));
+            DebugMsg(("%lu. suppressed: >%s<\n", GetTopLine(), line));
             if ( ModuleInfo.listif ) LstWriteSrcLine();
             *line = NULLC;
         }
         return;
     }
 
-    switch( resw->position ) {
+    switch( resw - AsmResWord ) {
     case T_COMMENT:
         StartComment( end );
         DebugMsg(("COMMENT starting, delim is >%c<\n", delim_char));
         *line = NULLC;
-        return;
+        break;
     case T_IF:
     case T_IF1:
     case T_IF2:
@@ -209,7 +216,7 @@ void conditional_assembly_prepare( char *line )
             ptr2 = "BLOCK_DONE";
             break;
         }
-        DebugMsg(("%lu. conditional_assembly_prepare IFx (%s): state=%s, level=%u, falselevel=%u\n", LineNumber, ptr, ptr2, blocknestlevel, falseblocknestlevel));
+        DebugMsg(("%lu. conditional_assembly_prepare IFx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, ptr2, blocknestlevel, falseblocknestlevel));
         }
 #endif
         break;
@@ -258,7 +265,7 @@ void conditional_assembly_prepare( char *line )
             ptr2 = "BLOCK_DONE";
             break;
         }
-        DebugMsg(("%lu. conditional_assembly_prepare ELSEx (%s): state=%s, level=%u, falselevel=%u\n", LineNumber, ptr, ptr2, blocknestlevel, falseblocknestlevel));
+        DebugMsg(("%lu. conditional_assembly_prepare ELSEx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, ptr2, blocknestlevel, falseblocknestlevel));
         }
 #endif
         break;
@@ -268,7 +275,7 @@ void conditional_assembly_prepare( char *line )
             if ( ModuleInfo.listif ) LstWriteSrcLine();
             *line = NULLC;
         }
-        DebugMsg(("%lu. conditional_assembly_prepare ENDIF: state=%u, level=%u, falselevel=%u\n", LineNumber, CurrIfState, blocknestlevel, falseblocknestlevel));
+        DebugMsg(("%lu. conditional_assembly_prepare ENDIF: state=%u, level=%u, falselevel=%u\n", GetTopLine(), CurrIfState, blocknestlevel, falseblocknestlevel));
         break;
     default: /* shouldn't happen */
         *end = NULLC;
@@ -309,8 +316,8 @@ static bool check_defd( char *string )
     }
 }
 
-static bool check_blank( char *string )
-/************************************/
+static bool check_blank( const char *string )
+/*******************************************/
 {
     for ( ;*string; string++ )
         if ( isspace(*string) == FALSE)
@@ -318,8 +325,8 @@ static bool check_blank( char *string )
     return( TRUE );
 }
 
-static bool check_dif( char *string, char *string2, bool sensitive )
-/******************************************************************/
+static bool check_dif( const char *string, const char *string2, bool sensitive )
+/******************************************************************************/
 {
     if( sensitive ) {
         return( strcmp( string, string2 ) != 0 );
@@ -329,7 +336,7 @@ static bool check_dif( char *string, char *string2, bool sensitive )
 }
 
 ret_code conditional_assembly_directive( int i, int directive )
-/*****************************************/
+/*************************************************************/
 {
     char *string1;
     char *string2;
@@ -345,7 +352,7 @@ ret_code conditional_assembly_directive( int i, int directive )
 
     switch( CurrIfState ) {
     case COND_CHECK:
-        DebugMsg(("%lu. conditional_assembly_directive, COND_CHECK, CurrIfState=%u, level=%u, falselevel=%u\n", LineNumber, CurrIfState, blocknestlevel, falseblocknestlevel));
+        DebugMsg(("%lu. conditional_assembly_directive, COND_CHECK, CurrIfState=%u, level=%u, falselevel=%u\n", GetTopLine(), CurrIfState, blocknestlevel, falseblocknestlevel));
         switch (directive) {
         case T_IF:
         case T_IF1:
@@ -378,10 +385,10 @@ ret_code conditional_assembly_directive( int i, int directive )
         if (directive == T_ENDIF && blocknestlevel > 0) {
             blocknestlevel--;
             CurrIfState = BLOCK_ACTIVE;
-            DebugMsg(("%lu. conditional_assembly_directive, ENDIF, CurrIfState=ACTIVE, level=%u\n", LineNumber, blocknestlevel));
+            DebugMsg(("%lu. conditional_assembly_directive, ENDIF, CurrIfState=ACTIVE, level=%u\n", GetTopLine(), blocknestlevel ));
             return( NOT_ERROR );
         }
-        DebugMsg(("conditional_assembly_directive, unexpected directive=%u\n", directive));
+        DebugMsg(("%lu. conditional_assembly_directive, unexpected directive=%u\n", GetTopLine(), directive ));
         AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
         return( ERROR );
         break;
@@ -448,18 +455,18 @@ ret_code conditional_assembly_directive( int i, int directive )
         i++;
         if ( directive == T_IFDIF ||
             directive == T_ELSEIFDIF ) {
-            DebugMsg(("conditional_assembly_directive, IFDIF, cmp >%s< and >%s<\n", AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
+            DebugMsg(("%lu. conditional_assembly_directive, IFDIF, cmp >%s< and >%s<\n", GetTopLine(), AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
             NextIfState = check_dif( string1, string2, TRUE ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
         } else if ( directive == T_IFDIFI ||
                    directive == T_ELSEIFDIFI ) {
-            DebugMsg(("conditional_assembly_directive, IFDIFI, cmp >%s< and >%s<\n", AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
+            DebugMsg(("%lu. conditional_assembly_directive, IFDIFI, cmp >%s< and >%s<\n", GetTopLine(), AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
             NextIfState = check_dif( string1, string2, FALSE ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
         } else if ( directive == T_IFIDN ||
                    directive == T_ELSEIFIDN ) {
-            DebugMsg(("conditional_assembly_directive, IFIDN, cmp >%s< and >%s<\n", AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
+            DebugMsg(("%lu. conditional_assembly_directive, IFIDN, cmp >%s< and >%s<\n", GetTopLine(), AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
             NextIfState = !check_dif( string1, string2, TRUE ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
         } else {
-            DebugMsg(("conditional_assembly_directive, IFIDNI, cmp >%s< and >%s<\n", AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
+            DebugMsg(("%lu. conditional_assembly_directive, IFIDNI, cmp >%s< and >%s<\n", GetTopLine(), AsmBuffer[i]->string_ptr, AsmBuffer[i+2]->string_ptr));
             NextIfState = !check_dif( string1, string2, FALSE ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
         }
         break;
@@ -501,18 +508,30 @@ ret_code conditional_assembly_directive( int i, int directive )
     case T_IFNDEF:
     case T_ELSEIFNDEF:
         NextIfState = BLOCK_INACTIVE;
-        if ( AsmBuffer[i]->token == T_ID && AsmBuffer[i+1]->token == T_FINAL) {
+        /* Masm's implementation works with IDs as arguments only. The rest
+         * will return FALSE. However, it's nice to be able to check whether
+         * a reserved word is defined or not.
+         */
+        /* v2.0: [ELSE]IF[N]DEF is valid *without* an argument! */
+        //if ( AsmBuffer[i]->token == T_ID && AsmBuffer[i+1]->token == T_FINAL) {
+        if ( ( AsmBuffer[i]->token == T_ID && AsmBuffer[i+1]->token == T_FINAL ) ||
+            AsmBuffer[i]->token == T_FINAL ) {
             NextIfState = ( check_defd( AsmBuffer[i]->string_ptr )  ? BLOCK_ACTIVE : BLOCK_INACTIVE );
-            i++;
-        } else if (( AsmBuffer[i]->token == T_RES_ID ||
+            if ( AsmBuffer[i]->token != T_FINAL )
+                i++;
+        } else if ( Options.strict_masm_compat == FALSE && (
+                    AsmBuffer[i]->token == T_RES_ID ||
                     AsmBuffer[i]->token == T_INSTRUCTION ||
+                    AsmBuffer[i]->token == T_DIRECTIVE ||
+                    //AsmBuffer[i]->token == T_UNARY_OP ||
+                    //AsmBuffer[i]->token == T_BINARY_OP ||
                     AsmBuffer[i]->token == T_REG ) &&
-                   AsmBuffer[i+1]->token == T_FINAL) {
+                   AsmBuffer[i+1]->token == T_FINAL ) {
             NextIfState = BLOCK_ACTIVE;
             i++;
         } else {
-            AsmWarn(2, IFDEF_EXPECTS_SYMBOL_ARGUMENT, AsmBuffer[i-1]->pos );
-            while (AsmBuffer[i]->token != T_FINAL) i++;
+            AsmWarn( 2, IFDEF_EXPECTS_SYMBOL_ARGUMENT, AsmBuffer[i-1]->pos );
+            while ( AsmBuffer[i]->token != T_FINAL ) i++;
         }
         if ( directive == T_IFNDEF || directive == T_ELSEIFNDEF )
             NextIfState = ( ( NextIfState == BLOCK_ACTIVE ) ? BLOCK_INACTIVE : BLOCK_ACTIVE );
@@ -520,6 +539,9 @@ ret_code conditional_assembly_directive( int i, int directive )
     case T_ELSE:
         NextIfState = BLOCK_ACTIVE;
         break;
+    default: /* might be T_ENDIF in a block nesting error */
+        /* just make sure that there's no invalid value in NextIfState */
+        NextIfState = CurrIfState;
     }
 
     if ( AsmBuffer[i]->token != T_FINAL ) {
@@ -546,14 +568,14 @@ ret_code conditional_assembly_directive( int i, int directive )
         ptr = "BLOCK_DONE";
         break;
     }
-    DebugMsg(("%lu. conditional_assembly_directive exit, CurrIfState=%s, level=%u, falselevel=%u\n", LineNumber, ptr, blocknestlevel, falseblocknestlevel));
+    DebugMsg(("%lu. conditional_assembly_directive exit, CurrIfState=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, blocknestlevel, falseblocknestlevel));
     }
 #endif
     return( NOT_ERROR );
 }
 
 ret_code conditional_error_directive( int i )
-/**************************************/
+/*******************************************/
 {
     expr_list opndx;
     uint direct;
@@ -590,7 +612,7 @@ ret_code conditional_error_directive( int i )
         if (*p)
             AsmErr( FORCED_ARBITRARY, p);
         else
-            AsmErr( FORCED, p);
+            AsmErr( FORCED_ERR, p);
         break;
     case T_DOT_ERRE:
     case T_DOT_ERRNZ:
@@ -766,6 +788,7 @@ ret_code conditional_error_directive( int i )
 }
 
 ret_code CheckForOpenConditionals( void )
+/***************************************/
 {
     if( blocknestlevel > 0 ) {
         AsmErr( BLOCK_NESTING_ERROR, "if-else" );
@@ -777,6 +800,7 @@ ret_code CheckForOpenConditionals( void )
 // init (called once per module)
 
 void CondInit( void )
+/*******************/
 {
     CurrIfState = BLOCK_ACTIVE;
     blocknestlevel = 0;

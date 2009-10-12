@@ -32,6 +32,7 @@
 #ifndef OMFGENMS_H
 #define OMFGENMS_H  1
 
+void        omf_write_record( obj_rec *objr, char kill );
 extern void omf_GenMSInit( void );
 extern void omf_GenMSFini( void );
 

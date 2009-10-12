@@ -66,13 +66,13 @@ typedef struct fixinfo fixinfo;
     The ordering of this enumerated type is depended on in several places.
 */
 enum {                      /* method of fixing up location:            */
-    FIX_LO_BYTE,            /* relocate lo byte of offset               */
-    FIX_OFFSET,             /* relocate offset (2 bytes)                */
-    FIX_BASE,               /* relocate base (2 bytes)                  */
-    FIX_POINTER,            /* relocate pointer (base:offset 4 bytes)   */
-    FIX_HI_BYTE,            /* relocate hi byte of offset               */
-    FIX_OFFSET386,          /* relocate offset (4 bytes)                */
-    FIX_POINTER386,         /* relocate pointer (base:offset 6 bytes)   */
+    FIXO_LO_BYTE,           /* relocate lo byte of offset               */
+    FIXO_OFFSET,            /* relocate offset (2 bytes)                */
+    FIXO_BASE,              /* relocate base (2 bytes)                  */
+    FIXO_POINTER,           /* relocate pointer (base:offset 4 bytes)   */
+    FIXO_HI_BYTE,           /* relocate hi byte of offset               */
+    FIXO_OFFSET386,         /* relocate offset (4 bytes)                */
+    FIXO_POINTER386,        /* relocate pointer (base:offset 6 bytes)   */
     /* don't define more than 8 values without changing bit field */
 };
 
@@ -136,9 +136,9 @@ extern size_t OmfFixGenFix( fixup *fix, uint_8 *buf, int type );
     buf must be at least FIX_GEN_MAX bytes large.
 */
 
-extern size_t OmfFixGenLRef( logref *log, uint_8 *buf, int type );
-extern size_t OmfFixGenPRef( physref *phys, uint_8 *buf, int type );
+//extern size_t OmfFixGenLRef( logref *log, uint_8 *buf, int type );
+//extern size_t OmfFixGenPRef( physref *phys, uint_8 *buf, int type );
 extern size_t OmfFixGenRef( logphys *lp, int is_logical, uint_8 *buf, int type );
-/* Generate references.  See FixGenFix comment for details. */
+/* Generate references.  See OmfFixGenFix comment for details. */
 
 #endif

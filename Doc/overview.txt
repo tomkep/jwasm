@@ -1,0 +1,94 @@
+
+  A brief overview of the assembler's functions
+
+  main
+  - main_init
+  - main_fini
+  - AssembleModule
+    - AssembleInit
+    - AssembleFini
+    - OnePass
+      - GetPreprocessedLine ( if pass == 1 )
+        - GetTextLine
+      - Tokenize ( if pass > 1 )
+      - ParseItems
+        - directive
+        - data_init
+          - EvalOperand
+        - EvalOperand
+        - match_phase_1
+
+  1. main()
+
+  cmdline parsing, wildcards
+  calls AssembleModule() for each source module.
+
+  2. AssembleModule()
+
+  assembles one module in at least 2 passes.
+
+  3. OnePass()
+
+  Executes one pass for a module. Pass one is handled
+  differently than the others, because the preprocessed
+  lines are saved in this pass and then read in the
+  consecutive passes.
+
+  4. Tokenize()
+
+  The tokenizer. Scans a source line and detects reserved words,
+  numbers, IDs, operators, literals. Converts the items to tokens
+  stored in global array AsmBuffer[].
+
+  5. GetPreprocessedLine()
+
+  This is the preprocessor. It 
+  - reads a line from the current source,
+  - converts in into tokens ( function Tokenize() )
+  - calls macro expansion.
+  - checks if the line contains a preprocessor directive
+    preprocessor directives are IF, WHILE, REPEAT, INCLUDE,
+    TEXTEQU, CATSTR, INSTR, ...
+  - if yes, handles the directive and returns 0.
+  - if no, returns the number of tokens found in the line
+
+  6. ParseItems()
+
+  The parser. It does:
+  - checks if first item is a code label (ID followed by ':'). If yes,
+    a label is created ( function LabelCreate() ).
+  - checks if current item is a directive. If yes, calls function
+    directive() or - if directive is a "data definition directive" -
+    function data_item()
+  - checks if current item is predefined type or an arbitrary type.
+    If yes, calls function data_item().
+  - if current item is an instruction, it calls the expression
+    evaluator ( function EvalOperand() ), up to 3 times, to get
+    the operands.
+  - if more than 1 operand has been read, function check_sizes()
+    is called, which verifies that the sizes of the operands will
+    "match".
+  - the code generator ( function match_phase_1() ) is called.
+
+  7. match_phase_1()
+
+  The code generator. This part 
+  - scans the instruction table to find an entry which matches
+    the number of operands and their types.
+  - if an entry is found, the code bytes and fixups are generated
+    and written into a buffer.
+
+  8. data_init()
+
+  Handles data lines. This is either a data directive ( DB, DW, DD, ...),
+  a predefined type ( BYTE, WORD, DWORD, ... ) or an arbitrary type, defined
+  with TYPEDEF, STRUCT, UNION, ....
+
+  9. directive()
+
+  The "directive dispatcher". This is mainly a large switch statement.
+
+  10. GetTextLine()
+
+  Reads a line from the current source. This is either a macro, a source
+  file or the global line queue, which is used to store generated code.

@@ -46,13 +46,17 @@ enum fixup_types {
 #if AMD64_SUPPORT
         FIX_OFF64,          /*  7, 8 byte, COFF64+BIN only */
 #endif
-        FIX_SEG,            /*  8, 2 byte */
+        FIX_SEG = 8,        /*  8, 2 byte */
         FIX_PTR16,          /*  9, 4 byte, OMF only */
         FIX_PTR32,          /* 10, 6 byte, OMF only */
         FIX_HIBYTE,         /* 11, 1 byte, OMF only */
         FIX_OFF32_IMGREL,   /* 12, 4 byte, COFF+ELF only */
         FIX_OFF32_SECREL,   /* 13, 4 byte, COFF+ELF only */
 };
+
+#define COFF_DISALLOWED 0x0E12
+#define  ELF_DISALLOWED 0x0F00
+#define  BIN_DISALLOWED 0x0000
 
 /* fixups are also used for backpatching of forward references in pass one.
  * the instructions which depend on the distance are CALL, JMP, PUSH <imm>.
@@ -97,9 +101,7 @@ struct asmfixup {
 };
 
 extern struct asmfixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
-//extern void             mark_fixupp( struct asmfixup *, OPNDTYPE determinant );
-extern struct fixup     *CreateOmfFixupRec( struct asmfixup * );
-extern ret_code         store_fixup( struct code_info *, int index );
+extern ret_code         store_fixup( struct asmfixup *, int_32 * );
 
 extern ret_code         BackPatch( struct asm_sym *sym );
 

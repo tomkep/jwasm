@@ -70,8 +70,8 @@ uint_32 list_pos_start;
 static unsigned         SymCount;
 
 #define DOTSMAX 32
-static char  dots[] = " . . . . . . . . . . . . . . . .";
-static char  stdprefix[] = "%08X                  ";
+static const char  dots[] = " . . . . . . . . . . . . . . . .";
+static const char  stdprefix[] = "%08X                  ";
 
 enum typestring {
     TS_BYTE,   TS_WORD,   TS_DWORD,   TS_FWORD,
@@ -84,7 +84,7 @@ enum typestring {
     TS_GROUP,  TS_NOSEG,  TS_TEXT,    TS_ALIAS
 };
 
-static char *typestr[] = {
+static const char * const typestr[] = {
     "Byte", "Word", "DWord", "FWord",
     "QWord", "TByte", "Para", "OWord",
     "Page",
@@ -96,11 +96,11 @@ static char *typestr[] = {
 };
 
 /* don't change this order, must match enum lang_type in globals.h */
-static char *langstr[] = {
+static const char * const langstr[] = {
     "", "C", "SYSCALL", "STDCALL", "PASCAL", "FORTRAN", "BASIC", "FASTCALL"
 };
 
-static char basereg[] = {' ', 'e', 'r' };
+static const char basereg[] = {' ', 'e', 'r' };
 
 void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
 /*******************************************************************/
@@ -286,8 +286,8 @@ void LstNL( void )
     }
 }
 
-static char *get_seg_align( seg_info *seg, char * buffer )
-/********************************************************/
+static const char *get_seg_align( seg_info *seg, char * buffer )
+/**************************************************************/
 {
     switch( seg->alignment ) {
     case 0:    return( typestr[TS_BYTE]  );
@@ -317,8 +317,8 @@ static void log_macro( struct asm_sym *sym )
 /******************************************/
 {
     int i = strlen ( sym->name);
-    char *pdots = dots + i + 1;
-    char *type = (sym->isfunc) ? typestr[TS_FUNC] : typestr[TS_PROC];
+    const char *pdots = dots + i + 1;
+    const char *type = (sym->isfunc) ? typestr[TS_FUNC] : typestr[TS_PROC];
 
     if (i >= DOTSMAX)
         pdots = "";
@@ -333,8 +333,8 @@ static void log_macro( struct asm_sym *sym )
 // called by log_struct and log_typedef
 // that is, the symbol is ensured to be a TYPE!
 
-static char * GetMemtypeString(asm_sym * sym, char * buffer)
-/**********************************************************/
+static const char * GetMemtypeString(asm_sym * sym, char * buffer)
+/****************************************************************/
 {
     if ( (sym->mem_type & MT_SPECIAL) == 0 ) {
         int size = (sym->mem_type & MT_SIZE_MASK) + 1;
@@ -416,7 +416,7 @@ static void log_struct( char * name, struct asm_sym *sym, int ofs )
 {
     unsigned      i;
     dir_node      *dir;
-    char          *pdots;
+    const char    *pdots;
     struct_info   *si;
     field_list    *f;
     static int    prefix = 0;
@@ -439,7 +439,10 @@ static void log_struct( char * name, struct asm_sym *sym, int ofs )
     for (i=0;i<prefix;i++)
         LstPrintf(" ");
     if (prefix == 0)
-        LstPrintf( "%s %s        %8X", name, pdots, sym->total_size );
+        if ( dir->e.structinfo->alignment > 1)
+            LstPrintf( "%s %s        %8X (%u)", name, pdots, sym->total_size, si->alignment );
+        else
+            LstPrintf( "%s %s        %8X", name, pdots, sym->total_size );
     else
         LstPrintf( "%s %s        %8X", name, pdots, sym->offset + ofs);
     LstNL();
@@ -479,7 +482,7 @@ static void log_record( struct asm_sym **syms, struct asm_sym *sym )
 
     if( si->typekind == TYPE_RECORD ) {
         int i = strlen ( sym->name);
-        char *pdots = dots + i + 1;
+        const char *pdots = dots + i + 1;
         if (i >= DOTSMAX)
             pdots = "";
         for( i = 0,f = si->head; f; f = f->next,i++ );
@@ -505,12 +508,12 @@ static void log_typedef( struct asm_sym **syms, struct asm_sym *sym )
 {
     dir_node    *dir = (dir_node *)sym;
     struct_info  *si = dir->e.structinfo;
-    char *p;
+    const char *p;
     char buffer[256];
 
     if( si->typekind == TYPE_TYPEDEF ) {
         int i = strlen ( sym->name );
-        char *pdots = dots + i + 1;
+        const char *pdots = dots + i + 1;
         if (i >= DOTSMAX)
             pdots = "";
         buffer[0] = '\0';
@@ -541,7 +544,7 @@ static void log_segment( struct asm_sym *sym, struct asm_sym *group )
 
     if( seg->group == group ) {
         int i = strlen( sym->name );
-        char *pdots = dots + i + 1;
+        const char *pdots = dots + i + 1;
         if (i >= DOTSMAX)
             pdots = "";
         LstPrintf( "%s %s        ", sym->name, pdots );
@@ -570,7 +573,7 @@ static void log_group( struct asm_sym *grp )
 /******************************************/
 {
     unsigned i;
-    char *pdots;
+    const char *pdots;
 
     i = strlen ( grp->name);
     pdots = dots + i + 1;
@@ -614,7 +617,7 @@ static void log_symbol( struct asm_sym *sym )
 /*******************************************/
 {
     int i = strlen( sym->name );
-    char *pdots = dots + i + 1;
+    const char *pdots = dots + i + 1;
     char buffer[MAX_LINE_LEN];
 
     if (i >= DOTSMAX)
@@ -673,10 +676,10 @@ static void log_proc( struct asm_sym *sym )
 {
     dir_node *f;
     struct dir_node *l;
-    char * p;
+    const char * p;
     dir_node *dir = (dir_node *)sym;
     int i = strlen( sym->name );
-    char *pdots = dots + i + 1;
+    const char *pdots = dots + i + 1;
 
     if ( i >= DOTSMAX )
         pdots = "";

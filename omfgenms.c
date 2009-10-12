@@ -37,10 +37,9 @@
 #include "omfpc.h"
 #include "omfgenms.h"
 #include "myassert.h"
-#include "msdbg.h"
 #include "queue.h"
 
-typedef int (*pobj_filter)( obj_rec *objr, OBJ_WFILE *out );
+typedef int (*pobj_filter)( OBJ_WFILE *out, obj_rec *objr );
 
 typedef struct {
     uint_8      command;
@@ -49,7 +48,7 @@ typedef struct {
 
 extern OBJ_WFILE *file_out;
 
-static int writeMisc( obj_rec *objr, OBJ_WFILE *out )
+static int writeMisc( OBJ_WFILE *out, obj_rec *objr )
 /***************************************************/
 {
 /*
@@ -71,7 +70,7 @@ static int writeMisc( obj_rec *objr, OBJ_WFILE *out )
     return( 0 );
 }
 
-static int writeMisc32( obj_rec *objr, OBJ_WFILE *out )
+static int writeMisc32( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
 /*
@@ -98,7 +97,7 @@ static int writeMisc32( obj_rec *objr, OBJ_WFILE *out )
     return( 0 );
 }
 
-static int writeComent( obj_rec *objr, OBJ_WFILE *out )
+static int writeComent( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
     uint_8  *ptr;
@@ -120,7 +119,7 @@ static int writeComent( obj_rec *objr, OBJ_WFILE *out )
     return( 0 );
 }
 
-static int writeSegdef( obj_rec *objr, OBJ_WFILE *out )
+static int writeSegdef( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
     int         is32;
@@ -169,14 +168,16 @@ static int writeSegdef( obj_rec *objr, OBJ_WFILE *out )
     OmfWriteIndex( out, objr->d.segdef.seg_name_idx );
     OmfWriteIndex( out, objr->d.segdef.class_name_idx );
     OmfWriteIndex( out, objr->d.segdef.ovl_name_idx );
+#if 0
     if( objr->d.segdef.access_valid ) {
         AsmError( ACCESS_CLASSES_NOT_SUPPORTED );
     }
+#endif
     OmfWEndRec( out );
     return( 0 );
 }
 
-static int writeFixup( obj_rec *objr, OBJ_WFILE *out )
+static int writeFixup( OBJ_WFILE *out, obj_rec *objr )
 /****************************************************/
 {
     int         is32;
@@ -210,7 +211,7 @@ static int writeFixup( obj_rec *objr, OBJ_WFILE *out )
     return( 0 );
 }
 
-static int writeLedata( obj_rec *objr, OBJ_WFILE *out )
+static int writeLedata( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
     size_t      save;
@@ -239,7 +240,7 @@ static int writeLedata( obj_rec *objr, OBJ_WFILE *out )
     return( 0 );
 }
 
-static int writeLidata( obj_rec *objr, OBJ_WFILE *out )
+static int writeLidata( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
     size_t      save;
@@ -268,16 +269,16 @@ static int writeLidata( obj_rec *objr, OBJ_WFILE *out )
     return( 0 );
 }
 
-static int writeTheadr( obj_rec *objr, OBJ_WFILE *out )
+static int writeTheadr( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
 /**/myassert( objr != NULL );
 /**/myassert( objr->command == CMD_THEADR );
 
-    return( writeMisc( objr, out ) );
+    return( writeMisc( out, objr ) );
 }
 
-static int writeModend( obj_rec *objr, OBJ_WFILE *out )
+static int writeModend( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
     size_t  len;
@@ -306,7 +307,7 @@ static int writeModend( obj_rec *objr, OBJ_WFILE *out )
     return( 0 );
 }
 
-static void writeBase( obj_rec *objr, OBJ_WFILE *out )
+static void writeBase( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
     size_t grp_idx;
@@ -321,7 +322,7 @@ static void writeBase( obj_rec *objr, OBJ_WFILE *out )
     }
 }
 
-static int writeComdat( obj_rec *objr, OBJ_WFILE *out )
+static int writeComdat( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
     uint_8      *ptr;
@@ -345,7 +346,7 @@ static int writeComdat( obj_rec *objr, OBJ_WFILE *out )
     }
     OmfWriteIndex( out, objr->d.comdat.type_idx );
     if( ( objr->d.comdat.attributes & COMDAT_ALLOC_MASK ) == COMDAT_EXPLICIT ) {
-        writeBase( objr, out );
+        writeBase( out, objr );
     }
     OmfWriteIndex( out, objr->d.comdat.public_name_idx );
     /* record is already in ms omf format */
@@ -358,7 +359,7 @@ static int writeComdat( obj_rec *objr, OBJ_WFILE *out )
     return( 0 );
 }
 
-static int writePubdef( obj_rec *objr, OBJ_WFILE *out )
+static int writePubdef( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
     int         is32;
@@ -373,7 +374,7 @@ static int writePubdef( obj_rec *objr, OBJ_WFILE *out )
 
     is32 = objr->is_32;
     OmfWBegRec( out, objr->command | ( is32 ? 1 : 0 ) );
-    writeBase( objr, out );
+    writeBase( out, objr );
     pubdata = objr->d.pubdef.pubs;
     if( pubdata != NULL ) {
         pubstop = pubdata + objr->d.pubdef.num_pubs;
@@ -395,7 +396,7 @@ static int writePubdef( obj_rec *objr, OBJ_WFILE *out )
     return( 0 );
 }
 
-static void writeLinnumData( obj_rec *objr, OBJ_WFILE *out )
+static void writeLinnumData( OBJ_WFILE *out, obj_rec *objr )
 /**********************************************************/
 {
     int is32;
@@ -442,7 +443,7 @@ static void writeLinnumData( obj_rec *objr, OBJ_WFILE *out )
 #endif
 }
 
-static int writeLinnum( obj_rec *objr, OBJ_WFILE *out )
+static int writeLinnum( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
 
@@ -450,13 +451,13 @@ static int writeLinnum( obj_rec *objr, OBJ_WFILE *out )
 /**/myassert( objr->command == CMD_LINNUM );
 
     OmfWBegRec( out, objr->is_32 ? CMD_LINN32 : CMD_LINNUM );
-    writeBase( objr, out );
-    writeLinnumData(objr, out );
+    writeBase( out, objr );
+    writeLinnumData( out, objr );
     OmfWEndRec( out );
     return( 0 );
 }
 
-static int writeLinsym( obj_rec *objr, OBJ_WFILE *out )
+static int writeLinsym( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
 
@@ -466,7 +467,7 @@ static int writeLinsym( obj_rec *objr, OBJ_WFILE *out )
     OmfWBegRec( out, objr->is_32 ? CMD_LINS32 : CMD_LINSYM );
     OmfWrite8( out, objr->d.linsym.d.linsym.flags );
     OmfWriteIndex( out, objr->d.linsym.d.linsym.public_name_idx );
-    writeLinnumData( objr, out );
+    writeLinnumData( out, objr );
     OmfWEndRec( out );
     return( 0 );
 }
@@ -499,11 +500,9 @@ static const pobj_list myFuncs[] = {
 };
 #define NUM_FUNCS   ( sizeof( myFuncs ) / sizeof( pobj_list ) )
 
-#define CMD_POBJ_MIN_CMD ( ( CMD_MIN_CMD - 1 ) & ~1 )
+#define JUMP_OFFSET(cmd)    ( ( cmd ) - CMD_MIN_CMD )
 
-#define JUMP_OFFSET(cmd)    ((cmd)-CMD_POBJ_MIN_CMD)
-
-static pobj_filter      jumpTable[ CMD_MAX_CMD - CMD_POBJ_MIN_CMD + 1 ];
+static pobj_filter      jumpTable[ CMD_MAX_CMD - CMD_MIN_CMD + 1 ];
 
 // call a function
 
@@ -514,7 +513,7 @@ void omf_write_record( obj_rec *objr, char kill )
 /**/myassert( objr != NULL );
     DebugMsg(("omf_write_record( command=%X, kill=%u )\n", objr->command, kill ));
     OmfRSeek( objr, 0 );
-    jumpTable[ JUMP_OFFSET(objr->command) ] ( objr, file_out );
+    jumpTable[ JUMP_OFFSET(objr->command) ] ( file_out, objr );
     if( kill ) {
         OmfKillRec( objr );
     }

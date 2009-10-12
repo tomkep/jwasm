@@ -24,7 +24,8 @@
 *
 *  ========================================================================
 *
-* Description:  implements a linked list of dynamically allocated objects
+* Description:  implements a linked list of dynamically allocated objects.
+*               Used by OMF output format.
 *
 ****************************************************************************/
 
@@ -50,8 +51,9 @@ typedef struct {
     void        **free_list;
 } cv_t;
 
-static void newBlk( cv_t *cv ) {
-
+static void newBlk( cv_t *cv )
+/****************************/
+{
     blk_t   *newblk;
 
     newblk = AsmAlloc( sizeof( blk_t ) - 1 + cv->blk_top );

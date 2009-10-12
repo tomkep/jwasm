@@ -53,6 +53,23 @@ typedef struct {
     uint_16  e_shstrndx;             // +50 section name string table index.
 } Elf32_Ehdr;
 
+typedef struct {
+    uint_8   e_ident[EI_NIDENT];     // signature & ID info
+    uint_16  e_type;                 // file type (i.e. obj file, exe file)
+    uint_16  e_machine;              // required architecture
+    uint_32  e_version;              // version of the file
+    uint_64  e_entry;                // program entry point
+    uint_64  e_phoff;                // program header offset
+    uint_64  e_shoff;                // section header offset
+    uint_32  e_flags;                // processor specific flags
+    uint_16  e_ehsize;               // elf header size
+    uint_16  e_phentsize;            // program header entry size
+    uint_16  e_phnum;                // number of program header entries
+    uint_16  e_shentsize;            // section header entry size
+    uint_16  e_shnum;                // number of section header entries
+    uint_16  e_shstrndx;             // section name string table index.
+} Elf64_Ehdr;
+
 // e_ident field indicies
 
 #define ELF_SIGNATURE   "\177ELF"
@@ -158,6 +175,19 @@ typedef struct {
     uint_32  sh_entsize;     // entry size for sects with fixed sized entries
 } Elf32_Shdr;
 
+typedef struct {
+    uint_32  sh_name;        // name of the section
+    uint_32  sh_type;        // section type
+    uint_64  sh_flags;
+    uint_64  sh_addr;        // starting address of section in image
+    uint_64  sh_offset;      // start of section in file
+    uint_64  sh_size;        // size of section in file.
+    uint_32  sh_link;        // multipurpose field   (based on type)
+    uint_32  sh_info;        // another multipurpose field (based on type)
+    uint_64  sh_addralign;   // address alignment
+    uint_64  sh_entsize;     // entry size for sects with fixed sized entries
+} Elf64_Shdr;
+
 // section types
 
 #define SHT_NULL        0               // inactive
@@ -216,11 +246,25 @@ typedef struct {
     uint_16  st_shndx;       // section index
 } Elf32_Sym;
 
+typedef struct {
+    uint_32  st_name;        // symbol name index into string table
+    uint_8   st_info;        // symbol's type and binding attribs.
+    uint_8   st_other;       // no meaning yet.
+    uint_16  st_shndx;       // section index
+    uint_64  st_value;       // symbol "value"
+    uint_64  st_size;        // symbol size
+} Elf64_Sym;
+
 // symbol info field contents
 
 #define ELF32_ST_BIND(i)        ((i)>>4)        // get the "bind" subfield
 #define ELF32_ST_TYPE(i)        ((i)&0xf)       // get the type subfield
 #define ELF32_ST_INFO(b,t)      (((b)<<4)+((t)&0xf)) // make a new st_info
+
+// the macros for 64bits are a guess only
+#define ELF64_ST_BIND(i)        ((i)>>4)        // get the "bind" subfield
+#define ELF64_ST_TYPE(i)        ((i)&0xf)       // get the type subfield
+#define ELF64_ST_INFO(b,t)      (((b)<<4)+((t)&0xf)) // make a new st_info
 
 // bind subfield contents
 
@@ -256,25 +300,80 @@ typedef struct {
     int_32   r_addend;       // value used as a basis for the reloc.
 } Elf32_Rela;
 
+typedef struct {
+    uint_64  r_offset;       // place to apply reloc (from begin of section)
+    uint_64  r_info;         // symbol idx, and type of reloc
+} Elf64_Rel;
+
+typedef struct {
+    uint_64  r_offset;       // place to apply reloc (from begin of section)
+    uint_64  r_info;         // symbol idx, and type of reloc
+    int_64   r_addend;       // value used as a basis for the reloc.
+} Elf64_Rela;
+
 // r_info field contents
 
 #define ELF32_R_SYM(i)  ((i)>>8)                // gets the symbol index
 #define ELF32_R_TYPE(i) ((uint_8)(i))           // gets the symbol type
 #define ELF32_R_INFO(s,t) (((s)<<8)+(uint_8)(t))    // make a new r_info
 
+#define ELF64_R_SYM(i)  ((i)>>32)               // gets the symbol index
+#define ELF64_R_TYPE(i) ((i)&0xffffffffL)       // gets the symbol type
+#define ELF64_R_INFO(s,t) ((((uint_64)s)<<32)+((t)&0xffffffffL)) // make a new r_info
+
 // relocation types.
 //386
-#define R_386_NONE              0
-#define R_386_32                1 /* direct */
-#define R_386_PC32              2
-#define R_386_GOT32             3 /* GOT entry */
-#define R_386_PLT32             4 /* PLT entry */
-#define R_386_COPY              5
-#define R_386_GLOB_DAT          6 /* create GOT entry */
-#define R_386_JMP_SLOT          7 /* create PLT entry */
-#define R_386_RELATIVE          8 /* relative to program base */
-#define R_386_GOTOFF            9 /* offset to GOT */
-#define R_386_GOTPC             10
+enum elf32_relocations {
+ R_386_NONE      =  0,
+ R_386_32        =  1, /* direct */
+ R_386_PC32      =  2, /* PC-relative */
+ R_386_GOT32     =  3, /* GOT entry */
+ R_386_PLT32     =  4, /* PLT entry */
+ R_386_COPY      =  5,
+ R_386_GLOB_DAT  =  6, /* create GOT entry */
+ R_386_JMP_SLOT  =  7, /* create PLT entry */
+ R_386_RELATIVE  =  8, /* relative to program base */
+ R_386_GOTOFF    =  9, /* offset to GOT */
+ R_386_GOTPC     = 10,
+/* GNU extensions for LD */
+ R_386_16        = 20, /* 16-bit direct */
+ R_386_PC16      = 21, /* 16-bit PC-relative */
+ R_386_8         = 22, /* 8-bit direct */
+ R_386_PC8       = 23  /* 8-bit PC-relative */
+};
+
+//X86_64
+enum elf64_relocations {
+ R_X86_64_NONE        =   0,
+ R_X86_64_64          =   1,
+ R_X86_64_PC32        =   2,
+ R_X86_64_GOT32       =   3,
+ R_X86_64_PLT32       =   4,
+ R_X86_64_COPY        =   5,
+ R_X86_64_GLOB_DAT    =   6,
+ R_X86_64_JUMP_SLOT   =   7,
+ R_X86_64_RELATIVE    =   8,
+ R_X86_64_GOTPCREL    =   9,
+ R_X86_64_32          =  10,
+ R_X86_64_32S         =  11,
+ R_X86_64_16          =  12,
+ R_X86_64_PC16        =  13,
+ R_X86_64_8           =  14,
+ R_X86_64_PC8         =  15,
+ R_X86_64_DPTMOD64    =  16,
+ R_X86_64_DTPOFF64    =  17,
+ R_X86_64_TPOFF64     =  18,
+ R_X86_64_TLSGD       =  19,
+ R_X86_64_TLSLD       =  20,
+ R_X86_64_DTPOFF32    =  21,
+ R_X86_64_GOTTPOFF    =  22,
+ R_X86_64_TPOFF32     =  23,
+ R_X86_64_PC64        =  24,
+ R_X86_64_GOTOFF64    =  25,
+ R_X86_64_GOTPC32     =  26,
+ R_X86_64_SIZE32      =  32,
+ R_X86_64_SIZE64      =  33
+};
 
 // program header
 

@@ -24,8 +24,8 @@
 *
 *  ========================================================================
 *
-* Description:  STRUCT, UNION, RECORD and TYPEDEF directives
-* virtually rewritten for JWasm.
+* Description:  STRUCT, UNION, RECORD and TYPEDEF directives,
+*               virtually rewritten for JWasm.
 *
 ****************************************************************************/
 
@@ -51,6 +51,7 @@ dir_node *CurrStruct;
 static dir_node *redef_struct;
 
 void TypesInit()
+/**************/
 {
     CurrStruct   = NULL;
     redef_struct = NULL;
@@ -59,6 +60,7 @@ void TypesInit()
 // search a name in a struct's fieldlist
 
 struct asm_sym *SearchNameInStruct( asm_sym *tstruct, const char *name, unsigned int * poffset, int level )
+/*********************************************************************************************************/
 {
     int len = strlen( name );
     field_list * fl = ((dir_node *)tstruct)->e.structinfo->head;
@@ -101,6 +103,7 @@ struct asm_sym *SearchNameInStruct( asm_sym *tstruct, const char *name, unsigned
 // check if a struct has changed
 
 static bool AreStructsEqual(dir_node *newstr, dir_node *oldstr)
+/*************************************************************/
 {
     field_list  *fold = oldstr->e.structinfo->head;
     field_list  *fnew = newstr->e.structinfo->head;
@@ -141,7 +144,7 @@ static bool AreStructsEqual(dir_node *newstr, dir_node *oldstr)
 // i = index of directive token
 
 ret_code StructDirective( int i )
-/********************/
+/*******************************/
 {
     char *name;
     unsigned alignment;
@@ -163,7 +166,7 @@ ret_code StructDirective( int i )
         return( ERROR );
     }
 
-    alignment = 1 << ModuleInfo.fieldalign;
+    alignment = ( 1 << ModuleInfo.fieldalign );
 
     i++; /* go past STRUCT/UNION */
 
@@ -268,11 +271,15 @@ ret_code StructDirective( int i )
             dir = dir_insert( name, SYM_TYPE );
         else {
             /* a nested structure is split in an anonymous STRUCT type
-             and a struct field with/without name
+             * and a struct field with/without name
              */
             //field_list *f;
-            dir = dir_insert_ex( "", SYM_TYPE);
-            sym = AddFieldToStruct( name_loc, -1, MT_TYPE, dir, 0 );
+            dir = dir_insert_ex( name, SYM_TYPE );
+            /* v2: don't call AddFieldToStruct() here. First the
+             * structure must be read in ( because of alignment issues
+             */
+            // sym = AddFieldToStruct( name_loc, -1, MT_TYPE, dir, 0 );
+
             alignment = CurrStruct->e.structinfo->alignment;
         }
     } else {
@@ -329,7 +336,7 @@ ret_code StructDirective( int i )
 // handle ENDS directive if CurrStruct != NULL
 
 ret_code EndstructDirective( int i )
-/********************/
+/**********************************/
 {
     //char *name;
     //unsigned int offset;
@@ -352,9 +359,11 @@ ret_code EndstructDirective( int i )
 
     dir = CurrStruct;
 
-    DebugMsg(("EndstructDirective, ofs=%u, struct size=%u, alignment=%u\n",
+    DebugMsg(("EndstructDirective(%s), ofs=%u, struct size=%u, max_mbr=%u, alignment=%u\n",
+              dir->sym.name,
               dir->sym.offset,
               dir->sym.total_size,
+              dir->sym.max_mbr_size,
               dir->e.structinfo->alignment));
 
     if ( ( i == 1 && dir->next == NULL ) ||
@@ -376,10 +385,21 @@ ret_code EndstructDirective( int i )
 
     i++; /* go past ENDS */
 
-    if ( dir->e.structinfo->alignment > 1 ) {
-        dir->sym.total_size = (dir->sym.total_size + dir->e.structinfo->alignment - 1) & (-dir->e.structinfo->alignment);
+    /* Pad bytes at the end of the structure.
+     * This isn't done by Masm, but JWasm does, as long
+     * as -Zne isn't set.
+     */
+#if 1
+    if ( dir->e.structinfo->alignment > 1 && Options.masm_compat_gencode == FALSE ) {
+        size = dir->sym.max_mbr_size;
+        if ( size == 0 )
+            size++;
+        if ( size > dir->e.structinfo->alignment )
+            size = dir->e.structinfo->alignment;
+        dir->sym.total_size = (dir->sym.total_size + size - 1) & (-size);
         DebugMsg(("EndstructDirective:, struct size after final alignment=%u\n", dir->sym.total_size));
     }
+#endif
     dir->e.structinfo->isOpen = FALSE;
     dir->sym.defined = TRUE;
 
@@ -390,13 +410,24 @@ ret_code EndstructDirective( int i )
     dir->sym.offset = 0;
 
     CurrStruct = dir->next;
+    /* v2.0: add the embedded struct AFTER it has been parsed! */
+    if ( i == 1 ) {
+        asm_sym *sym;
+        sym = AddFieldToStruct( -1, -1, MT_TYPE, dir, dir->sym.total_size );
+        /* the member name was stored in the type name */
+        sym->name = dir->sym.name;
+        sym->name_size = strlen( dir->sym.name );
+        sym->total_size = dir->sym.total_size;
+        dir->sym.name = ""; /* the type becomes anonymous */
+        dir->sym.name_size = 0;
+    }
 
     if ( FileInfo.file[LST] ) {
         LstWrite( LSTTYPE_STRUCT, size, dir->sym.name );
     }
 #if 1
     /* to allow direct structure access */
-    switch (dir->sym.total_size) {
+    switch ( dir->sym.total_size ) {
     case 1:  dir->sym.mem_type = MT_BYTE;   break;
     case 2:  dir->sym.mem_type = MT_WORD;   break;
     case 4:  dir->sym.mem_type = MT_DWORD;  break;
@@ -421,9 +452,14 @@ ret_code EndstructDirective( int i )
             redef_struct = NULL;
         }
     } else {
+
+        if ( dir->sym.max_mbr_size > CurrStruct->sym.max_mbr_size )
+            CurrStruct->sym.max_mbr_size = dir->sym.max_mbr_size;
+
         UpdateStructSize( size );
         DebugMsg(("EndstructDirective: new size of restored structure=%u\n", CurrStruct->sym.total_size));
     }
+    //dir->sym.max_mbr_size = 0;
     if ( AsmBuffer[i]->token != T_FINAL ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
@@ -438,8 +474,8 @@ ret_code EndstructDirective( int i )
 /* vartype: arbitrary type of item if memtype is MT_TYPE */
 /* size: size of type - used for alignment only */
 
-struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_node * vartype, int size)
-/*****************************/
+struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_node * vartype, int size )
+/********************************************************************************************************/
 {
     int offset;
     //int count;
@@ -449,15 +485,16 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
     struct_info *si;
     field_list  *f;
     asm_sym     *sym;
+    asm_sym     *gsym;
 
     si = CurrStruct->e.structinfo;
     offset = CurrStruct->sym.offset;
 
 #ifdef DEBUG_OUT
     if (name_loc < 0)
-        DebugMsg(("AddFieldToStruct(%s): anonymous, curr ofs=%u\n", CurrStruct->sym.name, offset ));
+        DebugMsg(("AddFieldToStruct(%s): anonymous, curr ofs=%u, vartype=%s, size=%u\n", CurrStruct->sym.name, offset, vartype ? vartype->sym.name : "NULL", size ));
     else
-        DebugMsg(("AddFieldToStruct(%s): name=%s, curr ofs=%u\n", CurrStruct->sym.name, AsmBuffer[name_loc]->string_ptr, offset ));
+        DebugMsg(("AddFieldToStruct(%s): name=%s, curr ofs=%u, vartype=%s, size=%u\n", CurrStruct->sym.name, AsmBuffer[name_loc]->string_ptr, offset, vartype ? vartype->sym.name : "NULL", size ));
 #endif
 
     if (name_loc >= 0) {
@@ -479,21 +516,7 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
 
     /* alloc the items needed */
 
-    if ( ModuleInfo.oldstructs == TRUE && *name != NULLC ) {
-        sym  = SymLookup( name );
-        if ( sym ) {
-            if ( sym->state == SYM_UNDEFINED )
-                sym->state = SYM_STRUCT_FIELD;
-            if ( sym->state == SYM_STRUCT_FIELD ) {
-                sym->mem_type = mem_type;
-                sym->type = &vartype->sym;
-                sym->defined = TRUE;
-            }
-        }
-    }
-
-    sym = SymCreate(name, FALSE);
-
+    sym = SymCreate( name, FALSE );
     sym->state = SYM_STRUCT_FIELD;
     sym->defined = TRUE;
     sym->mem_type = mem_type;
@@ -506,7 +529,7 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
     f->next = NULL;
     f->sym = sym;
 
-    if (loc != -1) {
+    if ( loc != -1 ) {
 
         i = strlen( AsmBuffer[loc]->string_ptr );
         DebugMsg(("AddFieldToStruct(%s): type=>%s<\n", CurrStruct->sym.name, AsmBuffer[loc]->string_ptr ));
@@ -540,22 +563,39 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
         si->tail = f;
     }
 
+#if 1
+    /* v2.0: for STRUCTs, don't use the struct's size for alignment calculations,
+     * instead use the size of the "max" member!
+     */
+    if ( mem_type == MT_TYPE &&
+        ( vartype->e.structinfo->typekind == TYPE_STRUCT ||
+         vartype->e.structinfo->typekind == TYPE_UNION ) ) {
+        size = vartype->sym.max_mbr_size;
+    }
+#endif
     /* align the field if an alignment argument was given */
     if ( si->alignment > 1 ) {
-        DebugMsg(("AddFieldToStruct: align=%u, size=%u, ofs=%u\n", si->alignment, size, offset));
+        //memtype mt;
+        //dir_node *tdir;
+        DebugMsg(("AddFieldToStruct(%s): align=%u, size=%u, ofs=%u\n", CurrStruct->sym.name, si->alignment, size, offset ));
         /* if it's the first field to add, use offset of the parent's current field */
-        if (offset == 0 && CurrStruct->next ) {
+#if 0
+        /* v2: removed. An embedded struct is now added AFTER it has
+         * been parsed. */
+        if ( offset == 0 && CurrStruct->next ) {
             dir_node *parent = CurrStruct->next;
-            if (si->alignment < size)
+            if ( si->alignment < size )
                 parent->e.structinfo->tail->sym->offset =
                     (parent->e.structinfo->tail->sym->offset + (si->alignment - 1)) & ( - si->alignment);
-            else if (size)
+            else if ( size )
                 parent->e.structinfo->tail->sym->offset =
                     (parent->e.structinfo->tail->sym->offset + (size - 1)) & (-size);
-        } else {
-            if (si->alignment < size)
+        } else
+#endif
+        {
+            if ( si->alignment < size )
                 offset = (offset + (si->alignment - 1)) & ( - si->alignment);
-            else if (size)
+            else if ( size )
                 offset = (offset + (size - 1)) & (-size);
         }
         /* adjust the struct's current offset + size.
@@ -563,12 +603,32 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
          */
         if ( CurrStruct->e.structinfo->typekind != TYPE_UNION ) {
             CurrStruct->sym.offset = offset;
-            if (offset > CurrStruct->sym.total_size)
+            if ( offset > CurrStruct->sym.total_size )
                 CurrStruct->sym.total_size = offset;
         }
     }
-
+    /* v2.0: for padding, save the max member size */
+    if ( size > CurrStruct->sym.max_mbr_size ) {
+        DebugMsg(("AddFieldToStruct(%s): max_mbr_size set to %u\n", CurrStruct->sym.name, size ));
+        CurrStruct->sym.max_mbr_size = size;
+    }
     sym->offset = offset;
+
+    /* if -Zm is on, create a global symbol */
+    if ( ModuleInfo.oldstructs == TRUE && *name != NULLC ) {
+        DebugMsg(("AddFieldToStruct(%s): Masm51 compat on, lookup %s in global symbol table\n", CurrStruct->sym.name, name ));
+        gsym  = SymLookup( name );
+        if ( gsym ) {
+            if ( gsym->state == SYM_UNDEFINED )
+                gsym->state = SYM_STRUCT_FIELD;
+            if ( gsym->state == SYM_STRUCT_FIELD ) {
+                gsym->mem_type = mem_type;
+                gsym->type = &vartype->sym;
+                gsym->offset = offset; /* added v2.0 */
+                gsym->defined = TRUE;
+            }
+        }
+    }
 
     return( sym );
 }
@@ -577,6 +637,7 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
 // a struct. It's already verified that <value> is a power of 2.
 
 ret_code AlignInStruct( int value )
+/*********************************/
 {
     if ( CurrStruct->e.structinfo->typekind != TYPE_UNION ) {
         int offset;
@@ -593,6 +654,7 @@ ret_code AlignInStruct( int value )
 // now called on pass 1 only.
 
 void UpdateStructSize(int no_of_bytes)
+/************************************/
 {
     if ( CurrStruct->e.structinfo->typekind == TYPE_UNION ) {
         if ( no_of_bytes > CurrStruct->sym.total_size )
@@ -608,6 +670,7 @@ void UpdateStructSize(int no_of_bytes)
 /* called if ORG occurs inside STRUCT/UNION definition */
 
 ret_code SetStructCurrentOffset(int offset)
+/*****************************************/
 {
     if ( CurrStruct->e.structinfo->typekind == TYPE_UNION ) {
         AsmError( ORG_NOT_ALLOWED_IN_UNIONS );
@@ -625,6 +688,7 @@ ret_code SetStructCurrentOffset(int offset)
 // TYPEDEF worker
 
 asm_sym *CreateTypeDef(char * name, int * pi)
+/*******************************************/
 {
     char        *token;
     int         i = *pi;
@@ -676,11 +740,11 @@ asm_sym *CreateTypeDef(char * name, int * pi)
         type = FindStdType( AsmBuffer[i]->value );
 
     if( type == -1 ) {
-        DebugMsg(("CreateTypeDef: arbitrary type\n" ));
+        DebugMsg(("CreateTypeDef(%s): arbitrary type\n", name ));
         /* it's not a simple type, check for PROTO qualifier */
         if (AsmBuffer[i]->value == T_PROTO) {
             dir_node * dir2;  /* create a PROTOtype item without name */
-            dir2 = (dir_node *)CreateProc( NULL, "" );
+            dir2 = (dir_node *)CreateProc( NULL, "", FALSE );
             DebugMsg(("CreateTypeDef PROTO, call ExamineProc, i=%d\n", i));
             if( ExamineProc( dir2, i+1, FALSE ) == ERROR )
                 return (NULL);
@@ -726,7 +790,7 @@ asm_sym *CreateTypeDef(char * name, int * pi)
         sym->mem_type = MT_TYPE;
         sym->total_size = symtype->total_size;
         sym->type = symtype;
-        DebugMsg(("CreateTypeDef ok, size=%u, mem_type=MT_TYPE, type=%X, i=%u\n", sym->total_size, sym->type, i ));
+        DebugMsg(("CreateTypeDef(%s) ok, size=%u, mem_type=MT_TYPE, type=%X, i=%u\n", sym->name, sym->total_size, sym->type, i ));
     } else {
         /* it's a simple or void type */
 #if 0 /* v1.96: removed */
@@ -738,7 +802,7 @@ asm_sym *CreateTypeDef(char * name, int * pi)
                  size = SizeFromMemtype( SimpleType[type].mem_type, ModuleInfo.Ofssize );
              else
                  size = SizeFromMemtype( SimpleType[type].mem_type, SimpleType[type].Ofssize );
-        DebugMsg(("CreateTypeDef: size %u\n", size ));
+        DebugMsg(("CreateTypeDef(%s): size %u\n", sym->name, size ));
 #if 1
         /* just check size, not mem_type */
         oldsize = sym->total_size;
@@ -810,7 +874,7 @@ asm_sym *CreateTypeDef(char * name, int * pi)
 
         dir->e.structinfo->indirection = indirection;
 
-        DebugMsg(("CreateTypeDef: memtype=%Xh, size=%u i=%u, token=%u\n", sym->mem_type, size, i, AsmBuffer[i]->token));
+        DebugMsg(("CreateTypeDef(%s): memtype=%Xh, size=%u i=%u, token=%u\n", sym->name, sym->mem_type, size, i, AsmBuffer[i]->token));
         if ((AsmBuffer[i]->token == T_ID) || (AsmBuffer[i]->token == T_RES_ID)) {
             symtype = SymSearch( AsmBuffer[i]->string_ptr );
 #ifdef DEBUGOUT
@@ -838,7 +902,7 @@ asm_sym *CreateTypeDef(char * name, int * pi)
             i++;
         }
         sym->total_size = size;
-        DebugMsg(("CreateTypeDef ok, size=%u, mem_type=%Xh, indirection=%u\n", size, sym->mem_type, indirection ));
+        DebugMsg(("CreateTypeDef(%s) ok, size=%u, mem_type=%Xh, indirection=%u\n", sym->name, size, sym->mem_type, indirection ));
     }
     *pi = i;
     return((asm_sym *)dir);
@@ -852,6 +916,7 @@ asm_sym *CreateTypeDef(char * name, int * pi)
 // EXTERNDEF: ptr <type>
 
 ret_code TypeDirective( int i )
+/*****************************/
 {
     char *name;
 
@@ -879,7 +944,7 @@ ret_code TypeDirective( int i )
 // generate a RECORD. Called on pass 1 only
 
 ret_code RecordDef( int i )
-/********************/
+/*************************/
 {
     char *name;
     struct asm_sym *sym;

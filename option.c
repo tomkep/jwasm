@@ -33,8 +33,8 @@ typedef struct _option {
 
 /* OPTION DOTNAME */
 
-static int SetDotName(int *pi)
-/****************************/
+static int SetDotName( int *pi )
+/******************************/
 {
     /* AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[(*pi)-1]->string_ptr ); */
     ModuleInfo.dotname = TRUE;
@@ -43,8 +43,8 @@ static int SetDotName(int *pi)
 
 /* OPTION NODOTNAME */
 
-static int SetNoDotName(int *pi)
-/******************************/
+static int SetNoDotName( int *pi )
+/********************************/
 {
     //AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[(*pi)-1]->string_ptr );
     ModuleInfo.dotname = FALSE;
@@ -54,8 +54,8 @@ static int SetNoDotName(int *pi)
 /* OPTION CASEMAP:NONE | NOTPUBLIC | ALL */
 /* NOTPUBLIC isn't implemented yet */
 
-static int SetCaseMap(int *pi)
-/****************************/
+static int SetCaseMap( int *pi )
+/******************************/
 {
     int i = *pi;
     if (AsmBuffer[i]->token != T_COLON) {
@@ -90,8 +90,8 @@ static int SetCaseMap(int *pi)
 
 /* OPTION M510 */
 
-static int SetM510(int *pi)
-/*************************/
+static int SetM510( int *pi )
+/***************************/
 {
     SetMasm510(TRUE);
     return( NOT_ERROR );
@@ -99,8 +99,8 @@ static int SetM510(int *pi)
 
 /* OPTION NOM510 */
 
-static int SetNoM510(int *pi)
-/***************************/
+static int SetNoM510( int *pi )
+/*****************************/
 {
     SetMasm510(FALSE);
     return( NOT_ERROR );
@@ -108,8 +108,8 @@ static int SetNoM510(int *pi)
 
 /* OPTION SCOPED */
 
-static int SetScoped(int *pi)
-/***************************/
+static int SetScoped( int *pi )
+/*****************************/
 {
     ModuleInfo.scoped = TRUE;
     return( NOT_ERROR );
@@ -117,8 +117,8 @@ static int SetScoped(int *pi)
 
 /* OPTION NOSCOPED */
 
-static int SetNoScoped(int *pi)
-/*****************************/
+static int SetNoScoped( int *pi )
+/*******************************/
 {
     ModuleInfo.scoped = FALSE;
     return( NOT_ERROR );
@@ -126,8 +126,8 @@ static int SetNoScoped(int *pi)
 
 /* OPTION OLDSTRUCTS */
 
-static int SetOldStructs(int *pi)
-/*******************************/
+static int SetOldStructs( int *pi )
+/*********************************/
 {
     ModuleInfo.oldstructs = TRUE;
     return( NOT_ERROR );
@@ -135,8 +135,8 @@ static int SetOldStructs(int *pi)
 
 /* OPTION NOOLDSTRUCTS */
 
-static int SetNoOldStructs(int *pi)
-/*********************************/
+static int SetNoOldStructs( int *pi )
+/***********************************/
 {
     ModuleInfo.oldstructs = FALSE;
     return( NOT_ERROR );
@@ -144,8 +144,8 @@ static int SetNoOldStructs(int *pi)
 
 /* OPTION EMULATOR */
 
-static int SetEmulator(int *pi)
-/*****************************/
+static int SetEmulator( int *pi )
+/*******************************/
 {
     ModuleInfo.emulator = TRUE;
     return( NOT_ERROR );
@@ -153,8 +153,8 @@ static int SetEmulator(int *pi)
 
 /* OPTION NOEMULATOR */
 
-static int SetNoEmulator(int *pi)
-/*******************************/
+static int SetNoEmulator( int *pi )
+/*********************************/
 {
     ModuleInfo.emulator = FALSE;
     return( NOT_ERROR );
@@ -162,8 +162,8 @@ static int SetNoEmulator(int *pi)
 
 /* OPTION LJMP */
 
-static int SetLJmp(int *pi)
-/*************************/
+static int SetLJmp( int *pi )
+/***************************/
 {
     ModuleInfo.ljmp = TRUE;
     return( NOT_ERROR );
@@ -171,8 +171,8 @@ static int SetLJmp(int *pi)
 
 /* OPTION NOLJMP */
 
-static int SetNoLJmp(int *pi)
-/***************************/
+static int SetNoLJmp( int *pi )
+/*****************************/
 {
     ModuleInfo.ljmp = FALSE;
     return( NOT_ERROR );
@@ -180,8 +180,8 @@ static int SetNoLJmp(int *pi)
 
 /* OPTION NOREADONLY */
 
-static int SetNoReadonly(int *pi)
-/*******************************/
+static int SetNoReadonly( int *pi )
+/*********************************/
 {
     /* default, nothing to do */
     return( NOT_ERROR );
@@ -189,8 +189,8 @@ static int SetNoReadonly(int *pi)
 
 /* OPTION NOOLDMACROS */
 
-static int SetNoOldmacros(int *pi)
-/********************************/
+static int SetNoOldmacros( int *pi )
+/**********************************/
 {
     /* default, nothing to do */
     return( NOT_ERROR );
@@ -198,8 +198,8 @@ static int SetNoOldmacros(int *pi)
 
 /* OPTION EXPR32 */
 
-static int SetExpr32(int *pi)
-/***************************/
+static int SetExpr32( int *pi )
+/*****************************/
 {
     /* default, nothing to do */
     return( NOT_ERROR );
@@ -207,8 +207,8 @@ static int SetExpr32(int *pi)
 
 /* OPTION NOKEYWORD */
 
-static int SetNoKeyword(int *pi)
-/******************************/
+static int SetNoKeyword( int *pi )
+/********************************/
 {
     int i = *pi;
     struct ReservedWord *resw;
@@ -243,9 +243,9 @@ static int SetNoKeyword(int *pi)
             cnt = p2 - buffer;
             resw = FindResWord( buffer );
             if ( resw )
-                DisableKeyword( resw );
+                DisableKeyword( resw - AsmResWord );
             else {
-                if ( IsKeywordDisabled( buffer, cnt ) == NULL ) {
+                if ( IsKeywordDisabled( buffer, cnt ) == EMPTY ) {
                     AsmError( RESERVED_WORD_EXPECTED );
                     return( ERROR );
                 }
@@ -261,8 +261,8 @@ static int SetNoKeyword(int *pi)
 
 /* OPTION LANGUAGE */
 
-static int SetLanguage(int *pi)
-/*****************************/
+static int SetLanguage( int *pi )
+/*******************************/
 {
     int i = *pi;
     //lang_type langtype;
@@ -288,8 +288,8 @@ static int SetLanguage(int *pi)
 
 /* OPTION SETIF2 */
 
-static int SetSetIF2(int *pi)
-/***************************/
+static int SetSetIF2( int *pi )
+/*****************************/
 {
     int i = *pi;
 
@@ -332,8 +332,8 @@ static int SetSetIF2(int *pi)
  userparms: prologuearg specified in PROC
  */
 
-static int SetPrologue(int *pi)
-/*****************************/
+static int SetPrologue( int *pi )
+/*******************************/
 {
     int i = *pi;
     char * name;
@@ -370,8 +370,8 @@ static int SetPrologue(int *pi)
  do NOT check the macros here!
  */
 
-static int SetEpilogue(int *pi)
-/*****************************/
+static int SetEpilogue( int *pi )
+/*******************************/
 {
     int i = *pi;
     char * name = (char *)-1;
@@ -408,8 +408,8 @@ static int SetEpilogue(int *pi)
  * default is GROUP.
  * determines result of OFFSET operator fixups if .model isn't set.
  */
-static int SetOffset(int *pi)
-/***************************/
+static int SetOffset( int *pi )
+/*****************************/
 {
     int i = *pi;
 
@@ -439,8 +439,8 @@ static int SetOffset(int *pi)
 
 /* OPTION PROC:PRIVATE | PUBLIC | EXPORT */
 
-static int SetProc(int *pi)
-/*************************/
+static int SetProc( int *pi )
+/***************************/
 {
     int i = *pi;
 
@@ -481,8 +481,8 @@ static int SetProc(int *pi)
  * externals defined outside of segments.
  */
 
-static int SetSegment(int *pi)
-/****************************/
+static int SetSegment( int *pi )
+/******************************/
 {
     int i = *pi;
 
@@ -518,11 +518,11 @@ static int SetSegment(int *pi)
 #if FIELDALIGN
 /* OPTION FIELDALIGN:1|2|4|8|16|32 */
 
-static int SetFieldAlign(int *pi)
-/*******************************/
+static int SetFieldAlign( int *pi )
+/*********************************/
 {
     int i = *pi;
-    int temp, temp2;
+    uint temp, temp2;
     expr_list opndx;
 
     if ( Options.strict_masm_compat ) {
@@ -540,12 +540,12 @@ static int SetFieldAlign(int *pi)
         AsmError( CONSTANT_EXPECTED );
         return( ERROR );
     }
-    if( opndx.value > MAX_STRUCT_ALIGN ) {
+    if( opndx.uvalue > MAX_STRUCT_ALIGN ) {
         AsmError( STRUCT_ALIGN_TOO_HIGH );
         return( ERROR );
     }
-    for( temp = 1, temp2 = 0; temp < opndx.value ; temp <<= 1, temp2++ );
-    if( temp != opndx.value ) {
+    for( temp = 1, temp2 = 0; temp < opndx.uvalue ; temp <<= 1, temp2++ );
+    if( temp != opndx.uvalue ) {
         AsmError( POWER_OF_2 );
         return( ERROR );
     }
@@ -558,8 +558,8 @@ static int SetFieldAlign(int *pi)
 #if PROCALIGN
 /* OPTION PROCALIGN:1|2|4|8|16|32 */
 
-static int SetProcAlign(int *pi)
-/******************************/
+static int SetProcAlign( int *pi )
+/********************************/
 {
     int i = *pi;
     int temp, temp2;
@@ -595,8 +595,8 @@ static int SetProcAlign(int *pi)
 #endif
 
 #if MZ_SUPPORT
-static int SetMZ(int *pi)
-/***********************/
+static int SetMZ( int *pi )
+/*************************/
 {
     int i = *pi;
     int j;
@@ -646,8 +646,128 @@ static int SetMZ(int *pi)
 }
 #endif
 
-static int Unsupported(int *pi)
+#if AMD64_SUPPORT
+/* OPTION FRAME: AUTO | NOAUTO
+ * default is NOAUTO
+ */
+static int SetFrame( int *pi )
 /*****************************/
+{
+    int i = *pi;
+
+    if (AsmBuffer[i]->token != T_COLON) {
+        AsmError( COLON_EXPECTED );
+        return( ERROR );
+    }
+    i++;
+    if (AsmBuffer[i]->token == T_FINAL) {
+        AsmError( SYNTAX_ERROR );
+        return( ERROR );
+    }
+    if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"AUTO" ) ) {
+        ModuleInfo.frame_auto = 1;
+    } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"NOAUTO" ) ) {
+        ModuleInfo.frame_auto = 0;
+    } else {
+        AsmError( SYNTAX_ERROR );
+        return( ERROR );
+    }
+    i++;
+    *pi = i;
+    return( NOT_ERROR );
+}
+#endif
+
+#if ELF_SUPPORT
+static int SetElf( int *pi )
+/*************************/
+{
+    int i = *pi;
+    expr_list opndx;
+
+    if ( Options.strict_masm_compat ) {
+        (*pi)--;
+        return( NOT_ERROR );
+    }
+    if (AsmBuffer[i]->token != T_COLON) {
+        AsmError( COLON_EXPECTED );
+        return( ERROR );
+    }
+    i++;
+    if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+        return( ERROR );
+    if ( opndx.kind == EXPR_CONST ) {
+        if ( opndx.llvalue > 0xFF ) {
+            AsmError( CONSTANT_VALUE_TOO_LARGE );
+            return( ERROR );
+        }
+        if ( Options.output_format == OFORMAT_ELF )
+            ModuleInfo.osabi = opndx.value;
+    } else {
+        AsmError( CONSTANT_EXPECTED );
+        return( ERROR );
+    }
+    *pi = i;
+    return( NOT_ERROR );
+}
+#endif
+
+#if RENAMEKEY
+
+/* OPTION RENAMEKEYWORD */
+
+static int SetRenameKey( int *pi )
+/********************************/
+{
+    int i = *pi;
+    struct ReservedWord *resw;
+    char * oldname;
+
+    /* reject option if -Zne is set */
+    if ( Options.strict_masm_compat ) {
+        (*pi)--;
+        return( NOT_ERROR );
+    }
+    /* do nothing if pass > 1 */
+    if( Parse_Pass != PASS_1 ) {
+        *pi = Token_Count;
+        return( NOT_ERROR);
+    }
+    if (AsmBuffer[i]->token != T_COLON) {
+        AsmError( COLON_EXPECTED );
+        return( ERROR );
+    }
+    i++;
+    if (AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' )  {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+    oldname = AsmBuffer[i]->string_ptr;
+    i++;
+    if ( AsmBuffer[i]->token != T_COMMA ) {
+        AsmError( EXPECTING_COMMA );
+        return( ERROR );
+    }
+    i++;
+    if (AsmBuffer[i]->token != T_ID )  {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+
+    resw = FindResWord( oldname );
+    if ( resw == NULL ) {
+        AsmError( RESERVED_WORD_EXPECTED );
+        return( ERROR );
+    }
+    RenameKeyword( resw - AsmResWord, AsmBuffer[i]->string_ptr, strlen( AsmBuffer[i]->string_ptr ) );
+    i++;
+    *pi = i;
+    return(NOT_ERROR);
+}
+#endif
+
+static int Unsupported( int *pi )
+/*******************************/
 {
     AsmErr( NOT_SUPPORTED, AsmBuffer[(*pi)-2]->pos );
     return( ERROR );
@@ -693,6 +813,15 @@ static const option optiontab[] = {
 #endif
 #if MZ_SUPPORT
     { "MZ",           SetMZ          },
+#endif
+#if AMD64_SUPPORT
+    { "FRAME",        SetFrame       },
+#endif
+#if ELF_SUPPORT
+    { "ELF",          SetElf         },
+#endif
+#if RENAMEKEY
+    { "RENAMEKEYWORD",SetRenameKey   },
 #endif
     { NULL                           }
 };

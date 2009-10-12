@@ -75,7 +75,7 @@ typedef struct {
 // initialize the token buffer array
 
 void InitTokenBuffer( void )
-/*********************/
+/**************************/
 {
     int         count;
     for( count = 0; count < MAX_TOKEN; count ++ ) {
@@ -135,7 +135,7 @@ done_scanning_float:
     buf->token = T_FLOAT;
     /* copy the string, fix input & output pointers */
     strncpy( p->output, p->input, ptr - p->input );
-    buf->string_ptr = p->output;
+    //buf->string_ptr = p->output;
     p->output += ( ptr - p->input );
     *p->output = '\0';
     p->output++;
@@ -143,16 +143,6 @@ done_scanning_float:
 
     *((float *)(&buf->value)) = atof(buf->string_ptr);
     return( NOT_ERROR );
-}
-
-static void array_mul_add( unsigned char *buf, unsigned base, unsigned long num, unsigned size )
-/**********************************************************************************************/
-{
-    while( size-- > 0 ) {
-        num += *buf * base;
-        *(buf++) = num;
-        num >>= 8;
-    }
 }
 
 static ret_code get_string( struct asm_tok *buf, ioptrs *p )
@@ -170,7 +160,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
      is a comma! It must be enclosed in <> or {}.
      */
 
-    buf->string_ptr = optr;
+    //buf->string_ptr = optr;
 
     symbol_o = *iptr;
     buf->string_delim = symbol_o;
@@ -244,7 +234,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
         buf->string_ptr++;
 
     iptr++;
-    buf->pos = iptr;
+    buf->pos = iptr; /* pos points BEHIND the delimiter! */
 
     count = 0;
     level = 0;
@@ -360,6 +350,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
                 buf->string_delim = NULLC;
 #endif
             }
+            buf->string_delim = NULLC; /* v2.0: same for strings beginning with (dbl)quote */
             break;
         } else {
             *optr++ = *iptr++;
@@ -377,6 +368,18 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
     return( NOT_ERROR );
 }
 
+#if 0
+static void array_mul_add( unsigned char *buf, unsigned base, unsigned num, unsigned size )
+/**********************************************************************************************/
+{
+    while( size-- > 0 ) {
+        num += *buf * base;
+        *(buf++) = num;
+        num >>= 8;
+    }
+}
+#endif
+
 // read in a number
 // check the number suffix:
 // b or y: base 2
@@ -393,7 +396,7 @@ static ret_code get_number( struct asm_tok *buf, ioptrs *p )
     unsigned            len;
     unsigned            base = 0;
     unsigned            digits_seen;
-    unsigned long       val;
+    uint_32             val;
     char                last_char;
 
 #define VALID_BINARY    0x0003
@@ -489,21 +492,33 @@ static ret_code get_number( struct asm_tok *buf, ioptrs *p )
         break;
     }
 
-    buf->string_ptr = p->output;
-    memset( buf->bytes, 0, sizeof( buf->bytes ) );
+    //buf->string_ptr = p->output;
+    //memset( buf->bytes, 0, sizeof( buf->bytes ) );
+    buf->value64 = 0;
+    buf->hivalue64 = 0;
 
     if ( base != 0 && is_valid_id_char( *ptr ) == FALSE ) {
         buf->token = T_NUM;
         while( dig_start < dig_end ) {
+            uint_16 *px;
             if( *dig_start <= '9' ) {
                 val = *dig_start - '0';
             } else {
                 val = tolower( *dig_start ) - 'a' + 10;
             }
-            array_mul_add( buf->bytes, base, val, sizeof( buf->bytes ) );
+            //v2: do the calculation inline and with 2 bytes at once
+            //array_mul_add( buf->bytes, base, val, sizeof( buf->bytes ) );
+            px = (uint_16 *)buf->bytes;
+            for (len = sizeof( buf->bytes ) >> 1; len; len-- ) {
+                val += (uint_32)*px * base;
+                *(px++) = val;
+                val >>= 16;
+            };
             ++dig_start;
         }
+        //DebugMsg(("get_number: inp=%s, value=%lX\n", p->input, buf->value64 ));
     } else {
+        buf->pos = p->input; /* restore input ptr for T_BAD_NUM */
         buf->token = T_BAD_NUM;
         DebugMsg(("get_number: BAD_NUMBER %s, radix=%u, base=%u, ptr=>%s<, digits_seen=%Xh\n", dig_start, ModuleInfo.radix, base, ptr, digits_seen ));
         /* swallow remainder of token */
@@ -519,15 +534,15 @@ static ret_code get_number( struct asm_tok *buf, ioptrs *p )
     p->input = ptr;
 
     return( NOT_ERROR );
-} /* get_number */
+}
 
 #if BACKQUOTES
 static ret_code get_id_in_backquotes( struct asm_tok *buf, ioptrs *p )
 /********************************************************************/
 {
-    buf->string_ptr = p->output;
+    //buf->string_ptr = p->output;
+    //buf->pos = p->input;
     buf->token = T_ID;
-    buf->pos = p->input;
     buf->value = 0;
 
     p->input++;         /* strip off the backquotes */
@@ -552,15 +567,13 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
     struct ReservedWord *resw;
     int  index;
 
-    buf->string_ptr = p->output;
-    buf->pos = p->input;
-    buf->token = T_ID;
+    //buf->string_ptr = p->output;
+    //buf->pos = p->input;
     buf->value = 0;
 
-    *(p->output)++ = *(p->input)++;
-    while ( is_valid_id_char( *p->input )) {
+    do {
         *(p->output)++ = *(p->input)++;
-    }
+    } while ( is_valid_id_char( *p->input ) );
     *(p->output)++ = '\0';
 
     /* now decide what to do with it */
@@ -571,11 +584,21 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
     }
     resw = FindResWord( buf->string_ptr );
     if( resw == NULL ) {
+        /* if ID begins with a DOT, check for OPTION DOTNAME.
+         * if not set, skip the token and return a T_DOT instead!
+         */
+        if ( buf->string_ptr[0] == '.' && ModuleInfo.dotname == FALSE ) {
+           buf->token = T_DOT;
+           buf->string_ptr[1] = NULLC;
+           p->output = buf->string_ptr+2;
+           p->input = buf->pos+1;
+           return( NOT_ERROR );
+        }
         buf->token = T_ID;
         return( NOT_ERROR );
     }
     buf->value = resw - AsmResWord; /* is a enum asm_token value */
-    index = resw->position;
+    index = optable_idx[buf->value];
 //  DebugMsg(("found item >%s< in instruction table, rm=%X\n", buf->string_ptr, AsmOpTable[index].rm_byte));
 
     /* if -Zm is set, the following from the Masm docs is relevant:
@@ -641,9 +664,8 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
     case RWT_DIRECTIVE:
         buf->token = T_DIRECTIVE;
         buf->flags = AsmOpTable[index].opnd_type[1];
-        if ( g_flags == 0 ) {
-            g_flags = AsmOpTable[index].opnd_type[1];
-        }
+        if ( g_flags == 0 )
+            g_flags = buf->flags;
         break;
     case RWT_BINARY_OP: /* GE, GT, LE, LT, EQ, NE, MOD */
         buf->token = T_BINARY_OPERATOR;
@@ -662,8 +684,8 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
     char    symbol;
 //    int     i;
 
-    buf->string_ptr = p->output;
-    buf->pos = p->input;
+    //buf->string_ptr = p->output;
+    //buf->pos = p->input;
 
     symbol = *p->input;
     switch( symbol ) {
@@ -735,56 +757,52 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
     return( NOT_ERROR );
 }
 
-// get one token
-// return values: NOT_ERROR, ERROR, EMPTY
+/* get one token.
+ * possible return values: NOT_ERROR, ERROR, EMPTY.
+ *
+ * names beginning with '.' are difficult to detect,
+ * because the dot is a binary operator. The rules to
+ * accept a "dotted" name are:
+ * 1.- a valid ID char is to follow the dot
+ * 2.- if buffer index is > 0, then the previous item
+ *     must not be a reg, ), ] or an ID.
+ * [bx.abc]    -> . is an operator
+ * ([bx]).abc  -> . is an operator
+ * [bx].abc    -> . is an operator
+ * varname.abc -> . is an operator
+ */
 
-static ret_code GetToken(unsigned int buf_index, ioptrs *p )
-/**********************************************************/
+static ret_code GetToken( unsigned int buf_index, ioptrs *p )
+/***********************************************************/
 {
-    int rc;
-
-//  while( isspace( *iptr ) )  iptr++;
-
     if( isdigit( *p->input ) ) {
-        if( get_number( AsmBuffer[buf_index], p ) == ERROR ) {
-            return( ERROR );
-        }
+        return( get_number( AsmBuffer[buf_index], p ) );
     } else if( is_valid_id_char( *p->input )) {
-        if( get_id( AsmBuffer[buf_index], p ) == ERROR ) {
-            return( ERROR );
-        }
-        /* allow names at pos 0 beginning with '.' and also
-         a hack to make ".type" not split in '.' and "type" */
+        return( get_id( AsmBuffer[buf_index], p ) );
     } else if( *p->input == '.' &&
-               (buf_index == 0 ||
-                (buf_index > 1 && AsmBuffer[buf_index-1]->token == T_COLON) ||
-                ((0 == _memicmp(p->input+1,"type",4) && is_valid_id_char(*(p->input+5)) == FALSE)))) {
-        if( get_id( AsmBuffer[buf_index], p ) == ERROR ) {
-            return( ERROR );
-        }
+               is_valid_id_char(*(p->input+1)) &&
+               ( buf_index == 0 ||
+                (AsmBuffer[buf_index-1]->token != T_REG &&
+                 AsmBuffer[buf_index-1]->token != T_CL_BRACKET &&
+                 AsmBuffer[buf_index-1]->token != T_CL_SQ_BRACKET &&
+                 AsmBuffer[buf_index-1]->token != T_ID ) ) ) {
+        return( get_id( AsmBuffer[buf_index], p ) );
 #if BACKQUOTES
     } else if( *p->input == '`' && Options.strict_masm_compat == FALSE ) {
-        if( get_id_in_backquotes( AsmBuffer[buf_index], p ) == ERROR ) {
-            return( ERROR );
-        }
+        return( get_id_in_backquotes( AsmBuffer[buf_index], p ) );
 #endif
-    } else {
-        rc = get_special_symbol( AsmBuffer[buf_index], p );
-        if (rc == ERROR || rc == EMPTY) {
-            return( rc );
-        }
     }
-    return (NOT_ERROR);
+    return( get_special_symbol( AsmBuffer[buf_index], p ) );
 }
 
 int Tokenize( char *string, int index )
-/**************************************/
+/*************************************/
 /*
-- perform syntax checking on scan line;
-- pass back tokens for later use;
-- string contains the WHOLE line to scan
-- if -1 is returned, no object file will be written anymore
-*/
+ * create tokens from a source line.
+ * string: the line which is to tokenize
+ * index: where to start in the token buffer. If index == 0,
+ *        then some variables are additionally initialized.
+ */
 {
     int                         rc;
     ioptrs                      p;
@@ -820,11 +838,12 @@ int Tokenize( char *string, int index )
         while( isspace( *p.input ) ) p.input++;
 
         AsmBuffer[buf_index]->string_ptr = p.output;
+        AsmBuffer[buf_index]->pos = p.input;
 
         /* comments usually are filtered in lower levels */
         /* but a ';' might appear here as part of a text macro */
         if( *p.input == NULLC || *p.input == ';' ) {
-            *p.input = '\0';
+            //*p.input = '\0';
             break;
         }
         rc = GetToken( buf_index, &p );
@@ -842,7 +861,6 @@ int Tokenize( char *string, int index )
     }
 
     AsmBuffer[buf_index]->token = T_FINAL;
-    AsmBuffer[buf_index]->pos = p.input;
     *p.output++ = NULLC;
     StringBufferEnd = p.output;
     return( buf_index );

@@ -43,8 +43,8 @@ proj_obj = $(OUTD)/main.o     $(OUTD)/assemble.o $(OUTD)/assume.o  \
            $(OUTD)/bin.o      $(OUTD)/queue.o    $(OUTD)/carve.o   \
            $(OUTD)/omfgenms.o $(OUTD)/omfio.o    $(OUTD)/omfrec.o  \
            $(OUTD)/omffixup.o $(OUTD)/listing.o  $(OUTD)/fatal.o   \
-           $(OUTD)/autodept.o $(OUTD)/context.o  $(OUTD)/extern.o  \
-           $(OUTD)/watcomc.o  \
+           $(OUTD)/context.o  $(OUTD)/extern.o  \
+           $(OUTD)/apiemu.o   $(OUTD)/dbgcv.o    \
            $(OUTD)/backptch.o $(OUTD)/msgtext.o  $(OUTD)/tbyte.o
 ######
 

@@ -56,8 +56,8 @@ char * GetNextAnonLabel( char * buffer )
     return( buffer );
 }
 
-struct asm_sym * IsLabelType( char *name )
-/****************************************/
+struct asm_sym * IsLabelType( const char *name )
+/**********************************************/
 {
     asm_sym *sym;
 
@@ -73,14 +73,14 @@ struct asm_sym * IsLabelType( char *name )
 // vartype: arbitrary type if mem_type is MT_TYPE
 // bLocal: local should be defined locally if possible
 
-asm_sym *LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *vartype, bool bLocal )
-/***********************************************************************************************/
+asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym *vartype, bool bLocal )
+/*****************************************************************************************************/
 {
     struct asm_sym      *sym;
-    int                 addr;
+    uint_32             addr;
     char                buffer[20];
 
-    DebugMsg(("LabelCreate(%s, memtype=%u, %X, %u) enter\n", symbol_name, mem_type, vartype, bLocal));
+    DebugMsg(("LabelCreate(%s, memtype=%Xh, %Xh, %u) enter\n", symbol_name, mem_type, vartype, bLocal));
 
     if ( CurrStruct ) {
 #if 0
@@ -103,7 +103,7 @@ asm_sym *LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *varty
     }
 
     if( CurrSeg == NULL ) {
-        AsmError( LABEL_OUTSIDE_SEGMENT );
+        AsmError( MUST_BE_IN_SEGMENT_BLOCK );
         return( NULL );
     }
 
@@ -159,7 +159,7 @@ asm_sym *LabelCreate( char *symbol_name, memtype mem_type, struct asm_sym *varty
     if( Parse_Pass != PASS_1 && sym->offset != addr ) {
 #ifdef DEBUG_OUT
         if (!PhaseError)
-            DebugMsg(("LabelCreate: Phase error, pass %u, sym >%s< first time, new=%X - old=%X\n", Parse_Pass+1, sym->name, sym->offset, addr));
+            DebugMsg(("LabelCreate: Phase error, pass %u, sym >%s< first time, new=%lX - old=%lX\n", Parse_Pass+1, sym->name, sym->offset, addr));
 #endif
         PhaseError = TRUE;
     }

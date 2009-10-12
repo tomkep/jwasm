@@ -52,15 +52,14 @@ enum asm_stypes {
 };
 
 // structure of items in the "reserved names" table AsmResWord
-// (file reswords.h)
 
 struct ReservedWord {
-    struct ReservedWord *next;
-    const char *name;        /* reserved word (char[]) */
+    short next;              /* index next entry (used for hash table) */
     unsigned char len;       /* length of reserved word, i.e. 'AX' = 2 */
     unsigned char flags;
-    unsigned short position; /* AsmOpTable index */
+    const char *name;        /* reserved word (char[]) */
 };
+
 
 enum reservedword_flags {
  RWF_SPECIAL  = 1, /* keyword is NO instruction */
@@ -136,7 +135,11 @@ enum special_type {
 
 // values for operand1 if register
 enum op1_flags {
- SFR_IREG = 1
+ SFR_IREG = 1,
+ SFR_SIZ2 = 2,
+ SFR_SIZ4 = 4,
+ SFR_SIZ8 = 8,
+ SFR_SIZMSK = 0xE
 };
 
 #if AMD64_SUPPORT
@@ -240,6 +243,14 @@ struct code_info {
 
 #define IS_OPER_32( s )   ( s->Ofssize ? ( s->prefix.opsiz == FALSE ) : ( s->prefix.opsiz == TRUE ))
 
+/* for special names, the optable_idx helper table isn't needed */
+//#define GetRegNo( x ) AsmOpTable[optable_idx[x]].opcode
+//#define GetOpndType( x, i ) AsmOpTable[optable_idx[x]].opnd_type[i]
+//#define GetRegCpu( x ) AsmOpTable[optable_idx[x]].cpu
+#define GetRegNo( x ) AsmOpTable[x].opcode
+#define GetOpndType( x, i ) AsmOpTable[x].opnd_type[i]
+#define GetRegCpu( x ) AsmOpTable[x].cpu
+
 // values for <op2> flags (RWT_DIRECTIVE entries)
 enum directive_flags {
  DF_CEXPR    = 0x01, /* avoid '<' being used as string delimiter (.IF, ...) */
@@ -263,13 +274,17 @@ enum directive_type {
 
 extern const struct asm_ins AsmOpTable[];
 extern struct ReservedWord  AsmResWord[];
+extern short  optable_idx[];
 extern bool   line_listed;
 
-extern int      OperandSize( OPNDTYPE opnd, struct code_info * );
+extern int      OperandSize( OPNDTYPE opnd, const struct code_info * );
 extern int      InRange( long val, unsigned bytes );
 extern void     find_frame( struct code_info *, struct asm_sym *sym );
-extern void     DisableKeyword( struct ReservedWord * );
-extern struct ReservedWord *IsKeywordDisabled( char *, int );
+extern uint     IsKeywordDisabled( const char *, int );
+extern void     DisableKeyword( uint token );
+#if RENAMEKEY
+extern void     RenameKeyword( uint token, const char *name, uint_8 len );
+#endif
 extern ret_code ParseItems( void );
 extern ret_code ParseInit( void );
 #if AMD64_SUPPORT

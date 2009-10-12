@@ -4,8 +4,7 @@
 # - Open Watcom v1.8
 # - HXDEV (optionally, only if DOS=1 is set below to create JWASMD.EXE)
 #
-# is's also possible to create a debug version (debug=1) or the
-# 64bit aware version (amd64=1)
+# is's also possible to create a debug version (debug=1)
 
 name = JWasm
 
@@ -17,11 +16,6 @@ WATCOM = \Watcom
 # if DOS=1, the HX directory must be set below.
 
 HXDIR = \HX
-
-# support for 64bit?
-!ifdef AMD64
-c_flags64=-DAMD64_SUPPORT=1
-!endif
 
 !ifndef DEBUG
 DEBUG=0
@@ -48,7 +42,7 @@ inc_dirs  = -IH -I$(WATCOM)\H
 TRMEM=0
 !endif
 
-linker = wlink.exe
+LINK = $(WATCOM)\binnt\wlink.exe
 
 #cflags stuff
 #########
@@ -74,7 +68,7 @@ LOPTD = debug dwarf op symfile lib user32.lib
 
 lflagsw = $(LOPTD) system nt $(LOPT) op map=$^*
 
-CC=$(WATCOM)\binnt\wcc386 -q -3$(CCV) -bc -bt=nt $(inc_dirs) $(extra_c_flags) $(c_flags64) -fo$@
+CC=$(WATCOM)\binnt\wcc386 -q -3$(CCV) -zc -bc -bt=nt $(inc_dirs) $(extra_c_flags) -fo$@
 
 .c{$(OUTD)}.obj:
 	$(CC) $<
@@ -94,14 +88,14 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   &
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
            $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   &
-           $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj  &
+           $(OUTD)/context.obj  $(OUTD)/extern.obj  &
 !if $(DEBUG)
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif
 !endif
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   &
-           $(OUTD)/apiemu.obj
+           $(OUTD)/apiemu.obj   $(OUTD)/dbgcv.obj
 ######
 
 !if $(WIN)
@@ -117,8 +111,8 @@ $(OUTD):
 	@if not exist $(OUTD) mkdir $(OUTD)
 
 $(OUTD)/$(name).exe: $(proj_obj)
-	$(linker) @<<
-$(lflagsw) file { $(proj_obj) } name $@ op stack=0x20000 op norelocs com stack=0x1000
+	$(LINK) @<<
+$(lflagsw) file { $(proj_obj) } name $@ op stack=0x20000, heapsize=0x100000, norelocs com stack=0x1000
 <<
 !if $(DEBUG)
 	@copy $(OUTD)\$(name).exe TEST\*.* >NUL
@@ -126,7 +120,7 @@ $(lflagsw) file { $(proj_obj) } name $@ op stack=0x20000 op norelocs com stack=0
 !endif
 
 $(OUTD)/$(name)d.exe: $(proj_obj)
-	$(linker) @<<
+	$(LINK) @<<
 $(LOPTD)
 format windows nt 
 runtime console 
@@ -138,7 +132,7 @@ Libpath $(HXDIR)\lib
 Library imphlp.lib, dkrnl32s.lib 
 Libfile cstrtwhx.obj 
 $(LOPT)
-op map=$^*, stub=$(HXDIR)\Bin\loadpex.bin, stack=0x40000
+op map=$^*, stub=$(HXDIR)\Bin\loadpex.bin, stack=0x40000, heapsize=0x100000
 <<
 	@$(HXDIR)\Bin\patchpe.exe $@
 

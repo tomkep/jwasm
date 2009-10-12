@@ -133,61 +133,6 @@ void OmfDetachData( obj_rec *objr )
     objr->length = 0;
 }
 
-#if 0
-uint_8 OmfGet8( obj_rec *objr )
-/*****************************/
-{
-/**/myassert( objr != NULL && objr->data != NULL );
-    return( objr->data[ objr->curoff++ ] );
-}
-
-uint_16 OmfGet16( obj_rec *objr )
-/*******************************/
-{
-    uint_8  *p;
-
-/**/myassert( objr != NULL && objr->data != NULL );
-    p = OmfGet( objr, sizeof( uint_16) );
-    return( ReadU16( p ) );
-}
-
-uint_32 OmfGet32( obj_rec *objr )
-/*******************************/
-{
-    uint_8  *p;
-
-/**/myassert( objr != NULL && objr->data != NULL );
-
-    p = OmfGet( objr, sizeof( uint_32) );
-    return( ReadU32( p ) );
-}
-
-uint_32 OmfGetEither( obj_rec *objr )
-/***********************************/
-{
-/**/myassert( objr != NULL );
-    if( objr->is_32 ) {
-        return( OmfGet32( objr ) );
-    } else {
-        return( (uint_32)OmfGet16( objr ) );
-    }
-}
-
-size_t OmfGetIndex( obj_rec *objr )
-/**********************************/
-{
-    size_t index;
-
-/**/myassert( objr != NULL && objr->data != NULL );
-
-    index = OmfGet8( objr );
-    if( index > 0x7f ) {
-        index = ( ( index & 0x7f ) << 8 ) | OmfGet8( objr );
-    }
-    return( index );
-}
-#endif
-
 uint_8 *OmfGet( obj_rec *objr, size_t len )
 /******************************************/
 {

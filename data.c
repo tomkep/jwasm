@@ -48,12 +48,14 @@
 #include "fastpass.h"
 #include "tokenize.h"
 #include "macro.h"
+#include "omf.h"
 
 #ifndef min
 #define min(x,y) (((x) < (y)) ? (x) : (y))
 #endif
 
 extern ret_code segm_override( struct code_info *CodeInfo, expr_list *opndx );
+extern uint_8 CommentDataInCode;
 
 /*
  variable StructInit is necessary because structure initialization
@@ -82,6 +84,7 @@ int StructInit;
 // initialization - the "expression branch" still needs some work.
 
 static ret_code InitializeArray( field_list *f, int *pi )
+/*******************************************************/
 {
     //int  count;
     char *ptr;
@@ -93,7 +96,7 @@ static ret_code InitializeArray( field_list *f, int *pi )
     expr_list opndx;
     char buffer[MAX_LINE_LEN];
 
-    DebugMsg(("InitializeArray( %s ) enter, items=%u, type=%s\n", f->sym->name, f->sym->total_length, f->initializer ));
+    DebugMsg(("InitializeArray( %s ) enter, items=%lu, type=%s\n", f->sym->name, f->sym->total_length, f->initializer ));
 
     /* array initialization is done by either a literal or an expression. */
 
@@ -123,7 +126,7 @@ static ret_code InitializeArray( field_list *f, int *pi )
         } else {
             /* it must be '<expr> DUP (...)' */
             if ( AsmBuffer[i]->token != T_RES_ID || AsmBuffer[i]->value != T_DUP ) {
-                AsmError( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM );
+                AsmErr( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM, f->sym->name );
                 return( ERROR );
             }
             if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
@@ -170,7 +173,7 @@ static ret_code InitializeArray( field_list *f, int *pi )
                 ptr = "<>";
             else
                 ptr = "?";
-            sprintf( buffer, "%s %u DUP (%s)", f->initializer,
+            sprintf( buffer, "%s %lu DUP (%s)", f->initializer,
                      f->sym->total_length - opndx.value, ptr );
             AddLineQueue( buffer );
         }
@@ -197,8 +200,10 @@ static ret_code InitializeArray( field_list *f, int *pi )
 
     pSave = (unsigned char *)AsmTmpAlloc( GetTokenStateSize() );
     SaveTokenState( pSave );
-    if ( line_queue )
+    if ( line_queue ) {
         RunLineQueueEx();
+        RestoreTokenState( pSave ); /* v2.0: restore token buffer state! */
+    }
 
     oldofs = GetCurrOffset();
     DebugMsg(("InitializeArray(%s): current offset=%X\n", f->sym->name, oldofs ));
@@ -227,12 +232,12 @@ static ret_code InitializeArray( field_list *f, int *pi )
         AsmErr( TOO_MANY_INITIAL_VALUES_FOR_ARRAY, AsmBuffer[i]->string_ptr );
     } else if (j < f->sym->total_size ) {
         char c;
-        DebugMsg(("InitializeArray: remaining bytes=%u\n", f->sym->total_size - j ));
+        DebugMsg(("InitializeArray: remaining bytes=%lu\n", f->sym->total_size - j ));
         if ( CurrSeg && CurrSeg->e.seginfo->segtype != SEGTYPE_BSS )
             c = '0';
         else
             c = '?';
-        sprintf( buffer, "db %u dup (%c)", f->sym->total_size - j, c );
+        sprintf( buffer, "db %lu dup (%c)", f->sym->total_size - j, c );
         AddLineQueue( buffer );
     }
 
@@ -248,8 +253,8 @@ static ret_code InitializeArray( field_list *f, int *pi )
 // currently this proc emits ASM lines with simple types
 // to actually "fill" the structure.
 
-static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded )
-/********************************************************************/
+static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embedded )
+/************************************************************************************/
 {
     char            *ptr;
     field_list      *f;
@@ -275,8 +280,8 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
         DebugMsg(("InitializeStructure(%s): unexpectedly called in pass %u!!!!!\n", symtype->sym.name, Parse_Pass+1 ));
     }
 #endif
-    DebugMsg(("InitializeStructure(%s) enter, total=%u/%u, init=>%s<\n",
-              symtype->sym.name, symtype->sym.total_size, symtype->sym.total_length, ptr ));
+    DebugMsg(("InitializeStructure(%s) enter, total=%u/%u, init=>%s<, embedded=%s, alignm=%u\n",
+              symtype->sym.name, symtype->sym.total_size, symtype->sym.total_length, ptr, embedded ? embedded->name : "NULL", symtype->e.structinfo->alignment ));
 #endif
 
     if ( AsmBuffer[index]->token == T_STRING ) {
@@ -295,7 +300,7 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
                 (AsmBuffer[index]->token == T_COMMA ||
                  AsmBuffer[index]->token == T_FINAL)) {
     } else {
-        AsmError( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM );
+        AsmErr( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM, embedded ? embedded->name : "" );
         return( ERROR );
     }
 
@@ -311,7 +316,7 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
      RunLineQueue() is NOT called and therefore the queue needn't be
      saved.
      */
-    if ( embedded == FALSE ) {
+    if ( embedded == NULL ) {
         old_line_queue = line_queue;
         line_queue = NULL;
     }
@@ -341,14 +346,15 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
 
     for( f = symtype->e.structinfo->head; f != NULL; f = f->next ) {
 
-        DebugMsg(("InitializeStructure field=%s total_size=%u total_length=%u initializer=%s default=>%s<\n",
+        DebugMsg(("InitializeStructure field=%s ofs=%u total_size=%lu total_length=%lu initializer=%s default=>%s<\n",
                   f->sym->name,
+                  f->sym->offset,
                   f->sym->total_size,
                   f->sym->total_length,
                   f->initializer ? f->initializer : "NULL",
-                  f->value));
+                  f->value ));
 
-        if (f->sym->mem_type == MT_BITS) {
+        if ( f->sym->mem_type == MT_BITS ) {
             opndx.kind = EXPR_CONST;
             opndx.string = NULL;
             if (AsmBuffer[i]->token == T_COMMA || AsmBuffer[i]->token == T_FINAL) {
@@ -386,7 +392,7 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
 #endif
         } else if ( f->initializer == NULL ) { /* embedded struct? */
 
-            InitializeStructure( (dir_node *)f->sym->type, i, TRUE );
+            InitializeStructure( (dir_node *)f->sym->type, i, f->sym );
             if ( AsmBuffer[i]->token == T_STRING )
                 i++;
 
@@ -394,6 +400,7 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
                     AsmBuffer[i]->token != T_FINAL &&
                     AsmBuffer[i]->token != T_COMMA ) {
             InitializeArray( f, &i );
+
         } else {
             strcpy( buffer, f->initializer );
             strcat( buffer, " " );
@@ -432,20 +439,20 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
                 }
             }
             AddLineQueue( buffer );
-
-            /* add padding bytes */
-
-            if ( f->next == NULL || symtype->e.structinfo->typekind == TYPE_UNION )
-                nextofs = symtype->sym.total_size;
-            else
-                nextofs = f->next->sym->offset;
-
-            if ( f->sym->offset + f->sym->total_size < nextofs ) {
-                sprintf(buffer,"db %u dup (?) ;padding",
-                        nextofs - (f->sym->offset + f->sym->total_size));
-                AddLineQueue( buffer );
-            }
         }
+
+        /* add padding bytes */
+        if ( f->next == NULL || symtype->e.structinfo->typekind == TYPE_UNION )
+            nextofs = symtype->sym.total_size;
+        else
+            nextofs = f->next->sym->offset;
+
+        if ( f->sym->offset + f->sym->total_size < nextofs ) {
+            sprintf( buffer,"db %u dup (?) ;padding",
+                    nextofs - (f->sym->offset + f->sym->total_size) );
+            AddLineQueue( buffer );
+        }
+
         /* for a union, just the first field is initialized */
         if ( symtype->e.structinfo->typekind == TYPE_UNION )
             break;
@@ -472,9 +479,9 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
         else
             p = "dd";
         if (is_record_set)
-            sprintf(buffer,"%s 0%Xh", p, dwRecInit);
+            sprintf( buffer,"%s 0%Xh", p, dwRecInit );
         else
-            sprintf(buffer,"%s ?", p);
+            sprintf( buffer,"%s ?", p );
         AddLineQueue( buffer );
     }
 
@@ -485,18 +492,18 @@ static ret_code InitializeStructure( dir_node *symtype, int index, bool embedded
     /* now run the generated code if embedded is FALSE ... and
      if at least one line has been generated */
 
-    if ( line_queue && ( embedded == FALSE ))
+    if ( line_queue && ( embedded == NULL ))
         RunLineQueueEx();
 
     RestoreTokenState( pSave );
 
-    if ( embedded == FALSE ) {
+    if ( embedded == NULL ) {
         line_queue = old_line_queue;
     }
 
     StructInit--;
 
-    DebugMsg(("InitializeStructure exit, current ofs=%X\n", GetCurrOffset() ));
+    DebugMsg(("InitializeStructure(%s) exit, current ofs=%X\n", symtype->sym.name, GetCurrOffset() ));
 
     return( NOT_ERROR );
 }
@@ -518,8 +525,15 @@ static void little_endian( char *string, unsigned no_of_bytes )
     return;
 }
 
+static void OutputDataBytes( const unsigned char *p, int len )
+/************************************************************/
+{
+    for( ; len; len-- )
+        OutputByte( *p++ );
+}
+
 static void output_float( int index, unsigned no_of_bytes, bool negative )
-/**********************************************************************************/
+/************************************************************************/
 {
     double              double_value;
     float               float_value;
@@ -544,14 +558,12 @@ static void output_float( int index, unsigned no_of_bytes, bool negative )
             if ( Parse_Pass == PASS_1 )
                 AsmWarn( 4, FLOAT_OPERAND );
             /* this is Masm-compatible: output 00 bytes */
-            for ( ; no_of_bytes; no_of_bytes-- )
-                OutputDataByte( 0x00 );
+            FillDataBytes( 0x00, no_of_bytes );
             return;
         }
     }
 
-    for ( ; no_of_bytes; no_of_bytes-- )
-        OutputDataByte( *char_ptr++ );
+    OutputDataBytes( char_ptr, no_of_bytes );
 
     return;
 }
@@ -576,12 +588,11 @@ static void update_sizes( asm_sym *sym, bool first, unsigned no_of_bytes )
  - dup: array size if called by DUP operator, otherwise 1
 */
 
-static ret_code data_item( struct code_info *CodeInfo, asm_sym *sym, dir_node *struct_sym, int *start_pos, unsigned no_of_bytes, unsigned int dup, bool struct_field, bool float_initializer )
-/************************************************************************************************/
+static ret_code data_item( struct code_info *CodeInfo, asm_sym *sym, dir_node *struct_sym, int *start_pos, unsigned no_of_bytes, unsigned int dup, bool struct_field, bool float_initializer, bool first )
+/********************************************************************************************************************************************************************************************************/
 {
     int                 cur_pos;
     int                 string_len;
-    bool                first = TRUE;
 #if FASTPASS
     bool                firstitem = TRUE;
 #endif
@@ -592,7 +603,7 @@ static ret_code data_item( struct code_info *CodeInfo, asm_sym *sym, dir_node *s
     char                tmp;
     expr_list           opndx;
 
-    DebugMsg(("data_item(sym=%X, type=%X, pos=%d, size=%u, dup=%u) enter\n", sym, struct_sym, *start_pos, no_of_bytes, dup));
+    DebugMsg(("data_item(sym=%s, type=%X, pos=%d, size=%u, dup=%u) enter\n", sym ? sym->name : "NULL", struct_sym, *start_pos, no_of_bytes, dup));
 
     for (;dup;dup--) {
     cur_pos = *start_pos;
@@ -659,7 +670,7 @@ next_item:
                         *CurrSource = ';';
                     }
                     if ( sym && sym->first_length == 0 ) {
-                        sprintf( buffer, "%s label %s", sym->name, struct_sym->sym.name);
+                        sprintf( buffer, "%s label %s", sym->name, struct_sym->sym.name );
                         StoreLine( buffer );
                         if ( Options.preprocessor_stdout == TRUE )
                             WritePreprocessedLine( buffer );
@@ -667,7 +678,7 @@ next_item:
                 }
 #endif
                 DebugMsg(("data_item: calling InitializeStructure\n"));
-                if ( InitializeStructure( struct_sym, cur_pos, FALSE ) == ERROR )
+                if ( InitializeStructure( struct_sym, cur_pos, NULL ) == ERROR )
                     return( ERROR );
             } else {
                 UpdateStructSize( no_of_bytes );
@@ -722,13 +733,14 @@ next_item:
                     break;
             }
         } else {
-            if ( data_item( CodeInfo, sym, struct_sym, &cur_pos, no_of_bytes, opndx.value, struct_field, float_initializer ) == ERROR ) {
-                DebugMsg(("call data_item for DUP, count=%u, returned with error\n", opndx.value));
+            DebugMsg(("data_item(%s): op DUP, count=%u, calling data_item()\n", sym ? sym->name : "NULL", opndx.value ));
+            if ( data_item( CodeInfo, sym, struct_sym, &cur_pos, no_of_bytes, opndx.value, struct_field, float_initializer, first ) == ERROR ) {
+                DebugMsg(("data_item(%s): op DUP, count=%u, returned with error\n", sym ? sym->name : "NULL", opndx.value));
                 return( ERROR );
             }
         }
         if( AsmBuffer[cur_pos]->token != T_CL_BRACKET ) {
-            DebugMsg(("data_item exit 4, error\n"));
+            DebugMsg(("data_item: error 'missing ')', exit\n"));
             AsmErr( EXPECTED, ")" );
             return( ERROR );
         }
@@ -788,7 +800,7 @@ next_item:
 
             /* a string returned by the evaluator (enclosed in quotes!)? */
 
-            if (opndx.string != NULL) {
+            if ( opndx.string != NULL ) {
                 DebugMsg(("data_item.CONST: string found: >%s<, struct_field=%u, no_of_bytes=%u, curr_ofs=%X\n", AsmBuffer[cur_pos]->string_ptr, struct_field, no_of_bytes, GetCurrOffset()));
                 char_ptr = (uint_8 *)opndx.string;
                 string_len = strlen( opndx.string );
@@ -809,43 +821,38 @@ next_item:
                         AsmError( INITIALIZER_OUT_OF_RANGE );
                         return( ERROR );
                     }
+                } else if ( string_len == 0 ) {
+                    if ( struct_field )
+                        string_len = 1;
+                    else {
+                        AsmError( EMPTY_STRING ); /* MASM doesn't like "" */
+                        return( ERROR );
+                    }
                 }
 
                 /* anything bigger than a byte must be stored in little-endian
                  * format -- LSB first */
-                if (string_len > 1)
+                if ( string_len > 1 )
                     little_endian( (char *)char_ptr, no_of_bytes );
 
                 if( sym && Parse_Pass == PASS_1 ) {
-                    if (no_of_bytes == 1) {
-                        if (string_len == 0) {
-                            if (struct_field)
-                                string_len = 1;
-                            else {
-                                AsmError( EMPTY_STRING ); /* MASM doesn't like "" */
-                                return( ERROR );
-                            }
-                        }
-                        update_sizes( sym, first, no_of_bytes );
-                        if (string_len > 1) {
-                            int i;
-                            for (i = string_len-1;i;i--)
-                                update_sizes( sym, FALSE, no_of_bytes );
-                        }
-                    } else
-                        update_sizes( sym, first, no_of_bytes );
+                    update_sizes( sym, first, no_of_bytes );
+                    if ( no_of_bytes == 1 && string_len > 1 ) {
+                        int i;
+                        for ( i = string_len-1; i; i-- )
+                            update_sizes( sym, FALSE, no_of_bytes );
+                    }
                 }
 
                 
                 if( !struct_field ) {
-                    for( count = 0; count < string_len; count++ )
-                        OutputDataByte( *char_ptr++ );
+                    OutputDataBytes( char_ptr, string_len );
 
-                    for( ; count < no_of_bytes; count++ )
-                        OutputDataByte( 0 );
+                    if ( no_of_bytes > string_len )
+                        FillDataBytes( 0, no_of_bytes - string_len );
                 } else {
                     if( Parse_Pass == PASS_1 ) {
-                        if (no_of_bytes == 1)
+                        if ( no_of_bytes == 1 )
                             count = string_len;
                         else
                             count = no_of_bytes;
@@ -865,24 +872,17 @@ next_item:
                     /* so if a simple type is larger, clear anything
                      which is above */
                     if (no_of_bytes > 16) {
-                        while( count < 16 ) {
-                            OutputDataByte( *(char_ptr++) );
-                            count++;
-                        }
+                        OutputDataBytes( char_ptr, 16 );
                         tmp = 0;
                         if (opndx.value6479 < 0)
                             tmp = 0xFF;
-                        while( count < no_of_bytes ) {
-                            OutputDataByte(tmp);
-                            count++;
-                        }
+                        FillDataBytes( tmp, no_of_bytes - 16 );
                     } else {
-                        while( count < no_of_bytes ) {
-                            OutputDataByte( *(char_ptr++) );
-                            count++;
-                        }
+                        OutputDataBytes( char_ptr, no_of_bytes );
                     }
                     if (Parse_Pass > PASS_1) {
+                        count = no_of_bytes;
+                        char_ptr += no_of_bytes;
                         while (count < 4) {
                             if ( *(char_ptr) != 0 && *(char_ptr) != 0xFF ) {
                                 DebugMsg(("data_item.CONST: error, CONST is %X\n", opndx.value));
@@ -900,10 +900,24 @@ next_item:
             break;
         case EXPR_ADDR:
             {
-                int              i;
+                //int              i;
                 char             *ptr;
                 enum fixup_types fixup_type;
                 struct asmfixup  *fixup;
+
+                /* since a fixup will be created, 8 bytes is max */
+                if ( no_of_bytes > sizeof(uint_64) ) {
+                    AsmError( INVALID_DATA_INITIALIZER );
+                    break;
+                }
+#if AMD64_SUPPORT
+                if ( CodeInfo->Ofssize != USE64 )
+#endif
+                if ( opndx.hvalue && ( opndx.hvalue != -1 || opndx.value >= 0 ) ) {
+                    DebugMsg(("data_item.ADDR: displacement doesn't fit in 32 bits: %I64X\n", opndx.value64 ));
+                    AsmError( CONSTANT_VALUE_TOO_LARGE );
+                    return( ERROR );
+                }
 
                 /* indirect addresses (incl. stack variables) are invalid */
                 if ( opndx.indirect == TRUE ) {
@@ -981,7 +995,7 @@ next_item:
                     fixup_type = FIX_OFF32_IMGREL;
                     break;
 #endif
-#if SECRELSUPP
+#if SECTIONRELSUPP
                 case T_SECTIONREL:
                     if ( no_of_bytes != sizeof(uint_32) ) {
                         DebugMsg(("data_item.ADDR: SECTIONREL, error, size=%u (should be 4)\n", no_of_bytes ));
@@ -1008,8 +1022,21 @@ next_item:
                     fixup_type = FIX_OFF16;
                     AsmError( CONSTANT_EXPECTED );
                     break;
+#if LOHI32
+                case T_LOW32:
+                    fixup_type = FIX_OFF32;
+                    if ( no_of_bytes < 4 ) {
+                        AsmError( SIZE_TOO_LARGE );
+                        break;
+                    }
+                    break;
+                case T_HIGHWORD:
+                    fixup_type = FIX_OFF32;
+                    AsmError( CONSTANT_EXPECTED );
+                    break;
+#endif
                 default:
-                    /* size < 2 can work with T_LOW operator only */
+                    /* size < 2 can work with T_LOW|T_HIGH operator only */
                     if ( no_of_bytes < 2) {
                         /* forward reference? */
                         if ( Parse_Pass == PASS_1 && opndx.sym && opndx.sym->state == SYM_UNDEFINED)
@@ -1035,20 +1062,26 @@ next_item:
                         // if symbol's offset is 32bit
                         if (opndx.explicit == TRUE && opndx.mem_type == MT_NEAR && opndx.Ofssize == USE16 )
                             ;
-                        else if ( opndx.sym && ( GetSymOfssize(opndx.sym) > USE16 ) ) {
+                        else if ( opndx.sym &&
+                                 opndx.sym->state != SYM_UNDEFINED &&
+                                 ( GetSymOfssize(opndx.sym) > USE16 ) ) {
                             DebugMsg(("data_item.ADDR: error, a 32bit offset (%s) wont fit in a WORD\n", opndx.sym->name));
-                            AsmError(INITIALIZER_MAGNITUDE_TOO_LARGE);
+                            AsmError( INITIALIZER_MAGNITUDE_TOO_LARGE );
                         }
                         fixup_type = FIX_OFF16;
                         break;
                     case 4:
-                        // masm generates:
-                        // off32 if curr segment is 32bit,
-                        // ptr16 if curr segment is 16bit,
-                        // and ignores type overrides
+                        /* masm generates:
+                         * off32 if curr segment is 32bit,
+                         * ptr16 if curr segment is 16bit,
+                         * and ignores type overrides.
+                         * if it's a NEAR external, size is 16, and
+                         * format isn't OMF, error 'symbol type conflict'
+                         * is displayed
+                        */
                         if ( opndx.explicit == TRUE ) {
                             if ( opndx.mem_type == MT_FAR ) {
-                                if ( opndx.Ofssize == USE32 ) {
+                                if ( opndx.Ofssize > USE16 ) {
                                     DebugMsg(("data_item.ADDR: error, FAR32 won't fit in a DWORD\n" ));
                                     AsmError( INITIALIZER_MAGNITUDE_TOO_LARGE );
                                 }
@@ -1062,25 +1095,43 @@ next_item:
                                     fixup_type = FIX_OFF32;
                             }
                         } else {
+                            /* what's done if code size is 16 is Masm-compatible.
+                             * It's not very smart, however.
+                             * A better strategy is to choose fixup type depending
+                             * on the symbol's offset size.
+                             */
+                            //if ( opndx.sym && ( GetSymOfssize( opndx.sym ) == USE16 ) )
                             if ( CodeInfo->Ofssize == USE16 )
-                                fixup_type = FIX_PTR16;
+                                if ( opndx.mem_type == MT_NEAR &&
+                                    ( Options.output_format == OFORMAT_COFF
+#if ELF_SUPPORT
+                                     || Options.output_format == OFORMAT_ELF
+#endif
+                                    )) {
+                                    fixup_type = FIX_OFF16;
+                                    AsmErr( SYMBOL_TYPE_CONFLICT, sym->name );
+                                } else
+                                    fixup_type = FIX_PTR16;
                             else
                                 fixup_type = FIX_OFF32;
                         }
                         break;
                     case 6:
-                        // Masm always generates a PTR32 fixup!
-                        fixup_type = FIX_PTR32;
-                        CodeInfo->opnd_type[OPND1] = OP_J48;
-                        break;
-#if AMD64_SUPPORT
-                    case 8:
-                        if ( CodeInfo->Ofssize == USE64 ) {
-                            fixup_type = FIX_OFF64;
-                            CodeInfo->opnd_type[OPND1] = OP_I64;
-                            break;
-                        }
+                        /* Masm generates a PTR32 fixup in OMF!
+                         * and a DIR32 fixup in COFF.
+                         */
+                        /* COFF/ELF has no far fixups */
+                        if ( Options.output_format == OFORMAT_COFF
+#if ELF_SUPPORT
+                            || Options.output_format == OFORMAT_ELF
 #endif
+                           ) {
+                            fixup_type = FIX_OFF32;
+                        } else {
+                            fixup_type = FIX_PTR32;
+                        }
+                        //CodeInfo->opnd_type[OPND1] = OP_J48;
+                        break;
                     default:
                         // Masm generates
                         // off32 if curr segment is 32bit
@@ -1089,8 +1140,12 @@ next_item:
                         // and generates a ptr32 fixup then
                         if ( opndx.explicit == TRUE && opndx.mem_type == MT_FAR && opndx.Ofssize == USE32 )
                             fixup_type = FIX_PTR32;
-                        else if( CodeInfo->Ofssize )
+                        else if( CodeInfo->Ofssize == USE32 )
                             fixup_type = FIX_OFF32;
+#if AMD64_SUPPORT
+                        else if( CodeInfo->Ofssize == USE64 )
+                            fixup_type = FIX_OFF64;
+#endif
                         else
                             fixup_type = FIX_PTR16;
                     }
@@ -1109,24 +1164,21 @@ next_item:
                     find_frame( CodeInfo, opndx.sym );
                     /* uses Frame and Frame_Datum  */
                     fixup = AddFixup( opndx.sym, fixup_type, OPTJ_NONE );
-                    CodeInfo->InsFixup[OPND1] = fixup;
-                    fixup->offset += opndx.value;
-                    fixup->fixup_loc = GetCurrOffset();
-                    CodeInfo->data[OPND1] = fixup->offset;
-                    store_fixup( CodeInfo, OPND1 ); /* may fail, but ignore error! */
+                    //CodeInfo->InsFixup[OPND1] = fixup;
+                    //CodeInfo->data[OPND1] = opndx.value;
 #if AMD64_SUPPORT
-                    if ( CodeInfo->InsFixup[OPND1] && CodeInfo->InsFixup[OPND1]->type == FIX_OFF32 ) {
-                        CodeInfo->InsFixup[OPND1]->addbytes = GetCurrOffset() - CodeInfo->InsFixup[OPND1]->fixup_loc;
-                    }
+                    //if ( fixup_type == FIX_OFF64 )
+                    //    CodeInfo->data[OPND2] = opndx.hvalue;
 #endif
+                    store_fixup( fixup, &opndx.value ); /* may fail, but ignore error! */
                 }
 
                 /* now actually output the data */
-                ptr = (char *)&CodeInfo->data[OPND1];
+                //ptr = (char *)&CodeInfo->data[OPND1];
+                ptr = (char *)&opndx.value;
 
                 /* emit offset (segment is on fixup), max is sizeof(uint_64) */
-                for( i = 0; i < min( no_of_bytes, sizeof(uint_64) ); i++ )
-                    OutputDataByte( *ptr++ );
+                OutputBytes( ptr, no_of_bytes );
             }
             break;
         case EXPR_REG:
@@ -1157,12 +1209,13 @@ item_done:
     return( NOT_ERROR );
 }
 
-static ret_code checktypes( asm_sym *sym, memtype mem_type, dir_node *struct_sym)
+static ret_code checktypes( const asm_sym *sym, memtype mem_type, const dir_node *struct_sym)
+/*******************************************************************************************/
 {
     /* for EXTERNDEF, check type changes */
     if ( sym->mem_type != MT_EMPTY ) {
         memtype mem_type2 = sym->mem_type;
-        asm_sym *tmp;
+        const asm_sym *tmp;
         /* skip alias types */
         tmp = (asm_sym *)struct_sym;
         while ( mem_type == MT_TYPE ) {
@@ -1190,7 +1243,7 @@ static ret_code checktypes( asm_sym *sym, memtype mem_type, dir_node *struct_sym
  */
 
 ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc, dir_node *struct_sym )
-/***********************************************/
+/******************************************************************************************************/
 {
     unsigned            no_of_bytes;
     struct asm_sym      *sym = NULL;
@@ -1242,7 +1295,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
 
         /* it's either a type or a data directive. For types, the index
          into the simpletype table is in <opcode>, for data directives
-         the index is found in the opnd_type[0] field in AsmOpTable.
+         the index is found in the opnd_type[0] field.
          */
 
         if ( AsmBuffer[ initializer_loc]->token == T_RES_ID &&
@@ -1250,7 +1303,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
             i = AsmBuffer[ initializer_loc]->opcode;
         } else if ( AsmBuffer[ initializer_loc]->token == T_DIRECTIVE &&
                    (AsmBuffer[ initializer_loc]->dirtype == DRT_DATADIR )) {
-            i = AsmOpTable[AsmResWord[AsmBuffer[initializer_loc]->value].position].opnd_type[0];
+            i = GetOpndType( AsmBuffer[initializer_loc]->value, 0 );
         } else {
             AsmErr( INVALID_TYPE_FOR_DATA_DECLARATION, sym->name );
             return( ERROR );
@@ -1286,15 +1339,17 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
         /* structure parsing is done in the first pass only */
         if( Parse_Pass == PASS_1 ) {
 
-            currofs = CurrStruct->sym.offset;
+            /* current offset isn't necessarily the fields start offset */
+            //currofs = CurrStruct->sym.offset;
 
             if (!(sym = AddFieldToStruct( sym_loc, initializer_loc, mem_type, struct_sym, no_of_bytes ))) {
                 return ( ERROR );
             }
+            currofs = sym->offset;
             DebugMsg(("data_init: %s, AddFieldToStruct called, ofs=%X\n", sym->name, sym->offset ));
         }
         initializer_loc++;
-        if( data_item( CodeInfo, sym, struct_sym, &initializer_loc, no_of_bytes, 1, TRUE, float_initializer ) == ERROR ) {
+        if( data_item( CodeInfo, sym, struct_sym, &initializer_loc, no_of_bytes, 1, TRUE, float_initializer, TRUE ) == ERROR ) {
             DebugMsg(("data_init: exit 4, data_item() returned with error\n"));
             return( ERROR );
         }
@@ -1302,9 +1357,25 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
         if ( ModuleInfo.list && Parse_Pass == PASS_1 )
             LstWrite( LSTTYPE_STRUCT, currofs, sym->name );
 
+        if (AsmBuffer[initializer_loc]->token != T_FINAL) {
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[initializer_loc]->string_ptr );
+            return( ERROR );
+        }
         DebugMsg(("data_init: exit, inside struct declaration (%s.%u), no error\n", CurrStruct->sym.name, CurrStruct->sym.offset ));
         return( NOT_ERROR );
     }
+
+    if( CurrSeg == NULL ) {
+        AsmError( MUST_BE_IN_SEGMENT_BLOCK );
+        return( ERROR );
+    }
+#if FASTPASS
+    if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
+        SaveState();
+    }
+#endif
+    if ( CommentDataInCode )
+        omf_OutSelect( TRUE );
 
     if ( ModuleInfo.list ) {
         currofs = GetCurrOffset();
@@ -1315,8 +1386,10 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
         if( Parse_Pass == PASS_1 ) {
             /* if it's an EXTERNDEF, remove the external info */
             if( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
-                if ( checktypes( sym, mem_type, struct_sym ) == ERROR )
-                    return( ERROR );
+                //if ( checktypes( sym, mem_type, struct_sym ) == ERROR )
+                //    return( ERROR );
+                //v2.0: display error and continue!
+                checktypes( sym, mem_type, struct_sym );
                 dir_internal( (dir_node *)sym );
                 sym->total_size = 0;
                 sym->total_length = 0;
@@ -1380,7 +1453,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
     }
 
     initializer_loc++;
-    if ( data_item( CodeInfo, sym, struct_sym, &initializer_loc, no_of_bytes, 1, FALSE, float_initializer ) == ERROR ) {
+    if ( data_item( CodeInfo, sym, struct_sym, &initializer_loc, no_of_bytes, 1, FALSE, float_initializer, TRUE ) == ERROR ) {
         DebugMsg(("data_init: exit, error in data_item()\n"));
         return( ERROR );
     }

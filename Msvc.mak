@@ -7,8 +7,6 @@
 #
 # By setting DOS=1 one can additionally create a 32bit DOS binary.
 # This requires the HXDEV package.
-#
-# with nmake -f msvc.mak amd64=1 one can create the 64bit aware version
 
 name = jwasm
 
@@ -24,11 +22,6 @@ WIN=1
 VCDIR  = \msvc8
 W32LIB = \Win32Inc\Lib
 HXDIR  = \HX
-
-# support for 64bit?
-!ifdef AMD64
-c_flags64=-DAMD64_SUPPORT=1
-!endif
 
 !ifndef DEBUG
 DEBUG=0
@@ -55,7 +48,8 @@ extra_c_flags = -Zd -Od -DDEBUG_OUT -DTRMEM
 extra_c_flags = -Zd -Od -DDEBUG_OUT
 !endif
 !else
-extra_c_flags = -Oty2 -Gs -DNDEBUG
+extra_c_flags = -O2 -Gs -DNDEBUG
+#extra_c_flags = -Ox -DNDEBUG
 !endif
 
 c_flags =-D__NT__ $(extra_c_flags) $(c_flags64)
@@ -95,11 +89,12 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   \
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  \
            $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   \
-           $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj  \
+           $(OUTD)/context.obj  $(OUTD)/extern.obj  \
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
 !endif
-           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj
+           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
+           $(OUTD)/dbgcv.obj
 ######
 
 !if $(WIN)

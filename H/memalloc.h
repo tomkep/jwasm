@@ -37,14 +37,15 @@ extern void *MemAlloc( size_t size );
 extern void *MemRealloc( void *ptr, size_t size );
 extern void MemFree( void *ptr );
 
-#ifdef __WATCOMC__
+#if defined(__WATCOMC__) || defined(__BORLANDC__)
 #define AsmTmpAlloc( amount )   alloca( amount )
 #include <malloc.h>
-#elif defined( __GNUC__ ) || defined(__TINYC__)
-//#include <malloc.h>
-//#define AsmTmpAlloc( amount )   _alloca( amount )
+#elif defined(__GNUC__) || defined(__TINYC__)
 #include <stdlib.h>
 #define AsmTmpAlloc( amount )   alloca( amount )
+#elif defined(__PCC__)
+#define AsmTmpAlloc( amount )   _alloca( amount )
+#include <malloc.h>
 #else
 #define AsmTmpAlloc( amount )   _alloca( amount )
 #endif

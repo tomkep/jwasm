@@ -2,7 +2,7 @@
 # this makefile (WMake) creates the Linux binary of JWasm.
 # Open Watcom v1.7 or v1.8 is used.
 
-name = JWasm
+name = jwasm
 
 # support for 64bit?
 !ifdef AMD64
@@ -31,7 +31,7 @@ inc_dirs  = -IH -I$(WATCOM)\LH
 # to track memory leaks, the Open Watcom TRMEM module can be included
 TRMEM=0
 
-linker = $(WATCOM)\Binnt\wlink.exe
+LINK = $(WATCOM)\Binnt\wlink.exe
 
 #cflags stuff
 #########
@@ -68,11 +68,12 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   &
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
            $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   &
-           $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj  &
+           $(OUTD)/context.obj  $(OUTD)/extern.obj  &
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif
-           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj    
+           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   &
+           $(OUTD)/dbgcv.obj
 ######
 
 ALL: $(OUTD) $(OUTD)/$(name)
@@ -81,7 +82,7 @@ $(OUTD):
 	@if not exist $(OUTD) mkdir $(OUTD)
 
 $(OUTD)/$(name) : $(proj_obj)
-	$(linker) @<<
+	$(LINK) @<<
 format elf
 runtime linux
 $(LOPTD) $(LOPT) op map=$^*

@@ -38,8 +38,8 @@ typedef struct {
 
 extern void QInit( qdesc *q );
 extern void QEnqueue( qdesc *q, void *item );
-extern void QJoinQueue( qdesc *dest, qdesc *src );
 extern void *QDequeue( qdesc *q );
+//extern void QJoinQueue( qdesc *dest, qdesc *src );
 
 #endif
 

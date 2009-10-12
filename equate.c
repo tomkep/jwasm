@@ -43,6 +43,7 @@
 #include "macro.h"
 #include "fastpass.h"
 #include "listing.h"
+#include "input.h"
 
 #if FASTPASS
 
@@ -89,14 +90,14 @@ asm_sym * CreateConstant( bool redefine )
     char                buffer[MAX_LINE_LEN];
     char                nameb[MAX_ID_LEN+1];
 
-    DebugMsg(( "%u:CreateConstant(%s, redef=%u) enter\n", Parse_Pass+1, name, redefine ));
+    DebugMsg(( "%lu. CreateConstant(%s, redef=%u) enter\n", LineNumber, name, redefine ));
 
     sym = SymSearch( name );
 
     if( sym == NULL ) {
         /*
-         if we've never seen it before
-         wait with definition until type of equate is clear
+         * if we've never seen it before
+         * wait with definition until type of equate is clear
          */
     } else if( sym->state == SYM_UNDEFINED ) {
 
@@ -115,7 +116,7 @@ asm_sym * CreateConstant( bool redefine )
         return( NULL );
     } else if( sym->equate == FALSE ) {
         /* it is defined as something else, get out */
-        DebugMsg(( "CreateConstant(%s) state=%u, mem_type=%u, value=%X, symbol redefinition\n", name, sym->state, sym->mem_type, sym->value));
+        DebugMsg(( "CreateConstant(%s) state=%u, mem_type=%Xh, value=%lX, symbol redefinition\n", name, sym->state, sym->mem_type, sym->value));
         AsmErr( SYMBOL_REDEFINITION, name );
         return( NULL );
     } else if ( redefine == FALSE || sym->variable == FALSE ) {
@@ -130,7 +131,7 @@ asm_sym * CreateConstant( bool redefine )
     if (AsmBuffer[i]->token == T_NUM &&
         AsmBuffer[i+1]->token == T_FINAL &&
         AsmBuffer[i]->hvalue == 0 ) {
-        opndx.llvalue = AsmBuffer[i]->llvalue;
+        opndx.llvalue = AsmBuffer[i]->value64;
         opndx.hlvalue = 0;
         opndx.kind = EXPR_CONST;
         opndx.string = NULL;
@@ -138,6 +139,7 @@ asm_sym * CreateConstant( bool redefine )
         opndx.labeldiff = FALSE;
         opndx.indirect = FALSE;
         rc = NOT_ERROR;
+        DebugMsg(( "%lu. CreateConstant(%s): simple numeric value=%lX\n", LineNumber, name, AsmBuffer[i]->value64 ));
         i++;
     } else {
 //        if ( redefine == FALSE ) {
@@ -183,7 +185,7 @@ asm_sym * CreateConstant( bool redefine )
             AsmBuffer[i]->token == T_FINAL &&
             (opndx.kind == EXPR_CONST ||
              (opndx.kind == EXPR_ADDR && opndx.sym != NULL ))) {
-            DebugMsg(( "CreateConstant(%s): expression evaluated, value=%X, string=%X\n", name, opndx.value, opndx.string));
+            DebugMsg(( "CreateConstant(%s): expression evaluated, value=%lX, string=%X\n", name, opndx.value, opndx.string));
             if ( opndx.kind == EXPR_CONST && sym->value == opndx.value ) {
                 return( sym );
             }
@@ -209,9 +211,9 @@ asm_sym * CreateConstant( bool redefine )
                 PhaseError = TRUE;
 #ifdef DEBUG_OUT
                 printf("%u: %s: equate caused a phase error >%s<\n", Parse_Pass + 1, sym->name, AsmBuffer[0]->pos );
-                printf("%u: %s: curr: type=%u addr=%X:%X\n", Parse_Pass + 1, sym->name,
+                printf("%u: %s: curr: type=%u addr=%X:%lX\n", Parse_Pass + 1, sym->name,
                        sym->type, sym->segment, sym->offset );
-                printf("%u: %s: new: name=%s type=%u addr=%X:%X, value=%X\n", Parse_Pass + 1, sym->name,
+                printf("%u: %s: new: name=%s type=%u addr=%X:%lX, value=%lX\n", Parse_Pass + 1, sym->name,
                        opndx.sym->name, opndx.sym->type, opndx.sym->segment, opndx.sym->offset, opndx.value );
 #endif
                 sym->offset = opndx.sym->offset + opndx.value;
@@ -288,12 +290,12 @@ noerr:
         if (opndx.kind == EXPR_CONST) {
             sym->mem_type = MT_ABS;
             sym->value = opndx.value;
-            DebugMsg(("%u:CreateConstant(%s), CONST, value=%X\n", Parse_Pass+1, name, opndx.value ));
+            DebugMsg(("%lu. CreateConstant(%s), CONST, pass=%u, value=%lX\n", LineNumber, name, Parse_Pass+1, opndx.value ));
         } else {
             sym->mem_type = opndx.mem_type;
             sym->offset = opndx.sym->offset + opndx.value;
             sym->segment = opndx.sym->segment;
-            DebugMsg(("%u:CreateConstant(%s), ADDR, values: ofs=%X/value=%X (sym=%X)\n", Parse_Pass+1, name, opndx.sym->offset, opndx.value, opndx.sym));
+            DebugMsg(("%lu. CreateConstant(%s), ADDR, pass=%u, values: ofs=%lX/value=%lX (sym=%s)\n", LineNumber, name, Parse_Pass+1, opndx.sym->offset, opndx.value, opndx.sym->name ));
         }
         return( sym );
     }
@@ -342,8 +344,8 @@ noerr:
 // define an assembly time variable directly without using the token buffer.
 // this is used for some internally generated variables.
 
-asm_sym * CreateConstantEx( char *name, int value )
-/*************************************************/
+asm_sym * CreateConstantEx( const char *name, int value )
+/*******************************************************/
 {
     struct asm_sym      *sym;
 

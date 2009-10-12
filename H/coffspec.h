@@ -204,6 +204,7 @@ typedef struct _IMAGE_SYMBOL {
 #define IMAGE_WEAK_EXTERN_SEARCH_ALIAS      3
 
 typedef union _IMAGE_AUX_SYMBOL {
+    /* AUX format 2: .bf and .ef entries */
     struct {
         uint_32 TagIndex;
         union {
@@ -224,9 +225,11 @@ typedef union _IMAGE_AUX_SYMBOL {
         } FcnAry;
         uint_16 TvIndex;
     } Sym;
+    /* AUX format 4: file entries */
     struct {
         char Name[IMAGE_SIZEOF_SYMBOL];
     } File;
+    /* AUX format 5: section entries */
     struct {
         uint_32 Length;
         uint_16 NumberOfRelocations;

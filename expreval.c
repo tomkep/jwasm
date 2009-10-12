@@ -89,8 +89,8 @@ static void init_expr( expr_list *new )
     new->type     = NULL;
 }
 
-static void TokenAssign( expr_list *t1, expr_list *t2 )
-/*****************************************************/
+static void TokenAssign( expr_list *t1, const expr_list *t2 )
+/***********************************************************/
 {
 #if 1
     /* note that offsetof() is used. This means, don't change position
@@ -215,7 +215,7 @@ static int get_precedence( int i, int bracket_precedence )
 // the HIBYTE is set to 0xFF, and PROC depends on the memory model
 
 static unsigned int GetTypeSize( int i )
-/*****************************/
+/**************************************/
 {
     if ( (SimpleType[i].mem_type & MT_SPECIAL) == 0 )
         return( ( SimpleType[i].mem_type & MT_SIZE_MASK ) + 1 );
@@ -275,8 +275,8 @@ static ret_code get_operand( expr_list *new, int *start, int end )
     case T_NUM:
         DebugMsg(("get_operand: T_NUM (%s)\n", AsmBuffer[i]->string_ptr ));
         new->kind = EXPR_CONST;
-        new->llvalue = AsmBuffer[i]->llvalue;
-        new->hlvalue = AsmBuffer[i]->hlvalue;
+        new->llvalue = AsmBuffer[i]->value64;
+        new->hlvalue = AsmBuffer[i]->hivalue64;
         break;
     case T_STRING:
         DebugMsg(("get_operand: T_STRING (%s), value=%X\n", AsmBuffer[i]->string_ptr, AsmBuffer[i]->value ));
@@ -285,7 +285,12 @@ static ret_code get_operand( expr_list *new, int *start, int end )
             if ( new->is_opattr ) /* OPATTR operator accepts anything! */
                 break;
             if ( error_msg )
-                AsmErr( UNEXPECTED_LITERAL_FOUND_IN_EXPRESSION, AsmBuffer[i]->string_ptr );
+                /* v2.0: display a comprehensible error msg if a quote is missing */
+                if ( AsmBuffer[i]->string_delim == NULLC &&
+                    ( *AsmBuffer[i]->string_ptr == '"' || *AsmBuffer[i]->string_ptr == '\'' ))
+                    AsmErr( MISSING_QUOTATION_MARK_IN_STRING );
+                else
+                    AsmErr( UNEXPECTED_LITERAL_FOUND_IN_EXPRESSION, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         new->kind = EXPR_CONST;
@@ -318,22 +323,22 @@ static ret_code get_operand( expr_list *new, int *start, int end )
         DebugMsg(( "get_operand: T_REG (%s)\n", AsmBuffer[i]->string_ptr ));
         new->kind = EXPR_REG;
         new->base_reg = i;
-        j = AsmResWord[AsmBuffer[i]->value].position;
+        j = AsmBuffer[i]->value;
 #if 1
         /* this check was previously done in the parser.
          Check if the register needs an extensions (which are bit masks).
          If no, then check if the cpu is sufficient.
          */
-        if( ( ( AsmOpTable[j].cpu & P_EXT_MASK ) &&
-            ((AsmOpTable[j].cpu & ModuleInfo.curr_cpu & P_EXT_MASK) == 0) ||
-              ( ModuleInfo.curr_cpu & P_CPU_MASK ) < ( AsmOpTable[j].cpu & P_CPU_MASK ) ) ) {
-            AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+        if( ( ( GetRegCpu( j ) & P_EXT_MASK ) &&
+            (( GetRegCpu( j ) & ModuleInfo.curr_cpu & P_EXT_MASK) == 0) ||
+              ( ModuleInfo.curr_cpu & P_CPU_MASK ) < ( GetRegCpu( j ) & P_CPU_MASK ) ) ) {
+            CAsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
             return( ERROR );
         }
 #endif
         if( op_sq_bracket_level > 0 ) {
             /* a valid index register? */
-            if ( AsmOpTable[j].opnd_type[0] & SFR_IREG ) {
+            if ( GetOpndType( j, 0 ) & SFR_IREG ) {
                 new->indirect = TRUE;
                 /* <opcode> contains register number */
                 if ( sym2 = GetStdAssume( AsmBuffer[i]->opcode ) ) {
@@ -341,14 +346,14 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                     for ( ; sym2->type; sym2 = sym2->type );
                     new->type = sym2;
                 }
-            } else if ( AsmOpTable[j].opnd_type[1] == OP_SR86 || AsmOpTable[j].opnd_type[1] == OP_SR386 ) {
+            } else if ( GetOpndType( j, 1 ) & OP_SR ) {
                 /* a segment register CS, SS, DS, ES, FS, GS? */
                 if( AsmBuffer[i+1]->token != T_COLON ) {
                     CAsmError( INVALID_USE_OF_REGISTER );
                     return( ERROR );
                 }
             } else {
-                CAsmError( INVALID_USE_OF_REGISTER );
+                CAsmError( MUST_BE_INDEX_OR_BASE_REGISTER );
                 return( ERROR );
             }
         } else if( AsmBuffer[i]->value == T_ST ) {
@@ -381,7 +386,7 @@ static ret_code get_operand( expr_list *new, int *start, int end )
         break;
     case T_ID:
         if ( new->type ) {
-            DebugMsg(("get_operand: T_ID (%s), type=%s\n", AsmBuffer[i]->string_ptr, new->type->name ));
+            DebugMsg(("get_operand(%s): ID, type=%s\n", AsmBuffer[i]->string_ptr, new->type->name ));
             new->value = 0;
             /*
              skip a type specifier matching the variable's type
@@ -394,19 +399,21 @@ static ret_code get_operand( expr_list *new, int *start, int end )
             } else {
 #endif
                 new->sym = SearchNameInStruct((asm_sym *)new->type, AsmBuffer[i]->string_ptr, (unsigned int *)&new->value, 0 );
-                DebugMsg(("get_operand: SearchNameInStruct()=%X, value=%u\n", new->sym, new->value));
+                DebugMsg(("get_operand(%s): SearchNameInStruct()=%X, value=%u\n", AsmBuffer[i]->string_ptr, new->sym, new->value));
                 if ( new->sym == NULL ) {
                     sym2 = SymSearch( AsmBuffer[i]->string_ptr );
                     if ( sym2 ) {
                         if ( sym2->state == SYM_TYPE ) {
                             new->sym = sym2;
-                        } else if ( ModuleInfo.oldstructs && sym2->state == SYM_STRUCT_FIELD )
+                        } else if ( ModuleInfo.oldstructs &&
+                                   ( sym2->state == SYM_STRUCT_FIELD ||
+                                    ( sym2->state == SYM_INTERNAL && sym2->mem_type == MT_ABS ) ) )
                             new->sym = sym2;
                     }
                 }
             //}
         } else {
-            DebugMsg(("get_operand: T_ID (%s)\n", AsmBuffer[i]->string_ptr));
+            DebugMsg(("get_operand(%s): ID\n", AsmBuffer[i]->string_ptr));
             /* ensure anonym labels are uppercase */
             if (*AsmBuffer[i]->string_ptr == '@' && *(AsmBuffer[i]->string_ptr+2) == '\0') {
                 if (*(AsmBuffer[i]->string_ptr+1) == 'b' || *(AsmBuffer[i]->string_ptr+1) == 'B')
@@ -423,6 +430,7 @@ static ret_code get_operand( expr_list *new, int *start, int end )
 
             /* for OPATTR, anything is ok */
             if ( new->is_opattr ) {
+                DebugMsg(( "get_operand: OPATTR, undefined symbol %s\n", AsmBuffer[i]->string_ptr ));
                 new->kind = EXPR_UNDEF;
                 break;
             }
@@ -456,18 +464,18 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                         break;
                     }
                 } else if ( new->sym->state != SYM_UNDEFINED ) {
-                    DebugMsg(("get_operand: macro/textmacro %s found\n", AsmBuffer[i]->string_ptr));
+                    DebugMsg(("get_operand(%s): symbol is macro/textmacro!\n", AsmBuffer[i]->string_ptr));
                     AsmErr( INVALID_SYMBOL_TYPE_IN_EXPRESSION, new->sym->name );
                     return( ERROR );
                 }
             } else {
 #ifdef DEBUG_OUT
                 if (CurrProc)
-                    DebugMsg(("get_operand: %s not defined, pass > 1, curr proc=>%s<, \n", AsmBuffer[i]->string_ptr, CurrProc->sym.name ));
+                    DebugMsg(("get_operand(%s): symbol not defined, pass > 1, curr proc=>%s<, \n", AsmBuffer[i]->string_ptr, CurrProc->sym.name ));
                 else
-                    DebugMsg(("get_operand: %s not defined, pass > 1, curr proc=NULL, \n", AsmBuffer[i]->string_ptr));
+                    DebugMsg(("get_operand(%s): symbol not defined, pass > 1, curr proc=NULL, \n", AsmBuffer[i]->string_ptr));
 #endif
-                if ( new->type ) {
+                if ( new->type && *new->type->name ) {
                     sprintf( StringBufferEnd, "%s.%s", new->type->name, AsmBuffer[i]->string_ptr );
                     AsmErr( SYMBOL_NOT_DEFINED, StringBufferEnd );
                 } else {
@@ -479,8 +487,8 @@ static ret_code get_operand( expr_list *new, int *start, int end )
         /* set default values */
         new->kind = EXPR_ADDR;
         new->sym->used = TRUE;
-        DebugMsg(("get_operand T_ID: sym->state=%u type=%X ofs=%X memtype=%u total_size=%u defined=%u\n",
-                  new->sym->state, new->sym->type, new->sym->offset, new->sym->mem_type, new->sym->total_size, new->sym->defined ));
+        DebugMsg(("get_operand(%s): sym->state=%u type=%X ofs=%X memtype=%Xh total_size=%u defined=%u\n",
+                  AsmBuffer[i]->string_ptr, new->sym->state, new->sym->type, new->sym->offset, new->sym->mem_type, new->sym->total_size, new->sym->defined ));
         switch ( new->sym->state ) {
         case SYM_TYPE:
             dir = (dir_node *)(new->sym);
@@ -489,13 +497,13 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                 //new->mem_type = MT_ABS;
                 new->mem_type = new->sym->mem_type;
                 new->is_type = TRUE;
-                DebugMsg(("get_operand: STRUCT/UNION/TYPEDEF/RECORD %s\n", new->sym->name ));
+                DebugMsg(("get_operand(%s): symbol is STRUCT/UNION/TYPEDEF/RECORD\n", new->sym->name ));
 #if 1
                 if (AsmBuffer[i-1]->token != T_DOT && AsmBuffer[i+1]->token != T_DOT)
                     new->value = new->sym->total_size;
 #endif
             } else {
-                DebugMsg(("get_operand: open STRUCT/UNION/TYPEDEF/RECORD %s\n", new->sym->name ));
+                DebugMsg(("get_operand(%s): symbol definition isn't closed!\n", new->sym->name ));
                 /* a valid constant should be returned if
                  1. the struct is open      AND
                  2. it's not an EQU operand
@@ -516,7 +524,7 @@ static ret_code get_operand( expr_list *new, int *start, int end )
             new->sym = NULL;  /* sym must be NULL, it's not a label */
             break;
         case SYM_STRUCT_FIELD:
-            DebugMsg(("get_operand: structure field: %s\n", new->sym->name));
+            DebugMsg(("get_operand(%s): structure field, ofs=%Xh\n", new->sym->name, new->sym->offset ));
 
             /* new->value might have been set by SearchNameInStruct() already! */
             new->value += new->sym->offset;
@@ -534,11 +542,11 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                 new->type = sym2;
                 if ( dir->e.structinfo->typekind == TYPE_RECORD )
                     new->mem_type = dir->sym.mem_type;
-                DebugMsg(("get_operand: new current struct: %s, mem_type=%u\n", sym2->name, sym2->mem_type));
+                DebugMsg(("get_operand: new current struct: %s, mem_type=%Xh\n", sym2->name, sym2->mem_type));
             } else {
                 new->type = NULL; /* added v1.96 */
                 new->mem_type = sym2->mem_type;
-                DebugMsg(("get_operand: mem_type=%u\n", new->mem_type ));
+                DebugMsg(("get_operand: mem_type=%Xh\n", new->mem_type ));
             }
             new->mbr = new->sym;
             new->sym = NULL;
@@ -548,6 +556,11 @@ static ret_code get_operand( expr_list *new, int *start, int end )
             if( new->sym->mem_type == MT_ABS && new->sym->state == SYM_INTERNAL ) {
                 new->llvalue = new->sym->value;
                 new->kind = EXPR_CONST;
+#if 1
+                /* call internal function (@Line, ... ) */
+                if ( new->sym->predefined && new->sym->sfunc_ptr )
+                    new->llvalue = new->sym->sfunc_ptr( new->sym );
+#endif
                 new->sym = NULL;
             } else {
                 new->label = i;
@@ -564,7 +577,7 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                 /* since there is no fixup for auto variables, the "offset"
                  must be stored in the <value> field */
                 if ( new->sym->state == SYM_STACK ) {
-                    new->value = new->sym->offset;
+                    new->llvalue = new->sym->offset;
                     new->indirect = TRUE;
                 }
             }
@@ -582,9 +595,13 @@ static ret_code get_operand( expr_list *new, int *start, int end )
             new->kind = EXPR_CONST;
             new->is_type = TRUE;
         } else if ( AsmBuffer[i]->value == T_FLAT ) {
+            if ( error_msg ) /* don't define FLAT group in EQU expression! */
+                DefineFlatGroup();
             new->label = i;
-            new->sym = SymSearch("FLAT");
-            new->kind = EXPR_ADDR;
+            if ( new->sym = SymSearch("FLAT") )
+                new->kind = EXPR_ADDR;
+            else
+                return( ERROR );
         } else {
             if( error_msg )
                 AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -592,12 +609,16 @@ static ret_code get_operand( expr_list *new, int *start, int end )
         }
         break;
     case T_CL_BRACKET:
-        if ( new->is_opattr )     /* for OPATTR, allow an empty operand */
+    case T_CL_SQ_BRACKET:
+        if ( new->is_opattr ) {    /* for OPATTR, allow empty () or [] operand */
+            DebugMsg(("get_operand: OPATTR, no operand\n" ));
             return( NOT_ERROR );
+        }
     default:
         DebugMsg(("get_operand: default, i=%d, string=%s\n", i, AsmBuffer[i]->string_ptr));
         if( error_msg )
             if (AsmBuffer[i]->token == T_BAD_NUM)
+                /* Masm complains even if in EQU-mode */
                 AsmErr( NONDIGIT_IN_NUMBER, AsmBuffer[i]->string_ptr );
             else if ( AsmBuffer[i]->token == T_COLON )
                 AsmError( SYNTAX_ERROR_UNEXPECTED_COLON );
@@ -606,8 +627,8 @@ static ret_code get_operand( expr_list *new, int *start, int end )
         return( ERROR );
     }
     (*start)++;
-    DebugMsg(("get_operand exit, ok, type=%X, value=%d, mem_type=0x%X, abs=%u, string=%X, type=>%s<\n",
-              new->type, new->value, new->mem_type, new->abs, new->string, new->type ? new->type->name : "NULL" ));
+    DebugMsg(("get_operand exit, ok, value=%ld, mem_type=%Xh, abs=%u, string=%s, type=>%s<\n",
+              new->value, new->mem_type, new->abs, new->string ? new->string : "NULL", new->type ? new->type->name : "NULL" ));
     return( NOT_ERROR );
 }
 
@@ -670,8 +691,8 @@ static bool check_same( expr_list *tok_1, expr_list *tok_2, enum exprtype kind )
 #define check_same( first, second, KIND ) (first->kind == KIND && second->kind == KIND )
 #endif
 
-static bool check_both( expr_list *tok_1, expr_list *tok_2, enum exprtype type1, enum exprtype type2 )
-/****************************************************************************************************/
+static bool check_both( const expr_list *tok_1, const expr_list *tok_2, enum exprtype type1, enum exprtype type2 )
+/****************************************************************************************************************/
 /* Check if tok_1 == type1 and tok_2 == type2 or vice versa */
 {
     if( tok_1->kind == type1 &&
@@ -685,28 +706,35 @@ static bool check_both( expr_list *tok_1, expr_list *tok_2, enum exprtype type1,
     }
 }
 
-static void index_connect( expr_list *tok_1, expr_list *tok_2 )
-/*************************************************************/
+static ret_code index_connect( expr_list *tok_1, expr_list *tok_2 )
+/*****************************************************************/
 /* Connects the register lists */
 {
-    if( tok_1->base_reg == EMPTY ) {
-        if( tok_2->base_reg != EMPTY ) {
+    if ( tok_2->base_reg != EMPTY ) {
+        if ( tok_1->base_reg == EMPTY )
             tok_1->base_reg = tok_2->base_reg;
-            tok_2->base_reg = EMPTY;
-        } else if( ( tok_2->idx_reg != EMPTY ) && ( tok_2->scale == 1 ) ) {
-            tok_1->base_reg = tok_2->idx_reg;
-            tok_2->idx_reg = EMPTY;
-        }
-    }
-    if( tok_1->idx_reg == EMPTY ) {
-        if( tok_2->idx_reg != EMPTY ) {
-            tok_1->idx_reg = tok_2->idx_reg;
-            tok_1->scale = tok_2->scale;
-        } else if( tok_2->base_reg != EMPTY ) {
+        else if ( tok_1->idx_reg == EMPTY ) {
             tok_1->idx_reg = tok_2->base_reg;
             tok_1->scale = 1;
+        } else {
+            CAsmError( MULTIPLE_INDEX_REGISTERS_NOT_ALLOWED );
+            return( ERROR );
         }
+        tok_1->indirect = 1;
     }
+    if( tok_2->idx_reg != EMPTY ) {
+        if ( tok_2->scale == 1 && tok_1->base_reg == EMPTY ) {
+            tok_1->base_reg = tok_2->idx_reg;
+        } else if ( tok_1->idx_reg == EMPTY ) {
+            tok_1->idx_reg = tok_2->idx_reg;
+            tok_1->scale = tok_2->scale;
+        } else {
+            CAsmError( MULTIPLE_INDEX_REGISTERS_NOT_ALLOWED );
+            return( ERROR );
+        }
+        tok_1->indirect = 1;
+    }
+    return( NOT_ERROR );
 }
 
 /* convert an address operand to a const operand if possible.
@@ -789,8 +817,8 @@ static void fix_struct_value( expr_list *token )
     }
 }
 
-static int check_direct_reg( expr_list *token_1, expr_list *token_2 )
-/*******************************************************************/
+static int check_direct_reg( const expr_list *token_1, const expr_list *token_2 )
+/*******************************************************************************/
 {
     if( ( token_1->kind == EXPR_REG ) && ( token_1->indirect == FALSE )
         || ( token_2->kind == EXPR_REG ) && ( token_2->indirect == FALSE ) ) {
@@ -846,7 +874,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
         token_1->llvalue = token_2->llvalue;
         break;
     case T_NEGATIVE:
-        DebugMsg(("calculate: T_NEGATIVE\n"));
+        DebugMsg(("calculate: T_NEGATIVE, value=%I64X\n", token_2->llvalue ));
         /*
          * The only format allowed is:
          *        - constant
@@ -864,7 +892,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
     case T_OP_BRACKET:
     case T_OP_SQ_BRACKET:
     case '+':
-        DebugMsg(("calculate %s, token1.memtype=%u type=%s; token2.memtype=%u type=%s\n",
+        DebugMsg(("calculate %s, token1.memtype=%Xh type=%s; token2.memtype=%Xh type=%s\n",
                   AsmBuffer[oper]->string_ptr,
                   token_1->mem_type, (token_1->type ? token_1->type->name : "NULL"),
                   token_2->mem_type, (token_2->type ? token_2->type->name : "NULL") ));
@@ -892,8 +920,8 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
 
             fix_struct_value( token_1 );
             fix_struct_value( token_2 );
-            index_connect( token_1, token_2 );
-            token_1->indirect |= token_2->indirect;
+            if ( index_connect( token_1, token_2 ) == ERROR )
+                return( ERROR );
             if( token_2->sym != NULL ) {
                 /* no error msg in pass one or in EQU mode */
                 if ( ( token_1->sym != NULL ) && ( Parse_Pass > PASS_1 || error_msg == FALSE ) ) {
@@ -911,7 +939,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
 
             DebugMsg(("calculate %s CONST - ADDR\n", AsmBuffer[oper]->string_ptr ));
             if( token_1->kind == EXPR_CONST ) {
-                token_2->value += token_1->value;
+                token_2->llvalue += token_1->llvalue;
                 token_2->indirect |= token_1->indirect;
                 if( token_1->explicit == TRUE ) {
                     token_2->explicit = TRUE;
@@ -920,7 +948,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                     token_2->mem_type = token_1->mem_type;
                 TokenAssign( token_1, token_2 );
             } else {
-                token_1->value += token_2->value;
+                token_1->llvalue += token_2->llvalue;
             }
             fix_struct_value( token_1 );
 
@@ -936,19 +964,19 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                     return( ERROR );
                 }
 #endif
-                index_connect( token_2, token_1 );
-                token_2->indirect |= token_1->indirect;
+                if ( index_connect( token_2, token_1 ) == ERROR )
+                    return( ERROR );
                 TokenAssign( token_1, token_2 );
             } else {
-                index_connect( token_1, token_2 );
-                token_1->indirect |= token_2->indirect;
+                if ( index_connect( token_1, token_2 ) == ERROR )
+                    return( ERROR );
             }
             fix_struct_value( token_1 );
 
         } else if( check_same( token_1, token_2, EXPR_REG ) ) {
 
-            index_connect( token_1, token_2 );
-            token_1->indirect |= token_2->indirect;
+            if ( index_connect( token_1, token_2 ) == ERROR )
+                return( ERROR );
             token_1->kind = EXPR_ADDR;
 
         } else if( check_both( token_1, token_2, EXPR_CONST, EXPR_REG ) ) {
@@ -961,10 +989,18 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 token_2->idx_reg = EMPTY;
             }
 
-            token_1->value += token_2->value;
+            /* v2: to make '+' work like '.'
+             * example: [bx+<struct_mbr>],-1
+             * will set expression's mem_type to the struct_mbr's one.
+             */
+            if ( ModuleInfo.oldstructs && token_1->mem_type == MT_EMPTY )
+                token_1->mem_type = token_2->mem_type;
+
+            token_1->llvalue += token_2->llvalue;
             token_1->indirect |= token_2->indirect;
             token_1->kind = EXPR_ADDR;
-        } else {
+        //} else {
+        } else if ( token_1->is_opattr == FALSE ) {
             CAsmError( CONSTANT_EXPECTED );
             DebugMsg(("calculate %s error 4\n", AsmBuffer[oper]->string_ptr ));
             return( ERROR );
@@ -986,9 +1022,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
          *        <segreg>: [NUM] . STRUCT_FIELD
          */
 
-        /*
-         this code needs cleanup! lots of stuff is obsolete by now.
-         */
+        /* this code needs cleanup! lots of stuff is obsolete by now. */
 
         if( check_direct_reg( token_1, token_2 ) == ERROR ) {
             CAsmError( INVALID_USE_OF_REGISTER );
@@ -997,10 +1031,10 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
         }
         if( check_same( token_1, token_2, EXPR_ADDR ) ) {
 
-            DebugMsg(("calculate '.', ADDR - ADDR, t1.memtype=%u, t2.memtype=%u\n", token_1->mem_type, token_2->mem_type));
+            DebugMsg(("calculate '.', ADDR - ADDR, t1.memtype=%Xh, t2.memtype=%Xh\n", token_1->mem_type, token_2->mem_type));
 
-            index_connect( token_1, token_2 );
-            token_1->indirect |= token_2->indirect;
+            if ( index_connect( token_1, token_2 ) == ERROR )
+                return( ERROR );
             if( token_2->sym != NULL ) {
                 if( (Parse_Pass > PASS_1) && (token_1->sym != NULL) ) {
                     CAsmError( SYNTAX_ERROR );
@@ -1031,20 +1065,20 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
         } else if( check_both( token_1, token_2, EXPR_CONST, EXPR_ADDR ) ) {
 
             if( token_1->kind == EXPR_CONST ) {
-                DebugMsg(("calculate '.', CONST - ADDR, t1.memtype=%u, t2.memtype=%u\n", token_1->mem_type, token_2->mem_type));
+                DebugMsg(("calculate '.', CONST - ADDR, t1.memtype=%Xh, t2.memtype=%Xh\n", token_1->mem_type, token_2->mem_type));
                 /* for TYPE.xxx, return offset instead of size */
                 if ((token_1->mbr) && (token_1->mbr->state == SYM_TYPE))
-                    token_1->value = token_1->mbr->offset;
+                    token_1->llvalue = token_1->mbr->offset;
                 token_2->indirect |= token_1->indirect;
-                token_2->value += token_1->value;
+                token_2->llvalue += token_1->llvalue;
                 TokenAssign( token_1, token_2 );
             } else {
-                DebugMsg(("calculate '.', ADDR - CONST, t1.memtype=%u t1.explicit=%u t2.memtype=%u\n",
+                DebugMsg(("calculate '.', ADDR - CONST, t1.memtype=%Xh t1.explicit=%u t2.memtype=%Xh\n",
                           token_1->mem_type, token_1->explicit, token_2->mem_type ));
                 /* for [var].TYPE | STRUCT_FIELD, use offset instead of size */
                 if ( token_2->mbr && token_2->mbr->state == SYM_TYPE )
-                    token_2->value = token_2->mbr->offset;
-                token_1->value += token_2->value;
+                    token_2->llvalue = token_2->mbr->offset;
+                token_1->llvalue += token_2->llvalue;
                 if( token_2->mbr != NULL ) {
                     token_1->mbr = token_2->mbr;
 #if 1
@@ -1073,7 +1107,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
 
         } else if( check_both( token_1, token_2, EXPR_ADDR, EXPR_REG ) ) {
 
-            DebugMsg(("calculate '.', ADDR - REG, t1.memtype=%u, t2.memtype=%u\n", token_1->mem_type, token_2->mem_type));
+            DebugMsg(("calculate '.', ADDR - REG, t1.memtype=%Xh, t2.memtype=%Xh\n", token_1->mem_type, token_2->mem_type));
 
             if( token_1->kind == EXPR_REG ) {
                 if( token_2->instr != EMPTY ) {
@@ -1081,17 +1115,17 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                     DebugMsg(("calculate '.' error 3\n"));
                     return( ERROR );
                 }
-                index_connect( token_2, token_1 );
-                token_2->indirect |= token_1->indirect;
+                if ( index_connect( token_2, token_1 ) == ERROR )
+                    return( ERROR );
                 TokenAssign( token_1, token_2 );
             } else {
-                index_connect( token_1, token_2 );
-                token_1->indirect |= token_2->indirect;
+                if ( index_connect( token_1, token_2 ) == ERROR )
+                    return( ERROR );
             }
 
         } else if( check_both( token_1, token_2, EXPR_CONST, EXPR_REG ) ) {
 
-            DebugMsg(("calculate '.', CONST - REG, t1.memtype=%u, t2.memtype=%u\n", token_1->mem_type, token_2->mem_type));
+            DebugMsg(("calculate '.', CONST - REG, t1.memtype=%Xh, t2.memtype=%Xh\n", token_1->mem_type, token_2->mem_type));
 
             if( token_2->kind == EXPR_REG ) {
                 token_1->base_reg = token_2->base_reg;
@@ -1103,7 +1137,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 /* this is most likely obsolete */
                 if (token_2->mbr) {
                     if (token_2->mbr->state == SYM_TYPE)
-                        token_2->value = token_2->mbr->offset;
+                        token_2->llvalue = token_2->mbr->offset;
                     else if (token_1->mbr == NULL)
                         token_1->mbr = token_2->mbr;
                 }
@@ -1112,18 +1146,21 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 token_1->mem_type = token_2->mem_type;
                 token_1->type = token_2->type;
             }
-            token_1->value += token_2->value;
+            token_1->llvalue += token_2->llvalue;
             token_1->indirect |= token_2->indirect;
             token_1->explicit = FALSE; /* added v1.95 */
             token_1->kind = EXPR_ADDR;
         } else {
             if (token_1->kind == EXPR_CONST && token_2->kind == EXPR_CONST) {
-                DebugMsg(("calculate '.', CONST - CONST, t1.value=%u, memtype=%u, t2.value, memtype=%u\n", token_1->value, token_1->mem_type, token_2->value, token_2->mem_type));
+                DebugMsg(("calculate '.', CONST - CONST, t1.value=%u, memtype=%Xh, t2.value, memtype=%Xh\n",
+                          token_1->value, token_1->mem_type, token_2->value, token_2->mem_type));
                 if (token_1->type != NULL && token_2->mbr != NULL) {
                     /* old token is a type */
                     /* the value (=size) is ignored then */
-                    token_1->value = token_2->value;
+                    token_1->llvalue = token_2->llvalue;
                     token_1->mbr = token_2->mbr;
+                    /* v2.0: copy mem_type (test case: mov ds:[<struct>.<mbr>], 123) */
+                    token_1->mem_type = token_2->mem_type;
                     token_1->is_type = FALSE;
                     /* either clear <type> or use the renewed one */
                     if ( token_1->type != token_2->type )
@@ -1135,7 +1172,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                     /* old token is NOT a type */
                     /* most likely a number or an MT_ABS symbol! */
                     /* so the TOTAL of both constants is required */
-                    token_1->value += token_2->value;
+                    token_1->llvalue += token_2->llvalue;
                     token_1->mbr = token_2->mbr;
                     token_1->mem_type = token_2->mem_type;
                     break;
@@ -1184,7 +1221,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                    token_2->kind == EXPR_CONST ) {
 
             DebugMsg(("calculate '-': ADDR-CONST\n" ));
-            token_1->value -= token_2->value;
+            token_1->llvalue -= token_2->llvalue;
             fix_struct_value( token_1 );
 
         } else if( check_same( token_1, token_2, EXPR_ADDR ) ){
@@ -1269,7 +1306,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
         } else if( token_1->kind == EXPR_REG &&
                    token_2->kind == EXPR_CONST ) {
 
-            token_1->value = -1 * token_2->value;
+            token_1->llvalue = -1 * token_2->llvalue;
             token_1->indirect |= token_2->indirect;
             token_1->kind = EXPR_ADDR;
 
@@ -1347,8 +1384,8 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 return( ERROR );
             }
             /* make sure it's a segment register BEFORE the ':' */
-            temp = AsmResWord[AsmBuffer[token_1->base_reg]->value].position;
-            if ( AsmOpTable[temp].opnd_type[1] != OP_SR86 && AsmOpTable[temp].opnd_type[1] != OP_SR386 ) {
+            temp = AsmBuffer[token_1->base_reg]->value;
+            if ( ( GetOpndType( temp, 1 ) & OP_SR ) == 0 ) {
                 CAsmError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
                 return( ERROR );
             }
@@ -1591,7 +1628,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
          WIDTH/MASK         bitfields or RECORD type
          */
 
-        temp = AsmOpTable[AsmResWord[AsmBuffer[oper]->value].position].opnd_type[1];
+        temp = GetOpndType( AsmBuffer[oper]->value, 1 );
 
         sym = token_2->sym;
         if( token_2->mbr != NULL )
@@ -1661,6 +1698,10 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 case T_HIGH:
                 case T_LOWWORD:
                 case T_HIGHWORD:
+#if LOHI32
+                case T_LOW32:
+                case T_HIGH32:
+#endif
                 case T_TYPE:
                 case T_OPATTR:
                 case T_DOT_TYPE:
@@ -1734,7 +1775,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
 
             switch( AsmBuffer[oper]->value ) {
             case T_LENGTH:
-                if(token_2->kind == EXPR_CONST ) {
+                if( token_2->kind == EXPR_CONST ) {
                     token_1->value = token_2->mbr->first_length ? token_2->mbr->first_length : 1;
                 } else if ( sym->state == SYM_EXTERNAL || sym->state == SYM_PROC ) {
                     token_1->value = 1;
@@ -1802,19 +1843,27 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                     break;
                 case T_LOWWORD:
                 case T_HIGHWORD:
+                //case T_SEG: /* masm returns 0 for TYPE SEG <label>! */
                     if ( token_2->sym )
                         token_1->value = 2;
                     break;
+#if LOHI32
+                case T_LOW32:
+                case T_HIGH32:
+                    if ( token_2->sym )
+                        token_1->value = 4;
+                    break;
+#endif
                 case T_OFFSET:
                 case T_LROFFSET:
 #if SECTIONRELSUPP
-                case T_SECTIONREL:
+                case T_SECTIONREL: /* masm returns 0 for TYPE SECTIONREL <label>! */
 #endif
 #if IMAGERELSUPP
-                case T_IMAGEREL:
+                case T_IMAGEREL: /* masm returns 0 for TYPE IMAGEREL <label>! */
 #endif
                     if ( token_2->sym)
-                        token_1->value = GetSymOfssize( token_2->sym ) ? 4 : 2;
+                        token_1->value = 2 << GetSymOfssize( token_2->sym );
                     break;
                 }
             } else if ( sym == NULL ) {
@@ -1866,6 +1915,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
             token_1->sym = NULL;  /* clear symbol in case it is undef */
             token_1->value = 0;
             token_1->mem_type = MT_EMPTY;
+            token_1->is_opattr = FALSE; /* v2: added */
             if ( token_2->kind == EXPR_EMPTY )
                 break;
             /* bit 0: is code label?
@@ -1956,7 +2006,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
             break;
         case T_OFFSET:
             /* if operand is a constant value, skip OFFSET operator */
-            if ( token_2->kind == EXPR_CONST) {
+            if ( token_2->kind == EXPR_CONST ) {
                 TokenAssign( token_1, token_2 );
                 break;
             }
@@ -1994,7 +2044,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 token_1->instr = T_LOWWORD;
                 token_1->mem_type = MT_WORD;
             }
-            token_1->value = token_1->value & 0xffff;
+            token_1->llvalue &= 0xffff;
             break;
         case T_HIGHWORD:
             TokenAssign( token_1, token_2 );
@@ -2017,7 +2067,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 token_1->instr = T_LOW;
                 token_1->mem_type = MT_EMPTY;
             }
-            token_1->value = token_1->value & 0xff;
+            token_1->llvalue &= 0xff;
             break;
         case T_HIGH:
             TokenAssign( token_1, token_2 );
@@ -2032,15 +2082,34 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 token_1->mem_type = MT_EMPTY;
             }
             token_1->value = token_1->value >> 8;
-            token_1->value = token_1->value & 0xff;
+            token_1->llvalue &= 0xff;
             break;
+#if LOHI32
+        case T_LOW32:
+            TokenAssign( token_1, token_2 );
+            if (token_2->kind == EXPR_ADDR && token_2->instr != T_SEG) {
+                token_1->instr = T_LOW32;
+                token_1->mem_type = MT_DWORD;
+            }
+            token_1->llvalue &= 0xffffffff;
+            break;
+        case T_HIGH32:
+            TokenAssign( token_1, token_2 );
+            if (token_2->kind == EXPR_ADDR && token_2->instr != T_SEG) {
+                token_1->instr = T_HIGH32;
+                token_1->mem_type = MT_DWORD;
+            }
+            token_1->llvalue = token_1->llvalue >> 32;
+            break;
+#endif
         case T_THIS:
             if ( token_2->is_type == FALSE ) {
                 CAsmError( INVALID_TYPE_EXPRESSION );
-                return(ERROR);
+                return( ERROR );
             }
             if (thissym == NULL) {
                 thissym = SymCreate("", FALSE);
+                /* fixme: set thissym->variable? */
                 thissym->state = SYM_INTERNAL;
                 thissym->defined = TRUE;
             }
@@ -2106,15 +2175,14 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
         return( ERROR );
     } /* end switch( AsmBuffer[oper]->token ) */
 #ifdef DEBUG_OUT
-    if (( token_1->value < 0 && token_1->hvalue != -1) ||
-        (token_1->value >= 0 && token_1->hvalue != 0)) {
-        DebugMsg(("calculate exit, ok, type=%X value=%I64d(0x%I64X) memtype=0x%X indirect=%u type=>%s<\n",
-                  token_1->type,     token_1->llvalue, token_1->llvalue,
+    if ( token_1->hvalue ) {
+        DebugMsg(("calculate exit, ok, value=%I64d(0x%I64X) memtype=0x%X indirect=%u type=>%s<\n",
+                  token_1->llvalue, token_1->llvalue,
                   token_1->mem_type,
                   token_1->indirect, token_1->type ? token_1->type->name : "NULL" ));
     } else {
-        DebugMsg(("calculate exit, ok, type=%X value=%d(0x%X) memtype=0x%X ind=%u exp=%u type=>%s<\n",
-                  token_1->type,     token_1->value, token_1->value,
+        DebugMsg(("calculate exit, ok, value=%d(0x%X) memtype=0x%X ind=%u exp=%u type=>%s<\n",
+                  token_1->value, token_1->value,
                   token_1->mem_type,
                   token_1->indirect, token_1->explicit,
                   token_1->type ? token_1->type->name : "NULL" ));
@@ -2125,8 +2193,8 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
 
 // this code runs BEFORE the - right - operand of an operator is read
 
-static void PrepareOp( int oper, expr_list *new, expr_list *old )
-/***************************************************************/
+static void PrepareOp( int oper, expr_list *new, const expr_list *old )
+/*********************************************************************/
 {
     switch ( AsmBuffer[oper]->token ) {
     case T_DOT:
@@ -2151,6 +2219,7 @@ static void PrepareOp( int oper, expr_list *new, expr_list *old )
         switch ( AsmBuffer[oper]->value ) {
         case T_OPATTR:
         case T_DOT_TYPE:
+            DebugMsg(("PrepareOp: OPATTR operator found, old.sym=%X, old.type=%s, expr=%s\n", old->sym, (old->type ? old->type->name : "NULL" ), AsmBuffer[oper]->pos + 1 ));
             new->is_opattr = TRUE;
         }
         break;
@@ -2277,8 +2346,16 @@ static ret_code evaluate( expr_list *operand1, int *i, int end, enum process_fla
         /* read the (next) operand */
 
         if( *i > end || IsCurrToken( T_CL_BRACKET )) {
-            if ( operand2.is_opattr == TRUE )  /* OPATTR needs no operand */
+            /* OPATTR needs no operand */
+            if ( operand2.is_opattr == TRUE )
                 goto do_calc;
+            /* v2.0: also allow OPATTR(xxx()) */
+            if ( operand1->is_opattr &&
+                AsmBuffer[curr_operator]->token == T_OP_BRACKET &&
+                IsCurrToken( T_CL_BRACKET ) ) {
+                (*i)++;
+                break;
+            }
             CAsmError( OPERAND_EXPECTED );
             DebugMsg(("evaluate exit 9, error, i=%d, end=%d\n", *i, end));
             return( ERROR );
@@ -2381,14 +2458,18 @@ static ret_code evaluate( expr_list *operand1, int *i, int end, enum process_fla
 #ifdef DEBUG_OUT
     if (( operand1->value < 0 && operand1->hvalue != -1) ||
         (operand1->value >= 0 && operand1->hvalue != 0)) {
-        DebugMsg(("evaluate exit, ok, type=%X value=%I64d(0x%I64X) string=%X memtype=0x%X indirect=%u type=>%s<\n",
-                  operand1->type,     operand1->llvalue, operand1->llvalue,
-                  operand1->string,   operand1->mem_type,
+        DebugMsg(("evaluate exit, ok, value=%I64d(0x%I64X) kind=%u string=%s memtype=0x%X indirect=%u type=>%s<\n",
+                  operand1->llvalue, operand1->llvalue,
+                  operand1->kind,
+                  operand1->string ? operand1->string : "NULL",
+                  operand1->mem_type,
                   operand1->indirect, operand1->type ? operand1->type->name : "NULL" ));
     } else {
-        DebugMsg(("evaluate exit, ok, type=%X value=%d(0x%X) str=%X memtype=0x%X ind=%u exp=%u type=>%s<\n",
-                  operand1->type,     operand1->value, operand1->value,
-                  operand1->string,   operand1->mem_type,
+        DebugMsg(("evaluate exit, ok, value=%ld(0x%lX) kind=%u string=%s memtype=0x%X ind=%u exp=%u type=>%s<\n",
+                  operand1->value, operand1->value,
+                  operand1->kind,
+                  operand1->string ? operand1->string : "NULL",
+                  operand1->mem_type,
                   operand1->indirect, operand1->explicit,
                   operand1->type ? operand1->type->name : "NULL" ));
     }
@@ -2396,7 +2477,7 @@ static ret_code evaluate( expr_list *operand1, int *i, int end, enum process_fla
     return( NOT_ERROR );
 }
 
-static bool is_expr_item( int i, int first )
+static bool is_expr_item( int i )
 /******************************************/
 /* Check if a token is a valid part of an expression
  also done here:
@@ -2437,7 +2518,9 @@ static bool is_expr_item( int i, int first )
             AsmBuffer[i]->precedence = PTR_PRECEDENCE;
             break;
         } else if ( AsmBuffer[i]->value == T_FLAT ) {
-            DefineFlatGroup();
+            //v2.0: this happens too early. If FLAT is used in an
+            //EQU expression, it should NOT be defined!
+            //DefineFlatGroup();
             break;
         } else if ( AsmBuffer[i]->value == T_DUP ) /* DUP must terminate the expression */
             return( FALSE );
@@ -2497,14 +2580,14 @@ extern ret_code EvalOperand( int *start_tok, int end_tok, expr_list *result, boo
 /******************************************************************************************/
 {
     int         i;
-    int         first = *start_tok;
+    //int         first = *start_tok;
 
     DebugMsg(("EvalOperand(start=%u [token=%X], end=%u, flag_msg=%u) enter\n", *start_tok, AsmBuffer[*start_tok]->token, end_tok, flag_msg ));
 
     init_expr( result );
 
-    for( i = first; i < end_tok; i++ ) {
-        if( is_expr_item( i, first ) == FALSE )
+    for( i = *start_tok; i < end_tok; i++ ) {
+        if( is_expr_item( i ) == FALSE )
             break;
     }
     if ( i == *start_tok )

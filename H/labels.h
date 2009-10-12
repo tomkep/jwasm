@@ -32,10 +32,10 @@
 #define _LABELS_H_
 
 extern void             LabelsInit( void );
-extern asm_sym *        IsLabelType( char * );
+extern asm_sym *        IsLabelType( const char * );
 extern ret_code         LabelDirective( int );
-extern char *           GetCurrAnonLabel(char *);
-extern char *           GetNextAnonLabel(char *);
-extern asm_sym *        LabelCreate( char *, memtype, struct asm_sym * vartype, bool);
+extern char *           GetCurrAnonLabel( char * );
+extern char *           GetNextAnonLabel( char * );
+extern asm_sym *        LabelCreate( const char *, memtype, struct asm_sym * vartype, bool);
 
 #endif

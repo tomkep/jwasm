@@ -28,8 +28,6 @@
 *
 ****************************************************************************/
 
-//#include <fcntl.h>
-
 #include "globals.h"
 #include "tokenize.h"
 #include "msgtext.h"
@@ -60,7 +58,7 @@ WINBASEAPI void    WINAPI WideCharToMultiByte( uint_32, uint_32, uint_16 *, uint
 
 #undef pick
 #define pick( code, string_eng, string_jap )  string_eng,
-static const char * msgtexts[] = {
+static const char * const msgtexts[] = {
 #include "msgdef.h"
 };
 
@@ -117,7 +115,7 @@ char * MsgGet( int msgid, char *buffer )
     DebugMsg(("MsgGet(%u): Msg not found!!!\n", msgid));
     if ( buffer == NULL )
         buffer = StringBufferEnd;
-    sprintf(buffer, "Msg %u", msgid);
+    sprintf( buffer, "Msg %u", msgid );
     return( buffer );
 }
 
@@ -146,8 +144,13 @@ void MsgPrintf1( int msgid, char *token )
 void MsgPrintUsage( void )
 /************************/
 {
+    const char *p;
     trademark();
-    printf( "%s", usage );
+    for ( p = usage; *p != '\n'; ) {
+        const char *p2 = p +strlen(p) + 1;
+        printf("%-20s %s\n", p, p2 );
+        p = p2 + strlen(p2) + 1;
+    }
 }
 
 char *MsgGetJWasmName( char * buffer )

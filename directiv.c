@@ -67,21 +67,26 @@
 #include "listing.h"
 #include "extern.h"
 #include "posndir.h"
+#include "omf.h"
 
 #include "myassert.h"
 
 #define ONEXMM 1
 
 /* prototypes */
-extern void             set_def_seg_name( void );
 extern ret_code         process_address( struct code_info *, expr_list * );
+
+typedef struct stacknode {
+    void    *next;
+    void    *elt;
+} stacknode;
 
 #define INIT_MODEL      0x1
 #define INIT_LANG       0x2
 #define INIT_STACK      0x4
 #define INIT_OS         0x8
 
-static typeinfo ModelInfo[] = {
+static const typeinfo ModelInfo[] = {
     { "TINY",         MOD_TINY,       INIT_MODEL      },
     { "SMALL",        MOD_SMALL,      INIT_MODEL      },
     { "COMPACT",      MOD_COMPACT,    INIT_MODEL      },
@@ -92,23 +97,23 @@ static typeinfo ModelInfo[] = {
 };
 #if 0
 // not needed. see GetLangType()
-static typeinfo LangInfo[] = {
+static const typeinfo LangInfo[] = {
     { "BASIC",        LANG_BASIC,     INIT_LANG       },
     { "FORTRAN",      LANG_FORTRAN,   INIT_LANG       },
     { "PASCAL",       LANG_PASCAL,    INIT_LANG       },
     { "C",            LANG_C,         INIT_LANG       },
-    { "FASLCALL",     LANG_FASTCALL,  INIT_LANG       },
+    { "FASTCALL",     LANG_FASTCALL,  INIT_LANG       },
     { "STDCALL",      LANG_STDCALL,   INIT_LANG       },
     { "SYSCALL",      LANG_SYSCALL,   INIT_LANG       }
 };
 #else
-static typeinfo dmyLang = { NULL, 0, INIT_LANG };
+static const typeinfo dmyLang = { NULL, 0, INIT_LANG };
 #endif
-static typeinfo StackInfo[] = {
+static const typeinfo StackInfo[] = {
     { "NEARSTACK",    STACK_NEAR,     INIT_STACK      },
     { "FARSTACK",     STACK_FAR,      INIT_STACK      }
 };
-static typeinfo OsInfo[] = {
+static const typeinfo OsInfo[] = {
     { "OS_OS2",       OPSYS_OS2,      INIT_OS         },
     { "OS_DOS",       OPSYS_DOS,      INIT_OS         }
 };
@@ -125,9 +130,11 @@ asm_sym                 *start_label;   // for COFF
 
 symbol_queue            Tables[TAB_LAST];// tables of definitions
 
+stacknode               *SafeSEHStack;
+
 /* startup code for 8086 */
 
-static char *StartupDosNear0[] = {
+static const char * const StartupDosNear0[] = {
         "mov\tdx,DGROUP",
         "mov\tds,dx",
         "mov\tbx,ss",
@@ -144,7 +151,7 @@ static char *StartupDosNear0[] = {
 
 /* startup code for 80186+ */
 
-static char *StartupDosNear1[] = {
+static const char * const StartupDosNear1[] = {
         "mov\tax,DGROUP",
         "mov\tds,ax",
         "mov\tbx,ss",
@@ -154,17 +161,17 @@ static char *StartupDosNear1[] = {
         "add\tsp,bx"
 };
 
-static char *StartupDosFar[] = {
+static const char * const StartupDosFar[] = {
         "mov\tdx,DGROUP",
         "mov\tds,dx"
 };
-static char *ExitOS2[] = { /* mov al, retval  followed by: */
+static const char * const ExitOS2[] = { /* mov al, retval  followed by: */
         "mov\tah,0",
         "push\t01h",
         "push\tax",
         "call\tDOSEXIT"
 };
-static char *ExitDos[] = {
+static const char * const ExitDos[] = {
         "mov\tah,4ch",
         "int\t21h"
 };
@@ -176,7 +183,6 @@ static asm_sym *sym_DataSize  ; /* numeric */
 static asm_sym *sym_Model     ; /* numeric */
        asm_sym *sym_Interface ; /* numeric */
        asm_sym *sym_Cpu       ; /* numeric */
-
 
 #define ROUND_UP( i, r ) (((i)+((r)-1)) & ~((r)-1))
 
@@ -289,17 +295,17 @@ void dir_remove_table( dir_node *dir )
         return;
     }
 
-    if( dir->prev)
+    if( dir->prev )
         dir->prev->next = dir->next;
     if( dir->next )
         dir->next->prev = dir->prev;
 
-    if (dir->next == NULL)
+    if ( dir->next == NULL )
         dir->next = dir->prev;
 
-    if (Tables[tab].head == dir)
+    if ( Tables[tab].head == dir )
         Tables[tab].head = dir->next;
-    if (Tables[tab].tail == dir)
+    if ( Tables[tab].tail == dir )
         Tables[tab].tail = dir->next;
 
     dir->prev = NULL;
@@ -374,7 +380,7 @@ dir_node *dir_insert( const char *name, int type )
 
     /**/myassert( name != NULL );
 
-    if (dir = (dir_node *)SymCreate( name, *name != NULLC ))
+    if ( dir = (dir_node *)SymCreate( name, *name != NULLC ) )
         dir_init( dir, type );
 
     return( dir );
@@ -391,7 +397,7 @@ dir_node *dir_insert_ex( const char *name, int tab )
 
     /**/myassert( name != NULL );
 
-    if (dir = (dir_node *)SymCreate( name, FALSE ))
+    if ( dir = (dir_node *)SymCreate( name, FALSE ) )
         dir_init( dir, tab );
 
     return( dir );
@@ -493,29 +499,15 @@ void dir_settype( dir_node *dir, int type )
 ret_code GetLangType( int *i, lang_type *plang )
 /**********************************************/
 {
-    if( AsmBuffer[*i]->token == T_RES_ID) {
+    if( AsmBuffer[*i]->token == T_RES_ID ) {
         switch( AsmBuffer[(*i)]->value ) {
-        case T_C:
-            *plang = LANG_C;
-            break;
-        case T_BASIC:
-            *plang = LANG_BASIC;
-            break;
-        case T_FORTRAN:
-            *plang = LANG_FORTRAN;
-            break;
-        case T_PASCAL:
-            *plang = LANG_PASCAL;
-            break;
-        case T_FASTCALL:
-            *plang = LANG_FASTCALL;
-            break;
-        case T_STDCALL:
-            *plang = LANG_STDCALL;
-            break;
-        case T_SYSCALL:
-            *plang = LANG_SYSCALL;
-            break;
+        case T_C:        *plang = LANG_C;        break;
+        case T_SYSCALL:  *plang = LANG_SYSCALL;  break;
+        case T_STDCALL:  *plang = LANG_STDCALL;  break;
+        case T_PASCAL:   *plang = LANG_PASCAL;   break;
+        case T_FORTRAN:  *plang = LANG_FORTRAN;  break;
+        case T_BASIC:    *plang = LANG_BASIC;    break;
+        case T_FASTCALL: *plang = LANG_FASTCALL; break;
         default:
             return( ERROR );
         }
@@ -542,7 +534,7 @@ int FindStdType( int token )
 // is32 param used only for MT_NEAR/MT_FAR
 
 int SizeFromMemtype( memtype type, int Ofssize )
-/********************************************/
+/**********************************************/
 {
     int  size;
 
@@ -590,7 +582,8 @@ ret_code MemtypeFromSize( int size, memtype *ptype )
     }
 #else
     const struct asm_ins *ins;
-    for ( ins = &AsmOpTable[AsmResWord[T_BYTE].position]; ins->rm_byte == RWT_TYPE; ins++ ) {
+    //for ( ins = &AsmOpTable[optable_idx[T_BYTE]]; ins->rm_byte == RWT_TYPE; ins++ ) {
+    for ( ins = &AsmOpTable[T_BYTE]; ins->rm_byte == RWT_TYPE; ins++ ) {
         if( ( ins->opnd_type[1] & MT_SPECIAL) == 0 ) {
             /* the size is encoded 0-based in field mem_type */
             if( ( ( ins->opnd_type[1] & MT_SIZE_MASK) + 1 ) == size ) {
@@ -607,11 +600,14 @@ ret_code MemtypeFromSize( int size, memtype *ptype )
 // displays text on the console
 
 static ret_code EchoDirective( int i )
-/*****************************/
+/************************************/
 {
     /* don't print to stdout if -EP is on! */
-    if ( Options.preprocessor_stdout == FALSE )
-        printf("%s\n", AsmBuffer[i-1]->pos + 5);
+    if ( Options.preprocessor_stdout == FALSE ) {
+        char *p = AsmBuffer[i]->pos + 4; /* 4 = sizeof("echo") */
+        while ( isspace( *p ) ) p++;
+        printf( "%s\n", p );
+    }
     return( NOT_ERROR );
 }
 
@@ -619,8 +615,8 @@ static ret_code EchoDirective( int i )
  find token in a 'typeinfo' table
  */
 
-typeinfo *FindToken( char *token, typeinfo *table, int size )
-/***********************************************************/
+const typeinfo *FindToken( const char *token, const typeinfo *table, int size )
+/*****************************************************************************/
 {
     for( ; size; size--, table++ ) {
         if( _stricmp( table->string, token ) == 0 ) {
@@ -639,21 +635,21 @@ static ret_code IncludeLibDirective( int i )
     dir_node *dir;
     struct asm_sym *sym;
 
-    if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_NUM) {
+    if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_NUM ) {
         AsmError( LIBRARY_NAME_MISSING );
         return( ERROR );
     }
 
-    if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<') {
-        if (AsmBuffer[i+1]->token != T_FINAL) {
+    if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
+        if ( AsmBuffer[i+1]->token != T_FINAL ) {
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
         name = AsmBuffer[i]->string_ptr;
     } else {
         int size;
-        size = strlen(AsmBuffer[i]->pos);
-        while (size && isspace(AsmBuffer[i]->pos[size-1])) {
+        size = strlen( AsmBuffer[i]->pos );
+        while ( size && isspace( AsmBuffer[i]->pos[size-1] ) ) {
             size--;
             AsmBuffer[i]->pos[size] = NULLC;
         }
@@ -669,9 +665,9 @@ static ret_code IncludeLibDirective( int i )
      then 2 defaultlib entries are added. If this is to be changed for
      JWasm, activate the _stricmp() below.
      */
-    for (dir = Tables[TAB_LIB].head; dir ; dir = dir->next ) {
+    for ( dir = Tables[TAB_LIB].head; dir ; dir = dir->next ) {
         //if ( _stricmp( dir->sym.name, name) == 0)
-        if ( strcmp( dir->sym.name, name ) == 0)
+        if ( strcmp( dir->sym.name, name ) == 0 )
             return( NOT_ERROR );
     }
     sym = SymCreate( name, FALSE );
@@ -698,17 +694,23 @@ static ret_code IncBinDirective( int i )
 
     DebugMsg(("IncBinDirective enter\n"));
 
-    if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_NUM) {
+    if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_NUM ) {
         AsmError( EXPECTED_FILE_NAME );
         return( ERROR );
     }
+#if FASTPASS
+    /* make sure the directive is stored */
+    if (StoreState == FALSE && Parse_Pass == PASS_1) {
+        SaveState();
+    }
+#endif
 
     if ( AsmBuffer[i]->token == T_STRING ) {
         if ( AsmBuffer[i]->string_delim == '"' ||
              AsmBuffer[i]->string_delim == '\'') {
             strncpy( filename, AsmBuffer[i]->string_ptr+1, AsmBuffer[i]->value );
             filename[ AsmBuffer[i]->value ] = NULLC;
-        } else if (AsmBuffer[i]->string_delim == '<') {
+        } else if ( AsmBuffer[i]->string_delim == '<' ) {
             strncpy( filename, AsmBuffer[i]->string_ptr, sizeof( filename ) );
         } else {
             AsmError( FILENAME_MUST_BE_ENCLOSED_IN_QUOTES_OR_BRACKETS );
@@ -741,12 +743,18 @@ static ret_code IncBinDirective( int i )
             }
         }
     }
-    if ( AsmBuffer[i]->token != T_FINAL) {
+    if ( AsmBuffer[i]->token != T_FINAL ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
 
+    if( CurrSeg == NULL ) {
+        AsmError( MUST_BE_IN_SEGMENT_BLOCK );
+        return( ERROR );
+    }
+
     /* try to open the file */
+    DebugMsg(("IncBinDirective: filename=%s, offset=%u, size=%u\n", filename, fileoffset, sizemax ));
     if ( InputQueueFile( filename, &file ) == NOT_ERROR ) {
         /* now transfer file content to the current segment. If no
          segment is open, function OutputByte() will fail and display
@@ -774,7 +782,7 @@ static ret_code StartupExitDirective( int i )
 {
     int         count;
     int         j;
-    char        **p;
+    const char  * const *p;
     char        *buffer = StringBufferEnd;
     expr_list   opndx;
 
@@ -817,7 +825,7 @@ static ret_code StartupExitDirective( int i )
                     count = sizeof(StartupDosFar) / sizeof(char *);
                 }
                 for ( ; count ; count--, p++ )
-                    AddLineQueue( *p );
+                    AddLineQueue( (char *)*p );
             }
         }
         ModuleInfo.StartupDirectiveFound = TRUE;
@@ -851,7 +859,7 @@ static ret_code StartupExitDirective( int i )
             count--;
         }
         for( ; count ; count--, p++ ) {
-            AddLineQueue( *p );
+            AddLineQueue( (char *)*p );
         }
         break;
     }
@@ -861,8 +869,8 @@ static ret_code StartupExitDirective( int i )
     return( NOT_ERROR );
 }
 
-static asm_sym * AddPredefinedConstant( char *name, int value)
-/************************************************************/
+static asm_sym * AddPredefinedConstant( const char *name, int value )
+/*******************************************************************/
 {
     asm_sym * sym = CreateConstantEx( name, value );
     if (sym)
@@ -870,8 +878,8 @@ static asm_sym * AddPredefinedConstant( char *name, int value)
     return(sym);
 }
 
-static void AddPredefinedText( char *name, char *value)
-/*****************************************************/
+static void AddPredefinedText( const char *name, char *value )
+/************************************************************/
 {
     asm_sym *sym;
 
@@ -927,7 +935,7 @@ static void SetModel( void )
         break;
     }
     sym_CodeSize = AddPredefinedConstant( "@CodeSize", value );
-    AddPredefinedText( "@code", Options.text_seg);
+    AddPredefinedText( "@code", GetCodeSegName() );
 
     /* Set @DataSize */
     switch( ModuleInfo.model ) {
@@ -951,7 +959,7 @@ static void SetModel( void )
 
     AddPredefinedText( "@data", textvalue );
 
-    if (ModuleInfo.distance == STACK_FAR)
+    if ( ModuleInfo.distance == STACK_FAR )
         textvalue = "STACK";
     AddPredefinedText( "@stack", textvalue );
 
@@ -1008,7 +1016,7 @@ void MakeConstantUnderscored( int token )
 // set default wordsize for segment definitions
 
 static ret_code SetDefaultOfssize( int size )
-/******************************************/
+/*******************************************/
 {
     /* outside any segments? */
     if( CurrSeg == NULL ) {
@@ -1023,7 +1031,11 @@ static ret_code SetDefaultOfssize( int size )
 static ret_code ModelDirective( int i )
 /*************************************/
 {
-    typeinfo    *type;           // type of option
+    const typeinfo *type;           // type of option
+    mod_type model;
+    lang_type language;
+    dist_type distance;
+    os_type ostype;
     uint_16 init;
 
     DebugMsg(("ModelDirective enter\n"));
@@ -1037,55 +1049,36 @@ static ret_code ModelDirective( int i )
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
-    /* get the model parameter */
+    /* get the model argument */
     if( type = FindToken( AsmBuffer[i]->string_ptr, ModelInfo, sizeof(ModelInfo)/sizeof(typeinfo) )) {
         if( ModuleInfo.model != MOD_NONE ) {
             AsmWarn( 2, MODEL_DECLARED_ALREADY );
             return( NOT_ERROR );
         }
-        ModuleInfo.model = type->value;
+        model = type->value;
         i++;
-        switch ( type->value ) {
-        case MOD_FLAT:
-            DefineFlatGroup();
-#if AMD64_SUPPORT
-            SetDefaultOfssize( ((ModuleInfo.curr_cpu & P_CPU_MASK) >= P_64 ) ? USE64 : USE32 );
-#else
-            SetDefaultOfssize( USE32 );
-#endif
-            // fall through
-        case MOD_TINY:
-        case MOD_SMALL:   /* near code, near data */
-        case MOD_MEDIUM:  /* far code, near data */
-            ModuleInfo.distance = STACK_NEAR;
-        case MOD_COMPACT: /* near data, far code */
-        case MOD_LARGE:
-        case MOD_HUGE:
-            set_def_seg_name();
-            break;
-        }
     } else {
         AsmError( EXPECTED_MEMORY_MODEL );
         return( ERROR );
     }
 
-    /* get the optional parameters: language, stack distance, os */
+    /* get the optional arguments: language, stack distance, os */
     init = 0;
     while ( i < ( Token_Count - 1 ) && AsmBuffer[i]->token == T_COMMA ) {
         i++;
         if ( AsmBuffer[i]->token != T_COMMA ) {
-            if ( GetLangType( &i, &ModuleInfo.langtype ) == NOT_ERROR ) {
+            if ( GetLangType( &i, &language ) == NOT_ERROR ) {
                 type = &dmyLang;
             } else if ( type = FindToken( AsmBuffer[i]->string_ptr, StackInfo, sizeof(StackInfo)/sizeof(typeinfo) ) ) {
-                if ( ModuleInfo.model == MOD_FLAT ) {
+                if ( model == MOD_FLAT ) {
                     AsmError( INVALID_MODEL_PARAM_FOR_FLAT );
                     return( ERROR );
                 }
                 i++;
-                ModuleInfo.distance = type->value;
+                distance = type->value;
             } else if ( type = FindToken( AsmBuffer[i]->string_ptr, OsInfo, sizeof(OsInfo)/sizeof(typeinfo) ) ) {
                 i++;
-                ModuleInfo.ostype = type->value;
+                ostype = type->value;
             } else {
                 break;
             }
@@ -1102,13 +1095,30 @@ static ret_code ModelDirective( int i )
         return( ERROR );
     }
 
+    ModuleInfo.model = model;
+    if ( init & INIT_LANG )
+        ModuleInfo.langtype = language;
+    if ( init & INIT_STACK )
+        ModuleInfo.distance = distance;
+    if ( init & INIT_OS )
+        ModuleInfo.ostype = ostype;
+
+    if ( model == MOD_FLAT ) {
+        DefineFlatGroup();
+#if AMD64_SUPPORT
+        SetDefaultOfssize( ((ModuleInfo.curr_cpu & P_CPU_MASK) >= P_64 ) ? USE64 : USE32 );
+#else
+        SetDefaultOfssize( USE32 );
+#endif
+    }
+    SetModelDefaultSegNames();
     SetModel();
 
     return( NOT_ERROR );
 }
 
 static ret_code EndDirective( int i, struct code_info *CodeInfo )
-/***********************************/
+/***************************************************************/
 {
     struct fixup        *fixup;
     expr_list           opndx;
@@ -1196,9 +1206,8 @@ static ret_code EndDirective( int i, struct code_info *CodeInfo )
         fix->offset = sym->offset + opndx.value;
 
         if ( CodeInfo->InsFixup[0] ) {
-            fixup = CreateOmfFixupRec( CodeInfo->InsFixup[0] );
-            // if( fixup == NULL ) return( ERROR );
-            ModendRec->d.modend.ref.log = fixup->lr;
+            if ( fixup = omf_create_fixup( CodeInfo->InsFixup[0] ) )
+                ModendRec->d.modend.ref.log = fixup->lr;
         }
     } else {
         // Masm silently ignores start for -coff if an offset was given
@@ -1233,7 +1242,7 @@ static ret_code AliasDirective( int i )
     i++; /* go past ALIAS */
 
     if ( AsmBuffer[i]->token != T_STRING ||
-        AsmBuffer[i]->string_delim != '<') {
+        AsmBuffer[i]->string_delim != '<' ) {
         DebugMsg(("AliasDirective: text item not found: %s\n", AsmBuffer[i]->string_ptr ));
         AsmError( TEXT_ITEM_REQUIRED );
         return( ERROR );
@@ -1249,7 +1258,7 @@ static ret_code AliasDirective( int i )
     }
 
     if ( AsmBuffer[i+2]->token != T_STRING ||
-        AsmBuffer[i+2]->string_delim != '<')  {
+        AsmBuffer[i+2]->string_delim != '<' )  {
         DebugMsg(("AliasDirective: text item not found: %s\n", AsmBuffer[i+2]->string_ptr ));
         AsmError( TEXT_ITEM_REQUIRED );
         return( ERROR );
@@ -1261,7 +1270,7 @@ static ret_code AliasDirective( int i )
     }
 
     /* make sure <alias_name> isn't defined elsewhere */
-    sym = SymSearch(AsmBuffer[i]->string_ptr);
+    sym = SymSearch( AsmBuffer[i]->string_ptr );
     if (sym != NULL) {
         if ( sym->state != SYM_ALIAS || (strcmp( sym->string_ptr, AsmBuffer[i+2]->string_ptr ) != 0)) {
             DebugMsg(("AliasDirective: symbol redefinition\n"));
@@ -1272,20 +1281,20 @@ static ret_code AliasDirective( int i )
         return( NOT_ERROR );
     }
 
-    if (Parse_Pass != PASS_1) {
+    if ( Parse_Pass != PASS_1 ) {
         /* for COFF, make sure <actual_name> is defined elsewhere */
         /* fixme: what about ELF format? */
         if ( Parse_Pass == PASS_2 && Options.output_format == OFORMAT_COFF ) {
-            sym = SymSearch(AsmBuffer[i+2]->string_ptr);
+            sym = SymSearch( AsmBuffer[i+2]->string_ptr );
             if (sym == NULL ||
                 ( sym->state != SYM_INTERNAL && sym->state != SYM_EXTERNAL && sym->state != SYM_PROC )) {
-                AsmErr(SYMBOL_NOT_DEFINED, AsmBuffer[i+2]->string_ptr);
-                return(ERROR);
+                AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i+2]->string_ptr );
+                return( ERROR );
             }
         }
     } else {
         sym = (asm_sym *)SymCreate( AsmBuffer[i]->string_ptr, TRUE );
-        if (sym == NULL)
+        if ( sym == NULL )
             return( ERROR );
         sym->state = SYM_ALIAS;
         sym->string_ptr = AsmAlloc( strlen( AsmBuffer[i+2]->string_ptr ) + 1 );
@@ -1300,8 +1309,10 @@ static ret_code AliasDirective( int i )
 static ret_code NameDirective( int i )
 /************************************/
 {
+    /* if a module name is set with -nm, ignore NAME directive! */
     if( Options.module_name != NULL )
         return( NOT_ERROR );
+
     i++;
 
     /* improper use of NAME is difficult to see since it is a nop
@@ -1324,7 +1335,7 @@ static ret_code NameDirective( int i )
         return( ERROR );
     }
 
-#if 0
+#if 0 /* don't touch Option fields! ( ModuleInfo.name probably? ) */
     Options.module_name = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1 );
     strcpy( Options.module_name, AsmBuffer[i]->string_ptr );
     DebugMsg(("NameDirective: set name to >%s<\n", Options.module_name));
@@ -1366,7 +1377,7 @@ static ret_code RadixDirective( int i )
     ModuleInfo.radix = opndx.value;
     DebugMsg(("RadixDirective: new radix=%u\n", ModuleInfo.radix ));
 
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 /* handles
@@ -1384,7 +1395,7 @@ static ret_code RadixDirective( int i )
 */
 
 ret_code SetCPU( enum asm_cpu newcpu )
-/**************************************/
+/************************************/
 {
     int temp;
 
@@ -1398,7 +1409,7 @@ ret_code SetCPU( enum asm_cpu newcpu )
 
         /* set default FPU bits if nothing is given and .NO87 not active */
         if ( (ModuleInfo.curr_cpu & P_FPU_MASK) != P_NO87 &&
-            (newcpu & P_FPU_MASK) == 0 ) {
+            ( newcpu & P_FPU_MASK ) == 0 ) {
             ModuleInfo.curr_cpu &= ~P_FPU_MASK;
             if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_286 )
                 ModuleInfo.curr_cpu |= P_87;
@@ -1416,7 +1427,7 @@ ret_code SetCPU( enum asm_cpu newcpu )
 #if AMD64_SUPPORT
     /* enable MMX, K3D, SSEx for 64bit cpus */
     if ( ( newcpu & P_CPU_MASK ) == P_64 )
-        ModuleInfo.curr_cpu |= P_MMX | P_K3D | P_SSEALL;
+        ModuleInfo.curr_cpu |= P_EXT_ALL;
 #endif
     if( newcpu & P_EXT_MASK ) {
         ModuleInfo.curr_cpu &= ~P_EXT_MASK;
@@ -1519,7 +1530,8 @@ static ret_code cpu_directive( int i )
     enum asm_cpu newcpu;
 
     //newcpu = comp_opt( AsmBuffer[i]->value );
-    newcpu = AsmOpTable[AsmResWord[AsmBuffer[i]->value].position].opnd_type[0];
+    //newcpu = AsmOpTable[optable_idx[AsmBuffer[i]->value]].opnd_type[0];
+    newcpu = GetOpndType( AsmBuffer[i]->value, 0 );
 
     if ( SetCPU( newcpu ) == NOT_ERROR ) {
         i++;
@@ -1635,9 +1647,9 @@ static ret_code ListingDirective( int i )
 static ret_code SegOrderDirective( int i )
 /****************************************/
 {
-    if (Options.output_format != OFORMAT_OMF &&
-        Options.output_format != OFORMAT_BIN) {
-        if (Parse_Pass == PASS_1)
+    if ( Options.output_format != OFORMAT_OMF &&
+        Options.output_format != OFORMAT_BIN ) {
+        if ( Parse_Pass == PASS_1 )
             AsmWarn( 2, DIRECTIVE_IGNORED_FOR_COFF, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
@@ -1655,20 +1667,69 @@ static ret_code SegOrderDirective( int i )
         break;
     }
     i++;
-    if (AsmBuffer[i]->token != T_FINAL) {
+    if ( AsmBuffer[i]->token != T_FINAL ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
     return( NOT_ERROR );
 }
 
+static ret_code SafeSEHDirective( int i )
+/***************************************/
+{
+    struct asm_sym *sym;
+    stacknode   *node;
+
+    if ( Options.output_format != OFORMAT_COFF ) {
+        if ( Parse_Pass == PASS_1)
+            AsmWarn( 2, DIRECTIVE_IGNORED_WITHOUT_X, "coff" );
+        return( NOT_ERROR );
+    }
+    if ( Options.safeseh == FALSE ) {
+        if ( Parse_Pass == PASS_1)
+            AsmWarn( 2, DIRECTIVE_IGNORED_WITHOUT_X, "safeseh" );
+        return( NOT_ERROR );
+    }
+    i++;
+    if ( AsmBuffer[i]->token != T_ID ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+    sym = SymSearch( AsmBuffer[i]->string_ptr );
+    if ( Parse_Pass == PASS_2 &&
+        ( sym == NULL || sym->state == SYM_UNDEFINED )) {
+        AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    } else if ( sym && sym->state != SYM_UNDEFINED && sym->state != SYM_PROC && sym->state != SYM_EXTERNAL ) {
+        AsmErr( SAFESEH_ARGUMENT_MUST_BE_A_PROC, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+    if ( Parse_Pass == PASS_1 ) {
+        if ( sym ) {
+            for ( node = (stacknode *)SafeSEHStack; node; node = node->next )
+                if ( node->elt == sym )
+                    break;
+        } else {
+            sym = SymCreate( AsmBuffer[i]->string_ptr, TRUE );
+            node = NULL;
+        }
+        if ( node == NULL )
+            pushitem( &SafeSEHStack, sym );
+    }
+    i++;
+    if ( AsmBuffer[i]->token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+
+    return( NOT_ERROR );
+}
 // dispatcher for all directives (exception: data directives DB, DW, ...)
 
 ret_code directive( int i, struct code_info *CodeInfo )
-/**************************************/
+/*****************************************************/
 {
     int direct = AsmBuffer[i]->value;
-
 
     if ( direct >= T_DOT_8086 && direct <= T_DOT_NO87 )
         return( cpu_directive( i ) );
@@ -1778,7 +1839,7 @@ ret_code directive( int i, struct code_info *CodeInfo )
     case T_ALIAS:
         return( AliasDirective( i ) );
     case T_ECHO:
-        return(Parse_Pass == PASS_1 ? EchoDirective( i+1 ) : NOT_ERROR );
+        return( Parse_Pass == PASS_1 ? EchoDirective( i ) : NOT_ERROR );
     case T_NAME:
         return( Parse_Pass == PASS_1 ? NameDirective( i ) : NOT_ERROR );
     case T_DOT_STARTUP:
@@ -1792,6 +1853,18 @@ ret_code directive( int i, struct code_info *CodeInfo )
     case T_GOTO:
         AsmError( DIRECTIVE_MUST_APPEAR_INSIDE_A_MACRO );
         return( ERROR );
+    case T_DOT_SAFESEH:
+        return( SafeSEHDirective( i ) );
+#if AMD64_SUPPORT
+    case T_DOT_ALLOCSTACK:
+    case T_DOT_ENDPROLOG:
+    case T_DOT_PUSHFRAME:
+    case T_DOT_PUSHREG:
+    case T_DOT_SAVEREG:
+    case T_DOT_SAVEXMM128:
+    case T_DOT_SETFRAME:
+        return( ExcFrameDirective( i ) );
+#endif
     default:
         /* this error may happen if
          * CATSTR, SUBSTR, MACRO, ...

@@ -51,7 +51,7 @@
 #define SkipFixup()
 #endif
 static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
-/***************************************************************/
+/********************************************************************/
 {
     long                disp;
     long                max_disp;
@@ -155,7 +155,11 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
                     for ( sym2 = seg->e.seginfo->labels; sym2; sym2 = (asm_sym *)((dir_node *)sym2)->next ) {
                         if ( sym2 == sym )
                             continue;
-                        if ( sym2->offset < fixup->fixup_loc )
+                        /* v2.0: fixup_loc is at least 1 byte too low, so
+                         * use the "<=" operator instead of "<"!
+                         */
+                        //if ( sym2->offset < fixup->fixup_loc )
+                        if ( sym2->offset <= fixup->fixup_loc )
                             break;
                         sym2->offset += size;
                         DebugMsg(("sym %s, offset changed %X -> %X\n", sym2->name, sym2->offset - size, sym2->offset));
@@ -185,7 +189,7 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
 }
 
 ret_code BackPatch( struct asm_sym *sym )
-/**********************************/
+/***************************************/
 /*
 - patching for forward reference labels in Jmp/Call instructions;
 - called by LabelCreate(), ProcDef() and data_init(), that is, whenever

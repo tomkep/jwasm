@@ -40,6 +40,7 @@
 #include <errno.h>
 #include "inttype.h"
 #include "bool.h"
+
 #if defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__) /* avoid for MinGW! */
 #include "watcomc.h"  /* for POSIX based C runtimes */
 #elif defined(__POCC__)
@@ -48,16 +49,11 @@
 #define _MAX_EXT FILENAME_MAX
 #define _MAX_DIR FILENAME_MAX
 #define _MAX_DRIVE 4
-#define O_RDWR   _O_RDWR
-#define O_CREAT  _O_CREAT
-#define O_TRUNC  _O_TRUNC
-#define O_BINARY _O_BINARY
 #pragma warn(disable:2030) /* disable '=' used in a conditional expression */
 #elif defined(__BORLANDC__)
 #define _stricmp  stricmp
 #define _strnicmp strnicmp
 #define _strupr   strupr
-#define _tell     tell
 #define _memicmp  memicmp
 #endif
 
@@ -75,12 +71,13 @@
 #define MAX_SYNC_MACRO_NESTING  20 /* "sync" macro call nesting  */
 #define MAX_STRUCT_NESTING      32 /* limit for "anonymous structs" only */
 
+#define MAX_LEDATA              (1024 - 6) /* OMF */
 #define MAX_LEDATA_THRESHOLD    1024 - 12 /* OMF: - 6 for header, -6 for fixups     */
-#define MAX_PUB_LENGTH          1024      /* OMF: max length of pubdef record */
-#define MAX_EXT_LENGTH          1024      /* OMF: max length ( in chars ) of extdef */
+#define MAX_PUB_LENGTH          1024 /* OMF: max length of pubdef record */
+#define MAX_EXT_LENGTH          1024 /* OMF: max length ( in chars ) of extdef */
 
 #ifndef AMD64_SUPPORT
-#define AMD64_SUPPORT 0 /* 1=support 64bit (premature) */
+#define AMD64_SUPPORT 1 /* 1=support 64bit */
 #endif
 
 #ifndef COFF_SUPPORT
@@ -91,12 +88,16 @@
 #endif
 #define BIN_SUPPORT  1 /* support BIN output format              */
 #define MZ_SUPPORT   1 /* support DOS MZ output format           */
-#define IMAGERELSUPP 1 /* support IMAGEREL operator (COFF+ELF)   */
-#define SECRELSUPP   1 /* support SECTIONREL operator (COFF+ELF) */
+#define IMAGERELSUPP 1 /* support IMAGEREL operator (not for OMF) */
+#define SECTIONRELSUPP 1 /* support SECTIONREL operator (not for OMF) */
+#define K3DSUPP      1 /* support K3D instruction set            */
 #define SSE3SUPP     1 /* support SSE3 instruction set           */
 #define SSSE3SUPP    1 /* support SSSE3 instruction set          */
 #define FIELDALIGN   1 /* support OPTION FIELDALIGN:<const>      */
 #define PROCALIGN    1 /* support OPTION PROCALIGN:<const>       */
+#define LOHI32       0 /* support LOW32/HIGH32 operators         */
+#define RENAMEKEY    1 /* support OPTION RENAMEKEYWORD:<old>,new */
+#define MACROLABEL   1 /* support LABEL qualifier for macro arg  */
 #define BUILD_TARGET 0 /* support "build target" (obsolete)      */
 #define INVOKE_WC    0 /* support watcom_c for INVOKE (not impl) */
 
@@ -118,15 +119,9 @@
 
 /* JWasm version info */
 
-#if AMD64_SUPPORT
-#define _BETA_ "pre"
+#define _BETA_
 #define _JWASM_VERSION_ "2.00" _BETA_
 #define _JWASM_VERSION_INT_ 200
-#else
-#define _BETA_
-#define _JWASM_VERSION_ "1.96" _BETA_
-#define _JWASM_VERSION_INT_ 196
-#endif
 
 #include "errmsg.h"
 
@@ -135,12 +130,15 @@
 #endif
 
 #define NULLC  '\0'
-#define NULLS  ""
+//#define NULLS  ""
 
 //#define is_valid_id_char( ch )  ( isalpha(ch) || isdigit(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 #define is_valid_id_char( ch )  ( isalnum(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
 #define is_valid_id_first_char( ch )  ( isalpha(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' || (ch == '.' && ModuleInfo.dotname == TRUE ))
+
+extern struct asm_sym WordSize;
+#define CurrWordSize WordSize.value
 
 /* function return values */
 
@@ -148,8 +146,7 @@ typedef enum {
  EMPTY = -2,
  ERROR = -1,
  NOT_ERROR = 0,
- STRING_EXPANDED = 1,
- INDIRECT_JUMP = 2      /* used by jmp() */
+ STRING_EXPANDED = 1
 } ret_code;
 
 enum {
@@ -190,17 +187,18 @@ enum oformat {
     OFORMAT_OMF,
     OFORMAT_COFF,
 #if ELF_SUPPORT
-	OFORMAT_ELF,
+    OFORMAT_ELF,
 #endif
     OFORMAT_BIN /* this is also for MZ and PE formats */
 };
 
 enum hformat {
     HFORMAT_NONE,
-	HFORMAT_MZ,
+    HFORMAT_MZ,
     HFORMAT_PE,  /* not supported yet */
 #if AMD64_SUPPORT
-    HFORMAT_WIN64  /* COFF for 64bit */
+    HFORMAT_WIN64, /* COFF for 64bit */
+    HFORMAT_ELF64  /* ELF for 64bit  */
 #endif
 };
 
@@ -259,10 +257,10 @@ enum asm_cpu {
            bit 4-6:   cpu type
            bit 7-11;  extension set */
 
-        P_87    = 0x0001,         /* 8087 */
-        P_287   = 0x0002,         /* 80287 */
-        P_387   = 0x0003,         /* 80387 */
-        P_NO87  = 0x0004,         /* no FPU */
+        P_NO87  = 0x0001,         /* no FPU */
+        P_87    = 0x0002,         /* 8087 */
+        P_287   = 0x0003,         /* 80287 */
+        P_387   = 0x0004,         /* 80387 */
 
         P_PM    = 0x0008,         /* privileged opcode */
 
@@ -287,7 +285,9 @@ enum asm_cpu {
 #endif
 
         P_MMX   = 0x0100,         /* MMX extension instructions */
+#if K3DSUPP
         P_K3D   = 0x0200,         /* 3DNow extension instructions */
+#endif
         P_SSE1  = 0x0400,         /* SSE1 extension instructions */
         P_SSE2  = 0x0800,         /* SSE2 extension instructions */
         P_SSE3  = 0x1000,         /* SSE3 extension instructions */
@@ -304,7 +304,14 @@ enum asm_cpu {
 
         P_FPU_MASK = 0x0007,
         P_CPU_MASK = 0x00F0,
-        P_EXT_MASK = P_MMX | P_K3D | P_SSEALL
+
+#if K3DSUPP
+        P_EXT_MASK = P_MMX | P_K3D | P_SSEALL,
+        P_EXT_ALL  = P_MMX | P_K3D | P_SSEALL
+#else
+        P_EXT_MASK = P_MMX | P_SSEALL,
+        P_EXT_ALL  = P_MMX | P_SSEALL
+#endif
 };
 
 /* the MASM compatible @CPU value flags: */
@@ -337,14 +344,16 @@ enum naming_types {
 #endif
 
 enum asm_token {
-#define res(token, string, len, rm_byte, op2, opcode, flags, cpu, prefix) T_ ## token ,
-#define ins(token, string, len, op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix ) T_ ## token ,
-#define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define  res(token, string, len, rm_byte, op2, opcode, flags, cpu, prefix) T_ ## token ,
+#define  ins(token, string, len, op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix ) T_ ## token ,
 #define insx(token, string, len, op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs ) T_ ## token ,
+#define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insm(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
 #include "special.h"
 #include "instruct.h"
-#undef insx
+#undef insm
 #undef insn
+#undef insx
 #undef ins
 #undef res
     T_NULL
@@ -377,9 +386,9 @@ struct qitem {
 };
 
 typedef struct global_options {
-    bool        sign_value;            /* -j option */
     bool        quiet;                 /* -q option */
     bool        line_numbers;          /* -Zd option */
+    bool        debug_symbols;         /* -Zi option */
     enum fpo    floating_point;        /* -FPi, -FPi87 */
 
     /* error handling stuff */
@@ -407,11 +416,11 @@ typedef struct global_options {
     bool        allow_c_octals;          /* -o option */
 #endif
     bool        no_comment_data_in_code_records; /* -zlc option */
-    bool        no_dependencies;         /* -zld option */
+//    bool        no_dependencies;         /* -zld option */
     bool        no_file_entry;           /* -zlf option */
     bool        no_section_aux_entry;    /* -zls option  */
     bool        no_cdecl_decoration;     /* -zcw & -zcm option */
-    uint_8      stdcall_decoration;      /* -zs<0|1|2> option */
+    uint_8      stdcall_decoration;      /* -zt<0|1|2> option */
     bool        no_export_decoration;    /* -zze option */
     bool        entry_decorated;         /* -zzs option  */
     bool        write_listing;           /* -Fl option  */
@@ -426,14 +435,16 @@ typedef struct global_options {
     enum listmacro list_macro;           /* -Sa option  */
     bool        no_symbol_listing;       /* -Sn option  */
     bool        all_symbols_public;      /* -Zf option  */
+    bool        safeseh;                 /* -safeseh option */
     uint_8      ignore_include;          /* -X option */
     enum oformat output_format;          /* -omf, -coff, -elf options */
     enum hformat header_format;          /* -mz, -pe options */
-    uint_8      alignment_default;       /* -Zp option  */
+    uint_8      fieldalign;              /* -Zp option  */
     lang_type   langtype;                /* -Gc|d|z option */
     mod_type    model;                   /* -mt|s|m|c|l|h|f option */
     enum asm_cpu cpu;                    /* -0|1|2|3|4|5|6 & -fp{0|2|3|5|6|c} option */
     unsigned char fastcall;              /* -zf0 & -zf1 option */
+    bool        syntax_check_only;       /* -Zs option */
 #if MANGLERSUPP
     char        *default_name_mangler;   /* OW peculiarity */
     enum naming_types naming_convention; /* OW naming peculiarities */
@@ -454,19 +465,18 @@ extern global_vars GlobalVars;
 typedef struct asm_tok ASM_TOK;
 
 typedef struct  fname_list {
-        struct  fname_list *next;
-        time_t  mtime;
         char    *name;
         char    *fullname;
+        time_t  mtime;
 } FNAME;
 
 #if MZ_SUPPORT
 /* if the structure changes, option.c, SetMZ() might need adjustment! */
 struct MZDATA {
-	uint_16 ofs_fixups; /* offset start fixups */
-	uint_16 alignment; /* header alignment: 16,32,64,128,256,512 */
-	uint_16 heapmin;
-	uint_16 heapmax;
+    uint_16 ofs_fixups; /* offset start fixups */
+    uint_16 alignment; /* header alignment: 16,32,64,128,256,512 */
+    uint_16 heapmin;
+    uint_16 heapmax;
 };
 #endif
 
@@ -485,19 +495,34 @@ extern bool             write_to_file;  // 1=write the object module
 
 // functions in assemble.c
 
-extern void             OutputCodeByte( unsigned char );
-extern void             OutputDataByte( unsigned char );
 extern void             OutputByte( unsigned char );
+extern void             OutputBytes( unsigned char *, int len );
+extern void             FillDataBytes( unsigned char, int len );
+extern void             OutputCodeByte( unsigned char );
 extern void             OutSelect( bool );
 extern void             AssembleModule( void );
-extern void             AddLinnumDataRef( void );
+extern void             AddLinnumDataRef( unsigned );
 extern void             RunLineQueue( void );
 extern void             RunLineQueueEx( void );
-extern void             WritePreprocessedLine( char * );
+extern void             WritePreprocessedLine( const char * );
 extern void             SetMasm510( bool );
+extern void             close_files( void );
 
-// main.c
-
-extern void             CloseFiles( void );
+typedef struct line_num_info {
+    struct line_num_info *next;
+    uint_16 number;
+    union {
+        uint_32 offset;
+        /* the next struct is set if sym is != NULL */
+        struct {
+            uint_32 line_number:20,
+                    file:12;
+        };
+    };
+    union {
+        uint srcfile;
+        struct asm_sym * sym; /* used if number is 0 */
+    };
+} line_num_info;
 
 #endif

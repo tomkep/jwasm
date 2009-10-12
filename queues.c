@@ -36,82 +36,50 @@
 #include "queue.h"
 #include "queues.h"
 #include "fastpass.h"
-#include "myassert.h"
+#include "proc.h"
 
-#define COFF_LINNUM 0
+#define COFF_LINNUM 1
 
 typedef struct queuenode {
     void *next;
     void *data;
 } queuenode;
 
-static qdesc   *LnameQueue;  // queue of LNAME structs
-static qdesc   *PubQueue;    // queue of pubdefs
-static qdesc   *GlobalQueue; // queue of global / externdefs
-static qdesc   *LinnumQueue; // queue of linnum_data structs
-
-// add an existing node to a queue
-// used to add - former - EXTERNDEF items to the PubQueue
-
-static void QAddQItem( qdesc **queue, queuenode *node )
-/*****************************************************/
-{
-    if( *queue == NULL ) {
-        *queue = AsmAlloc( sizeof( qdesc ) );
-        QInit( *queue );
-    }
-    QEnqueue( *queue, node );
-}
+static qdesc   LnameQueue;  // LNAME items (segments, groups and classes)
+static qdesc   PubQueue;    // PUBLIC items
+static qdesc   GlobalQueue; // GLOBAL items ( externdefs )
 
 // add a new node to a queue
 
-static void QAddItem( qdesc **queue, void *data )
+static void QAddItem( qdesc *queue, void *data )
 /***********************************************/
 {
     struct queuenode    *node;
 
     node = AsmAlloc( sizeof( queuenode ) );
     node->data = data;
-    if( *queue == NULL ) {
-        *queue = AsmAlloc( sizeof( qdesc ) );
-        QInit( *queue );
-    }
-    QEnqueue( *queue, node );
-}
-
-long GetQueueItems( void *q )
-/****************************/
-/* count the # of entries in the queue, if the retval is -ve we have an error */
-{
-    long        count = 0;
-    queuenode   *node;
-
-    if( q == NULL )
-        return( 0 );
-    for( node = ((qdesc *)q)->head; node != NULL; node = node->next ) {
-        if( ++count < 0 ) {
-            return( -1 );
-        }
-    }
-    return( count );
+    QEnqueue( queue, node );
 }
 
 void AddPublicData( asm_sym *sym )
 /*********************************/
 {
+    DebugMsg(("AddPublicData: %s\n", sym->name ));
     QAddItem( &PubQueue, sym );
 }
 
 // get (next) PUBLIC item
 
-dir_node * GetPublicData( queuenode * *curr)
+asm_sym * GetPublicData( void * *vp )
 /******************************************/
 {
-    if (PubQueue == NULL)
+    queuenode * *curr = (queuenode * *)vp;
+
+    if ( PubQueue.head == NULL)
         return( NULL );
 
     if (*curr == NULL)
-        *curr = PubQueue->head;
+        *curr = PubQueue.head;
     else
         *curr = (*curr)->next;
 
@@ -135,7 +103,7 @@ dir_node * GetPublicData( queuenode * *curr)
 #endif
             continue;
         }
-        return((dir_node *)sym);
+        return( sym );
     }
     return( NULL );
 }
@@ -143,17 +111,13 @@ dir_node * GetPublicData( queuenode * *curr)
 static void FreePubQueue( void )
 /******************************/
 {
-    if( PubQueue != NULL ) {
-        while( PubQueue->head != NULL ) {
+    while( PubQueue.head != NULL ) {
 #if FASTMEM /* for FASTMEM, AsmFree() will vanish, so avoid unused p var */
-            QDequeue( PubQueue );
+        QDequeue( &PubQueue );
 #else
-            void *p = QDequeue( PubQueue );
-            AsmFree( p );
+        void *p = QDequeue( &PubQueue );
+        AsmFree( p );
 #endif
-        }
-        AsmFree( PubQueue );
-        PubQueue = NULL;
     }
 }
 
@@ -163,29 +127,27 @@ static void FreePubQueue( void )
  * SYM_CLASS_LNAME : class names
 */
 
-void AddLnameData( dir_node *dir )
+void AddLnameData( asm_sym *sym )
 /********************************/
 {
-    QAddItem( &LnameQueue, dir );
+    QAddItem( &LnameQueue, sym );
 }
 
-// find a class index
+// find a class index.
+// the classes aren't in the symbol table!
 
-direct_idx FindLnameIdx( char *name )
-/***********************************/
+direct_idx FindLnameIdx( const char *name )
+/*****************************************/
 {
     queuenode           *node;
-    dir_node            *dir;
+    asm_sym             *sym;
 
-    if( LnameQueue == NULL )
-        return( LNAME_NULL);
-
-    for( node = LnameQueue->head; node != NULL; node = node->next ) {
-        dir = (dir_node *)node->data;
-        if( dir->sym.state != SYM_CLASS_LNAME )
+    for( node = LnameQueue.head; node != NULL; node = node->next ) {
+        sym = (asm_sym *)node->data;
+        if( sym->state != SYM_CLASS_LNAME )
             continue;
-        if( _stricmp( dir->sym.name, name ) == 0 ) {
-            return( dir->sym.idx );
+        if( _stricmp( sym->name, name ) == 0 ) {
+            return( sym->idx );
         }
     }
     return( LNAME_NULL );
@@ -195,64 +157,36 @@ char *GetLname( direct_idx idx )
 /******************************/
 {
     queuenode           *node;
-    dir_node            *dir;
+    asm_sym             *sym;
 
-    if( LnameQueue == NULL )
-        return( NULL);
-
-    for( node = LnameQueue->head; node != NULL; node = node->next ) {
-        dir = (dir_node *)node->data;
-        if( dir->sym.state != SYM_CLASS_LNAME )
+    for( node = LnameQueue.head; node != NULL; node = node->next ) {
+        sym = (asm_sym *)node->data;
+        if( sym->state != SYM_CLASS_LNAME )
             continue;
-        if( dir->sym.idx == idx ) {
-            return( dir->sym.name );
+        if( sym->idx == idx ) {
+            return( sym->name );
         }
     }
     return( NULL );
 }
 
 // called by OMF output format
-// the first Lname entry is a null string!
 
-unsigned GetLnameData( char **data )
-/**********************************/
+void GetLnameData( void **data, asm_sym **psym )
+/*********************************************/
 {
-    char            *lname = NULL;
-    unsigned        total_size;
-    queuenode       *curr;
-    dir_node        *dir;
-    int             len;
+    queuenode       *curr = *data;
 
-    total_size = 1;
-    if( LnameQueue )
-        for( curr = LnameQueue->head; curr != NULL ; curr = curr->next ) {
-            dir = (dir_node *)(curr->data);
-            /**/myassert( dir != NULL );
-            total_size += 1 + strlen( dir->sym.name );
-        }
-
-    lname = AsmAlloc( total_size * sizeof( char ) + 1 );
-    /* add the NULL entry */
-    *lname = NULLC;
-
-    if( LnameQueue ) {
-        int     i = 1;
-        for( curr = LnameQueue->head; curr != NULL ; curr = curr->next ) {
-            dir = (dir_node *)(curr->data);
-
-            len = strlen( dir->sym.name );
-            lname[i] = (char)len;
-            i++;
-            strcpy( lname+i, dir->sym.name );
-            //if ( ModuleInfo.convert_uppercase )
-            /* lnames are converted for casemaps ALL and NOTPUBLIC */
-            if ( ModuleInfo.case_sensitive == FALSE )
-                _strupr( lname+i );
-            i += len; // overwrite the null char
-        }
+    *psym = NULL;
+    if ( curr == NULL ) {
+        curr = LnameQueue.head;
+    } else {
+        curr = curr->next;
     }
-    *data = lname;
-    return( total_size );
+    if ( curr )
+        *psym = (asm_sym *)(curr->data);
+    *data = curr;
+    return;
 }
 
 static void FreeLnameQueue( void )
@@ -261,21 +195,18 @@ static void FreeLnameQueue( void )
     struct asm_sym *sym;
     queuenode *node;
 
-    if( LnameQueue != NULL ) {
-        while( LnameQueue->head != NULL ) {
-            node = QDequeue( LnameQueue );
-            sym = (asm_sym *)node->data;
-            if( sym->state == SYM_CLASS_LNAME ) {
-                SymFree( sym );
-            }
-            AsmFree( node );
+    while( LnameQueue.head != NULL ) {
+        node = QDequeue( &LnameQueue );
+        sym = (asm_sym *)node->data;
+        if( sym->state == SYM_CLASS_LNAME ) {
+            SymFree( sym );
         }
-        AsmFree( LnameQueue );
-        LnameQueue = NULL;
+        AsmFree( node );
     }
+    LnameQueue.head = NULL;
 }
 
-// Global Queue is used by EXTERNDEF
+// Global Queue is used to store EXTERNDEFs
 
 void AddGlobalData( dir_node *dir )
 /*********************************/
@@ -291,10 +222,8 @@ void GetGlobalData( void )
     queuenode           *curr;
     struct asm_sym      *sym;
 
-    if( GlobalQueue == NULL )
-        return;
     DebugMsg(("GetGlobalData enter, GlobalQueue=%X\n", GlobalQueue));
-    while ( curr = (queuenode *)QDequeue( GlobalQueue )) {
+    while ( curr = (queuenode *)QDequeue( &GlobalQueue )) {
         sym = (asm_sym *)curr->data;
         DebugMsg(("GetGlobalData: %s state=%u used=%u public=%u\n", sym->name, sym->state, sym->used, sym->public ));
         if( sym->state == SYM_EXTERNAL ) {
@@ -304,102 +233,26 @@ void GetGlobalData( void )
                     sym->public == FALSE ) {
             /* make this record a pubdef */
             sym->public = TRUE;
-            QAddQItem( &PubQueue, curr );
+            QEnqueue( &PubQueue, curr );
             continue; /* don't free this item! */
         }
         AsmFree( curr );
     }
-    AsmFree( GlobalQueue );
-    GlobalQueue = NULL;
-}
-
-void AddLinnumData( struct line_num_info *data )
-/**********************************************/
-{
-    /* if output format is OMF, there's just a global
-     queue of line number data. For other formats, the
-     queue is stored in the section */
-    if (Options.output_format == OFORMAT_OMF)
-        QAddItem( &LinnumQueue, data );
-    else {
-#if COFF_LINNUM
-        /* this isn't fully implemented yet */
-        dir_node *seg = CurrSeg;
-        if (seg) {
-            /* COFF line numbers must be preceded by a function symbol table
-               index.  */
-            if (seg->e.seginfo->LinnumQueue == NULL && data->number != 0) {
-                static line_num_info dummy;
-                dummy.number = 0;
-                if (CurrProc == NULL) {
-                    dummy.sym = SymLookupLabel( "$$$00001", FALSE );
-                    if (dummy.sym) {
-                        SetSymSegOfs( dummy.sym );
-                        dummy.sym->state = SYM_INTERNAL;
-                        dummy.sym->defined = TRUE;
-                    }
-                } else
-                    dummy.sym = (asm_sym *)CurrProc;
-                DebugMsg(("addlinnumdata: &data=%X\n", &dummy));
-                QAddItem( (qdesc **)&seg->e.seginfo->LinnumQueue, &dummy );
-            }
-            DebugMsg(("addlinnumdata: &data=%X\n", data));
-            QAddItem( (qdesc **)&seg->e.seginfo->LinnumQueue, data );
-        }
-#endif
-    }
-}
-
-// get line numbers
-
-line_num_info * GetLinnumData2( qdesc *curr)
-{
-    queuenode  *node;
-    if (curr && ( node = QDequeue( curr )))
-        return( node->data );
-    return(NULL);
-}
-
-int GetLinnumData( struct linnum_data **ldata, bool *need32 )
-/***********************************************************/
-{
-    queuenode               *node;
-    struct line_num_info    *next;
-    int                     count, i;
-
-    count = GetQueueItems( LinnumQueue );
-    if( count == 0 )
-        return( count );
-    *need32 = FALSE;
-    *ldata = AsmAlloc( count * sizeof( struct linnum_data ) );
-    for( i = 0; i < count; i++ ) {
-        node = QDequeue( LinnumQueue );
-        next = (struct line_num_info *)(node->data);
-        if( *ldata != NULL ) {
-            (*ldata)[i].number = next->number;
-            (*ldata)[i].offset = next->offset;
-            if( next->offset > 0xffffUL ) {
-                *need32 = TRUE;
-            }
-        }
-        AsmFree( next );
-        AsmFree( node );
-    }
-    AsmFree( LinnumQueue );
-    LinnumQueue = NULL;
-    return( count );
+    GlobalQueue.head = NULL;
 }
 
 void QueueInit( void )
-/************************/
+/********************/
 {
-    LnameQueue = NULL;
-    PubQueue   = NULL;
-    GlobalQueue= NULL;
-    LinnumQueue= NULL;
+    QInit( &LnameQueue );
+    QInit( &PubQueue );
+    QInit( &GlobalQueue );
 }
+
+/* called once per module */
+
 void QueueFini( void )
-/************************/
+/********************/
 {
     FreePubQueue();
     FreeLnameQueue();

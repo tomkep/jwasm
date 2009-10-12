@@ -65,8 +65,8 @@ typedef struct mlocal_list {
     char                label[];         // name of local
 } mlocal_list;
 
-static int replace_parm( char *line, char *start, int len, int parmcnt, mparm_list *parms , mlocal_list *locals )
-/*************************************************************************************/
+static int replace_parm( const char *line, char *start, int len, int parmcnt, mparm_list *parms , mlocal_list *locals )
+/*********************************************************************************************************************/
 {
     /* scan list of macro parameters/local if current word is found.
      - line: current line
@@ -79,9 +79,9 @@ static int replace_parm( char *line, char *start, int len, int parmcnt, mparm_li
      * value 00 isn't used - this restricts the total of parameters
      * and locals for a macro to 255.
      */
-    char    *label;
-    char    *rest = start + len;
-    uint    count;
+    const char *label;
+    char       *rest = start + len;
+    uint       count;
 
 //  DebugMsg(("replace_parm(%s) enter, len=%u\n", start, len ));
 
@@ -150,22 +150,28 @@ static int store_placeholders( char *line, int cnt, mparm_list *parms, mlocal_li
     bool substprf;  /* substitution character before ID? */
 
     for( p = line; *p != NULLC; ) {
-        if ( isdigit( *p) || is_valid_id_first_char( *p ) ) {
+        if ( is_valid_id_first_char( *p ) ) {
             DebugMsg(("store_placeholders: found ID: %s\n", p));
             start = p++;
             while ( is_valid_id_char( *p )) p++;
             substprf = ( start != line && *(start-1) == '&');
             if ( quote == NULLC || substprf ) {
                 /* look for this word in the macro parms, and replace it if it is */
-                if ( replace_parm( line, start, p - start, cnt, parms, locals) ) {
+                if ( replace_parm( line, start, p - start, cnt, parms, locals ) ) {
                     params++;
                     p = start + PLACEHOLDER_SIZE - (substprf ? 1 : 0);
                 }
             }
+        } else if ( isdigit( *p) ) {
+            /* skip numbers (they may contain alphas) */
+            while ( is_valid_id_char( *p )) p++;
         } else {
             switch (*p) {
             case '!':
                 if ( quote == NULLC && *(p+1) != NULLC )
+                /* v2.0: code below might be better - or evil. */
+                //if ( quote == NULLC &&
+                //    ( *(p+1) == '<' || *(p+1) == '>' || *(p+1) == '"' || *(p+1) == '\'' || *(p+1) == '!') )
                     p++;
                 break;
             case '<':
@@ -196,8 +202,8 @@ static int store_placeholders( char *line, int cnt, mparm_list *parms, mlocal_li
 
 /* check if <string> starts with <substr> */
 
-static bool lineis( char *string, char *substr, int len )
-/*******************************************************/
+static bool lineis( const char *string, const char *substr, int len )
+/*******************************************************************/
 {
     if( string[len] != '\0' && !isspace( string[len] ) ) {
         return( FALSE );
@@ -251,6 +257,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                 AsmErr( SYNTAX_ERROR_EX, token );
                 break;
             }
+#if 0 /* v2.0: tokenizer handles dotnames ok */
             /* allow parameter names beginning with '.' */
             if ( AsmBuffer[i]->token == T_DOT ) {
                 if ( ( AsmBuffer[i+1]->pos != (AsmBuffer[i]->pos + 1)) ||
@@ -263,12 +270,13 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                 strcpy( buffer+1, AsmBuffer[i]->string_ptr );
                 token = buffer;
             }
+#endif
             paranode->def = NULL;
             paranode->required = FALSE;
 
             /* first get the parm. name */
             paranode->label = AsmAlloc( strlen( token ) + 1 );
-            strcpy( paranode->label, token );
+            strcpy( (char *)paranode->label, token );
             i++;
 
             /* now see if it has a default value or is required */
@@ -277,7 +285,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                 if( *AsmBuffer[i]->string_ptr == '=' ) {
                     i++;
                     if( AsmBuffer[i]->token != T_STRING ) {
-                        AsmError( LITERAL_EXPECTED );
+                        AsmError( LITERAL_EXPECTED_AFTER_EQ );
                         break; // return( ERROR );
                     }
                     paranode->def = AsmAlloc( AsmBuffer[i]->value + 1 );
@@ -287,7 +295,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                     /* required parameter */
                     paranode->required = TRUE;
                     i++;
-                } else if(( AsmBuffer[i]->token == T_RES_ID ) && (AsmBuffer[i]->value == T_VARARG)) {
+                } else if( ( AsmBuffer[i]->token == T_RES_ID ) && ( AsmBuffer[i]->value == T_VARARG )) {
                     /* more parameters can follow */
                     macro->sym.vararg = TRUE;
                     if (AsmBuffer[i+1]->token != T_FINAL) {
@@ -295,6 +303,18 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                         break;
                     }
                     i++;
+#if MACROLABEL
+                } else if( AsmBuffer[i]->token == T_DIRECTIVE &&
+                          AsmBuffer[i]->value == T_LABEL &&
+                          Options.strict_masm_compat == FALSE ) { /* parm:LABEL? */
+                    /* must be first param */
+                    if ( paranode != info->parmlist ) {
+                        AsmError( LABEL_PARAMETER_MUST_BE_FIRST );
+                        break;
+                    }
+                    macro->sym.label = TRUE;
+                    i++;
+#endif
                 } else {
                     AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
                     break;
@@ -503,8 +523,8 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 
 // create a macro symbol
 
-dir_node *CreateMacro( char *name )
-/*********************************/
+dir_node *CreateMacro( const char *name )
+/***************************************/
 {
     dir_node *macro;
     if (macro = (dir_node *)SymCreate( name, *name != NULLC )) {
@@ -537,7 +557,7 @@ void ReleaseMacroData( dir_node *macro )
          the items are stored in static memory
          */
         if ( macro->sym.predefined == FALSE )
-            AsmFree( macro->e.macroinfo->parmlist[i].label );
+            AsmFree( (void *)macro->e.macroinfo->parmlist[i].label );
         AsmFree( macro->e.macroinfo->parmlist[i].def );
     }
 
@@ -653,7 +673,7 @@ static ret_code EnvironFunc(char * buffer, char * *params)
 {
     char * p = getenv( *params );
     if (p)
-        strcpy(buffer, p);
+        strcpy( buffer, p );
     else
         buffer[0] = '\0';
     return( NOT_ERROR );
@@ -667,8 +687,8 @@ static char * parmnames[] = {"p1"};
 // macro initialization
 // this proc is called once per pass
 
-ret_code MacroInit( int pass)
-/***************************/
+ret_code MacroInit( int pass )
+/****************************/
 {
     dir_node *macro;
 

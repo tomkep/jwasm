@@ -38,20 +38,20 @@
 #include "input.h"
 #include "msgtext.h"
 
-extern void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args );
+extern void PutMsg( FILE *fp, int severity, int msgnum, va_list args );
 
 typedef void (*err_act)( void );
 
 typedef struct {
-    int       message;        // message displayed
-    int       num;            // arguments
+    short     message;        // message displayed
+    uint_8    num;            // arguments
+    uint_8    ret;            // exit code
     err_act   action;         // function to call, if any
-    int       ret;            // exit code
 } Msg_Struct;
 
 static const Msg_Struct Fatal_Msg[] = {
 #undef fix
-#define fix( cmd, argc, act, ret )     { cmd, argc, act, ret },
+#define fix( cmd, argc, act, ret )     { cmd, argc, ret, act },
 #include "fatalmsg.h"
 };
 
@@ -63,19 +63,21 @@ void Fatal( unsigned msg, ... )
 {
     va_list     args;
     //int         i;
-    const FNAME *fname;
+    //const FNAME *fname;
 
-    MsgPrintf( MSG_FATAL_ERROR );
-    if ( fname = GetFName(get_curr_srcfile()) )
-        printf(" (%s,%d)", fname->name, LineNumber);
-    printf(": ");
+    //MsgPrintf( MSG_FATAL_ERROR );
+    //if ( fname = GetFName(get_curr_srcfile()) )
+    //    printf(" (%s,%d)", fname->name, LineNumber);
+    //printf(": ");
 
     va_start( args, msg );
 
-    if ( msg >= FATAL_LAST )
+    if ( msg >= FATAL_LAST ) {
+        DebugMsg(("Fatal: unknown fatal msg %u\n", msg ));
         exit(-1);
+    }
 
-    PutMsg( stdout, NULL, Fatal_Msg[msg].message, args );
+    PutMsg( stdout, 1, Fatal_Msg[msg].message, args );
 
     va_end( args );
 
@@ -93,7 +95,7 @@ void SeekError( void )
 /********************/
 {
     DebugMsg(("SeekError occured\n"));
-    Fatal( FATAL_FILE_LSEEK_ERROR, FileInfo.fname[OBJ], errno );
+    Fatal( FATAL_FILE_SEEK_ERROR, FileInfo.fname[OBJ], errno );
 };
 
 void WriteError( void )

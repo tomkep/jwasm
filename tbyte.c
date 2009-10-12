@@ -69,7 +69,7 @@ typedef struct {
 
 #define MAX_EXP_INDEX 13
 
-static ELD tab_plus_exp[MAX_EXP_INDEX] = {
+static const ELD tab_plus_exp[MAX_EXP_INDEX] = {
     { { 0x00000000UL, 0x00000000UL, 0xA0000000UL }, 0x4002 }, // 1e1L
     { { 0x00000000UL, 0x00000000UL, 0xC8000000UL }, 0x4005 }, // 1e2L
     { { 0x00000000UL, 0x00000000UL, 0x9C400000UL }, 0x400C }, // 1e4L
@@ -85,7 +85,7 @@ static ELD tab_plus_exp[MAX_EXP_INDEX] = {
     { { 0xC94C14F7UL, 0x8A20979AUL, 0xC4605202UL }, 0x7525 }  // 1e4096L
 };
 
-static ELD tab_minus_exp[MAX_EXP_INDEX] = {
+static const ELD tab_minus_exp[MAX_EXP_INDEX] = {
     { { 0xCCCCCCCDUL, 0xCCCCCCCCUL, 0xCCCCCCCCUL }, 0x3FFB }, // 1e-1L
     { { 0x3D70A3D7UL, 0x70A3D70AUL, 0xA3D70A3DUL }, 0x3FF8 }, // 1e-2L
     { { 0xD3C36113UL, 0xE219652BUL, 0xD1B71758UL }, 0x3FF1 }, // 1e-4L
@@ -101,8 +101,8 @@ static ELD tab_minus_exp[MAX_EXP_INDEX] = {
     { { 0x2DE37E46UL, 0xD2CE9FDEUL, 0xA6DD04C8UL }, 0x0AD8 }  // 1e-4096L
 };
 
-static int cmp_u96_max( u96 *x )
-/**********************************************
+static int cmp_u96_max( const u96 *x )
+/*************************************
     compare u96 with maximum value before u96
     overflow after multiply by 10
 */
@@ -124,8 +124,8 @@ static int cmp_u96_max( u96 *x )
     }
 }
 
-static int add_check_u96_overflow( u96 *x, unsigned int c)
-/**********************************************
+static int add_check_u96_overflow( u96 *x, unsigned int c )
+/**********************************************************
     test u96 overflow after multiply by 10
     add one decimal digit to u96
 */
@@ -146,8 +146,8 @@ static int add_check_u96_overflow( u96 *x, unsigned int c)
     }
 }
 
-static int bitsize32(uint_32 x)
-/**********************************************
+static int bitsize32( uint_32 x )
+/********************************
     calculate bitsize for uint_32
 */
 {
@@ -160,8 +160,8 @@ static int bitsize32(uint_32 x)
     return i;
 }
 
-static int bitsize64(uint_64 x)
-/**********************************************
+static int bitsize64( uint_64 x )
+/********************************
     calculate bitsize for uint_64
 */
 {
@@ -174,15 +174,15 @@ static int bitsize64(uint_64 x)
     return i;
 }
 
-static int U96LD(u96 *op, ELD *res)
-/**************************************************
+static int U96LD( const u96 *op, ELD *res )
+/******************************************
     convert u96 into internal extended long double
 */
 {
     int bs;
     int shft;
 
-    memcpy(res, op, sizeof(u96));
+    memcpy( res, op, sizeof(u96) );
     bs = bitsize32(res->m32[2]) + 64;
     if( bs == 64 ) {
         res->m32[2] = res->m32[1];
@@ -213,8 +213,8 @@ static int U96LD(u96 *op, ELD *res)
     return 0;
 }
 
-static int normalize(u192 *res)
-/**************************************************
+static int normalize( u192 *res )
+/********************************
     normalize internal extended long double u192
     return exponent shift
 */
@@ -251,8 +251,8 @@ static int normalize(u192 *res)
     return bs - 192;
 }
 
-static int add192(u192 *res, uint_64 x, int pos)
-/**************************************************
+static int add192( u192 *res, const uint_64 x, int pos )
+/*******************************************************
     add uint_64 to u192 on uint_32 position
 */
 {
@@ -274,8 +274,8 @@ static int add192(u192 *res, uint_64 x, int pos)
     return 0;
 }
 
-static int multiply(ELD *op1, ELD *op2, ELD *res)
-/**************************************************
+static int multiply( const ELD *op1, const ELD *op2, ELD *res )
+/**************************************************************
     multiply u96 by u96 into u96
     normalize and round result
 */
@@ -321,12 +321,12 @@ static int multiply(ELD *op1, ELD *op2, ELD *res)
 }
 
 static int TB_create(u96 *value, long exponent, TB_LD *ld)
-/**************************************************
+/*********************************************************
     create tbyte/long double from u96 value and
     decimal exponent, round result
 */
 {
-    ELD *tabExp;
+    const ELD *tabExp;
     int i;
     ELD res;
 
@@ -361,8 +361,8 @@ static int TB_create(u96 *value, long exponent, TB_LD *ld)
     return 0;
 }
 
-TB_LD * strtotb(char *p, TB_LD * ld, char negative)
-/**************************************************
+TB_LD * strtotb( char *p, TB_LD * ld, char negative )
+/****************************************************
     convert string into tbyte/long double
     set result sign
 */

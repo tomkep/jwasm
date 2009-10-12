@@ -26,7 +26,7 @@ inc_dirs  = -IH -I$(WATCOM)\H
 TRMEM=0
 !endif
 
-linker = $(WATCOM)\binnt\wlink.exe
+LINK = $(WATCOM)\binnt\wlink.exe
 
 #cflags stuff
 #########
@@ -49,7 +49,7 @@ LOPTD = debug dwarf op symfile
 
 lflagsd = $(LOPTD) sys dos op map=$^*, stack=0x4000
 
-CC=$(WATCOM)\binnt\wcc -q -0 -w3 -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -zt=10000
+CC=$(WATCOM)\binnt\wcc -q -0 -w3 -zc -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -DAMD64_SUPPORT=0 -zt=10000
 
 .c{$(OUTD)}.obj:
    $(CC) $<
@@ -69,13 +69,14 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   &
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
            $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   &
-           $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj  &
+           $(OUTD)/context.obj  $(OUTD)/extern.obj  &
 !if $(DEBUG)
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif
 !endif
-           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj
+           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   &
+           $(OUTD)/dbgcv.obj
 ######
 
 TARGET=
@@ -86,7 +87,7 @@ $(OUTD):
 	@if not exist $(OUTD) mkdir $(OUTD)
 
 $(OUTD)/$(name)r.exe: $(proj_obj)
-	$(linker) @<<
+	$(LINK) @<<
 $(lflagsd) file { $(proj_obj) } name $@
 <<
 

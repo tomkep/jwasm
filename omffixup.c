@@ -132,8 +132,8 @@ static uint_8 *putTargetDatum( uint_8 *p, uint_8 method, uint_16 datum )
     return( putIndex( p, datum ) );
 }
 
-size_t OmfFixGenLRef( logref *log, uint_8 *buf, int type )
-/********************************************************/
+static size_t OmfFixGenLRef( logref *log, uint_8 *buf, int type )
+/***************************************************************/
 {
     uint_8  *p;
     uint_8  target;
@@ -165,8 +165,8 @@ size_t OmfFixGenLRef( logref *log, uint_8 *buf, int type )
     return( p - buf );
 }
 
-size_t OmfFixGenPRef( physref *ref, uint_8 *buf, int type )
-/*********************************************************/
+static size_t OmfFixGenPRef( physref *ref, uint_8 *buf, int type )
+/****************************************************************/
 {
     uint_8  *p;
 
@@ -190,6 +190,11 @@ size_t OmfFixGenRef( logphys *ref, int is_logical, uint_8 *buf, int type )
     return( OmfFixGenPRef( &ref->phys, buf, type ) );
 }
 
+/* translate an OMF fixup into its binary representation.
+ * the first two bytes will contain the fixup type and
+ * the location within the LEDATA record (10 bits).
+ */
+
 size_t OmfFixGenFix( fixup *fix, uint_8 *buf, int type )
 /******************************************************/
 {
@@ -203,33 +208,33 @@ size_t OmfFixGenFix( fixup *fix, uint_8 *buf, int type )
     p = buf;
     byte = fix->self_relative ? 0x80 : 0xc0;    /* explicit fixup */
     switch( fix->loc_method ) {
-    case FIX_LO_BYTE:
+    case FIXO_LO_BYTE:
         byte |= ( LOC_OFFSET_LO << 2 );
         break;
-    case FIX_OFFSET:
+    case FIXO_OFFSET:
         if( fix->loader_resolved ) {
             byte |= ( LOC_MS_LINK_OFFSET << 2 );
         } else {
             byte |= ( LOC_OFFSET << 2 );
         }
         break;
-    case FIX_BASE:
+    case FIXO_BASE:
         byte |= ( LOC_BASE << 2 );
         break;
-    case FIX_POINTER:
+    case FIXO_POINTER:
         byte |= ( LOC_BASE_OFFSET << 2 );
         break;
-    case FIX_HI_BYTE:
+    case FIXO_HI_BYTE:
         byte |= ( LOC_OFFSET_HI << 2 );
         break;
-    case FIX_OFFSET386:
+    case FIXO_OFFSET386:
         if( fix->loader_resolved ) {
             byte |= ( LOC_MS_LINK_OFFSET_32 << 2 );
         } else {
             byte |= ( LOC_MS_OFFSET_32 << 2 );
         }
         break;
-    case FIX_POINTER386:
+    case FIXO_POINTER386:
         byte |= ( LOC_MS_BASE_OFFSET_32 << 2 );
         break;
     default:

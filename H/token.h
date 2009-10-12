@@ -35,13 +35,13 @@
 enum state {
         T_FINAL,
         T_INSTRUCTION,
-        T_RES_ID,
-        T_ID,
         T_REG,
-        T_STRING,
         T_DIRECTIVE,
         T_UNARY_OPERATOR,
         T_BINARY_OPERATOR,
+        T_RES_ID,
+        T_ID,
+        T_STRING,
         T_NUM,
         T_FLOAT,
         T_POSITIVE,
@@ -63,33 +63,36 @@ enum state {
 };
 
 struct asm_tok {
-        enum state      token;
-        char            *string_ptr;
-        union {
-            struct {
-                int_32     value;
-                union {
-                    char   *pos;   /* ptr in src line (to be changed to a 32bit offset) */
-                    int_32 hvalue; /* for T_NUM only */
-                };
-                union {
-                    uint_16    flags;  /* for T_DIRECTIVE only */
-                    short      xvalue; /* for T_NUM only */
-                    uint_8     rm_byte;/* for T_RES_ID only */
-                };
-                union {
-                    unsigned char  dirtype; /* T_DIRECTIVE: type */
-                    unsigned char  opcode;  /* for T_RES_ID */
-                    unsigned char  precedence; /* for T_UNARY_OPERATOR/T_BINARY_OPERATOR */
-                    char  string_delim; /* for T_STRING only */
-                };
-            };
-            unsigned char bytes[16]; /* used by T_FLOAT + T_NUM */
-            struct {
-                uint_64 llvalue;
-                uint_64 hlvalue;
+#ifdef __WATCOMC__
+    enum state      token;
+#else
+    unsigned char   token;
+#endif
+    union {
+        unsigned char  dirtype;    /* T_DIRECTIVE: type */
+        unsigned char  opcode;     /* T_RES_ID */
+        unsigned char  precedence; /* T_UNARY_OPERATOR/T_BINARY_OPERATOR */
+        char  string_delim;        /* T_STRING: string delimiter  */
+    };
+    union {
+        uint_16     flags;  /* for T_DIRECTIVE only */
+        uint_8      rm_byte;/* for T_RES_ID only */
+    };
+    char            *string_ptr;
+    union {
+        struct {
+            int_32  value;
+            union {
+                char   *pos;    /* points to item in CurrSource */
+                int_32 hvalue; /* for T_NUM only */
             };
         };
+        unsigned char bytes[16]; /* used by T_FLOAT + T_NUM */
+        struct {
+            uint_64 value64;
+            uint_64 hivalue64;
+        };
+    };
 };
 
 #endif

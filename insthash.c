@@ -38,7 +38,7 @@
 //#define HASH_TABLE_SIZE 2003
 
 //static struct ReservedWord *inst_table[ HASH_TABLE_SIZE ] = { NULL };
-static struct ReservedWord *inst_table[ HASH_TABLE_SIZE ];
+static short inst_table[ HASH_TABLE_SIZE ];
 
 static unsigned int hashpjw( const char *s )
 /******************************************/
@@ -56,17 +56,17 @@ static unsigned int hashpjw( const char *s )
     return( h % HASH_TABLE_SIZE );
 }
 
-struct ReservedWord *FindResWord( char *name )
-/********************************************/
-/* find an instruction in the hash table */
+struct ReservedWord *FindResWord( const char *name )
+/**************************************************/
+/* search reserved word in hash table */
 {
     struct ReservedWord *inst;
+    int i;
 
-    inst = inst_table[ hashpjw( name ) ];
-
-    for( ; inst; inst = inst->next ) {
+    for( i = inst_table[ hashpjw( name ) ]; i != EMPTY; i = inst->next ) {
+        inst = &AsmResWord[i];
         /* check if the name matches the entry for this inst in AsmChars */
-//        if( name[ inst->len ] == NULLC && _strnicmp( name, inst->name, inst->len ) == 0) {
+        //if( name[ inst->len ] == NULLC && _strnicmp( name, inst->name, inst->len ) == 0) {
         if( name[ inst->len ] == NULLC && _memicmp( name, inst->name, inst->len ) == 0) {
             return( inst );
         }
@@ -77,8 +77,8 @@ struct ReservedWord *FindResWord( char *name )
 /* returns index of instruction in AsmOpTable */
 
 #if 0
-int get_instruction_position( char *string )
-/******************************************/
+int get_instruction_position( const char *string )
+/************************************************/
 {
     struct ReservedWord *inst;
 
@@ -88,35 +88,45 @@ int get_instruction_position( char *string )
 }
 #endif
 
+void InitInstHashTable( void )
+/****************************/
+{
+    int i;
+    for ( i = 0; i < HASH_TABLE_SIZE; i++ )
+         inst_table[i] = EMPTY;
+}
+
 /* add reserved word to hash table */
 
 struct ReservedWord *AddResWord( struct ReservedWord *inst )
-/********************************************************/
+/**********************************************************/
 {
-    struct ReservedWord  **location;
+    int i;
+    int old;
+    int curr;
     char buffer[MAX_RESW_LEN];
 
+#ifdef DEBUG_OUT
+    if ( inst->len >= MAX_RESW_LEN ) {
+        printf( "internal error, reserved word %.*s exceeds max size %u\n", inst->len, inst->name, MAX_RESW_LEN );
+        exit(-1);
+    }
+#endif
     memcpy( buffer, inst->name, inst->len );
     buffer[ inst->len ] = NULLC;
-
-    location = &inst_table[ hashpjw( buffer ) ];
+    i = hashpjw( buffer );
 
     /* sort the items of a line by length! */
 
-    for( ; *location && (*location)->len <= inst->len; location = &((*location)->next) ) {
-#if 0 /* this isn't needed anymore, a duplicate entry would cause a compile error */
-        /* to be safe check if the name is already in there */
-        if( inst->len == (*location)->len &&
-            memcmp( buffer, (*location)->name, inst->len ) == 0 ) {
-            /* we already have one, shouldn't happen */
-            AsmErr( SYMBOL_ALREADY_DEFINED, buffer );
-            return( NULL );
-        }
-#endif
-    }
+    for( curr = inst_table[i], old = EMPTY; curr != EMPTY && AsmResWord[curr].len <= inst->len; old = curr, curr = AsmResWord[curr].next );
 
-    inst->next = *location;
-    *location = inst;
+    if ( old == EMPTY ) {
+        inst->next = inst_table[i];
+        inst_table[i] = inst - AsmResWord;
+    } else {
+        inst->next = AsmResWord[old].next;
+        AsmResWord[old].next = inst - AsmResWord;
+    }
 
     return( inst );
 }
@@ -124,23 +134,23 @@ struct ReservedWord *AddResWord( struct ReservedWord *inst )
 // remove a reserved word from the hash table.
 
 int RemoveResWord( struct ReservedWord *inst )
+/********************************************/
 {
-    struct ReservedWord  *prev = NULL;
-    struct ReservedWord  *curr;
     int i;
+    int old;
+    int curr;
     char buffer[MAX_RESW_LEN];
 
     memcpy( buffer, inst->name, inst->len );
     buffer[ inst->len ] = NULLC;
     i = hashpjw( buffer );
-    curr = inst_table[i];
 
-    for( ; curr ; prev = curr, curr = curr->next)  {
-        if( curr == inst ) {
-            if ( prev )
-                prev->next = curr->next;
+    for( curr = inst_table[i], old = EMPTY ; curr != EMPTY ; old = curr, curr = AsmResWord[curr].next )  {
+        if( &AsmResWord[curr] == inst ) {
+            if ( old != EMPTY )
+                AsmResWord[old].next = AsmResWord[curr].next;
             else
-                inst_table[i] = curr->next;
+                inst_table[i] = AsmResWord[curr].next;
             return( TRUE );
         }
     }
@@ -149,16 +159,17 @@ int RemoveResWord( struct ReservedWord *inst )
 
 #ifdef DEBUG_OUT
 void DumpInstrStats( void )
+/*************************/
 {
     unsigned            i;
-    struct ReservedWord *inst;
+    int                 inst;
     unsigned            count = 0;
     unsigned            max = 0;
     unsigned            curr = 0;
     unsigned            num[8] = {0,0,0,0,0,0,0,0};
 
     for( i = 0; i < HASH_TABLE_SIZE; i++ ) {
-        for( inst = inst_table[i], curr = 0; inst; inst = inst->next ) {
+        for( inst = inst_table[i], curr = 0; inst != EMPTY; inst = AsmResWord[inst].next ) {
             curr++;
         }
         count += curr;

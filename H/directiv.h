@@ -41,17 +41,15 @@ typedef int     direct_idx;     // directive index, such as segment index,
                                 // group index or lname index, etc.
 
 typedef enum {
-    STACK_NONE,
+    //STACK_NONE,
     STACK_NEAR,
     STACK_FAR,
 } dist_type;            // Stack distance
-#define NUM_STACKTYPE 3
 
 typedef enum {
     OPSYS_DOS,
     OPSYS_OS2
 } os_type;              // Type of operating system
-#define NUM_OS 2
 
 enum {
     TAB_UNDEF = 0,
@@ -81,11 +79,6 @@ typedef enum {
 } offset_type;
 
 /*---------------------------------------------------------------------------*/
-
-typedef struct stacknode {
-    void    *next;
-    void    *elt;
-} stacknode;
 
 typedef struct {
     enum asm_token token;
@@ -118,7 +111,7 @@ typedef struct {
     uint                numseg;         // number of segments in the group
 } grp_info;
 
-/* todo: remove the OMF segment record and store the info directly
+/* todo: remove field segrec, which is OMF specific, and store the info directly
    in seg_info */
 
 typedef struct {
@@ -148,21 +141,24 @@ typedef struct {
     union {
         void            *LinnumQueue;   // for COFF line numbers
         uint_32         fileoffset;     // used by BIN + ELF
+        uint_32         num_linnums;    // used by COFF (after LinnumQueue has been read)
     };
     uint_32             num_relocs;     // used by COFF/ELF
-    seg_type            segtype;        // segment is belonging to "CODE" or 'DATA' class
+    seg_type            segtype;        // segment's type (code, data, ...)
     direct_idx          lname_idx;      // LNAME index (OMF only)
     unsigned char       Ofssize;        // segment's offset size
-    unsigned char       characteristics;
+    unsigned char       characteristics;// used by COFF
     unsigned char       alignment:4;    // is value 2^x
     unsigned char       readonly:1;     // if the segment is readonly
+    unsigned char       force32:1;      // force 32bit segdef (OMF only)
 } seg_info;
 
 #define MAX_SEGALIGNMENT 0x0F
 
 typedef struct regs_list {
     struct regs_list    *next;
-    char                *reg;
+    uint_16             idx;
+    char                reg[1];
 } regs_list;
 
 // PROC item
@@ -175,17 +171,23 @@ typedef struct {
     int                 parasize;       // total no. of bytes used by parameters
     int                 localsize;      // PROC: total no. of bytes used by local variables
     char                *prologuearg;   // PROC: prologuearg attribute
+#if AMD64_SUPPORT
+    struct asm_sym      *exc_handler;   // PROC: exc handler set by FRAME
+#endif
     uint_32             list_pos;       // PROC: prologue list pos
     union {
         unsigned char   flags;
         struct {
             unsigned char       is_vararg:1;    // if it has a vararg
-            unsigned char       pe_type:1;      // prolog/epilog code type 0:8086/186 1:286 and above
+            unsigned char       pe_type:1;      // epilog code, 1=use LEAVE
             unsigned char       export:1;       // EXPORT procedure
             unsigned char       init:1;         // has ExamineProc() been called?
             unsigned char       forceframe:1;   // FORCEFRAME prologuearg?
             unsigned char       loadds:1;       // LOADDS prologuearg?
             unsigned char       stackparam:1;   // for FASTCALL: 1=a stack param exists
+#if AMD64_SUPPORT
+            unsigned char       isframe:1;      // FRAME set?
+#endif
         };
     };
 } proc_info;
@@ -193,7 +195,7 @@ typedef struct {
 // macro parameter
 
 typedef struct mparm_list {
-    char                *label;         // name of parameter
+    const char          *label;         // name of parameter
     char                *def;           // optional default parm
     unsigned char       required:1;     // is parm required (REQ)
 } mparm_list;
@@ -273,7 +275,8 @@ union entry {
 typedef struct dir_node {
     struct asm_sym sym;
     union {
-        /* additional fields, used by seg, grp, proc, type, macro */
+        /* additional fields, used by
+         SYM_SEG, SYM_GRP, SYM_PROC, SYM_TYPE, SYM_MACRO */
         union entry e;
         /* used to save the local hash table (contains PROC locals: params,
          locals, labels). Details see SymGetLocal(), SymSetLocal() in symbols.c */
@@ -321,8 +324,10 @@ typedef struct {
     unsigned            warning_count;   // total of warnings so far
     char                *proc_prologue;  // current OPTION PROLOGUE value
     char                *proc_epilogue;  // current OPTION EPILOGUE value
+    char                *code_class;     // either "CODE" or value of -nc
     unsigned            anonymous_label; // "anonymous label" counter
     unsigned            hll_label;       // hll directive label counter
+    unsigned            total_segs;      // number of segments in module
     dist_type           distance;        // stack distance;
     mod_type            model;           // memory model;
     lang_type           langtype;        // language;
@@ -356,14 +361,22 @@ typedef struct {
     unsigned            list_generated_code:1; // .listall, -Sa, -Sg
     unsigned            StartupDirectiveFound:1;
     unsigned            EndDirectiveFound:1;
+    unsigned            frame_auto:1;
 
     unsigned            flatgrp_idx;     // index of FLAT group
+    union {
+        uint_8          osabi;           // for ELF
+    };
+    uint                srcfile;         // is a file stack index
     char                name[_MAX_FNAME];// name of module
-    uint                srcfile;
-    int                 obj_fh;
 } module_info;    // Information about the module
 
 extern module_info      ModuleInfo;
+
+struct format_options {
+    const char *formatname;
+    void (*init)( module_info * );
+};
 
 /*---------------------------------------------------------------------------*/
 
@@ -381,7 +394,7 @@ extern ret_code         GetLangType( int *, lang_type * );
 
 //extern uint             GetExtIdx( struct asm_sym * ); /* Get the index of an extrn defn */
 
-extern typeinfo         *FindToken( char *token, typeinfo *, int );
+extern const typeinfo   *FindToken( const char *token, const typeinfo *, int );
 extern int              FindStdType( int );  // find a predefined type
 //extern int              RegisterValueToIndex( int, bool *);
 extern int              SizeFromRegister( int );

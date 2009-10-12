@@ -12,7 +12,7 @@ extern ret_code  EndstructDirective( int );
 extern ret_code  RecordDef( int );
 extern ret_code  TypeDirective( int );
 extern asm_sym   *CreateTypeDef( char *, int *);
-extern asm_sym   *AddFieldToStruct( int , int, memtype, dir_node *, int);
+extern asm_sym   *AddFieldToStruct( int, int, memtype, dir_node *, int);
 extern void      UpdateStructSize( int );
 extern ret_code  SetStructCurrentOffset( int );
 extern ret_code  AlignInStruct( int );

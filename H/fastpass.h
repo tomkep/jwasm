@@ -28,7 +28,6 @@ typedef struct line_item {
     struct line_item *next;
     uint_32 lineno:20, srcfile:12;
     uint_32 list_pos; /* position .LST file */
-    uint_8 macrolevel; /* just a bit (macrolevel > 0?) is needed */
     char line[];
 } line_item;
 
@@ -43,6 +42,15 @@ typedef struct mod_state {
     equ_item *EquTail;
     module_info modinfo;
 } mod_state;
+
+/* source lines start to be "stored" when one of the following is detected:
+ * - an instruction
+ * - a data item (but not a struct field)
+ * - directives which "generate source": PROC, INVOKE, .IF, .WHILE, .REPEAT
+ * - directives ALIGN and ORG (which emit bytes and/or change $)
+ * - directive END (to ensure that there is at least 1 line)
+ * - directive ASSUME if operand is a forward reference
+ */
 
 extern mod_state modstate;
 extern bool StoreState; /* is 1 if states are to be stored in pass one */

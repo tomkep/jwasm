@@ -36,22 +36,6 @@
 #define _ltoa   ltoa
 #define _strupr strupr
 
-/* for gcc, use POSIX names? or NOT? */
-#ifndef __CYGWIN__
-/* for Cygwin, never translate _lseek(). It won't work! */
-#define _lseek lseek
-#if 1 /* set to 0 if POSIX isn't needed. */
-#define _open  open 
-#define _close close
-#define _read  read
-#define _write write
-#endif
-#endif
-
-#ifndef __WATCOMC__
-#define _tell( handle ) _lseek( handle, 0L, SEEK_CUR )
-#endif
-
 char *_fullpath( char *, const char *, size_t );
 
 #define _MAX_DRIVE      48      /*  maximum length of node name w/ '\0' */

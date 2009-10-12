@@ -62,8 +62,6 @@ extern struct asm_sym   *GetOverrideAssume( enum assume_segreg );
 
 extern struct asm_sym   *GetStdAssume( int );
 
-extern void             SetAssumeCSCurrSeg( void );
-
 extern ret_code         AssumeDirective( int );
 extern void             ModelAssumeInit( void );
 extern void             SetSegAssumeTable( void * );

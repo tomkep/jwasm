@@ -23,13 +23,13 @@ extra_c_flags = -v -y -DDEBUG_OUT
 extra_c_flags = -O2 /DNDEBUG
 !endif
 
-c_flags =-WC -K -D__NT__ $(extra_c_flags)
+c_flags =-q -WC -K -D__NT__ -w-8060 $(extra_c_flags)
 
 CC = $(BCDIR)\bin\bcc32.exe -c $(inc_dirs) $(c_flags)
 LINK = $(BCDIR)\Bin\ilink32.exe -s -Tpe -ap -Gn -c -L$(BCDIR)\Lib 
 
 .c{$(OUTD)}.obj:
-	$(CC) -o$* $<
+	@$(CC) -o$* $<
 
 proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
@@ -46,8 +46,9 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   \
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  \
            $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   \
-           $(OUTD)/autodept.obj $(OUTD)/context.obj  $(OUTD)/extern.obj  \
-           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj    
+           $(OUTD)/context.obj  $(OUTD)/extern.obj  \
+           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
+           $(OUTD)/dbgcv.obj
 ######
 
 TARGET1=$(OUTD)\$(name).exe 
@@ -58,7 +59,7 @@ $(OUTD):
 	@mkdir $(OUTD)
 
 $(OUTD)\$(name).exe : $(proj_obj)
-	cd $(OUTD)
+	@cd $(OUTD)
 !if $(DEBUG)
 	$(LINK) @<<
 $(BCDIR)\Lib\c0x32.obj $(proj_obj:BCC32D/=+), $(name).exe, $(name).map, import32.lib cw32.lib
@@ -68,13 +69,13 @@ $(BCDIR)\Lib\c0x32.obj $(proj_obj:BCC32D/=+), $(name).exe, $(name).map, import32
 $(BCDIR)\Lib\c0x32.obj $(proj_obj:BCC32R/=+), $(name).exe, $(name).map, import32.lib cw32.lib
 <<
 !endif
-	cd ..
+	@cd ..
 
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h
-	$(CC) /o$* msgtext.c
+	@$(CC) /o$* msgtext.c
 
 $(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
-	$(CC) /o$* parser.c
+	@$(CC) /o$* parser.c
 
 ######
 

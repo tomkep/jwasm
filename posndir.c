@@ -36,10 +36,11 @@
 #include "types.h"
 #include "listing.h"
 #include "posndir.h"
+#include "fastpass.h"
 
 #include "myassert.h"
 
-static uint_8 NopList16[] = {
+static const uint_8 NopList16[] = {
     3,                  /* objlen of first NOP pattern */
     0x2E, 0x8b, 0xc0,   /* MOV AX,AX */
     0x89, 0xc0,         /* MOV AX,AX */
@@ -51,7 +52,7 @@ static uint_8 NopList16[] = {
  which modifies the flags!
  */
 
-static uint_8 NopList32[] = {
+static const uint_8 NopList32[] = {
     7,
     0x8d,0xa4,0x24,0,0,0,0,         // lea     esp,[esp+00000000]
     0x8d,0x80,0,0,0,0,              // lea     eax,[eax+00000000]
@@ -68,9 +69,10 @@ static uint_8 NopList32[] = {
 };
 
 #if AMD64_SUPPORT
-static uint_8 *NopLists[] = { NopList16, NopList32, NopList32 };
+/* just use the 32bit nops for 64bit */
+static const uint_8 * const NopLists[] = { NopList16, NopList32, NopList32 };
 #else
-static uint_8 *NopLists[] = { NopList16, NopList32 };
+static const uint_8 * const NopLists[] = { NopList16, NopList32 };
 #endif
 
 ret_code OrgDirective( int i )
@@ -81,33 +83,24 @@ ret_code OrgDirective( int i )
     expr_list opndx;
 
     i++;
-    if ((ERROR == EvalOperand( &i, Token_Count, &opndx, TRUE )))
-        return(ERROR);
-    switch ( opndx.kind ) {
-    case EXPR_CONST:
-        //if ( opndx.string != NULL ) // type string is allowed!
-        //    break;
-        if ( AsmBuffer[i]->token != T_FINAL ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-            return( ERROR );
-        }
-        if( CurrStruct != NULL )
+    if ( ( ERROR == EvalOperand( &i, Token_Count, &opndx, TRUE ) ) )
+        return( ERROR );
+    if ( AsmBuffer[i]->token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+    if ( CurrStruct ) {
+        if ( opndx.kind == EXPR_CONST )
             return( SetStructCurrentOffset( opndx.value ) );
-
-        return( SetCurrOffset( opndx.value, FALSE, FALSE ) );
-    case EXPR_ADDR:
-        if (opndx.indirect || (opndx.sym && opndx.sym->state == SYM_STACK))
-            break;
-        if ( AsmBuffer[i]->token != T_FINAL ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-            return( ERROR );
-        }
-        /* ORG inside a struct requires a CONST value */
-        if( CurrStruct != NULL )
-            break;
-        return( SetCurrOffset( opndx.sym->offset + opndx.value, FALSE, FALSE ) );
-    default:
-        break;
+    } else {
+#if FASTPASS
+        if ( StoreState == FALSE && Parse_Pass == PASS_1 )
+            SaveState();
+#endif
+        if ( opndx.kind == EXPR_CONST )
+            return( SetCurrOffset( opndx.value, FALSE, FALSE ) );
+        else if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE )
+            return( SetCurrOffset( opndx.sym->offset + opndx.value, FALSE, FALSE ) );
     }
     AsmError( EXPECTING_NUMBER );
     return( ERROR );
@@ -125,7 +118,7 @@ static void fill_in_objfile_space( uint size )
      - nops    ... for CODE
      */
 
-    if( ! CurrSeg->e.seginfo->segtype == SEGTYPE_CODE ) {
+    if( CurrSeg->e.seginfo->segtype != SEGTYPE_CODE ) {
 
         if (CurrSeg->e.seginfo->segtype == SEGTYPE_BSS ||
             CurrSeg->e.seginfo->segtype == SEGTYPE_ABS ) {
@@ -134,9 +127,7 @@ static void fill_in_objfile_space( uint size )
 
         } else {
             /* just output nulls */
-            for( i = 0; i < size; i++ ) {
-                OutputByte( 0x00 );
-            }
+            FillDataBytes( 0x00, size );
         }
 
     } else {
@@ -222,6 +213,11 @@ ret_code AlignDirective( int directive, int i )
     if ( CurrStruct )
         return( AlignInStruct( align_val ));
 
+#if FASTPASS
+    if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
+        SaveState();
+    }
+#endif
     seg_align = GetCurrSegAlign(); // # of bytes
     if( seg_align <= 0 ) {
         AsmError( MUST_BE_IN_SEGMENT_BLOCK );
@@ -230,7 +226,7 @@ ret_code AlignDirective( int directive, int i )
     if( align_val > seg_align ) {
         if ( Parse_Pass == PASS_1 )
             AsmWarn( 1, ALIGN_TOO_HIGH );
-        return( ERROR );
+        //return( ERROR ); /* v2.0: don't exit */
     }
     /* find out how many bytes past alignment we are & add the remainder */
     //store temp. value

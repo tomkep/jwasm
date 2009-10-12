@@ -12,7 +12,6 @@
 #include <ctype.h>
 
 #include "globals.h"
-#include "myunistd.h"
 #include "symbols.h"
 #include "memalloc.h"
 #include "directiv.h"
@@ -38,15 +37,16 @@ static uint_32 fileoffset;
 static uint_32 entryoffset;
 static asm_sym *entryseg;
 static uint_32 sizehdr;
+static uint_32 imagestart;
 
 #if SECTORMAP
 /* these strings are to be moved to msgdef.h */
-static char *szCaption = "Binary Map:";
-static char *szCaption2= "Segment                  Position Size(file) Size(mem)";
-static char *szLine    = "-------------------------------------------------------";
-static char *szHeader  = "<header>";
-static char *szSegLine = "%-24s %8X %8X  %8X";
-static char *szTotal   = "%-33s %8X  %8X";
+static const char * const szCaption = "Binary Map:";
+static const char * const szCaption2= "Segment                  Pos(file)      VA  Size(fil) Size(mem)";
+static const char * const szLine    = "---------------------------------------------------------------";
+static const char * const szHeader  = "<header>";
+static const char * const szSegLine = "%-24s %8X %8X %9X %9X";
+static const char * const szTotal   = "%-42s %9X %9X";
 #endif
 
 /* reorder segments for DOSSEG:
@@ -56,24 +56,25 @@ static char *szTotal   = "%-33s %8X  %8X";
  4. uninitialized data
  5. stack
  */
-static seg_type typeorder[] = {
+static const seg_type typeorder[] = {
     SEGTYPE_CODE, SEGTYPE_UNDEF, SEGTYPE_DATA,
     SEGTYPE_BSS, SEGTYPE_STACK, SEGTYPE_ERROR
 };
 
 #ifdef __I86__
-/* "huge" write for 16-bit code */
-uint_32 _hwrite( int fh, uint_8 huge *pBuffer, uint_32 size )
+/* "huge" fwrite() for JWasmr.exe */
+uint_32 hfwrite( uint_8 huge *pBuffer, int size, uint_32 count, FILE *file )
+/**************************************************************************/
 {
     uint_32 written;
     uint tmpsize;
 
-    for ( written = 0; written < size; written += tmpsize ) {
-        if ( size > 0xFE00 )
+    for ( written = 0; written < count; written += tmpsize ) {
+        if ( count > 0xFE00 )
             tmpsize = 0xFE00;
         else
-            tmpsize = size;
-        if (_write( fh, pBuffer, tmpsize ) != tmpsize )
+            tmpsize = count;
+        if ( fwrite( pBuffer, size, tmpsize, file ) != tmpsize )
             WriteError();
         pBuffer += tmpsize;
     }
@@ -154,9 +155,12 @@ static void CalcOffset( dir_node *curr, bool firstseg )
     }
 
     curr->e.seginfo->fileoffset = fileoffset;
-    if ( firstseg && Options.header_format == HFORMAT_NONE )
+    //if ( firstseg && Options.header_format == HFORMAT_NONE ) {
+    if ( Options.header_format == HFORMAT_NONE ) {
         fileoffset += curr->sym.max_offset - curr->e.seginfo->start_loc;
-    else {
+        if ( firstseg )
+            imagestart = curr->e.seginfo->start_loc;
+    } else {
         curr->e.seginfo->fileoffset += curr->e.seginfo->start_loc;
         fileoffset += curr->sym.max_offset;
     }
@@ -243,10 +247,10 @@ static uint_32 GetImageSize( bool memimage )
 /******************************************/
 {
     dir_node *curr;
-    bool first = TRUE;
     uint_32 size = 0;
 
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+        uint_32 tmp;
         if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
             continue;
         if ( memimage == FALSE ) {
@@ -260,12 +264,9 @@ static uint_32 GetImageSize( bool memimage )
             }
         }
         DebugMsg(("GetImageSize(%s): fileofs=%Xh, max_offs=%Xh\n", curr->sym.name, curr->e.seginfo->fileoffset, curr->sym.max_offset ));
-        if ( first )
-            /* the first segment is special, the start offset might be != 0 */
-            size = curr->e.seginfo->fileoffset + (curr->sym.max_offset - curr->e.seginfo->start_loc );
-        else if ( size < (curr->e.seginfo->fileoffset + curr->sym.max_offset))
-            size = curr->e.seginfo->fileoffset + curr->sym.max_offset;
-        first = FALSE;
+        tmp = curr->e.seginfo->fileoffset + (curr->sym.max_offset - curr->e.seginfo->start_loc );
+        if ( size < tmp )
+            size = tmp;
     }
     DebugMsg(("GetImageSize(%u)=%Xh\n", memimage, size ));
     return( size );
@@ -290,7 +291,7 @@ static ret_code DoFixup( dir_node *curr )
     if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
         return( NOT_ERROR );
 
-    DebugMsg(("DoFixup(%s) enter, segment start ofs=%Xh\n", curr->sym.name, curr->e.seginfo->start_offset ));
+    DebugMsg(("DoFixup(%s) enter, segment start ofs=%lXh\n", curr->sym.name, curr->e.seginfo->start_offset ));
     for ( fixup = curr->e.seginfo->FixupListHeadGen; fixup; fixup = fixup->nextrlc ) {
         codeptr = curr->e.seginfo->CodeBuffer +
             (fixup->fixup_loc - curr->e.seginfo->start_loc);
@@ -298,7 +299,7 @@ static ret_code DoFixup( dir_node *curr )
         if (fixup->sym && fixup->sym->variable) {
             seg = (dir_node *)fixup->segment;
             value = seg->e.seginfo->start_offset + fixup->offset;
-            DebugMsg(("DoFixup(%s, %Xh, %s): variable, fixup->segment=%Xh fixup->offset=%Xh, fixup->sym->offset=%Xh\n",
+            DebugMsg(("DoFixup(%s, %Xh, %s): variable, fixup->segment=%Xh fixup->offset=%lXh, fixup->sym->offset=%lXh\n",
                       curr->sym.name, fixup->fixup_loc, fixup->sym->name, seg, fixup->offset, fixup->sym->offset ));
         } else if ( fixup->sym && fixup->sym->segment ) {
             seg = (dir_node *)fixup->sym->segment;
@@ -307,18 +308,42 @@ static ret_code DoFixup( dir_node *curr )
              * - the fixup's offset (usually the displacement )
              * - the segment/group offset in the image
              */
-            if ( seg->e.seginfo->group )
+            if ( fixup->type == FIX_OFF32_IMGREL ) {
+                value = ( fixup->offset + fixup->sym->offset + seg->e.seginfo->start_offset ) - imagestart;
+                DebugMsg(("DoFixup(%s): IMGREL, loc=%lX value=%lX seg.start=%lX imagestart=%lX\n",
+                          curr->sym.name, fixup->fixup_loc, value, seg->e.seginfo->start_offset, imagestart ));
+            } else if ( fixup->type == FIX_OFF32_SECREL  ) {
+                char *tmp;
+                /* check if symbol's segment name contains a '$'.
+                 * If yes, search the segment without suffix.
+                 */
+                value = ( fixup->offset + fixup->sym->offset ) - seg->e.seginfo->start_loc;
+                if ( tmp = strchr( seg->sym.name, '$' ) ) {
+                    int namlen = tmp - seg->sym.name;
+                    dir_node *segfirst;
+                    for( segfirst = Tables[TAB_SEG].head; segfirst; segfirst = segfirst->next ) {
+                        if ( segfirst->sym.name_size == namlen &&
+                            ( memcmp( segfirst->sym.name, seg->sym.name, namlen ) == 0 ) ) {
+                            value = ( fixup->offset + fixup->sym->offset + seg->e.seginfo->start_offset ) - segfirst->e.seginfo->start_offset;
+                            DebugMsg(("DoFixup(%s): SECREL, primary seg=%s, start_offset=%X\n",
+                                      curr->sym.name, segfirst->sym.name, segfirst->e.seginfo->start_offset ));
+                            break;
+                        }
+                    }
+                }
+                DebugMsg(("DoFixup(%s): SECREL, loc=%lX, value=%lX\n", curr->sym.name, fixup->fixup_loc, value ));
+            } else if ( seg->e.seginfo->group ) {
                 value = (seg->e.seginfo->group->offset & 0xF) + seg->e.seginfo->start_offset + fixup->offset + fixup->sym->offset;
-            else if ( fixup->type >= FIX_RELOFF8 && fixup->type <= FIX_RELOFF32 )
+            } else if ( fixup->type >= FIX_RELOFF8 && fixup->type <= FIX_RELOFF32 ) {
                 /* v1.96: special handling for "relative" fixups */
                 value = seg->e.seginfo->start_offset + fixup->offset + fixup->sym->offset;
-            else
+            } else
                 value = (seg->e.seginfo->start_offset & 0xF) + fixup->offset + fixup->sym->offset;
-            DebugMsg(("DoFixup(%s, %Xh, %s): target->start_offset=%Xh, fixup->offset=%Xh, fixup->sym->offset=%Xh\n",
+            DebugMsg(("DoFixup(%s, %lXh, %s): target->start_offset=%lXh, fixup->offset=%lXh, fixup->sym->offset=%lXh\n",
                       curr->sym.name, fixup->fixup_loc, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, fixup->sym->offset ));
         } else {
             seg = (dir_node *)fixup->segment;
-            DebugMsg(("DoFixup(%s, %Xh, %s): target segment=0, fixup->offset=%Xh, fixup->sym->offset=%Xh\n",
+            DebugMsg(("DoFixup(%s, %lXh, %s): target segment=0, fixup->offset=%lXh, fixup->sym->offset=%lXh\n",
                       curr->sym.name, fixup->fixup_loc, fixup->sym ? fixup->sym->name : "", fixup->offset, fixup->sym ? fixup->sym->offset : 0 ));
             value = 0;
         }
@@ -327,14 +352,14 @@ static ret_code DoFixup( dir_node *curr )
             //*codeptr += (value - fixup->fixup_loc + 1) & 0xff;
             // changed in v1.95
             *codeptr += (value - (fixup->fixup_loc + curr->e.seginfo->start_offset) - 1) & 0xff;
-            DebugMsg(("DoFixup(%s, %Xh): FIX_RELOFF8, value=%Xh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr ));
+            DebugMsg(("DoFixup(%s, %lXh): FIX_RELOFF8, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr ));
             break;
         case FIX_RELOFF16:
             codeptr16 = (uint_16 *)codeptr;
             //*codeptr16 += (value - fixup->fixup_loc + 2) & 0xffff;
             // changed in v1.95
             *codeptr16 += (value - (fixup->fixup_loc + curr->e.seginfo->start_offset) - 2) & 0xffff;
-            DebugMsg(("DoFixup(%s, %Xh): FIX_RELOFF16, value=%Xh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr16 ));
+            DebugMsg(("DoFixup(%s, %lXh): FIX_RELOFF16, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr16 ));
             break;
         case FIX_RELOFF32:
 #if AMD64_SUPPORT
@@ -347,31 +372,40 @@ static ret_code DoFixup( dir_node *curr )
             //*codeptr32 += (value - fixup->fixup_loc + 4);
             // changed in v1.95
             *codeptr32 += (value - (fixup->fixup_loc + curr->e.seginfo->start_offset) - 4);
-            DebugMsg(("DoFixup(%s, %Xh): FIX_RELOFF32, value=%Xh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
+            DebugMsg(("DoFixup(%s, %lXh): FIX_RELOFF32, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
             break;
         case FIX_LOBYTE:
             *codeptr = value & 0xff;
-            DebugMsg(("DoFixup(%s, %Xh): FIX_LOBYTE, value=%Xh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr ));
+            DebugMsg(("DoFixup(%s, %lXh): FIX_LOBYTE, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr ));
             break;
         case FIX_HIBYTE:
             *codeptr = (value >> 8) & 0xff;
-            DebugMsg(("DoFixup(%s, %Xh): FIX_HIBYTE, value=%Xh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr ));
+            DebugMsg(("DoFixup(%s, %lXh): FIX_HIBYTE, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr ));
             break;
         case FIX_OFF16:
             codeptr16 = (uint_16 *)codeptr;
             *codeptr16 = value & 0xffff;
-            DebugMsg(("DoFixup(%s, %Xh): FIX_OFF16, value=%Xh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr16 ));
+            DebugMsg(("DoFixup(%s, %lXh): FIX_OFF16, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr16 ));
             break;
         case FIX_OFF32:
             codeptr32 = (uint_32 *)codeptr;
             *codeptr32 = value;
-            DebugMsg(("DoFixup(%s, %Xh): FIX_OFF32, value=%Xh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
+            DebugMsg(("DoFixup(%s, %lXh): FIX_OFF32, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
+            break;
+        case FIX_OFF32_IMGREL:
+            codeptr32 = (uint_32 *)codeptr;
+            *codeptr32 = value;
+            DebugMsg(("DoFixup(%s, %lXh): FIX_OFF32_IMGREL, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
+        case FIX_OFF32_SECREL:
+            codeptr32 = (uint_32 *)codeptr;
+            *codeptr32 = value;
+            DebugMsg(("DoFixup(%s, %lXh): FIX_OFF32_SECREL, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
             break;
 #if AMD64_SUPPORT
         case FIX_OFF64:
             codeptr64 = (uint_64 *)codeptr;
             *codeptr64 = value;
-            DebugMsg(("DoFixup(%s, %Xh): FIX_OFF64, value=%Xh, *target=%I64Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr64 ));
+            DebugMsg(("DoFixup(%s, %lXh): FIX_OFF64, value=%lXh, *target=%I64Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr64 ));
             break;
 #endif
         case FIX_SEG:
@@ -388,13 +422,13 @@ static ret_code DoFixup( dir_node *curr )
                 seg = (dir_node *)fixup->sym;
                 if ( seg->sym.state == SYM_GRP ) {
                     *codeptr16 = seg->sym.offset >> 4;
-                    DebugMsg(("DoFixup(%s, %Xh): FIX_SEG, group.offset=%Xh\n", curr->sym.name, fixup->fixup_loc, seg->sym.offset ));
+                    DebugMsg(("DoFixup(%s, %lXh): FIX_SEG, group.offset=%lXh\n", curr->sym.name, fixup->fixup_loc, seg->sym.offset ));
                 } else if (seg->e.seginfo->group ) {
                     *codeptr16 = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
-                    DebugMsg(("DoFixup(%s, %Xh): FIX_SEG, segment.offset=%Xh, group.offset=%Xh\n", curr->sym.name, fixup->fixup_loc, seg->e.seginfo->start_offset, seg->e.seginfo->group->offset ));
+                    DebugMsg(("DoFixup(%s, %lXh): FIX_SEG, segment.offset=%lXh, group.offset=%lXh\n", curr->sym.name, fixup->fixup_loc, seg->e.seginfo->start_offset, seg->e.seginfo->group->offset ));
                 } else {
                     *codeptr16 = seg->e.seginfo->start_offset >> 4;
-                    DebugMsg(("DoFixup(%s, %Xh): FIX_SEG, segment.offset=%Xh\n", curr->sym.name, fixup->fixup_loc, seg->e.seginfo->start_offset ));
+                    DebugMsg(("DoFixup(%s, %lXh): FIX_SEG, segment.offset=%lXh\n", curr->sym.name, fixup->fixup_loc, seg->e.seginfo->start_offset ));
                 }
                 break;
             }
@@ -402,7 +436,7 @@ static ret_code DoFixup( dir_node *curr )
         case FIX_PTR16:
 #if MZ_SUPPORT
             if ( Options.header_format == HFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %Xh): FIX_PTR16, seg->start=%Xh\n", curr->sym.name, fixup->fixup_loc, seg->e.seginfo->start_offset ));
+                DebugMsg(("DoFixup(%s, %lXh): FIX_PTR16, seg->start=%Xh\n", curr->sym.name, fixup->fixup_loc, seg->e.seginfo->start_offset ));
                 codeptr16 = (uint_16 *)codeptr;
                 *codeptr16 = value & 0xffff;
                 codeptr16++;
@@ -417,7 +451,7 @@ static ret_code DoFixup( dir_node *curr )
         case FIX_PTR32:
 #if MZ_SUPPORT
             if ( Options.header_format == HFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %Xh): FIX_PTR32\n", curr->sym.name, fixup->fixup_loc ));
+                DebugMsg(("DoFixup(%s, %lXh): FIX_PTR32\n", curr->sym.name, fixup->fixup_loc ));
                 codeptr32 = (uint_32 *)codeptr;
                 *codeptr32 = value;
                 codeptr32++;
@@ -431,8 +465,8 @@ static ret_code DoFixup( dir_node *curr )
             }
 #endif
         default:
-            DebugMsg(("DoFixup(%s, %Xh): invalid fixup %u\n", curr->sym.name, fixup->fixup_loc, fixup->type ));
-            AsmErr( SEGMENT_FIXUPS_INVALID, fixup->type );
+            DebugMsg(("DoFixup(%s, %lXh): invalid fixup %u\n", curr->sym.name, fixup->fixup_loc, fixup->type ));
+            AsmErr( INVALID_FIXUP_TYPE, "BIN", fixup->fixup_loc );
             return( ERROR );
         }
     }
@@ -448,7 +482,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
 {
     dir_node *curr;
     uint_32 size;
-    seg_type *segtype;
+    const seg_type *segtype;
     bool first = TRUE;
 #if MZ_SUPPORT
     uint_16 reloccnt;
@@ -550,7 +584,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
     if ( Options.header_format == HFORMAT_MZ ) {
         /* set fields in MZ header */
-        DebugMsg(("bin_write_data: MZ, sizetotal=%Xh\n", sizetotal));
+        DebugMsg(( "bin_write_data: MZ, sizetotal=%Xh\n", sizetotal ));
         pReloc = (uint_16 *)(hdrbuf);
         *(pReloc+0) = 'M' + ('Z' << 8);
         *(pReloc+1) = sizetotal % 512; /* bytes last page */
@@ -618,10 +652,10 @@ ret_code bin_write_data( module_info *ModuleInfo )
 #endif
 
     if ( Options.header_format == HFORMAT_MZ ) {
-        if (_write( ModuleInfo->obj_fh, hdrbuf, sizehdr ) != sizehdr )
+        if ( fwrite( hdrbuf, 1, sizehdr, FileInfo.file[OBJ] ) != sizehdr )
             WriteError();
 #if SECTORMAP
-        LstPrintf( szSegLine, szHeader, 0, sizehdr, sizehdr );
+        LstPrintf( szSegLine, szHeader, 0, 0, sizehdr, 0 );
         LstNL();
 #endif
     }
@@ -647,24 +681,31 @@ ret_code bin_write_data( module_info *ModuleInfo )
             }
         }
 #if SECTORMAP
-        LstPrintf( szSegLine, curr->sym.name, curr->e.seginfo->fileoffset, size, sizemem );
+        LstPrintf( szSegLine, curr->sym.name, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset + curr->e.seginfo->start_loc, size, sizemem );
         LstNL();
 #endif
         if (size != 0 && curr->e.seginfo->CodeBuffer ) {
             DebugMsg(("bin_write_data(%s): write %Xh bytes at offset %Xh, initialized bytes=%lu, buffer=%Xh\n", curr->sym.name, size, curr->e.seginfo->fileoffset, curr->e.seginfo->bytes_written, curr->e.seginfo->CodeBuffer ));
-            _lseek( ModuleInfo->obj_fh, curr->e.seginfo->fileoffset, SEEK_SET );
+            fseek( FileInfo.file[OBJ], curr->e.seginfo->fileoffset, SEEK_SET );
 #ifdef __I86__
-            if (_hwrite( ModuleInfo->obj_fh, curr->e.seginfo->CodeBuffer, size) != size )
-#else
-            if (_write( ModuleInfo->obj_fh, curr->e.seginfo->CodeBuffer, size) != size )
-#endif
+            if ( hfwrite( curr->e.seginfo->CodeBuffer, 1, size, FileInfo.file[OBJ] ) != size )
                 WriteError();
+#else
+            if ( fwrite( curr->e.seginfo->CodeBuffer, 1, size, FileInfo.file[OBJ] ) != size )
+                WriteError();
+#endif
         }
     }
 #if SECTORMAP
     LstPrintf( szLine );
     LstNL();
-    LstPrintf( szTotal, " ", sizetotal, sizeheap+sizetotal );
+#if MZ_SUPPORT
+    if ( Options.header_format == HFORMAT_MZ )
+        sizeheap += sizetotal - sizehdr;
+    else
+#endif
+        sizeheap = GetImageSize( TRUE );
+    LstPrintf( szTotal, " ", sizetotal, sizeheap );
     LstNL();
 #endif
     DebugMsg(("bin_write_data: exit\n"));

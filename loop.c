@@ -50,7 +50,7 @@ ret_code LoopDirective( int i, int directive )
     int start = i - 1; /* location of "directive name .. after any labels" */
     int arg_loc;
     int len;
-    bool first = TRUE;
+    //bool first = TRUE;
     char c;
     char *parmstring;
     char *oldbufferend;
@@ -71,7 +71,7 @@ ret_code LoopDirective( int i, int directive )
     if ( ModuleInfo.list == TRUE )
         LstWrite( LSTTYPE_MACRO, 0, NULL );
 
-    switch (directive) {
+    switch ( directive ) {
     case T_REPT:
     case T_REPEAT:
         if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
@@ -80,9 +80,8 @@ ret_code LoopDirective( int i, int directive )
             AsmError( CONSTANT_EXPECTED );
             opndx.value = 0;
         }
-        len = opndx.value;
         if( AsmBuffer[i]->token != T_FINAL ) {
-            AsmError( SYNTAX_ERROR );
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         break;
@@ -94,9 +93,13 @@ ret_code LoopDirective( int i, int directive )
             opndx.kind = EXPR_CONST;
             opndx.value = 0;
         }
+        if( AsmBuffer[i]->token != T_FINAL ) {
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            return( ERROR );
+        }
         /* the expression must be saved, since AsmBuffer will be destroyed */
         ptr = AsmBuffer[start]->pos + 5;  /* 5 = strlen("WHILE") */
-        while (isspace(*ptr)) ptr++;
+        while ( isspace( *ptr ) ) ptr++;
         strcpy( line, ptr );
         break;
     default: /* FOR, FORC, IRP, IRPC */
@@ -108,15 +111,15 @@ ret_code LoopDirective( int i, int directive )
             return( ERROR );
         }
         c = *AsmBuffer[i]->string_ptr;
-        if(( is_valid_id_char(c) == FALSE) || (isdigit(c) == TRUE)) {
-            DebugMsg(("LoopDirective(FOR): token %s is not an ID\n", AsmBuffer[i]->string_ptr));
-            AsmError( SYNTAX_ERROR );
+        if( ( is_valid_id_char(c) == FALSE ) || ( isdigit(c) == TRUE ) ) {
+            DebugMsg(( "LoopDirective(FOR): token %s is not an ID\n", AsmBuffer[i]->string_ptr ));
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         arg_loc = i;
 
         i++;
-        while (AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA)
+        while ( AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA )
             i++;
 
         if( AsmBuffer[i]->token != T_COMMA ) {
@@ -125,12 +128,8 @@ ret_code LoopDirective( int i, int directive )
         }
 
         i++;
-        // FORC accepts anything as "argument list"
-        if( directive == T_FORC || directive == T_IRPC) {
-            if (AsmBuffer[i]->token == T_FINAL) {
-                AsmError( PARM_REQUIRED );
-                return( ERROR );
-            }
+        /* FORC accepts anything as "argument list", even nothing! */
+        if( directive == T_FORC || directive == T_IRPC ) {
             if( AsmBuffer[i]->token == T_STRING) {
                 parmstring = AsmTmpAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1 );
                 strcpy( parmstring, AsmBuffer[i]->string_ptr );
@@ -138,19 +137,19 @@ ret_code LoopDirective( int i, int directive )
                 char *ptr2;
                 /* AsmBuffer[i]->pos cannot be used (T_NUM!) */
                 ptr = AsmBuffer[i-1]->pos;
-                ptr++;
-                while (isspace(*ptr)) ptr++;
+                ptr++; /* skip comma */
+                while ( isspace(*ptr) ) ptr++;
                 ptr2 = ptr;
                 while (*ptr2 && (isspace(*ptr2) == FALSE))
                     ptr2++;
                 len = ptr2 - ptr;
                 parmstring = AsmTmpAlloc( len + 1 );
                 memcpy( parmstring, ptr, len );
-                *(parmstring+len) = '\0';
+                *(parmstring+len) = NULLC;
             }
         } else {
-            if( AsmBuffer[i]->token == T_FINAL ) {
-                AsmError( PARM_REQUIRED );
+            if ( AsmBuffer[i]->token == T_FINAL ) {
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->string_ptr );
                 return( ERROR );
             }
             /* FOR/IRP accepts a literal enclosed in <> only */
@@ -159,7 +158,9 @@ ret_code LoopDirective( int i, int directive )
                 return( ERROR );
             }
             parmstring = AsmTmpAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1 );
-            strcpy( parmstring, AsmBuffer[i]->string_ptr );
+            //v2.0: use GetTextMacroValue() instead of strcpy!!!
+            //strcpy( parmstring, AsmBuffer[i]->string_ptr );
+            GetTextMacroValue( AsmBuffer[i]->string_ptr, parmstring );
             DebugMsg(("LoopDirective(FOR): param string >%s<\n", parmstring));
         }
         /* to run StoreMacro(), AsmBuffer must be setup correctly. */
@@ -173,10 +174,10 @@ ret_code LoopDirective( int i, int directive )
     /* now make a temporary macro */
 #if USELOCALMAC
     macro = &tmpmacro;
-    memset( &tmpmacro, 0, sizeof(tmpmacro));
+    memset( &tmpmacro, 0, sizeof(tmpmacro) );
     tmpmacro.sym.name = "";
     tmpmacro.e.macroinfo = &macinfo;
-    memset( &macinfo, 0, sizeof(macinfo));
+    memset( &macinfo, 0, sizeof(macinfo) );
 #else
     macro = CreateMacro( "" );
 #endif
@@ -197,7 +198,7 @@ ret_code LoopDirective( int i, int directive )
 
     /* now run the just created macro in a loop */
 
-    switch (directive) {
+    switch ( directive ) {
     case T_REPEAT:
     case T_REPT:
         /* currently there's just one queue generated for all
@@ -206,18 +207,21 @@ ret_code LoopDirective( int i, int directive )
          * Also, the line numbering probably won't work correctly
          * for iteration > 1.
          */
-        for (;len;len--) {
-            RunMacro( macro, "", NULL, len == 1, first, FALSE );
-            DebugMsg(("LoopDirective REPT: cnt=%u\n", count++ ));
-            first = FALSE;
+        for ( ; macro->sym.value < opndx.value; macro->sym.value++ ) {
+            //RunMacro( macro, "", NULL, len == 1, first, FALSE );
+            RunMacro( macro, "", NULL, TRUE, TRUE, FALSE );
+            if ( AsmBuffer[0]->value == T_EXITM )
+                break;
+            DebugMsg(("LoopDirective REPT: iteration=%u\n", macro->sym.total_length ));
+            //first = FALSE;
         }
         break;
     case T_WHILE:
         oldbufferend = StringBufferEnd;
-        while (opndx.kind == EXPR_CONST && opndx.value != 0) {
+        while ( opndx.kind == EXPR_CONST && opndx.value != 0 ) {
             DebugMsg(("LoopDirective WHILE: cnt=%u\n", count++ ));
             RunMacro( macro, "", NULL, TRUE, TRUE, FALSE );
-            if (AsmBuffer[0]->value == T_EXITM)
+            if ( AsmBuffer[0]->value == T_EXITM )
                 break;
             /* Don't use the first item in AsmBuffer! This ensures
              that the line buffer isn't set to our local buffer.
@@ -228,11 +232,12 @@ ret_code LoopDirective( int i, int directive )
             Token_Count = Tokenize( line, i );
             if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
                 break;
+            macro->sym.value++;
         }
         break;
     case T_FORC:
     case T_IRPC:
-        for( ptr = parmstring; *ptr; ) {
+        for( ptr = parmstring; *ptr; macro->sym.value++ ) {
             char * ptr2 = line;
             *ptr2++ = '<';
             /* v1.96: '"' and '\'' added, '!' removed */
@@ -246,28 +251,23 @@ ret_code LoopDirective( int i, int directive )
             *ptr2++ = *ptr++;
             *ptr2++ = '>';
             *ptr2 = NULLC;
-            RunMacro( macro, line, NULL, *ptr == NULLC, first, FALSE);
-            first = FALSE;
+            //RunMacro( macro, line, NULL, *ptr == NULLC, first, FALSE);
+            RunMacro( macro, line, NULL, TRUE, TRUE, FALSE);
+            if ( AsmBuffer[0]->value == T_EXITM )
+                break;
+            //first = FALSE;
             DebugMsg(("LoopDirective FORC: call RunMacro(), cnt=%u, param=>%s<\n", count++, line ));
         }
         break;
     default: /* T_FOR, T_IRP */
         /* a FOR/IRP parameter can be a macro function call */
         /* that's why the macro calls must be run synchronously */
-        for( ptr = parmstring; *ptr;) {
+        for( ptr = parmstring; *ptr; macro->sym.value++ ) {
             DebugMsg(("LoopDirective FOR: cnt=%u, calling RunMacro( param=>%s<, prefix=NULL, runit=1, insert=1, addbrackets=0 )\n", count++, ptr ));
             len = RunMacro( macro, ptr, NULL, TRUE, TRUE, FALSE);
-            if (len < 1 || AsmBuffer[0]->value == T_EXITM)
+            if ( len < 1 || AsmBuffer[0]->value == T_EXITM )
                 break;
             ptr += len;
-#if 0
-            /* RunMacro() has skipped the comma already! */
-            if (*ptr && *ptr != ',') {
-                AsmError(EXPECTING_COMMA);
-                break;
-            }
-            if (*ptr) ptr++;
-#endif
         }
     }
 #if USELOCALMAC

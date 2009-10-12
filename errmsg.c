@@ -45,9 +45,8 @@
 #include "segment.h"
 
 extern char             *MsgGet( int resourceid, char *buffer );
+extern void             print_source_nesting_structure( void );
 extern char             banner_printed;
-
-void                    print_include_file_nesting_structure( void );
 
 //    WngLvls[level] // warning levels associated with warning messages
 //    CompFlags.errout_redirected
@@ -56,11 +55,10 @@ void                    print_include_file_nesting_structure( void );
 #define ErrLimit Options.error_limit
 #define WngLevel Options.warning_level
 
-static FILE             *ErrFile;
 //static bool             Errfile_Written;
 
-static void             PrtMsg( char *prefix, int msgnum, va_list args1, va_list args2 );
-void                    PutMsg( FILE *fp, char *prefix, int msgnum, va_list args );
+//static void             PrtMsg( int severity, int msgnum, va_list args1, va_list args2 );
+//void                    PutMsg( FILE *fp, int severity, int msgnum, va_list args );
 
 void AsmError( int msgnum )
 /*************************/
@@ -83,6 +81,74 @@ void DoDebugMsg( const char *format, ... )
 }
 #endif
 
+static void OpenErrFile( void )
+/**********************/
+{
+//    if( !isatty( fileno( errout ) ) ) return;
+    if( FileInfo.fname[ERR] != NULL ) {
+        FileInfo.file[ERR] = fopen( FileInfo.fname[ERR], "w" );
+    }
+}
+
+void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
+/********************************************************************/
+{
+    int             i,j;
+    char           *type;
+    char            msgbuf[MAXMSGSIZE];
+    char            buffer[MAX_LINE_LEN];
+
+    if( fp != NULL ) {
+
+        MsgGet( msgnum, msgbuf );
+        switch (severity ) {
+        case 1:  type = MsgGetEx( MSG_FATAL_PREFIX );   break;
+        case 2:  type = MsgGetEx( MSG_ERROR_PREFIX );   break;
+        case 4:  type = MsgGetEx( MSG_WARNING_PREFIX ); break;
+        default:  type = NULL; i = 0; break;
+        }
+        if ( type )
+            i = sprintf( buffer, "%s A%4u: ", type, severity * 1000 + msgnum );
+        i += vsprintf( buffer+i, msgbuf, args );
+        //buffer[i] = NULLC;
+
+        if ( severity && (j = GetCurrSrcPos( msgbuf ))) {
+            fwrite( msgbuf, 1, j, fp );
+        } else
+            j = 0;
+        fwrite( buffer, 1, i, fp );
+        fwrite( "\n", 1, 1, fp );
+
+        /* if in Pass 1, add the error msg to the listing */
+        if ( FileInfo.file[LST] &&
+             severity &&
+             Parse_Pass == PASS_1 &&
+             fp == FileInfo.file[ERR] ) {
+            LstWrite( LSTTYPE_DIRECTIVE, GetCurrOffset(), 0 );
+            LstPrintf( "                           %s", buffer );
+            LstNL();
+        }
+    }
+}
+
+static void PrtMsg( int severity, int msgnum, va_list args1, va_list args2 )
+/***************************************************************************/
+{
+    if( !banner_printed )
+        trademark();
+
+    if( FileInfo.file[ERR] == NULL )
+        OpenErrFile();
+    PutMsg( errout, severity, msgnum, args1 );
+    fflush( errout );                       /* 27-feb-90 */
+    if( FileInfo.file[ERR] ) {
+        //Errfile_Written = TRUE;
+        PutMsg( FileInfo.file[ERR], severity, msgnum, args2 );
+    }
+}
+
+/* notes: "included by", "macro called from", ... */
+
 void PrintNote( int msgnum, ... )
 /*****************************/
 {
@@ -91,7 +157,7 @@ void PrintNote( int msgnum, ... )
     va_start( args1, msgnum );
     va_start( args2, msgnum );
 
-    PrtMsg( NULL, msgnum, args1, args2 );
+    PrtMsg( 0, msgnum, args1, args2 );
     va_end( args1 );
     va_end( args2 );
 }
@@ -106,14 +172,14 @@ void AsmErr( int msgnum, ... )
 #endif
     va_start( args1, msgnum );
     va_start( args2, msgnum );
-    PrtMsg( MsgGetEx( MSG_ERROR_PREFIX ), msgnum, args1, args2 );
+    PrtMsg( 2, msgnum, args1, args2 );
     va_end( args1 );
     va_end( args2 );
     ModuleInfo.error_count++;
     write_to_file = FALSE;
-    print_include_file_nesting_structure();
-    if( ErrLimit != -1  &&  ModuleInfo.error_count >= ErrLimit ) {
-        PrtMsg( MsgGetEx( MSG_FATAL_PREFIX ), TOO_MANY_ERRORS, args1, args2 );
+    print_source_nesting_structure();
+    if( ErrLimit != -1  &&  ModuleInfo.error_count == ErrLimit+1 ) {
+        PrtMsg( 2, TOO_MANY_ERRORS, args1, args2 );
         /* Just simulate the END directive, don't do a fatal exit!
          This allows to continue to assemble further modules.
          */
@@ -133,40 +199,15 @@ void AsmWarn( int level, int msgnum, ... )
         va_start( args1, msgnum );
         va_start( args2, msgnum );
         if( !Options.warning_error ) {
-            PrtMsg( MsgGetEx( MSG_WARNING_PREFIX ), msgnum, args1, args2 );
+            PrtMsg( 4, msgnum, args1, args2 );
             ModuleInfo.warning_count++;
         } else {
-            PrtMsg( MsgGetEx( MSG_ERROR_PREFIX ), msgnum, args1, args2 );
+            PrtMsg( 2, msgnum, args1, args2 );
             ModuleInfo.error_count++;
         }
         va_end( args1 );
         va_end( args2 );
-        print_include_file_nesting_structure();
-    }
-}
-
-static void OpenErrFile( void )
-/**********************/
-{
-//    if( !isatty( fileno( errout ) ) ) return;
-    if( FileInfo.fname[ERR] != NULL ) {
-        ErrFile = fopen( FileInfo.fname[ERR], "w" );
-    }
-}
-
-static void PrtMsg( char *prefix, int msgnum, va_list args1, va_list args2 )
-/***************************************************************************/
-{
-    if( !banner_printed )
-        trademark();
-
-    if( ErrFile == NULL )
-        OpenErrFile();
-    PutMsg( errout, prefix, msgnum, args1 );
-    fflush( errout );                       /* 27-feb-90 */
-    if( ErrFile ) {
-        //Errfile_Written = TRUE;
-        PutMsg( ErrFile, prefix, msgnum, args2 );
+        print_source_nesting_structure();
     }
 }
 
@@ -174,44 +215,6 @@ void InitErrFile( void )
 /*********************/
 {
     remove( FileInfo.fname[ERR] );
-    ErrFile = NULL;
-    //Errfile_Written = FALSE;
-}
-
-void PutMsg( FILE *fp, char *prefix, int msgnum, va_list args )
-/********************************************************************/
-{
-    int             i,j;
-    char            msgbuf[MAXMSGSIZE];
-    char            buffer[MAX_LINE_LEN];
-
-    if( fp != NULL ) {
-
-        MsgGet( msgnum, msgbuf );
-        i = 0;
-        if ( prefix != NULL ) {
-            i = sprintf( buffer, "%s %c%03d: ", prefix, *prefix, msgnum );
-        }
-        i += vsprintf( buffer+i, msgbuf, args );
-        buffer[i] = NULLC;
-
-        if ( prefix && (j = GetCurrSrcPos( msgbuf ))) {
-            fwrite( msgbuf, 1, j, fp );
-        } else
-            j = 0;
-        fwrite( buffer, 1, i, fp );
-        fwrite( "\n", 1, 1, fp );
-
-        /* if in Pass 1, add the error msg to the listing */
-        if ( FileInfo.file[LST] &&
-             prefix &&
-             Parse_Pass == PASS_1 &&
-             fp == ErrFile ) {
-            LstWrite( LSTTYPE_DIRECTIVE, GetCurrOffset(), 0 );
-            LstPrintf( "                           %s", buffer );
-            LstNL();
-        }
-    }
 }
 
 #ifndef NDEBUG
@@ -226,7 +229,7 @@ int InternalError( const char *file, unsigned line )
     GetCurrSrcPos( buffer );
     fprintf( errout, "%s", buffer );
     fprintf( errout, MsgGetEx( INTERNAL_ERROR ), file, line );
-    CloseFiles();
+    close_files();
     exit( EXIT_FAILURE );
     return(0);
 }
