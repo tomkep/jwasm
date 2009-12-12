@@ -85,9 +85,9 @@ asm_sym * GetPublicData( void * *vp )
 
     for ( ; *curr ; *curr = (*curr)->next ) {
         asm_sym *sym = (*curr)->data;
-        if( sym->state == SYM_PROC ) {
+        if( sym->isproc ) {
             /* skip PROTOs without matching PROC */
-            if( sym->isproc == FALSE ) {
+            if( sym->state == SYM_EXTERNAL ) {
                 continue;
             }
         } else if ( sym->state == SYM_EXTERNAL ) {
@@ -95,7 +95,7 @@ asm_sym * GetPublicData( void * *vp )
             //if (sym->weak == TRUE)
                 continue;
         }
-        if( sym->state != SYM_INTERNAL && sym->state != SYM_PROC ) {
+        if( sym->state != SYM_INTERNAL && sym->state != SYM_EXTERNAL ) {
             // v1.95: make a full second pass and emit error on PUBLIC
             //AsmErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
 #if FASTPASS
@@ -214,10 +214,11 @@ void AddGlobalData( dir_node *dir )
     QAddItem( &GlobalQueue, dir );
 }
 
+/* EXTERNDEFs which have been defined in the module must be made
+ * PUBLIC. This code runs after pass 1.
+ */
 void GetGlobalData( void )
 /************************/
-/* turn the EXTERNDEFs into either externs or publics as appropriate */
-/* this runs just once, after pass 1 */
 {
     queuenode           *curr;
     struct asm_sym      *sym;
@@ -226,12 +227,10 @@ void GetGlobalData( void )
     while ( curr = (queuenode *)QDequeue( &GlobalQueue )) {
         sym = (asm_sym *)curr->data;
         DebugMsg(("GetGlobalData: %s state=%u used=%u public=%u\n", sym->name, sym->state, sym->used, sym->public ));
-        if( sym->state == SYM_EXTERNAL ) {
-            if( sym->used == TRUE)
-                sym->weak = FALSE;
-        } else if ( sym->state != SYM_PROC && /* ignore PROCs! Masm does also */
-                    sym->public == FALSE ) {
-            /* make this record a pubdef */
+        if( sym->state == SYM_INTERNAL &&
+           sym->isproc == FALSE && /* ignore PROCs! Masm does also */
+           sym->public == FALSE ) {
+            /* add it to the public queue */
             sym->public = TRUE;
             QEnqueue( &PubQueue, curr );
             continue; /* don't free this item! */

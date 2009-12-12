@@ -23,8 +23,9 @@
     4.    Instruction Sets
     5.    Code Generation Differences
     6.    Win64 Structured Exception Handling (SEH)
-    7.    Masm Bugs fixed in JWasm
-    8.    Known Bugs and missing Features
+    7.    Errors and Warnings
+    8.    Masm Bugs fixed in JWasm
+    9.    Known Bugs and missing Features
 
 
     1. About
@@ -145,6 +146,7 @@
       - directive OPTION RENAMEKEYWORD (see 3.10)
       - directives PUSHCONTEXT/POPCONTEXT ALIGNMENT (see 3.11)
       - attribute LABEL for macro parameter (see 3.14)
+      - integer initializer values for items of type [X]MMWORD (see 3.15)
       - parameters for IF[N]DEF directive (see 3.16)
 
     -zt<n>: "Set name decoration for STDCALL symbols". Options "-zt0" will
@@ -348,6 +350,13 @@
     - segment attribute ALIGN(n)
     - segment characteristics INFO, READ, WRITE, EXECUTE, SHARED, NOPAGE,
       NOCACHE, DISCARD.
+    - data types MMWORD and XMMWORD.
+
+     For data items of types MMWORD or XMMWORD, JWasm will accept integer
+    values for initialization. This differs from Masm - Masm accepts just
+    floating-point initializers for such data items ( it's even worse, since
+    floating-point initializers are silently ignored for data items with
+    sizes != 4, 8 and 10 ).
 
 
     3.16 Other Differences
@@ -378,13 +387,17 @@
 
     4. Instruction Sets
 
-    JWasm supports all instructions sets supported by Masm v8. This is
+    JWasm supports all instructions sets supported by Masm v8. These are
 
     - the instructions implemented by 8086, 80186, 80286, 80386, 80486.
     - the Pentium and Pentium Pro instructions.
     - the MMX and K3D instruction set extensions.
     - the SSE, SSE2, SSE3 and SSSE3 instruction set extensions.
     - the x86-64 64-bit instruction set (implemented by ML64.EXE).
+
+    Additionally, the SSE4.1 and SSE4.2 instruction sets have been implemented
+    in JWasm v2.01. These instructions aren't supported by Masm v8, but 
+    require Masm v9.
 
 
     5. Code Generation Differences
@@ -435,7 +448,22 @@
     the corresponding data definitions in the listing if option -Sg is set.
 
 
-    7. Masm bugs fixed in JWasm
+    7. Errors and Warnings
+
+    The warning and error numbers emitted by JWasm differ from Masm's.
+    However, the texts of the messages are pretty much identical. There
+    are a few messages which deserve a more detailed explanation:
+
+    - 'Text macro was used before definition': this is a warning only. 
+    However, using text macros before they have been defined will force
+    JWasm to do a full second path, which increases assembly time.
+
+    - 'IF[n]DEF expects a plain symbol as argument': this is a warning.
+    Masm accepts any expression as argument for these directives, but
+    the result probably isn't always what has been expected. 
+
+
+    8. Masm bugs fixed in JWasm
 
     - the infamous "invoke" bug: using invoke with variables of type BYTE
       (or WORD in 32bit code) causes bad code to be generated in Masm.
@@ -484,7 +512,7 @@
     compatibility.
 
 
-    8. Known Bugs and missing Features
+    9. Known Bugs and missing Features
 
     a) Bugs which are known but not fixed yet:
 
@@ -501,7 +529,6 @@
       - EXPR16
       - READONLY
     - optional parameter NONUNIQUE for structures is ignored.
-    - types MMWORD, XMMWORD (Masm v8+).
     - operators LOW32, HIGH32 (Masm v8+).
     - INVOKE for procedures which use the Watcom C calling convention.
     - commandline option -Zd for ELF output format.

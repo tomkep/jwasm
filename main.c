@@ -218,21 +218,15 @@ static char *GetAFileName( void )
 static void SetTargName( char *name, unsigned len )
 /*************************************************/
 {
-    char        *p;
-
     if( Options.build_target != NULL ) {
-        AsmFree( Options.build_target );
+        MemFree( Options.build_target );
         Options.build_target = NULL;
     }
     if( name == NULL || len == 0 )
         return;
     Options.build_target = MemAlloc( len + 1 );
-    p = Options.build_target;
-    while( len != 0 ) {
-        *p++ = toupper( *name++ );
-        --len;
-    }
-    *p++ = '\0';
+    strcpy( Options.build_target, name );
+    _strupr( Options.build_target );
 }
 #endif
 
@@ -778,7 +772,7 @@ static void free_strings( void )
 {
 #if BUILD_TARGET
     if( Options.build_target != NULL )
-        AsmFree( Options.build_target );
+        MemFree( Options.build_target );
 #endif
     if( Options.code_class != NULL )
         MemFree( Options.code_class );
@@ -798,7 +792,7 @@ static void set_default_build_target( void )
 {
 
     if( Options.build_target == NULL ) {
-        Options.build_target = AsmAlloc( MAX_OS_NAME_SIZE + 1 );
+        Options.build_target = MemAlloc( MAX_OS_NAME_SIZE + 1 );
 #if defined(__OSI__)
         if( __OS == OS_DOS ) {
             strcpy( Options.build_target, "DOS" );
@@ -1140,10 +1134,11 @@ static void genfailure(int signo)
 static void main_init( void )
 /***************************/
 {
-    int         i;
+    int i;
 
     MemInit();
-    memset( &ModuleInfo, 0, sizeof(ModuleInfo));
+    /* v2.01: ModuleInfo now initialized in AssembleModule() */
+    //memset( &ModuleInfo, 0, sizeof(ModuleInfo));
     for( i = 0; i < NUM_FILE_TYPES; i++ ) {
         FileInfo.file[i] = NULL;
         FileInfo.fname[i] = NULL;
@@ -1203,7 +1198,7 @@ int main( int argc, char **argv )
     while ( 1 ) {
         main_init();
 #ifdef DEBUG_OUT
-        ModuleInfo.cref = TRUE; /* enable debug displays */
+        ModuleInfo.cref = TRUE; /* don't suppress debug displays */
 #endif
         parse_cmdline( (const char **)argv );
         if( FileInfo.fname[ASM] == NULL ) /* source file name supplied? */

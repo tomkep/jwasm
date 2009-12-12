@@ -179,7 +179,7 @@ res(CR8, cr8, 3, RWT_REGISTER,      OP_CR,      8, RWF_X64,    P_64,   0)
 
 #endif
 
-/* predefined types */
+/* predefined types. BYTE must be first! */
 /* token    str    len  rm_byte     op2        opcode   flags cpu     op1 */
 
 res(BYTE,   byte,   4,  RWT_TYPE,   MT_BYTE,   ST_BYTE,    0, P_86,    0)
@@ -197,11 +197,15 @@ res(TBYTE,  tbyte,  5,  RWT_TYPE,   MT_TBYTE,  ST_TBYTE,   0, P_86,    0)
 res(REAL10, real10, 6,  RWT_TYPE,   MT_REAL10, ST_REAL10,  0, P_86,    0)
 res(OWORD,  oword,  5,  RWT_TYPE,   MT_OWORD,  ST_OWORD,   0, P_86,    0)
 res(NEAR,   near,   4,  RWT_TYPE,   MT_NEAR,   ST_NEAR,    0, P_86,    0)
+res(FAR,    far,    3,  RWT_TYPE,   MT_FAR,    ST_FAR,     0, P_86,    0)
 res(NEAR16, near16, 6,  RWT_TYPE,   MT_NEAR,   ST_NEAR16,  0, P_386,   0)
 res(NEAR32, near32, 6,  RWT_TYPE,   MT_NEAR,   ST_NEAR32,  0, P_386,   0)
-res(FAR,    far,    3,  RWT_TYPE,   MT_FAR,    ST_FAR,     0, P_86,    0)
 res(FAR16,  far16,  5,  RWT_TYPE,   MT_FAR,    ST_FAR16,   0, P_386,   0)
 res(FAR32,  far32,  5,  RWT_TYPE,   MT_FAR,    ST_FAR32,   0, P_386,   0)
+#if XMMWORD
+res(MMWORD, mmword, 6,  RWT_TYPE,   MT_QWORD,  ST_QWORD,   0, P_586|P_MMX, 0)
+res(XMMWORD,xmmword,7,  RWT_TYPE,   MT_OWORD,  ST_OWORD,   0, P_686|P_SSE1, 0)
+#endif
 
 /* unary operators. field before cpu contains priority */
 

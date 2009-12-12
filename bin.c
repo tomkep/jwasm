@@ -58,7 +58,7 @@ static const char * const szTotal   = "%-42s %9X %9X";
  */
 static const seg_type typeorder[] = {
     SEGTYPE_CODE, SEGTYPE_UNDEF, SEGTYPE_DATA,
-    SEGTYPE_BSS, SEGTYPE_STACK, SEGTYPE_ERROR
+    SEGTYPE_BSS, SEGTYPE_STACK, SEGTYPE_ABS, SEGTYPE_ERROR
 };
 
 #ifdef __I86__
@@ -132,11 +132,15 @@ static void CalcOffset( dir_node *curr, bool firstseg )
     uint_32 offset;
     dir_node *grp;
 
+    if ( curr->e.seginfo->segtype == SEGTYPE_ABS ) {
+        curr->e.seginfo->start_offset = curr->e.seginfo->segrec->d.segdef.abs.frame << 4;
+        DebugMsg(("CalcOffset(%s): abs seg, offset=%Xh\n",
+                  curr->sym.name, curr->e.seginfo->start_offset ));
+        return;
+    }
+
     grp = (dir_node *)curr->e.seginfo->group;
-    if ( curr->e.seginfo->alignment == MAX_SEGALIGNMENT )
-        align = 1;
-    else
-        align = 1 << curr->e.seginfo->alignment;
+    align = 1 << curr->e.seginfo->alignment;
     //alignbytes = ((offset + (align - 1)) & (-align)) - offset;
     alignbytes = ((fileoffset + (align - 1)) & (-align)) - fileoffset;
     fileoffset += alignbytes;
@@ -209,6 +213,9 @@ static int GetSegRelocs( uint_16 *pDst )
             case FIX_PTR32:
             case FIX_PTR16:
             case FIX_SEG:
+                /* ignore fixups for absolute segments */
+                if ( fixup->sym && fixup->sym->segment && ((dir_node *)fixup->sym->segment)->e.seginfo->segtype == SEGTYPE_ABS )
+                    break;
                 count++;
                 if (pDst) {
                     size = fixup->fixup_loc + (curr->e.seginfo->fileoffset & 0xf);
@@ -332,7 +339,9 @@ static ret_code DoFixup( dir_node *curr )
                     }
                 }
                 DebugMsg(("DoFixup(%s): SECREL, loc=%lX, value=%lX\n", curr->sym.name, fixup->fixup_loc, value ));
-            } else if ( seg->e.seginfo->group ) {
+            /* v2.01: don't use group if fixup explicitely refers the segment! */
+            //} else if ( seg->e.seginfo->group ) {
+            } else if ( seg->e.seginfo->group && fixup->frame != FRAME_SEG ) {
                 value = (seg->e.seginfo->group->offset & 0xF) + seg->e.seginfo->start_offset + fixup->offset + fixup->sym->offset;
             } else if ( fixup->type >= FIX_RELOFF8 && fixup->type <= FIX_RELOFF32 ) {
                 /* v1.96: special handling for "relative" fixups */
@@ -544,10 +553,9 @@ ret_code bin_write_data( module_info *ModuleInfo )
         }
         for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
             /* ignore absolute segments */
-            if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
-                continue;
             CalcOffset( curr, first );
-            first = FALSE;
+            if ( curr->e.seginfo->segtype != SEGTYPE_ABS )
+                first = FALSE;
             DebugMsg(("bin_write_data(%s): start ofs=%Xh, size=%Xh, file ofs=%Xh, grp=%s\n",
                       curr->sym.name, curr->e.seginfo->start_offset, curr->sym.max_offset - curr->e.seginfo->start_loc, curr->e.seginfo->fileoffset, (curr->e.seginfo->group ? curr->e.seginfo->group->name : "NULL" )));
         }

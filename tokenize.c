@@ -523,7 +523,10 @@ static ret_code get_number( struct asm_tok *buf, ioptrs *p )
         DebugMsg(("get_number: BAD_NUMBER %s, radix=%u, base=%u, ptr=>%s<, digits_seen=%Xh\n", dig_start, ModuleInfo.radix, base, ptr, digits_seen ));
         /* swallow remainder of token */
         while( is_valid_id_char( *ptr ) ) ++ptr;
-        //AsmError( INVALID_NUMBER_DIGIT ); // this is done later
+        /* don't display an error here, it will cause
+         * 'nondigit in number' later in expression evaluator
+         */
+        //AsmError( INVALID_NUMBER_DIGIT );
     }
 
     len = ptr - p->input;

@@ -49,7 +49,9 @@
 
 #define IS_CONDJMP( inst )  ( ( inst >= T_JA ) && ( inst <= T_JZ ) )
 
+extern ret_code segm_override( const expr_list *opndx, struct code_info *CodeInfo );
 extern unsigned int     Opnd_Count;     // operand count of current instr
+extern struct asm_sym *SegOverride;
 
 /* "short jump extension": extend a (conditional) jump.
  * example:
@@ -106,21 +108,21 @@ static void FarCallToNear( struct code_info *CodeInfo )
 
     OutputCodeByte( 0x0E ); /* 0x0E is "PUSH CS" opcode */
     CodeInfo->mem_type = MT_NEAR;
-    CodeInfo->mem_type_fixed = TRUE;
 
     return;
 }
 
-ret_code branch( struct code_info *CodeInfo, const expr_list *opndx )
-/*******************************************************************/
+ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
+/***************************************************************************/
 /*
- called by idata_fixup() and idata_nofixup().
- current instruction is CALL, JMP, Jxx, LOOPx, JCXZ or JECXZ
- determine the displacement of jmp;
- possible return values are:
- - NOT_ERROR,
- - ERROR,
-*/
+ * called by idata_fixup(), idata_nofixup().
+ * current instruction is CALL, JMP, Jxx, LOOPx, JCXZ or JECXZ
+ * and operand is an immediate value.
+ * determine the displacement of jmp;
+ * possible return values are:
+ * - NOT_ERROR,
+ * - ERROR,
+ */
 {
     int_32              addr;
     enum fixup_types    fixup_type;
@@ -131,10 +133,28 @@ ret_code branch( struct code_info *CodeInfo, const expr_list *opndx )
     dir_node            *seg;
     unsigned            opidx = optable_idx[CodeInfo->token];
 
+    /*
+     * Masm checks overrides for branch instructions with immediate operand.
+     * No segment prefix byte is emitted.
+     */
+    if ( opndx->override != EMPTY ) {
+        segm_override( opndx, NULL );
+        if ( SegOverride && opndx->sym && opndx->sym->segment && SegOverride != opndx->sym->segment ) {
+            if ( opndx->sym )
+                AsmErr( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS, opndx->sym->name );
+            else
+                AsmErr( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS, "" );
+            return( ERROR );
+        }
+    }
+
+    if ( opndx->explicit )
+        CodeInfo->mem_type = opndx->mem_type;
+
     CodeInfo->data[Opnd_Count] = opndx->value;
     sym = opndx->sym;
     if( sym == NULL ) { /* no symbolic label specified? */
-        DebugMsg(("branch: sym=NULL, op.memtype=%Xh\n", opndx->mem_type ));
+        DebugMsg(("branch(%X): sym=NULL, op.memtype=%Xh\n", GetCurrOffset(), opndx->mem_type ));
 
         /* Masm rejects: "jump dest must specify a label */
 #if NEEDLABEL
@@ -155,7 +175,7 @@ ret_code branch( struct code_info *CodeInfo, const expr_list *opndx )
     DebugMsg(("branch(%X): explicit=%u op.memtype=%X sym=>%s< sym.state=%u/mem_type=%Xh/ofs=%X\n", GetCurrOffset(), opndx->explicit, opndx->mem_type, sym->name, sym->state, sym->mem_type, sym->offset));
 
     state = sym->state;
-    if ( state == SYM_UNDEFINED || state == SYM_INTERNAL || state == SYM_PROC || state == SYM_EXTERNAL ) {
+    if ( state == SYM_UNDEFINED || state == SYM_INTERNAL || state == SYM_EXTERNAL ) {
         seg = GetSeg( sym );
         if( seg == NULL || ( CurrSeg != seg ) ) {
             /* if label has a different segment and jump/call is near or short,
@@ -178,9 +198,6 @@ ret_code branch( struct code_info *CodeInfo, const expr_list *opndx )
         }
     }
 
-    if( !CodeInfo->mem_type_fixed ) {
-        CodeInfo->mem_type = MT_EMPTY;
-    }
     fixup_option = OPTJ_NONE;
     fixup_type = FIX_RELOFF8;
     switch( state ) {
@@ -188,13 +205,12 @@ ret_code branch( struct code_info *CodeInfo, const expr_list *opndx )
         SetSymSegOfs( sym ); /* set symbol's seg:ofs to current seg:ofs */
         /* fall through */
     case SYM_INTERNAL:
-    case SYM_PROC:
         /* if a segment override is active,
          check if it's matching the assumed value of CS.
          If no, assume a FAR call.
          */
-        if ( CodeInfo->prefix.SegOverride != NULL && CodeInfo->mem_type == MT_EMPTY ) {
-            if ( CodeInfo->prefix.SegOverride != GetOverrideAssume( ASSUME_CS) ) {
+        if ( SegOverride != NULL && CodeInfo->mem_type == MT_EMPTY ) {
+            if ( SegOverride != GetOverrideAssume( ASSUME_CS) ) {
                 CodeInfo->mem_type = MT_FAR;
             }
         }
@@ -218,7 +234,7 @@ ret_code branch( struct code_info *CodeInfo, const expr_list *opndx )
              */
             if( CodeInfo->token == T_CALL &&
                 CodeInfo->mem_type == MT_EMPTY &&
-                ( sym->mem_type == MT_FAR || CodeInfo->prefix.SegOverride ) ) {
+                ( sym->mem_type == MT_FAR || SegOverride ) ) {
                 FarCallToNear( CodeInfo );
             }
 
@@ -347,7 +363,7 @@ ret_code branch( struct code_info *CodeInfo, const expr_list *opndx )
             switch( CodeInfo->mem_type ) {
             case MT_SHORT:
             case MT_NEAR:
-                if( Opnd_Count == OPND1 && CodeInfo->mem_type_fixed ) {
+                if( opndx->explicit ) {
                     AsmError( CANNOT_USE_SHORT_OR_NEAR );
                     return( ERROR );
                 }
@@ -362,7 +378,7 @@ ret_code branch( struct code_info *CodeInfo, const expr_list *opndx )
                     SET_OPSIZ( CodeInfo, GetSymOfssize( sym ));
 
                 /* set global vars Frame + Frame_Datum */
-                find_frame( CodeInfo, sym );
+                find_frame( sym );
 #if 0 /* v1.96: removed */
                 if( Opnd_Count == OPND2 ) { /* WASM hack (call/jmp with 2 ops) */
                     if( IS_OPER_32( CodeInfo ) ) {
@@ -432,7 +448,7 @@ ret_code branch( struct code_info *CodeInfo, const expr_list *opndx )
                     fixup_type = FIX_RELOFF16;
                     CodeInfo->opnd_type[Opnd_Count] = OP_I16;
                 }
-                find_frame( CodeInfo, sym );/* added v1.95 (after change in fixup.c */
+                find_frame( sym );/* added v1.95 (after change in fixup.c */
                 break;
             default:
                 AsmError( INVALID_OPERAND_SIZE );

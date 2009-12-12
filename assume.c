@@ -68,6 +68,11 @@ static assume_info saved_SegAssumeTable[NUM_SEGREGS];
 static assume_info saved_StdAssumeTable[NUM_STDREGS];
 #endif
 
+/* order to use for assume searches */
+static const enum assume_segreg searchtab[] = {
+    ASSUME_DS, ASSUME_SS, ASSUME_ES, ASSUME_FS, ASSUME_GS, ASSUME_CS
+};
+
 void SetSegAssumeTable( void *savedstate )
 /****************************************/
 {
@@ -155,8 +160,8 @@ void ModelAssumeInit( void )
     }
 }
 
-struct asm_sym * GetStdAssume(int reg)
-/************************************/
+struct asm_sym * GetStdAssume( int reg )
+/**************************************/
 {
     return (StdAssumeTable[reg].symbol);
 }
@@ -338,10 +343,13 @@ ret_code AssumeDirective( int i )
  * - sym: segment of symbol for which to search segment register
  * - def: prefered default register (or ASSUME_NOTHING )
  * - search_grps: if TRUE, check groups as well
+ *
+ * for data items, Masm checks assumes in this order:
+ *   DS, SS, ES, FS, GS, CS
  */
 
 enum assume_segreg search_assume( struct asm_sym *sym,
-                         enum assume_segreg def, bool search_grps )
+                  enum assume_segreg def, bool search_grps )
 /**********************************************************/
 {
     asm_sym *grp;
@@ -367,18 +375,18 @@ enum assume_segreg search_assume( struct asm_sym *sym,
     /* now check all segment registers */
 
     for( def = 0; def < NUM_SEGREGS; def++ ) {
-        if( SegAssumeTable[def].symbol == sym ) {
-            return( def );
+        if( SegAssumeTable[searchtab[def]].symbol == sym ) {
+            return( searchtab[def] );
         }
     }
 
     /* now check the groups */
     if( search_grps && grp )
         for( def = 0; def < NUM_SEGREGS; def++ ) {
-            if( SegAssumeTable[def].flat && grp == &flat_grp->sym )
-                return( def );
-            if( SegAssumeTable[def].symbol == grp ) {
-                return( def );
+            if( SegAssumeTable[searchtab[def]].flat && grp == &flat_grp->sym )
+                return( searchtab[def] );
+            if( SegAssumeTable[searchtab[def]].symbol == grp ) {
+                return( searchtab[def] );
             }
         }
 
@@ -403,13 +411,13 @@ asm_sym *GetOverrideAssume( enum assume_segreg override )
 
 /*
  * in:
- * override: CodeInfo->prefix.SegOverride
+ * override: SegOverride
  * sym: symbol in current memory operand
  * def: default segment assume value
  */
 
 enum assume_segreg GetAssume( struct asm_sym *override, struct asm_sym *sym, enum assume_segreg def, asm_sym * *passume )
-/*********************************************************************************************/
+/***********************************************************************************************************************/
 {
     enum assume_segreg  reg;
 

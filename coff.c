@@ -23,6 +23,7 @@
 #include "coffspec.h"
 #include "fatal.h"
 #include "input.h"
+#include "myassert.h"
 
 #if COFF_SUPPORT
 
@@ -287,7 +288,7 @@ ret_code coff_write_section_table( module_info *ModuleInfo )
 static short CoffGetType( const asm_sym * sym )
 /*********************************************/
 {
-    if (sym->state == SYM_PROC)
+    if ( sym->isproc )
         return( 0x20 );
 
 #if 0
@@ -310,8 +311,6 @@ static short CoffGetClass( const asm_sym * sym )
 /**********************************************/
 {
     if ( sym->state == SYM_EXTERNAL || sym->public == TRUE )
-        return( IMAGE_SYM_CLASS_EXTERNAL );
-    else if ( sym->state == SYM_PROC && sym->isproc == FALSE )
         return( IMAGE_SYM_CLASS_EXTERNAL );
 #if HELPSYMS
     else if ( sym->variable == TRUE ) /* assembly time variable in fixup */
@@ -443,12 +442,14 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
         }
     }
 
-    // third are externals + communals
+    // third are externals + communals ( + protos [since v2.01] )
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
         /* skip "weak" (=unused) externdefs */
-        if (curr->sym.comm == FALSE && curr->sym.weak == TRUE)
+        if ( curr->sym.comm == FALSE && curr->sym.weak == TRUE ) {
+            DebugMsg(("coff_write_symbols(EXT+COMM): %s skipped, used=%u, comm=%u, weak=%u\n", curr->sym.name, curr->sym.used, curr->sym.comm, curr->sym.weak ));
             continue;
+        }
         Mangle( &curr->sym, buffer );
         len = strlen( buffer );
 
@@ -476,11 +477,11 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
         ifh.NumberOfSymbols++;
     }
 
+#if 0 /* v2.01: PROTOs are now in TAB_EXT */
     // PROTOs which have been "used" and have no matching PROC are also
     // externals.
-
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
-        if( curr->sym.used == FALSE || curr->sym.isproc == TRUE )
+        if( curr->sym.used == FALSE || curr->sym.state != SYM_EXTERNAL )
             continue;
         Mangle( &curr->sym, buffer );
         len = strlen( buffer );
@@ -504,7 +505,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             WriteError();
         ifh.NumberOfSymbols++;
     }
-
+#endif
     // publics and internal symbols. The internal symbols have
     // been written to the "public" queue inside coff_write_data().
 
@@ -513,11 +514,11 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
         Mangle( sym, buffer );
         len = strlen( buffer );
 #ifdef DEBUG_OUT
-        if ( sym->state == SYM_PROC && sym->isproc == TRUE && Options.line_numbers )
+        if ( sym->state == SYM_INTERNAL && sym->isproc == TRUE && Options.line_numbers )
             DebugMsg(("coff_write_symbols(%u): %s, file=%u\n", ifh.NumberOfSymbols, sym->name, sym->debuginfo->file ));
 #endif
         if ( Options.line_numbers &&
-            sym->state == SYM_PROC &&
+            sym->isproc &&
             sym->debuginfo->file != lastfile ) {
             lastfile = sym->debuginfo->file;
             strncpy( is.N.ShortName, ".file", IMAGE_SIZEOF_SHORT_NAME );
@@ -551,7 +552,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             is.SectionNumber = 0;
 
         is.NumberOfAuxSymbols = 0;
-        if ( Options.line_numbers && sym->state == SYM_PROC )
+        if ( Options.line_numbers && sym->isproc )
             is.NumberOfAuxSymbols++;
 
         if ( len <= IMAGE_SIZEOF_SHORT_NAME )
@@ -566,7 +567,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
         if ( fwrite( &is, 1, sizeof(is), FileInfo.file[OBJ] ) != sizeof(is) )
             WriteError();
         ifh.NumberOfSymbols++;
-        if ( Options.line_numbers && sym->state == SYM_PROC ) {
+        if ( Options.line_numbers && sym->isproc ) {
             /* write:
              * 1.   the aux for the proc
              * 2+3. a .bf record with 1 aux
@@ -937,28 +938,30 @@ static uint_32 SetSymbolIndices( void )
 
     /* count externals and protos */
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
-        if (curr->sym.comm == 0 && curr->sym.weak == 1)
+        if (curr->sym.comm == FALSE && curr->sym.weak == TRUE )
             continue;
         curr->sym.idx = index++;
     }
+#if 0
+    /* v2.01: PROTOs are now in TAB_EXT */
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         if( curr->sym.used == FALSE || curr->sym.isproc == TRUE )
             continue;
         curr->sym.idx = index++;
     }
-
+#endif
     /* count publics */
     vp = NULL;
     while( sym = GetPublicData( &vp ) ) {
         if( sym->state == SYM_UNDEFINED ) {
             continue;
-        } else if ( sym->state == SYM_PROC && sym->isproc == FALSE ) {
+        } else if ( sym->state == SYM_EXTERNAL && sym->isproc == TRUE ) {
             continue;
         } else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
             continue;
         }
         /* if line numbers are on, co, add 6 entries for procs */
-        if ( Options.line_numbers && sym->state == SYM_PROC ) {
+        if ( Options.line_numbers && sym->isproc ) {
             if (  sym->debuginfo->file != lastfile ) {
                 if ( start_files == 0 )
                     start_files = index;
@@ -1175,8 +1178,7 @@ ret_code coff_write_data( module_info *ModuleInfo )
                      */
                     fix->sym = fix->segment;
 #endif
-                } else if (( fix->sym->state == SYM_INTERNAL ||
-                     ( fix->sym->state == SYM_PROC && fix->sym->isproc == TRUE ) ) &&
+                } else if (( fix->sym->state == SYM_INTERNAL ) &&
                     fix->sym->included == FALSE &&
                     fix->sym->public == FALSE) {
                     fix->sym->included = TRUE;
@@ -1184,7 +1186,7 @@ ret_code coff_write_data( module_info *ModuleInfo )
                     DebugMsg(("coff_write_data(%s, %Xh): %s added to symbol table, idx=%u\n",
                               section->sym.name, offset, fix->sym->name, index ));
                     fix->sym->idx = index++;
-                    if ( Options.line_numbers && fix->sym->state == SYM_PROC )
+                    if ( Options.line_numbers && fix->sym->isproc )
                         index += 6;
                 }
                 ir.VirtualAddress = fix->fixup_loc;
@@ -1206,6 +1208,7 @@ ret_code coff_write_data( module_info *ModuleInfo )
                 uint_32 line_numbers = 0;
                 last = NULL;
                 lni = (struct line_num_info *)((qdesc *)section->e.seginfo->LinnumQueue)->head;
+                DebugMsg(("coff_write_data(%s): writing linnum data\n", section->sym.name ));
                 while ( lni ) {
                     DebugMsg(("coff_write_data(%s, %Xh): linnum, #=%u, ofs=%X, sym=%s\n",
                               section->sym.name, offset, lni->number, lni->offset, lni->number ? "NULL" : lni->sym->name ));
@@ -1230,6 +1233,7 @@ ret_code coff_write_data( module_info *ModuleInfo )
                         //((dir_node *)lni->sym)->e.procinfo->file = lni->file;
                         lni->sym->debuginfo->ln_fileofs = data_pos + offset;
                     } else {
+                        myassert( last != NULL );
                         il.Linenumber = lni->number - last->debuginfo->start_line;
                         if ( il.Linenumber == 0) /* avoid # 0 */
                             il.Linenumber = 0x7FFF;

@@ -1,7 +1,7 @@
 
 // simple types
 
-pick ( NULL,    MT_EMPTY,  USE_EMPTY )
+pick ( NULL,    MT_EMPTY,  USE_EMPTY ) /* still needed! See types.c */
 pick ( BYTE,    MT_BYTE,   USE_EMPTY )
 pick ( SBYTE,   MT_SBYTE,  USE_EMPTY )
 pick ( WORD,    MT_WORD,   USE_EMPTY )
@@ -23,3 +23,4 @@ pick ( FAR,     MT_FAR,    USE_EMPTY )
 pick ( FAR16,   MT_FAR,    USE16     )
 pick ( FAR32,   MT_FAR,    USE32     )
 pick ( PROC,    MT_NEAR,   USE_EMPTY )
+pick ( PTR,     MT_PTR,    USE_EMPTY )

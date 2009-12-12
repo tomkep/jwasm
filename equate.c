@@ -133,11 +133,10 @@ asm_sym * CreateConstant( bool redefine )
         AsmBuffer[i]->hvalue == 0 ) {
         opndx.llvalue = AsmBuffer[i]->value64;
         opndx.hlvalue = 0;
-        opndx.kind = EXPR_CONST;
         opndx.string = NULL;
         opndx.instr = EMPTY;
-        opndx.labeldiff = FALSE;
-        opndx.indirect = FALSE;
+        opndx.kind = EXPR_CONST;
+        opndx.flags = 0;
         rc = NOT_ERROR;
         DebugMsg(( "%lu. CreateConstant(%s): simple numeric value=%lX\n", LineNumber, name, AsmBuffer[i]->value64 ));
         i++;
@@ -180,17 +179,17 @@ asm_sym * CreateConstant( bool redefine )
         rc = EvalOperand( &i, Token_Count, &opndx, redefine );
     }
     /* for EQU, don't allow value to change */
-    if (cmpvalue) {
+    if ( cmpvalue ) {
         if ( rc != ERROR &&
             AsmBuffer[i]->token == T_FINAL &&
             (opndx.kind == EXPR_CONST ||
              (opndx.kind == EXPR_ADDR && opndx.sym != NULL ))) {
-            DebugMsg(( "CreateConstant(%s): expression evaluated, value=%lX, string=%X\n", name, opndx.value, opndx.string));
+            DebugMsg(( "CreateConstant(%s): expression evaluated, value=%lX, string=%X, labeldiff=%u\n", name, opndx.value, opndx.string, opndx.labeldiff ));
             if ( opndx.kind == EXPR_CONST && sym->value == opndx.value ) {
                 return( sym );
             }
             // if ((opndx.kind == EXPR_ADDR) && (dir->e.constinfo->sym->offset == opndx.sym->offset))
-            if (opndx.kind == EXPR_ADDR) {
+            if ( opndx.kind == EXPR_ADDR ) {
 #if 0
                 /* test case:
 
@@ -230,17 +229,16 @@ asm_sym * CreateConstant( bool redefine )
         else
             DebugMsg(("CreateConstant(%s), ADDR value changed: old=%X, new sym=NULL, value=%X\n", name, sym->offset, opndx.value));
 #endif
-        if (opndx.kind == EXPR_CONST) {
+        if ( opndx.kind == EXPR_CONST ) {
 #if FLAG_LABELDIFF
             /* skip error if constant is the difference of 2 labels and
-             a phase error has occured */
-//            if (opndx.labeldiff) {
-            if (opndx.labeldiff && PhaseError) {
-                /* the following line was active for v1.9-v1.93.
-                 but this was probably an error. A difference between
-                 2 labels must be constant once there's no phase error
-                 anymore. Otherwise it's an error.
-                 */
+             * a phase error has occured.
+             * v2.01: the PhaseError variable cannot be queried here. It is
+             * set when a label's value changes, but this needn't have happened
+             * yet.
+             */
+            //if ( opndx.labeldiff && PhaseError ) {
+            if ( opndx.labeldiff ) {
                 goto noerr;
             }
 #endif
@@ -260,12 +258,12 @@ noerr:
         //opndx.string == NULL &&
         opndx.indirect == FALSE &&
         
-         /* the CONST's magnitude must be <= 32 */
-        ((opndx.kind == EXPR_CONST &&
-          ((opndx.hvalue == 0 && opndx.hlvalue == 0) ||
-           (opndx.value < 0 && opndx.hvalue == -1))) ||
-         (opndx.kind == EXPR_ADDR && opndx.sym != NULL && opndx.sym->state != SYM_EXTERNAL)) &&
-        (opndx.instr == EMPTY || redefine == TRUE)) {
+         /* CONSTs must be internal, and the magnitude must be <= 32 */
+        ( ( opndx.kind == EXPR_CONST && opndx.abs == FALSE &&
+          (( opndx.hvalue == 0 && opndx.hlvalue == 0 ) ||
+           ( opndx.hvalue == -1 && opndx.uvalue != 0 ) ) ) ||
+         ( opndx.kind == EXPR_ADDR && opndx.sym != NULL && opndx.sym->state != SYM_EXTERNAL ) ) &&
+        ( opndx.instr == EMPTY || redefine == TRUE ) ) {
         if (!sym) {
             sym = SymCreate( name, TRUE );
 #if FASTPASS
@@ -287,12 +285,32 @@ noerr:
             sym->state = SYM_INTERNAL;
         }
         sym->defined = TRUE;
-        if (opndx.kind == EXPR_CONST) {
+        if ( opndx.kind == EXPR_CONST ) {
             sym->mem_type = MT_ABS;
-            sym->value = opndx.value;
-            DebugMsg(("%lu. CreateConstant(%s), CONST, pass=%u, value=%lX\n", LineNumber, name, Parse_Pass+1, opndx.value ));
+            sym->uvalue = opndx.uvalue;
+            sym->sign = (opndx.hvalue < 0);
+            DebugMsg(("%lu. CreateConstant(%s), CONST, pass=%u, value=%lX, sign=%u, labeldiff=%u\n", LineNumber, name, Parse_Pass+1, sym->uvalue, sym->sign, opndx.labeldiff ));
         } else {
+#if 1 /* v2.01: allow PROC equates */
+            if ( opndx.sym->isproc ) {
+                dir_node *dir = (dir_node *)sym;
+                sym->equate = TRUE;
+                sym->isproc = TRUE;
+                /* just copy the procinfo extension! */
+                dir->e.procinfo = ((dir_node *)opndx.sym)->e.procinfo;
+            }
+#endif
             sym->mem_type = opndx.mem_type;
+            /* v2.01: allow equates of variables with arbitrary type.
+             * Currently the expression evaluator sets opndx.mem_type
+             * to the mem_type of the type (i.e. QWORD for a struct with size 8),
+             * which is a bad idea in this case. So the original mem_type of the
+             * label is used instead.
+             */
+            if ( opndx.sym->mem_type == MT_TYPE && opndx.explicit == FALSE ) {
+                sym->mem_type = opndx.sym->mem_type;
+                sym->type = opndx.sym->type;
+            }
             sym->offset = opndx.sym->offset + opndx.value;
             sym->segment = opndx.sym->segment;
             DebugMsg(("%lu. CreateConstant(%s), ADDR, pass=%u, values: ofs=%lX/value=%lX (sym=%s)\n", LineNumber, name, Parse_Pass+1, opndx.sym->offset, opndx.value, opndx.sym->name ));

@@ -180,7 +180,7 @@ ret_code ExterndefDirective( int i )
         } else if ( AsmBuffer[i]->token == T_DIRECTIVE ) {
             if ( AsmBuffer[i]->value == T_PROTO ) {
                 /* dont scan this line further */
-                /* a SYM_PROC will be defined finally, not a SYM_EXTERNAL */
+                /* ProtoDef() will define a SYM_EXTERNAL */
                 return ( ProtoDef(i, token) );
             } else if ( AsmBuffer[i]->value == T_PROC ) {
                 mem_type = SimpleType[ST_PROC].mem_type;
@@ -195,13 +195,17 @@ ret_code ExterndefDirective( int i )
             }
         }
         if ( mem_type == MT_EMPTY ) {
-            AsmError( INVALID_QUALIFIED_TYPE );
-            return( ERROR );
-        }
-        /* if it is a pointer to something (not VOID),
-         an anonymous TYPEDEF has to be created
-         */
-        if ( mem_type == MT_PTR && AsmBuffer[i+1]->token != T_FINAL ) {
+            /* v2.01: "EXTERNDEF <name>:" is accepted by Masm!
+             * No type is associated with the external then.
+             */
+            if ( AsmBuffer[i]->token != T_FINAL ) {
+                AsmError( INVALID_QUALIFIED_TYPE );
+                return( ERROR );
+            }
+        } else if ( mem_type == MT_PTR && AsmBuffer[i+1]->token != T_FINAL ) {
+            /* if it is a pointer to something (not VOID),
+             an anonymous TYPEDEF has to be created
+             */
             if (( symtype = CreateTypeDef("", &i )) == NULL )
                 return (ERROR);
             DebugMsg(("ExterndefDirective(%s): CreateTypeDef()=%X\n", token, symtype));
@@ -271,9 +275,9 @@ ret_code ExterndefDirective( int i )
         SetMangler( sym, mangle_type, langtype );
 
         /* write a global entry if none has been written yet */
-        if (sym->state == SYM_EXTERNAL && sym->weak == FALSE)
+        if ( sym->state == SYM_EXTERNAL && sym->weak == FALSE )
             ;// skip EXTERNDEF if a real EXTERN/COMM was done
-        else if (sym->global == FALSE) {
+        else if ( sym->global == FALSE ) {
             sym->global = TRUE;
             DebugMsg(("writing a global entry for %s\n", sym->name));
             AddGlobalData( (dir_node *)sym );
@@ -399,9 +403,14 @@ ret_code ExternDirective( int i )
             }
         }
 
-        if (mem_type == MT_EMPTY ) {
-            AsmError( INVALID_QUALIFIED_TYPE );
-            return( ERROR );
+        if ( mem_type == MT_EMPTY ) {
+            /* v2.01: "EXTERN <name>:" is accepted by Masm!
+             * No type is associated with the external then.
+             */
+            if ( AsmBuffer[i]->token != T_FINAL ) {
+                AsmError( INVALID_QUALIFIED_TYPE );
+                return( ERROR );
+            }
         }
 
         for( ; i < Token_Count && AsmBuffer[i]->token != T_COMMA; i++ );
@@ -439,8 +448,7 @@ ret_code ExternDirective( int i )
                 }
             } else {
                 if ( sym->altname = SymSearch( altname ) ) {
-                    if ( sym->altname->state != SYM_INTERNAL &&
-                         sym->altname->state != SYM_PROC ) {
+                    if ( sym->altname->state != SYM_INTERNAL ) {
                         sym->altname = NULL;
                         AsmErr( SYMBOL_TYPE_CONFLICT, altname );
                         return( ERROR );
@@ -493,7 +501,7 @@ ret_code ExternDirective2( int i )
             symalt = SymSearch( AsmBuffer[i]->string_ptr );
             if ( symalt == NULL || ( symalt->state == SYM_EXTERNAL && symalt->weak == TRUE ) ) {
                 AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
-            } else if (symalt->state != SYM_INTERNAL && symalt->state != SYM_PROC ) {
+            } else if (symalt->state != SYM_INTERNAL ) {
                 AsmErr( SYMBOL_TYPE_CONFLICT, AsmBuffer[i]->string_ptr );
             } else {
                 sym = SymSearch( token );
@@ -544,12 +552,11 @@ ret_code PublicDirective( int i )
         if( sym != NULL ) {
             if (sym->state != SYM_UNDEFINED &&
                 sym->state != SYM_INTERNAL &&
-                sym->state != SYM_EXTERNAL &&
-                sym->state != SYM_PROC) {
+                sym->state != SYM_EXTERNAL ) {
                 AsmErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
                 return( ERROR );
             }
-            if ( sym->scoped == TRUE && (sym->state == SYM_INTERNAL || sym->state == SYM_PROC) ) {
+            if ( sym->scoped == TRUE && ( sym->state == SYM_INTERNAL ) ) {
                 AsmErr( CANNOT_DECLARE_SCOPED_CODE_LABEL_AS_PUBLIC, sym->name );
                 return( ERROR );
             }

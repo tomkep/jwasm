@@ -456,10 +456,12 @@ void omf_write_lib( void )
 void omf_write_export( void )
 /***************************/
 {
+    uint_8      parmcnt;
     dir_node    *dir;
+    dir_node    *parm;
     obj_rec     *objr;
     //char        *name;
-    char        buffer[MAX_ID_LEN+1];
+    char        buffer[MAX_ID_LEN+8+1]; /* leave space for decoration */
 
     for( dir = Tables[TAB_PROC].head; dir != NULL; dir = dir->next ) {
         if( dir->e.procinfo->export ) {
@@ -473,8 +475,16 @@ void omf_write_export( void )
             else
                 strcpy( buffer, dir->sym.name );
             OmfAllocData( objr, 4 + strlen( buffer )  );
-            OmfPut8( objr, 2 );
-            OmfPut8( objr, 0 );             // temporary
+            OmfPut8( objr, 2 ); /* subtype 02 is EXPDEF */
+            /* write the "Exported Flag" byte:
+             * bits 0-4: parameter count
+             * bit 5: no data (entry doesn't use initialized data )
+             * bit 6: resident (name should be kept resident)
+             * bit 7: ordinal ( if 1, 2 byte index must follow name)
+             */
+            for ( parm = dir->e.procinfo->paralist, parmcnt = 0; parm; parm = parm->nextparam, parmcnt++ );
+            parmcnt &= 0x1F; /* ensure bits 5-7 are still 0 */
+            OmfPut8( objr, parmcnt ); /* v2.01: changed from fix 0x00 */
             OmfPutName( objr, buffer, strlen( buffer ) );
             OmfPut8( objr, 0 );
             omf_write_record( objr, TRUE );
@@ -503,10 +513,14 @@ void omf_write_grp( void )
 
         grp->d.grpdef.idx = curr->e.grpinfo->idx;
 
-        /* we might need up to 3 bytes for each seg in dgroup and 1 byte for
-           the group name index */
-        OmfAllocData( grp, 1 + 3 * curr->e.grpinfo->numseg );
-        OmfPut8( grp, GetLnameIdx( curr->sym.name ) );
+        /* we might need:
+         * - 1 or 2 bytes for the group name index
+         * - 2 or 3 bytes for each segment in the group
+         */
+        OmfAllocData( grp, 2 + 3 * curr->e.grpinfo->numseg );
+        /* v2.01: the LName index of the group may be > 0xff */
+        //OmfPut8( grp, GetLnameIdx( curr->sym.name ) );
+        OmfPutIndex( grp, GetLnameIdx( curr->sym.name ) );
 
         for( seg = curr->e.grpinfo->seglist; seg; seg = seg->next ) {
             //writeseg = TRUE;
@@ -521,7 +535,7 @@ void omf_write_grp( void )
                 // LineNumber = line_num;
             } else {
                 OmfPut8( grp, GRP_SEGIDX );
-                OmfPutIndex( grp, segminfo->e.seginfo->segrec->d.segdef.idx);
+                OmfPutIndex( grp, segminfo->e.seginfo->segrec->d.segdef.idx );
             }
         }
         OmfTruncRec( grp );
@@ -530,7 +544,11 @@ void omf_write_grp( void )
     DebugMsg(("omf_write_grp exit\n"));
 }
 
-/* write segment table */
+/* write segment table.
+ * This is done after pass 1.
+ * There might exist entries of undefined segments in
+ * the segment list!
+ */
 
 void omf_write_seg( void )
 /************************/
@@ -599,6 +617,10 @@ void omf_write_seg( void )
                   objr->d.segdef.align,
                   objr->d.segdef.combine
                  ));
+        /* write a comment for the linker.
+         * this is something not done by Masm, it has
+         * been inherited from Wasm.
+         */
         if( curr->e.seginfo->segtype == SEGTYPE_CODE ) {
             obj_rec     *rec;
 
@@ -691,7 +713,8 @@ void omf_write_extdef( )
     // first scan the EXTERN/EXTERNDEF items
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
-        if ((curr->sym.comm == 1) || (curr->sym.weak == 1))
+        DebugMsg(("omf_write_extdef: %s, weak=%u, used=%u\n", curr->sym.name, curr->sym.weak, curr->sym.used ));
+        if ( ( curr->sym.comm == TRUE ) || ( curr->sym.weak == TRUE ) )
             continue;
         DebugMsg(("omf_write_extdef: %s\n", curr->sym.name));
         Mangle( &curr->sym, buffer );
@@ -720,8 +743,8 @@ void omf_write_extdef( )
         name[i++] = 0;      // for the type index
     }
 
+#if 0 /* v2.01: PROTOs have been moved to TAB_EXT */
     // now scan the PROTO items
-
     for(curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         /* the item must be USED and UNDEFINED */
         if( curr->sym.used == TRUE && curr->sym.isproc == FALSE ) {
@@ -752,6 +775,8 @@ void omf_write_extdef( )
             name[i++] = 0;      // for the type index
         }
     }
+#endif
+
     DebugMsg(("omf_write_extdef: attach data, curr=%X, size=%u, last=%u, names=%u, MAX=%u\n", curr, total_size, len, num, MAX_EXT_LENGTH));
     if( num != 0 ) {
         OmfAttachData( objr, (uint_8 *)name, total_size );
@@ -1242,14 +1267,9 @@ struct fixup *omf_create_fixup( struct asmfixup *fixup )
                 /* set the frame to the frame of the corresponding segment */
                 fixup->frame_datum = GetGrpIdx( sym );
             }
-        } else if ( sym->state == SYM_PROC && sym->isproc == FALSE ) {
-            /* these are PROTOs without a segment reference */
-            DebugMsg(("CreateOmfFixupRec(%X): PROTO %s\n", fixup, sym->name));
-            fixomf->lr.target = TARGET_EXT;
-            fixomf->lr.target_datum = sym->idx;
         } else {
             //asm_sym *grpsym;
-            /* it's a SYM_INTERNAL/SYM_PROC */
+            /* it's a SYM_INTERNAL */
             DebugMsg(("CreateOmfFixupRec(%X): fixup->frame, datum=%u.%u sym->name=%s state=%X segm=%X\n",
                       fixup, fixup->frame, fixup->frame_datum, sym->name, sym->state, sym->segment ));
             if ( sym->segment == NULL ) {

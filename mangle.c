@@ -108,7 +108,7 @@ static char *StdcallMangler( struct asm_sym *sym, char *buffer )
     dir_node    *dir = (dir_node *)sym;
 
     if( Options.stdcall_decoration == STDCALL_FULL &&
-       sym->state == SYM_PROC ) {
+       sym->isproc ) {
         sprintf( buffer, "_%s@%d", sym->name, dir->e.procinfo->parasize );
         return( buffer );
     } else {
@@ -127,7 +127,7 @@ static char *ow_decorate( struct asm_sym *sym, char *buffer )
     char                *name;
     enum changes        changes = NORMAL;
 
-    if( sym->state == SYM_PROC ) {
+    if( sym->isproc ) {
         changes |= USCORE_BACK;
     } else {
         switch( sym->mem_type ) {

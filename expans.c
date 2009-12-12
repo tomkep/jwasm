@@ -43,17 +43,20 @@ static const char __digits[] = "0123456789ABCDEF";
 // C ltoa() isn't fully compatible since hex digits are lower case.
 // for JWasm, it's ensured that 2 <= radix <= 16.
 
-char *myltoa( int_32 value, char *buffer, int radix, bool addzero )
-/*****************************************************************/
+char *myltoa( uint_32 value, char *buffer, uint radix, bool sign, bool addzero )
+/******************************************************************************/
 {
     char   *p;
     char   *dst = buffer;
     char   tmpbuf[34];
 
+#ifdef DEBUG_OUT
+    uint_32 saved_value = value;
+#endif
     tmpbuf[33] = '\0';
-    if ( value < 0 ) {
+    if ( sign ) {
         *dst++ = '-';
-        value = 0 - value;
+         value = 0 - value;
     } else if ( value == 0 ) {
         *dst++ = '0';
         *dst = NULLC;
@@ -64,6 +67,7 @@ char *myltoa( int_32 value, char *buffer, int radix, bool addzero )
     if ( addzero && ( *(p+1) > '9') ) /* v2: add a leading '0' if first digit is alpha */
         *p-- = '0';
     strcpy( dst, p + 1 );
+    DebugMsg(("myltoa(in %Xh,out %s, %u, %u)\n", saved_value, buffer, radix, addzero ));
     return( buffer );
 }
 
@@ -688,7 +692,7 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
 
                 i = 1;
                 if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) != ERROR ) {
-                    DebugMsg(( "RunMacro(%s.%s): num expansion, opndx.type=%d, value=%u\n", macro->sym.name, info->parmlist[parmidx].label, opndx.type, opndx.value));
+                    DebugMsg(( "RunMacro(%s.%s): num expansion, opndx.type=%d, value=%d\n", macro->sym.name, info->parmlist[parmidx].label, opndx.type, opndx.value ));
                     /* the expression evaluator accepts forward references
                      but the % operator won't accept them */
                     if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
@@ -701,7 +705,7 @@ int RunMacro( dir_node * macro, char * params, char * prefix, bool runit, bool i
                         /* the evaluator was unable to evaluate the full expression */
                         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->pos );
                     } else
-                        myltoa( opndx.value, start_expr, ModuleInfo.radix, FALSE );
+                        myltoa( opndx.uvalue, start_expr, ModuleInfo.radix, opndx.hvalue < 0, FALSE );
                 }
             }
 
@@ -937,6 +941,7 @@ static ret_code ExpandTextMacro( dir_node * dir, int pos, char * string, int add
 {
     int count;
     int i;
+    int len;
     dir_node *tmpdir;
     char * p;
     char *src;
@@ -974,13 +979,20 @@ static ret_code ExpandTextMacro( dir_node * dir, int pos, char * string, int add
 
             GetTextMacroValue( dst, buffer3 );
 
-            RunMacro( tmpdir, buffer3, buffer, TRUE, TRUE, addbrackets );
+            i = RunMacro( tmpdir, buffer3, buffer, TRUE, TRUE, addbrackets );
             DebugMsg(("ExpandTextMacro: replace >%s< by >%s<\n", dir->sym.string_ptr, buffer));
             memcpy( string, buffer2, start );
             p = string + start;
-            strcpy(p, buffer);
-            p = p + strlen(p);
-            strcpy(p, buffer2+start+count);
+            strcpy( p, buffer );
+            p += strlen( p );
+            /* v2.01: don't forget possible chars in the text macro
+             * string behind the ')'! */
+            if ( i != -1 ) {
+                len = strlen( buffer3 + i );
+                memcpy( p, buffer3 + i, len );
+                p += len;
+            }
+            strcpy( p, buffer2 + start + count );
             Token_Count = 0;
             return( STRING_EXPANDED );
         } else if ( tmpdir->sym.state == SYM_TMACRO ) {
@@ -1063,7 +1075,7 @@ ret_code ExpandToken( int count, char * string, bool addbrackets, bool Equ_Mode 
             }
             opndx.value = 0;
         }
-        myltoa( opndx.value, StringBufferEnd, ModuleInfo.radix, FALSE );
+        myltoa( opndx.value, StringBufferEnd, ModuleInfo.radix, opndx.hvalue < 0, FALSE );
         p = AsmBuffer[count]->pos;
         AsmBuffer[count]->token = T_STRING;
         AsmBuffer[count]->string_ptr = StringBufferEnd;

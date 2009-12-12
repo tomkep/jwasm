@@ -119,6 +119,7 @@ typedef enum operand_type OPNDTYPE;
 enum operand3_type { /* this is a 4bit field only! */
     OP3_NONE = 0x00,
     //OP3_CL   = 0x01, /* v1.96: value not used */
+    OP3_XMM0 = 0x01, /* v2.01: introduced with SSE4.1 */
     OP3_I8_U = 0x02,
     //OP3_I    = 0x03, /* v1.96: value not used */
     OP3_HID  = 0x08 /* this is a flag, data in bits 0-2! */

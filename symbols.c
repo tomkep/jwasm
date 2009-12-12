@@ -711,19 +711,15 @@ static void DumpSymbol( struct asm_sym *sym )
         type = "GROUP";
         break;
     case SYM_EXTERNAL:
-        if (sym->comm)
+        if ( dir->sym.isproc )
+            type = "PROTO";
+        else if ( sym->comm )
             type = "COMMUNAL";
         else
             type = "EXTERNAL";
         break;
     case SYM_TMACRO:
         type = "TEXT";
-        break;
-    case SYM_PROC:
-        if ( dir->sym.isproc )
-            type = "PROCEDURE";
-        else
-            type = "PROTOTYPE";
         break;
     case SYM_MACRO:
         type = "MACRO";
@@ -736,9 +732,9 @@ static void DumpSymbol( struct asm_sym *sym )
         default:           type = "STRUCTURE"; break;
         }
         break;
-    case SYM_CLASS_LNAME:
-        type = "CLASS";
-        break;
+    //case SYM_CLASS_LNAME:  /* this type is never stored in the symbol table */
+    //    type = "CLASS";
+    //    break;
     case SYM_STRUCT_FIELD:
         type = "STRUCT FIELD";
         break;
@@ -746,9 +742,11 @@ static void DumpSymbol( struct asm_sym *sym )
         type = "UNDEFINED";
         break;
     case SYM_INTERNAL:
-        if ( dir->sym.mem_type == MT_ABS ) {
+        if ( dir->sym.isproc )
+            type = "PROCEDURE";
+        else if ( dir->sym.mem_type == MT_ABS )
             type = "NUMBER";
-        } else
+        else
             type = "INTERNAL";
         break;
     default:

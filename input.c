@@ -1043,7 +1043,8 @@ int GetPreprocessedLine( char *string )
                 if ( *ptr == NULLC )
                     break;
                 if ( (Token_Count = Tokenize( ptr, Token_Count )) == 0 )
-                    return -1;
+                    //return -1; /* v2.01: too many tokens?   */
+                    break;       /* then just skip this line! */
             } while ( AsmBuffer[Token_Count-1]->token == T_COMMA );
         }
     }
@@ -1167,9 +1168,7 @@ int GetPreprocessedLine( char *string )
             return(0);
 #endif
         case T_TEXTEQU:
-            CatStrDef( 1 );
-            return(0);
-        case T_CATSTR:
+        case T_CATSTR: /* TEXTEQU and CATSTR are synonyms! */
             CatStrDef( 1 );
             return(0);
         case T_SUBSTR:

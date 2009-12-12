@@ -385,10 +385,7 @@ ret_code EndstructDirective( int i )
 
     i++; /* go past ENDS */
 
-    /* Pad bytes at the end of the structure.
-     * This isn't done by Masm, but JWasm does, as long
-     * as -Zne isn't set.
-     */
+    /* Pad bytes at the end of the structure. */
 #if 1
     if ( dir->e.structinfo->alignment > 1 && Options.masm_compat_gencode == FALSE ) {
         size = dir->sym.max_mbr_size;
@@ -622,9 +619,15 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
             if ( gsym->state == SYM_UNDEFINED )
                 gsym->state = SYM_STRUCT_FIELD;
             if ( gsym->state == SYM_STRUCT_FIELD ) {
+                dir_node *dir;
                 gsym->mem_type = mem_type;
                 gsym->type = &vartype->sym;
                 gsym->offset = offset; /* added v2.0 */
+                /* v2.01: must be the full offset.
+                 * (there's still a problem if alignment is > 1!)
+                 */
+                for ( dir = CurrStruct->next; dir; dir = dir->next )
+                    gsym->offset += dir->sym.offset;
                 gsym->defined = TRUE;
             }
         }

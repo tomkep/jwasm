@@ -38,7 +38,7 @@ static const char szCVCompiler[] = { "Microsoft (R) Macro Assembler Version 6.15
 static const char szCVCompiler[] = { "JWasm v" _JWASM_VERSION_ };
 #endif
 
-#define SetPrefixName( p, name, len ) *p++ = len; memcpy( p, name, len ); p += len;
+#define SetPrefixName( p, name, len ) { *p++ = len; memcpy( p, name, len ); p += len; }
 
 
 /* translate symbol's mem_type to a codeview typeref */
@@ -99,12 +99,6 @@ static uint_16 GetCVStructLen( struct asm_sym *sym, uint_8 Ofssize )
 {
     uint_16 len;
     switch ( sym->state ) {
-    case SYM_PROC:
-        if ( Ofssize == USE16 )
-            len = sizeof( struct cv_symrec_lproc16 );
-        else
-            len = sizeof( struct cv_symrec_lproc32 );
-        break;
     case SYM_TYPE:
         len = sizeof( struct cv_symrec_udt );
         break;
@@ -115,7 +109,12 @@ static uint_16 GetCVStructLen( struct asm_sym *sym, uint_8 Ofssize )
             len = sizeof( struct cv_symrec_bprel32 );
         break;
     default:
-        if ( sym->mem_type == MT_NEAR || sym->mem_type == MT_FAR ) {
+        if ( sym->isproc ) {
+            if ( Ofssize == USE16 )
+                len = sizeof( struct cv_symrec_lproc16 );
+            else
+                len = sizeof( struct cv_symrec_lproc32 );
+        } else if ( sym->mem_type == MT_NEAR || sym->mem_type == MT_FAR ) {
             if ( Ofssize == USE16 )
                 len = sizeof( struct cv_symrec_label16 );
             else
@@ -364,40 +363,6 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
     len = GetCVStructLen( sym, Ofssize );
     ps = checkflush( symbols, sbuffer, ps, 1 + sym->name_size + len );
     switch ( sym->state ) {
-    case SYM_PROC:
-        DebugMsg(( "WriteSymbol: PROC=%s\n", sym->name ));
-        if ( Ofssize == USE16 ) {
-            ((struct cv_symrec_lproc16 *)ps)->sr.size = sizeof( struct cv_symrec_lproc16 ) - sizeof(uint_16) + 1 + sym->name_size;
-            ((struct cv_symrec_lproc16 *)ps)->sr.type = (sym->public ? S_GPROC16 : S_LPROC16);
-            ((struct cv_symrec_lproc16 *)ps)->pParent = 0;  /* filled by CVPACK */
-            ((struct cv_symrec_lproc16 *)ps)->pEnd = 0;     /* filled by CVPACK */
-            ((struct cv_symrec_lproc16 *)ps)->pNext = 0;    /* filled by CVPACK */
-            ((struct cv_symrec_lproc16 *)ps)->proc_length = sym->total_size;
-            ((struct cv_symrec_lproc16 *)ps)->debug_start = 0;
-            ((struct cv_symrec_lproc16 *)ps)->debug_end = sym->total_size;
-            ((struct cv_symrec_lproc16 *)ps)->offset = 0;
-            ((struct cv_symrec_lproc16 *)ps)->segment = 0;
-            ((struct cv_symrec_lproc16 *)ps)->proctype = 0; /* typeref */
-            ((struct cv_symrec_lproc16 *)ps)->flags = ((sym->mem_type == MT_FAR) ? CV_TYPE_LABEL_FAR : CV_TYPE_LABEL_NEAR);
-            rectype = FIX_PTR16;
-            ofs = offsetof( struct cv_symrec_lproc16, offset );
-        } else {
-            ((struct cv_symrec_lproc32 *)ps)->sr.size = sizeof( struct cv_symrec_lproc32 ) - sizeof(uint_16) + 1 + sym->name_size;
-            ((struct cv_symrec_lproc32 *)ps)->sr.type = (sym->public ? S_GPROC32 : S_LPROC32 );
-            ((struct cv_symrec_lproc32 *)ps)->pParent = 0; /* filled by CVPACK */
-            ((struct cv_symrec_lproc32 *)ps)->pEnd = 0;    /* filled by CVPACK */
-            ((struct cv_symrec_lproc32 *)ps)->pNext = 0;   /* filled by CVPACK */
-            ((struct cv_symrec_lproc32 *)ps)->proc_length = sym->total_size;
-            ((struct cv_symrec_lproc32 *)ps)->debug_start = 0;
-            ((struct cv_symrec_lproc32 *)ps)->debug_end = sym->total_size;
-            ((struct cv_symrec_lproc32 *)ps)->offset = 0;
-            ((struct cv_symrec_lproc32 *)ps)->segment = 0;
-            ((struct cv_symrec_lproc32 *)ps)->proctype = 0; /* typeref */
-            ((struct cv_symrec_lproc32 *)ps)->flags = ((sym->mem_type == MT_FAR) ? CV_TYPE_LABEL_FAR : CV_TYPE_LABEL_NEAR);
-            rectype = FIX_PTR32;
-            ofs = offsetof( struct cv_symrec_lproc32, offset );
-        }
-        break;
     case SYM_TYPE:
         ((struct cv_symrec_udt *)ps)->sr.size = sizeof( struct cv_symrec_udt ) - sizeof(uint_16) + 1 + sym->name_size;
         ((struct cv_symrec_udt *)ps)->sr.type = S_UDT;
@@ -417,6 +382,41 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
         rectype = FIX_VOID; /* types have no fixup */
         break;
     default: /* is SYM_INTERNAL */
+        if ( sym->isproc ) {
+            DebugMsg(( "WriteSymbol: PROC=%s\n", sym->name ));
+            if ( Ofssize == USE16 ) {
+                ((struct cv_symrec_lproc16 *)ps)->sr.size = sizeof( struct cv_symrec_lproc16 ) - sizeof(uint_16) + 1 + sym->name_size;
+                ((struct cv_symrec_lproc16 *)ps)->sr.type = (sym->public ? S_GPROC16 : S_LPROC16);
+                ((struct cv_symrec_lproc16 *)ps)->pParent = 0;  /* filled by CVPACK */
+                ((struct cv_symrec_lproc16 *)ps)->pEnd = 0;     /* filled by CVPACK */
+                ((struct cv_symrec_lproc16 *)ps)->pNext = 0;    /* filled by CVPACK */
+                ((struct cv_symrec_lproc16 *)ps)->proc_length = sym->total_size;
+                ((struct cv_symrec_lproc16 *)ps)->debug_start = 0;
+                ((struct cv_symrec_lproc16 *)ps)->debug_end = sym->total_size;
+                ((struct cv_symrec_lproc16 *)ps)->offset = 0;
+                ((struct cv_symrec_lproc16 *)ps)->segment = 0;
+                ((struct cv_symrec_lproc16 *)ps)->proctype = 0; /* typeref */
+                ((struct cv_symrec_lproc16 *)ps)->flags = ((sym->mem_type == MT_FAR) ? CV_TYPE_LABEL_FAR : CV_TYPE_LABEL_NEAR);
+                rectype = FIX_PTR16;
+                ofs = offsetof( struct cv_symrec_lproc16, offset );
+            } else {
+                ((struct cv_symrec_lproc32 *)ps)->sr.size = sizeof( struct cv_symrec_lproc32 ) - sizeof(uint_16) + 1 + sym->name_size;
+                ((struct cv_symrec_lproc32 *)ps)->sr.type = (sym->public ? S_GPROC32 : S_LPROC32 );
+                ((struct cv_symrec_lproc32 *)ps)->pParent = 0; /* filled by CVPACK */
+                ((struct cv_symrec_lproc32 *)ps)->pEnd = 0;    /* filled by CVPACK */
+                ((struct cv_symrec_lproc32 *)ps)->pNext = 0;   /* filled by CVPACK */
+                ((struct cv_symrec_lproc32 *)ps)->proc_length = sym->total_size;
+                ((struct cv_symrec_lproc32 *)ps)->debug_start = 0;
+                ((struct cv_symrec_lproc32 *)ps)->debug_end = sym->total_size;
+                ((struct cv_symrec_lproc32 *)ps)->offset = 0;
+                ((struct cv_symrec_lproc32 *)ps)->segment = 0;
+                ((struct cv_symrec_lproc32 *)ps)->proctype = 0; /* typeref */
+                ((struct cv_symrec_lproc32 *)ps)->flags = ((sym->mem_type == MT_FAR) ? CV_TYPE_LABEL_FAR : CV_TYPE_LABEL_NEAR);
+                rectype = FIX_PTR32;
+                ofs = offsetof( struct cv_symrec_lproc32, offset );
+            }
+            break;
+        }
         /* there are 3 types of INTERNAL symbols:
          * - numbers ( won't occur here )
          * - labels "without type" (MT_NEAR or MT_FAR)
@@ -493,7 +493,7 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
      * to mark the block's end, write an ENDBLK item.
      */
 
-    if ( sym->state == SYM_PROC ) {
+    if ( sym->isproc ) {
         dir_node *proc = (dir_node *)sym;
         dir_node  *lcl;
 
@@ -613,15 +613,11 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
     CurrSeg = symbols;
     Modend = FALSE;
 
-    /* scan symbol table for SYM_PROC, SYM_TYPE, SYM_INTERNAL */
+    /* scan symbol table for SYM_TYPE, SYM_INTERNAL */
 
     sym = NULL;
     while ( SymEnum( &sym, &i ) ) {
         switch ( sym->state ) {
-        case SYM_PROC:
-            if ( sym->isproc == FALSE ) /* skip PROTOs */
-                break;
-            /* fall through */
         case SYM_TYPE: /* types also have an entry in the symbols table */
         //case SYM_STACK: /* stack symbols are local only */
         case SYM_INTERNAL:

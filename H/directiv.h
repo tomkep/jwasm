@@ -276,20 +276,20 @@ typedef struct dir_node {
     struct asm_sym sym;
     union {
         /* additional fields, used by
-         SYM_SEG, SYM_GRP, SYM_PROC, SYM_TYPE, SYM_MACRO */
+         SYM_SEG, SYM_GRP, SYM_INTERNAL(procs), SYM_TYPE, SYM_MACRO */
         union entry e;
         /* used to save the local hash table (contains PROC locals: params,
          locals, labels). Details see SymGetLocal(), SymSetLocal() in symbols.c */
         struct dir_node *nextll;
     };
     union {
-        /* for SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_PROC, SYM_ALIAS, SYM_LIB:
+        /* for SYM_UNDEFINED, SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_INTERNAL(procs), SYM_ALIAS:
          * linked list of this type of symbol.
          * for SYM_INTERNAL:
          * linked list of labels for current segment (used for BackPatch)
          */
         struct dir_node *next;
-        /* used by PROC params */
+        /* used by PROC params ( SYM_STACK ) */
         struct {
             unsigned char       is_vararg:1;  // if it is a VARARG param
             unsigned char       is_ptr:1;     // if it is a PTR type
@@ -298,7 +298,7 @@ typedef struct dir_node {
         };
     };
     union {
-        /* for SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_PROC, SYM_ALIAS, SYM_LIB:
+        /* for SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_INTERNAL(procs), SYM_ALIAS:
          * linked list of this type of symbol, to allow fast removes.
          * Actually, the only symbols which have a "chance" to be
          * removed are those of type SYM_EXTERNAL.

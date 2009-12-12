@@ -38,19 +38,10 @@ typedef struct {
     unsigned            flat:1;         // the register is assumed to FLAT
 } assume_info;
 
+/* segment assume table is sorted by seg reg number: ES,CS,SS,DS,FS,GS */
 extern assume_info SegAssumeTable[];
 
 #define NUM_SEGREGS 6
-
-enum assume_segreg {
-    ASSUME_NOTHING=-2,
-    ASSUME_ES=0,
-    ASSUME_CS,
-    ASSUME_SS,
-    ASSUME_DS,
-    ASSUME_FS,
-    ASSUME_GS,
-};
 
 extern void AssumeInit( void );     // init assume tables
 

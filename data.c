@@ -54,7 +54,8 @@
 #define min(x,y) (((x) < (y)) ? (x) : (y))
 #endif
 
-extern ret_code segm_override( struct code_info *CodeInfo, expr_list *opndx );
+extern ret_code segm_override( const expr_list *opndx, struct code_info *CodeInfo );
+extern struct asm_sym *SegOverride;
 extern uint_8 CommentDataInCode;
 
 /*
@@ -555,6 +556,9 @@ static void output_float( int index, unsigned no_of_bytes, bool negative )
             char_ptr = (char *)&double_value;
             break;
         default:
+            /* sizes != 4,8 or 10 aren't accepted.
+             * Masm ignores silently, JWasm also unless -W4 is set.
+             */
             if ( Parse_Pass == PASS_1 )
                 AsmWarn( 4, FLOAT_OPERAND );
             /* this is Masm-compatible: output 00 bytes */
@@ -761,7 +765,7 @@ next_item:
             } else if (AsmBuffer[cur_pos]->token == '+' && AsmBuffer[cur_pos+1]->token == T_FLOAT)
                 cur_pos++;
 
-            if (AsmBuffer[cur_pos]->token == T_FLOAT) {
+            if ( AsmBuffer[cur_pos]->token == T_FLOAT ) {
                 if (!struct_field)
                     output_float( cur_pos, no_of_bytes, negative );
                 else {
@@ -1155,13 +1159,17 @@ next_item:
                 /* there might be a segment override.
                  It can be a segment, a group or a segment register.
                  */
-                CodeInfo->prefix.SegOverride = NULL;
-                segm_override( CodeInfo, &opndx );
+                SegOverride = NULL;
+                segm_override( &opndx, NULL );
 #endif
                 if ( write_to_file ) {
                     /* set global vars Frame and Frame_Datum */
                     /* opndx.sym may be NULL, then SegOverride is set. */
-                    find_frame( CodeInfo, opndx.sym );
+                    if ( ModuleInfo.offsettype == OT_SEGMENT &&
+                        ( opndx.instr == T_OFFSET || opndx.instr == T_SEG ))
+                        find_frame2( opndx.sym );
+                    else
+                        find_frame( opndx.sym );
                     /* uses Frame and Frame_Datum  */
                     fixup = AddFixup( opndx.sym, fixup_type, OPTJ_NONE );
                     //CodeInfo->InsFixup[OPND1] = fixup;

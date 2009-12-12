@@ -23,7 +23,7 @@ extra_c_flags = -v -y -DDEBUG_OUT
 extra_c_flags = -O2 /DNDEBUG
 !endif
 
-c_flags =-q -WC -K -D__NT__ -w-8060 $(extra_c_flags)
+c_flags =-q -WC -K -D__NT__ -w-8012 -w-8057 -w-8060 $(extra_c_flags)
 
 CC = $(BCDIR)\bin\bcc32.exe -c $(inc_dirs) $(c_flags)
 LINK = $(BCDIR)\Bin\ilink32.exe -s -Tpe -ap -Gn -c -L$(BCDIR)\Lib 

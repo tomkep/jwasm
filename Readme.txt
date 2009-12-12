@@ -124,9 +124,10 @@
 
     These people contributed to JWasm ( additions, bugfixes, bug reports):
 
-    agner, BlackVortex, drizz, Paul Edwards, filofel, Peter Flass, gfalen,
-    Japheth, Jimg, jj2007, Khusraw, Alex Kozlov, Peter Kuznetsov, misca,
-    Michal Necasek, RotateRight, Ito Toshimitsu, Vortex.
+    agner, BlackVortex, drizz, Paul Edwards, filofel, Peter Flass,
+    James C. Fuller, gfalen, Japheth, Jimg, jj2007, Khusraw, Alex Kozlov,
+    Peter Kuznetsov, misca, Michal Necasek, RotateRight, Ito Toshimitsu,
+    Vortex.
 
     Japheth
 

@@ -240,9 +240,11 @@ pick( OP2_TOO_BIG,
 pick( OP1_TOO_SMALL,
       "Operand 1 too small" ,
       "オペランド1が小さすぎます" )
+#if 0
 pick( INVALID_NUMBER_DIGIT,
       "Invalid number digit" ,
       "不適切な数値です" )
+#endif
 pick( LINE_TOO_LONG,
       "Line too long" ,
       "アセンブラコードが長すぎます" )
@@ -273,9 +275,9 @@ pick( LABEL_EXPECTED,
 pick( LABEL_NOT_DEFINED,
       "Label is not defined: %s" ,
       "ラベルは定義されていません" )
-pick( MORE_THAN_ONE_OVERRIDE,
-      "More than one override" ,
-      "2個以上のオーバーライドがあります" )
+pick( MULTIPLE_OVERRIDES,
+      "Multiple overrides, ignored: %s" ,
+      "Multiple overrides, ignored: %s" )
 pick( SEGMENT_GROUP_OR_SEGREG_EXPECTED,
       "Segment, group or segment register expected" ,
       "Segment, group or segment register expected" )
@@ -293,9 +295,11 @@ pick( INCONSISTENT_INTERNAL_TABLES,
 pick( CANNOT_OFFSET_GRP,
       "Can not take offset of group" ,
       "グループのオフセットは取れません" )
+#if 0
 pick( INVALID_CHARACTER,
       "Invalid character found" ,
       "使用できない文字があります" )
+#endif
 pick( INVALID_OPERAND_SIZE,
       "Invalid operand size for instruction" ,
       "命令に対してオペランドの大きさが不適切です" )
@@ -306,8 +310,8 @@ pick( SIZE_NOT_SPECIFIED_ASSUMING,
       "Size not specified, assuming: %s" ,
       "Size not specified, assuming: %s" )
 pick( FLOAT_OPERAND,
-      "Float is used as operand" ,
-      "Float is used as operand" )
+      "Floating-point initializer ignored" ,
+      "Floating-point initializer ignored" )
 pick( ONLY_SHORT_AND_NEAR_DISPLACEMENT_IS_ALLOWED,
       "Only SHORT and NEAR displacement is allowed" ,
       "SHORT,NEARディスプレースメントのみ可能です" )
@@ -320,15 +324,15 @@ pick( SIZE_TOO_LARGE,
 pick( SEGMENT_ATTRIBUTE_DEFINED_ALREADY,
       "Segment attribute is defined already: %s" ,
       "セグメントパラメータは既に定義されています" )
-pick( SEGMENT_DEF_ERROR,
-      "Syntax error in segment definition" ,
-      "セグメント定義で構文エラーが起きています" )
+//pick( SEGMENT_DEF_ERROR,
+//      "Syntax error in segment definition" ,
+//      "セグメント定義で構文エラーが起きています" )
 pick( SEGDEF_CHANGED,
       "Segment definition changed: %s, %s" ,
       "セグメント定義が変りました" )
-pick( LNAME_TOO_LONG,
-      "Lname is too long" ,
-      "Lnameが長すぎます" )
+pick( CLASS_NAME_TOO_LONG,
+      "Class name too long" ,
+      "Class name too long" )
 pick( BLOCK_NESTING_ERROR,
       "Block nesting error: %s" ,
       "ブロック・ネスト・エラー" )
@@ -380,9 +384,9 @@ pick( MUST_BE_ASSOCIATED_WITH_CODE,
 pick( LANG_MUST_BE_SPECIFIED,
       "Language type must be specified" ,
       "言語タイプが定義されていなければなりません" )
-pick( LOCAL_VAR_MUST_FOLLOW_PROC,
-      "Local variable must immediately follow PROC or MACRO statement" ,
-      "ローカル変数はPROC文の直後になければなりません" )
+pick( PROC_MACRO_MUST_PRECEDE_LOCAL,
+      "PROC, MACRO or macro loop directive must precede LOCAL" ,
+      "PROC, MACRO or macro loop directive must precede LOCAL" )
 pick( CANNOT_NEST_PROCEDURES,
       "Cannot nest procedures" ,
       "プロシージャをネストすることはできません" )
@@ -454,7 +458,7 @@ pick( EXPECTED_FILE_NAME,
       "ファイル名が必要です" )
 #if 0
 pick( NO_FP_WITH_FPC_SET,
-      "Floating point instruction not allowed with -fpc" ,
+      "Floating-point instruction not allowed with -fpc" ,
       "-fpc指定時には、浮動小数点命令は使用できません" )
 #endif
 pick( TOO_MANY_ERRORS,

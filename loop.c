@@ -192,12 +192,17 @@ ret_code LoopDirective( int i, int directive )
 #endif
         return( ERROR );
     }
-    /* EXITM is allowed inside a loop construct */
+    /* EXITM is allowed inside a macro loop */
     /* this doesn't make the loop a macro function, reset the bit! */
     macro->sym.isfunc = FALSE;
 
     /* now run the just created macro in a loop */
 
+    /* don't run the macro if there are no lines (macroinfo->data == NULL)!
+     * this isn't exactly what Masm does; an empty 'WHILE 1'
+     * will loop "forever" in Masm,
+     */
+    if ( macro->e.macroinfo->data ) /* added in v2.01 */
     switch ( directive ) {
     case T_REPEAT:
     case T_REPT:

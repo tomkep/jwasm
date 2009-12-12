@@ -93,9 +93,13 @@
 #define K3DSUPP      1 /* support K3D instruction set            */
 #define SSE3SUPP     1 /* support SSE3 instruction set           */
 #define SSSE3SUPP    1 /* support SSSE3 instruction set          */
+#ifndef SSE4SUPP
+#define SSE4SUPP     1 /* support SSE4 instruction set           */
+#endif
 #define FIELDALIGN   1 /* support OPTION FIELDALIGN:<const>      */
 #define PROCALIGN    1 /* support OPTION PROCALIGN:<const>       */
 #define LOHI32       0 /* support LOW32/HIGH32 operators         */
+#define XMMWORD      1 /* support MMWORD and XMMWORD types       */
 #define RENAMEKEY    1 /* support OPTION RENAMEKEYWORD:<old>,new */
 #define MACROLABEL   1 /* support LABEL qualifier for macro arg  */
 #define BUILD_TARGET 0 /* support "build target" (obsolete)      */
@@ -120,8 +124,8 @@
 /* JWasm version info */
 
 #define _BETA_
-#define _JWASM_VERSION_ "2.00" _BETA_
-#define _JWASM_VERSION_INT_ 200
+#define _JWASM_VERSION_ "2.01" _BETA_
+#define _JWASM_VERSION_INT_ 201
 
 #include "errmsg.h"
 
@@ -250,6 +254,17 @@ enum listmacro {
     LM_LISTMACROALL
 };
 
+/* assume values are used as index in codegen.c! */
+enum assume_segreg {
+    ASSUME_NOTHING = EMPTY,
+    ASSUME_ES = 0,
+    ASSUME_CS,
+    ASSUME_SS,
+    ASSUME_DS,
+    ASSUME_FS,
+    ASSUME_GS
+};
+
 enum asm_cpu {
         /* bit count from left:
            bit 0-2:   Math coprocessor
@@ -293,10 +308,17 @@ enum asm_cpu {
         P_SSE3  = 0x1000,         /* SSE3 extension instructions */
 #if SSSE3SUPP
         P_SSSE3 = 0x2000,         /* SSSE3 extension instructions */
+#if SSE4SUPP
+        P_SSE4  = 0x4000,         /* SSE4 extension instructions */
+#endif
 #endif
         /* all SSE extension instructions */
 #if SSSE3SUPP
+ #if SSE4SUPP
+        P_SSEALL = P_SSE1 | P_SSE2 | P_SSE3 | P_SSSE3 | P_SSE4,
+ #else
         P_SSEALL = P_SSE1 | P_SSE2 | P_SSE3 | P_SSSE3,
+ #endif
 #else
         P_SSEALL = P_SSE1 | P_SSE2 | P_SSE3,
 #endif

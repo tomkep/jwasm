@@ -296,7 +296,7 @@ ret_code LocalDef( int i )
     DebugMsg(("LocalDef(%u) entry\n", i));
 
     if( DefineProc == FALSE || CurrProc == NULL) {
-        AsmError( LOCAL_VAR_MUST_FOLLOW_PROC );
+        AsmError( PROC_MACRO_MUST_PRECEDE_LOCAL );
         return( ERROR );
     }
 
@@ -465,11 +465,10 @@ ret_code LocalDef( int i )
 
 /* parse parameters of a PROC/PROTO
  * i=token buffer index
- * IsProc:1 for PROC, 0 for PROTO
  */
 
-static ret_code ParseParams( dir_node *proc, int i, bool IsProc )
-/***************************************************************/
+static ret_code ParseParams( dir_node *proc, int i, bool IsInternal )
+/*******************************************************************/
 {
     char            *token;
 #ifdef DEBUG_OUT
@@ -511,7 +510,7 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsProc )
 
         symtype = NULL;
         /* read symbol */
-        if ( IsProc ) {
+        if ( IsInternal ) {
             if (AsmBuffer[i]->token != T_ID) {
                 DebugMsg(("ParseParams: name missing/invalid for parameter %u, i=%u\n", cntParam+1, i));
                 AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr ); /* for PROC, parameter needs a name */
@@ -540,7 +539,7 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsProc )
 
         /* read colon (optional for PROC!) */
         if( AsmBuffer[i]->token != T_COLON ) {
-            if ( IsProc ) {
+            if ( IsInternal ) {
                 switch ( ModuleInfo.Ofssize ) {
 #if AMD64_SUPPORT
                 case USE64: mem_type = MT_QWORD; break;
@@ -601,13 +600,13 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsProc )
             if (AsmBuffer[i+1]->token != T_FINAL && AsmBuffer[i+1]->token != T_COMMA) {
                 if (ptrpos != EMPTY)
                     i = ptrpos;
-                if (( IsProc == TRUE && (symtype = CreateTypeDef("", &i)))) {
+                if (( IsInternal == TRUE && (symtype = CreateTypeDef("", &i)))) {
                     is_ptr = FALSE;
                     mem_type = symtype->mem_type;
                     i--;
                 }
 #ifdef DEBUG_OUT
-                if ( IsProc && (symtype == NULL )) {
+                if ( IsInternal && (symtype == NULL )) {
                     DebugMsg(("ParseParams: CreateTypeDef() failed!\n"));
                 }
 #endif
@@ -652,7 +651,7 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsProc )
     type_is_set:
 
         /* check if parameter name is defined already */
-        if (( IsProc ) && (sym = SymSearch( token )) && sym->state != SYM_UNDEFINED) {
+        if (( IsInternal ) && (sym = SymSearch( token )) && sym->state != SYM_UNDEFINED) {
             DebugMsg(("ParseParams: %s defined already, state=%u, local=%u\n", sym->name, sym->state, sym->scoped ));
             AsmErr( SYMBOL_PREVIOUSLY_DEFINED, token );
             return( ERROR );
@@ -680,7 +679,7 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsProc )
                 //return( ERROR );
             }
             /* the parameter type used in PROC has highest priority! */
-            if ( IsProc ) {
+            if ( IsInternal ) {
                 if (symtype) {
                     paracurr->sym.type = symtype;
                     paracurr->sym.mem_type = MT_TYPE;
@@ -700,7 +699,7 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsProc )
                     //return( ERROR );
                 }
 #endif
-            if ( IsProc ) {
+            if ( IsInternal ) {
                 DebugMsg(("ParseParams: calling SymSetName(%s, %s)\n", paracurr->sym.name, token ));
                 SymSetName( &paracurr->sym, token );
             }
@@ -727,7 +726,7 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsProc )
             AsmErr( CONFLICTING_PARAMETER_DEFINITION, "" );
             return( ERROR );
         } else {
-            if ( IsProc ) {
+            if ( IsInternal ) {
                 paranode = (dir_node *)SymLCreate( token );
             } else
                 paranode = (dir_node *)SymCreate("", FALSE );/* for PROTO, no param name needed */
@@ -870,15 +869,14 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsProc )
 /*
  * create a PROC type
  * i = position of attributes
- * IsProc = TRUE for PROC, FALSE for PROTO
  * strategy to set default value for "offset size" (16/32):
  * 1. if current model is FLAT, use 32, else
  * 2. use the current segment's attribute
  * 3. if no segment is set, use cpu setting
  */
 
-ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
-/********************************************************/
+ret_code ExamineProc( dir_node *proc, int i, bool IsInternal )
+/************************************************************/
 {
     char            *token;
     regs_list       *regist;
@@ -898,7 +896,7 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
 
     proc->sym.defined = TRUE;
 
-    if ( IsProc ) {
+    if ( IsInternal ) {
         proc->e.procinfo->export = ModuleInfo.procs_export;
         /* don't overwrite a PUBLIC directive for this symbol! */
         if ( ModuleInfo.procs_private == FALSE )
@@ -920,7 +918,7 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
 
 #if MANGLERSUPP
     /* OW name mangling */
-    if( AsmBuffer[i]->token == T_STRING && IsProc ) {
+    if( AsmBuffer[i]->token == T_STRING && IsInternal ) {
         SetMangler( &proc->sym, AsmBuffer[i]->string_ptr, LANG_NONE );
         i++;
     }
@@ -936,7 +934,7 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
         case T_NEAR16:
         case T_NEAR32:
             type = FindStdType(AsmBuffer[i]->value);
-            if ( IsProc ) {
+            if ( IsInternal ) {
                 if (( ModuleInfo.Ofssize >= USE32 && SimpleType[type].Ofssize == USE16 ) ||
                     ( ModuleInfo.Ofssize == USE16 && SimpleType[type].Ofssize == USE32 )) {
                     AsmError( DISTANCE_INVALID );
@@ -982,7 +980,7 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
 #endif
             proc->e.procinfo->export = FALSE;
             i++;
-        } else if ( IsProc && (_stricmp(token, "PUBLIC") == 0 )) {
+        } else if ( IsInternal && (_stricmp(token, "PUBLIC") == 0 )) {
             proc->sym.public = TRUE;
             proc->e.procinfo->export = FALSE;
             i++;
@@ -995,7 +993,7 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
 
     /* 4. attribute is <prologuearg>, for PROC only.
      it must be enclosed in <> */
-    if ( IsProc && AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
+    if ( IsInternal && AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
         int idx = Token_Count + 1;
         int max;
         if ( ModuleInfo.proc_prologue == NULL)
@@ -1035,7 +1033,7 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
 #if AMD64_SUPPORT
     /* check for optional FRAME[:exc_proc] */
     if ( ModuleInfo.Ofssize == USE64 &&
-        IsProc &&
+        IsInternal &&
         AsmBuffer[i]->token == T_RES_ID &&
         AsmBuffer[i]->value == T_FRAME ) {
         i++;
@@ -1053,7 +1051,6 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
                 sym->used = TRUE;
                 dir_add_table( (dir_node *)sym );
             } else if ( sym->state != SYM_UNDEFINED &&
-                       sym->state != SYM_PROC &&
                        sym->state != SYM_INTERNAL &&
                        sym->state != SYM_EXTERNAL ) {
                 AsmErr( SYMBOL_REDEFINITION, sym->name );
@@ -1070,7 +1067,7 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
     if ( AsmBuffer[i]->token == T_ID ) {
         if ( _stricmp(AsmBuffer[i]->string_ptr, "USES") == 0) {
             regs_list *lastreg = NULL;
-            if ( !IsProc ) {/* not for PROTO! */
+            if ( !IsInternal ) {/* not for PROTO! */
                 DebugMsg(("ExamineProc: USES found in PROTO\n"));
                 AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             }
@@ -1118,7 +1115,7 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
     } else  {
         if( AsmBuffer[i]->token == T_COMMA )
             i++;
-        if ( ERROR == ParseParams(proc, i, IsProc ) )
+        if ( ERROR == ParseParams(proc, i, IsInternal ) )
             /* do proceed if the parameter scan returns an error */
             ;//return( ERROR );
     }
@@ -1131,8 +1128,8 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsProc )
 
 // create a proc item. sym is either NULL or has type SYM_UNDEFINED
 
-asm_sym *CreateProc( asm_sym *sym, const char *name, unsigned char isproc )
-/*************************************************************************/
+asm_sym *CreateProc( asm_sym *sym, const char *name, unsigned char isinternal )
+/*****************************************************************************/
 {
     if ( sym == NULL )
         sym = SymCreate( name, *name != NULLC );
@@ -1141,7 +1138,13 @@ asm_sym *CreateProc( asm_sym *sym, const char *name, unsigned char isproc )
 
     if ( sym ) {
         proc_info *info;
-        sym->state = SYM_PROC;
+        if ( isinternal )
+            sym->state = SYM_INTERNAL;
+        else {
+            sym->Ofssize = ModuleInfo.Ofssize;
+            sym->state = SYM_EXTERNAL;
+            sym->weak = TRUE;
+        }
         info = AsmAlloc( sizeof( proc_info ) );
         ((dir_node *)sym)->e.procinfo = info;
         info->regslist = NULL;
@@ -1154,7 +1157,7 @@ asm_sym *CreateProc( asm_sym *sym, const char *name, unsigned char isproc )
         info->flags = 0;
         if ( *(sym->name) )
             dir_add_table( (dir_node *)sym );
-        if ( isproc ) {
+        if ( isinternal ) {
             procidx++;
             if ( Options.line_numbers ) {
                 sym->debuginfo = AsmAlloc( sizeof( struct debug_info ) );
@@ -1196,7 +1199,7 @@ void DeleteProc( dir_node *dir )
     if ( dir->e.procinfo->prologuearg )
         AsmFree( dir->e.procinfo->prologuearg );
 
-    if ( Options.line_numbers && dir->sym.isproc )
+    if ( Options.line_numbers && dir->sym.state == SYM_INTERNAL )
         AsmFree( dir->sym.debuginfo );
 
     AsmFree( dir->e.procinfo );
@@ -1261,15 +1264,15 @@ ret_code ProcDef( int i )
 
         if( sym == NULL || sym->state == SYM_UNDEFINED ) {
             sym = CreateProc( sym, name, TRUE );
-        } else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
-            /* additional checks (language type? mem type?) */
-            dir_free( (dir_node *)sym, TRUE );
-            sym = CreateProc( sym, name, TRUE );
-        } else if ( sym->state == SYM_PROC && sym->isproc == FALSE ) {
+        } else if ( sym->state == SYM_EXTERNAL && sym->isproc == TRUE ) {
             if ( Options.line_numbers ) {
                 sym->debuginfo = AsmAlloc( sizeof( struct debug_info ) );
                 sym->debuginfo->file = get_curr_srcfile();
             }
+        } else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
+            /* additional checks (language type? mem type?) */
+            dir_free( (dir_node *)sym, TRUE );
+            sym = CreateProc( sym, name, TRUE );
         } else {
             AsmErr( SYMBOL_PREVIOUSLY_DEFINED, sym->name );
             return( ERROR );
@@ -1280,8 +1283,6 @@ ret_code ProcDef( int i )
 
         oldpubstate = sym->public;
 
-        sym->isproc = TRUE;
-
         SymClearLocal();
 
         CurrProc = (dir_node *)sym;
@@ -1290,6 +1291,13 @@ ret_code ProcDef( int i )
             CurrProc = NULL;
             return( ERROR );
         }
+
+        /* if proto, change to SYM_INTERNAL! */
+        if ( sym->state == SYM_EXTERNAL && sym->isproc == TRUE ) {
+            dir_internal( dir );
+        }
+
+        sym->isproc = TRUE;
 
         if( sym->public == TRUE && oldpubstate == FALSE )
             AddPublicData( sym );
@@ -1382,7 +1390,7 @@ ret_code ProtoDef( int i, const char * name )
      of type PROTO, an external is not allowed */
     if( sym == NULL || sym->state == SYM_UNDEFINED ) {
         sym = CreateProc( sym, name, FALSE );
-    } else if ( sym->state != SYM_PROC ) {
+    } else if ( sym->isproc == FALSE ) {
         AsmErr( SYMBOL_PREVIOUSLY_DEFINED, sym->name );
         return( ERROR );
     }
@@ -1406,6 +1414,7 @@ ret_code ProtoDef( int i, const char * name )
             dir->sym.mangler  = dir2->sym.mangler;
 #endif
             dir->sym.public   = dir2->sym.public;
+            dir->sym.isproc   = TRUE;
             dir->e.procinfo->paralist = NULL;
             for ( curr = dir2->e.procinfo->paralist; curr; curr = curr->nextparam ) {
                 newl = AsmAlloc( sizeof(dir_node) );
@@ -1421,6 +1430,7 @@ ret_code ProtoDef( int i, const char * name )
             return( NOT_ERROR );
         }
     }
+    sym->isproc = TRUE;
 
     return( ExamineProc( dir, i, FALSE ) );
 }

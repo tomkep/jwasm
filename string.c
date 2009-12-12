@@ -44,17 +44,18 @@ static uint_32 equcnt;
 #endif
 
 /* use this version to ensure that uppercase letters are used! */
-extern void myltoa( long value, char *buffer, int radix, bool addzero );
+extern void myltoa( uint_32 value, char *buffer, uint radix, bool sign, bool addzero );
 
 // generic parameter names. In case the parameter name is
 // displayed in an error message ("required parameter %s missing")
 
 static const char * parmnames[] = {"p1","p2","p3"};
 
-// CatStr()
-// defines a text equate
-// syntax <name> CATSTR [<string>,...]
-// TEXTEQU is an alias for CATSTR
+/* CatStr()
+ * defines a text equate
+ * syntax <name> CATSTR [<string>,...]
+ * TEXTEQU is an alias for CATSTR
+ */
 
 ret_code CatStrDef( int i )
 /*************************/
@@ -69,6 +70,7 @@ ret_code CatStrDef( int i )
 #endif
     DebugMsg(("CatStrDef(%u) enter\n", i ));
 
+    /* syntax must be <id> CATSTR textitem[,textitem,...] */
     if ( i != 1 ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
@@ -82,11 +84,23 @@ ret_code CatStrDef( int i )
 
     sym = SymSearch( AsmBuffer[0]->string_ptr );
 
-    if( sym && sym->state != SYM_UNDEFINED && sym->state != SYM_TMACRO ) {
-        /* it is defined as something else, get out */
-        DebugMsg(( "CatStrDef(%s) exit, error\n", sym->name));
-        AsmErr( SYMBOL_REDEFINITION, sym->name );
-        return( ERROR );
+    if( sym && sym->state != SYM_TMACRO ) {
+        if( sym->state == SYM_UNDEFINED ) {
+            /* v2.01: symbol has been used already. Using
+             * a textmacro before it has been defined is
+             * somewhat problematic!
+             */
+            dir_remove_table( (dir_node *)sym );
+#if FASTPASS
+            SkipSavedState();
+#endif
+            AsmWarn( 2, TEXT_MACRO_USED_BEFORE_DEFINITION, sym->name );
+        } else  {
+            /* it is defined as something else, get out */
+            DebugMsg(( "CatStrDef(%s) exit, error\n", sym->name));
+            AsmErr( SYMBOL_REDEFINITION, sym->name );
+            return( ERROR );
+        }
     }
 
     buffer[0] = NULLC;
@@ -544,7 +558,7 @@ static ret_code InStrFunc( char * buffer, char * *params )
 {
     int pos = 1;
     char *p;
-    int found;
+    uint_32 found;
 
     DebugMsg(("@InStr( %s, %s, %s)\n",
               *(params+0) ? *(params+0) : "",
@@ -569,7 +583,7 @@ static ret_code InStrFunc( char * buffer, char * *params )
     p = strstr( *(params+1)+pos-1, *(params+2) );
     if (p) {
         found = p - *(params+1) + 1;
-        myltoa( found, buffer, ModuleInfo.radix, TRUE );
+        myltoa( found, buffer, ModuleInfo.radix, FALSE, TRUE );
     }
 
     DebugMsg(( "@InStrFunc()=>%s<\n", buffer ));
@@ -585,7 +599,7 @@ static ret_code SizeStrFunc( char * buffer, char * *params )
 {
     DebugMsg(("@SizeStr(%s)\n", *params ? *params : "" ));
     if ( *params )
-        myltoa( strlen( *params ), buffer, ModuleInfo. radix, TRUE );
+        myltoa( strlen( *params ), buffer, ModuleInfo. radix, FALSE, TRUE );
     else {
         buffer[0] = '0';
         buffer[1] = NULLC;

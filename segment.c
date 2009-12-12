@@ -256,7 +256,7 @@ static direct_idx InsertClassLname( const char *name )
     asm_sym *sym;
 
     if( strlen( name ) > MAX_LNAME ) {
-        AsmError( LNAME_TOO_LONG );
+        AsmError( CLASS_NAME_TOO_LONG );
         return( LNAME_NULL );
     }
 
@@ -604,7 +604,7 @@ int GetSymOfssize( struct asm_sym *sym )
 
     curr = GetSeg( sym );
     if( curr == NULL ) {
-        if( sym->state == SYM_EXTERNAL || sym->state == SYM_PROC || sym->state == SYM_GRP )
+        if( sym->state == SYM_EXTERNAL || ( sym->state == SYM_INTERNAL && sym->isproc ) || sym->state == SYM_GRP )
             return( sym->Ofssize );
         else if( sym->state == SYM_SEG  )
             return( ((dir_node *)sym)->e.seginfo->Ofssize );

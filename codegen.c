@@ -38,6 +38,18 @@
 #include "segment.h"
 #include "input.h"
 
+enum prefix_reg {
+    PREFIX_ES = 0x26,
+    PREFIX_CS = 0x2E,
+    PREFIX_SS = 0x36,
+    PREFIX_DS = 0x3E,
+    PREFIX_FS = 0x64,
+    PREFIX_GS = 0x65
+};
+
+static const char sr_prefix[] =
+    { PREFIX_ES, PREFIX_CS, PREFIX_SS, PREFIX_DS, PREFIX_FS, PREFIX_GS };
+
 static ret_code output_3DNow( struct code_info *CodeInfo )
 /********************************************************/
 {
@@ -60,7 +72,7 @@ static ret_code output_opc( struct code_info *CodeInfo )
     const struct asm_ins *ins = CodeInfo->pcurr;
     uint_8           tmp;
 
-    DebugMsg(("output_opc enter, opc=%X rm=%X, byte1_info=%X\n", ins->opcode, ins->rm_byte, ins->byte1_info ));
+    DebugMsg(("output_opc enter, ins.opc/rm=%X/%X, byte1_info=%X CodeInfo->rm=%X\n", ins->opcode, ins->rm_byte, ins->byte1_info, CodeInfo->rm_byte ));
     /*
      * Output debug info - line numbers
      */
@@ -234,7 +246,7 @@ static ret_code output_opc( struct code_info *CodeInfo )
      * Output segment prefix
      */
     if( CodeInfo->prefix.RegOverride != EMPTY ) {
-        OutputCodeByte( CodeInfo->prefix.RegOverride );
+        OutputCodeByte( sr_prefix[CodeInfo->prefix.RegOverride] );
     }
 
     if( ins->opnd_dir ) {
@@ -280,8 +292,8 @@ static ret_code output_opc( struct code_info *CodeInfo )
         OutputCodeByte( ins->opcode );
         OutputCodeByte( ins->rm_byte );
         OutputCodeByte( CodeInfo->rm_byte );
-        /* what about value of tmp? */
-        goto common_wds;
+        tmp = CodeInfo->rm_byte; /* v2.01: tmp wasn't set in v2.01 */
+        goto output_sib;
     case no_WDS:
         CodeInfo->opcode = 0;
         // no break
@@ -292,7 +304,7 @@ static ret_code output_opc( struct code_info *CodeInfo )
         }
         tmp = ins->rm_byte | CodeInfo->rm_byte;
         OutputCodeByte( tmp );
-    common_wds:
+    output_sib:
         if( ( CodeInfo->Ofssize == USE16 && CodeInfo->prefix.adrsiz == 0 ) ||
            ( CodeInfo->Ofssize == USE32 && CodeInfo->prefix.adrsiz == 1 ) )
             break; /* not for 16bit */
@@ -364,7 +376,7 @@ static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int i
         CodeInfo->InsFixup[index] = NULL;
         return;
     }
-    DebugMsg(("output_data(idx=%u, op=%X [data=%X] ) enter\n", index, determinant, CodeInfo->data[index] ));
+    DebugMsg(("output_data(idx=%u, op=%X [data=%X fixup=%X] ) enter [rm=%X]\n", index, determinant, CodeInfo->data[index], CodeInfo->InsFixup[index], CodeInfo->rm_byte ));
 
     if ( CodeInfo->InsFixup[index] && write_to_file ) {
         CodeInfo->InsFixup[index]->fixup_loc = GetCurrOffset();
@@ -400,7 +412,7 @@ static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int i
                 switch( CodeInfo->rm_byte & BIT_012 ) {
                 case S_I_B: /* 0x04 (equals register # for ESP) */
                     if( ( CodeInfo->sib & BIT_012 ) != D32 ) {
-                        break;  // out = 0
+                        break;  // size = 0
                     }
                     // no break
                 case D32: /* 0x05 (equals register # for EBP) */
@@ -488,9 +500,11 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                 return( output_opc( CodeInfo ) );
             }
             break;
-        case OP_SR:
-        case OP_DX:
         case OP_A:
+            /* v2.01: added */
+            if ( !(cur_opnd & OP_A ))
+                break;
+        case OP_SR:
         case OP_R:
         case OP_RGT8:
         case OP_R32:
@@ -499,7 +513,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
         case OP_RGT16:
 #endif
             if( cur_opnd & asm_op2 ) {
-                DebugMsg(("match_phase_3: OP_SR/DX/A/R/R1632/R32\n"));
+                DebugMsg(("match_phase_3: OP_SR/A/R/R1632/R32\n"));
                 if( check_3rd_operand( CodeInfo ) == ERROR )
                     break;
                 if( output_opc( CodeInfo ) == ERROR )
@@ -508,8 +522,15 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                 return( output_3rd_operand( CodeInfo ) );
             }
             break;
+        case OP_DX: /* v2.01: accept only DX for IN */
+            if( cur_opnd == asm_op2 ) {
+                DebugMsg(("match_phase_3: OP_DX\n"));
+                return( output_opc( CodeInfo ) );
+            }
+            break;
         case OP_CL:
-            if( cur_opnd & asm_op2 ) {
+            //if( cur_opnd & asm_op2 ) { /* v2.01: accept CL only */
+            if( cur_opnd == asm_op2 ) { 
                 DebugMsg(("match_phase_3: OP_CL\n"));
                 // CL is encoded in bit 345 of rm_byte, but we don't need it
                 // so clear it here
@@ -625,18 +646,23 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                 return( ERROR );
             output_data( CodeInfo, last_opnd, OPND1 );
             output_data( CodeInfo, OP_I8, OPND2 );
+#if 0 //SSE4SUPP /* the EXTRQ instruction has 2 immediate operands */
+            return( output_3rd_operand( CodeInfo ) );
+#else
             return( NOT_ERROR );
+#endif
         case OP_I8:
             DebugMsg(("match_phase_3: OP_I8\n"));
             /* if this branch modifies CodeInfo fields, it
              * will exit with either NOT_ERROR or ERROR.
              */
             if( cur_opnd == OP_I8 ) {
-                /* do nothing yet */
                 if( CodeInfo->InsFixup[OPND2] != NULL ) {
-                    break;
+                    break; /* external? then do nothing yet */
                 }
-            } else if( cur_opnd == OP_I16 || cur_opnd == OP_I32) {
+            /* v2.01: is const size forced? */
+            // } else if( cur_opnd == OP_I16 || cur_opnd == OP_I32) {
+            } else if( CodeInfo->const_size_fixed && ( cur_opnd == OP_I16 || cur_opnd == OP_I32 ) ) {
                 /* if there was a typecast to avoid to use the short, signed
                  instructions, skip this. Example
                  "cmp ax,word ptr 1"
@@ -858,6 +884,13 @@ ret_code match_phase_1( struct code_info *CodeInfo )
             }
             break;
 #endif
+        case OP_DX: /* v2.01: accept reg DX only! */
+            if( cur_opnd == asm_op1 ) {
+                retcode = match_phase_2( CodeInfo );
+                if( retcode != EMPTY )
+                    return( retcode );
+            }
+            break;
         case OP_I8_U: /* INT, OUT */
             if( cur_opnd & OP_I ) {
                 if( CodeInfo->data[OPND1] <= UCHAR_MAX ) {

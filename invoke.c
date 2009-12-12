@@ -441,6 +441,7 @@ static int PushInvokeParam( dir_node *proc, dir_node *curr, int i, int reqParam,
 
         if ( opndx.kind == EXPR_REG || opndx.indirect ) {
             if ( curr->is_far || psize == fptrsize ) {
+                DebugMsg(("PushInvokeParam: far ptr, %s isfar=%u, psize=%u, fptrsize=%u\n", curr->sym.name, curr->is_far, psize, fptrsize ));
                 strcpy( buffer, " push " );
                 if ( opndx.sym && opndx.sym->state == SYM_STACK )
                     strcat( buffer, "ss" );
@@ -887,9 +888,9 @@ ret_code InvokeDirective( int i )
             }
         } else if ( opndx.kind == EXPR_ADDR &&
                    opndx.sym != NULL &&
-                   (opndx.sym->state == SYM_PROC ||
-                   (opndx.sym->mem_type == MT_TYPE &&
-                   opndx.sym->type->mem_type == MT_PTR)) ) {
+                   ( opndx.sym->isproc ||
+                   ( opndx.sym->mem_type == MT_TYPE &&
+                   opndx.sym->type->mem_type == MT_PTR ) ) ) {
             sym = opndx.sym;
         } else {
             AsmErr( INVOKE_REQUIRES_PROTOTYPE );
@@ -916,9 +917,9 @@ ret_code InvokeDirective( int i )
         AsmErr( SYMBOL_NOT_DEFINED, name );
         return( ERROR );
     }
-    if( sym->state == SYM_PROC )  /* the most simple case: symbol is a PROC */
+    if( sym->isproc )  /* the most simple case: symbol is a PROC */
         ;
-    else if ((sym->mem_type == MT_TYPE) && (sym->type->mem_type == MT_PTR)) {
+    else if ( ( sym->mem_type == MT_TYPE ) && ( sym->type->mem_type == MT_PTR ) ) {
         /* second case: symbol is a (function?) pointer */
         proc = (dir_node *)sym->type;
         /* get the pointer target */
@@ -940,9 +941,9 @@ ret_code InvokeDirective( int i )
     } else {
 #ifdef DEBUG_OUT
         if (sym->mem_type == MT_TYPE)
-            DebugMsg(("InvokeDef: symbol name=%s, state=%u, type=%s, memtype=%u, [type memtype=%u]\n", sym->name, sym->state, sym->type->name, sym->mem_type, sym->type->mem_type));
+            DebugMsg(("InvokeDef: symbol name=%s, state=%u, type=%s, memtype=%Xh, [type memtype=%u]\n", sym->name, sym->state, sym->type->name, sym->mem_type, sym->type->mem_type));
         else
-            DebugMsg(("InvokeDef: symbol name=%s, state=%u, type=%X, memtype=%u\n", sym->name, sym->state, sym->type, sym->mem_type));
+            DebugMsg(("InvokeDef: symbol name=%s, state=%u, type=%X, memtype=%Xh\n", sym->name, sym->state, sym->type, sym->mem_type));
 #endif
         AsmErr( INVOKE_REQUIRES_PROTOTYPE );
         return( ERROR );
@@ -961,7 +962,7 @@ ret_code InvokeDirective( int i )
     /* get the number of parameters */
 
     for ( curr = info->paralist, numParam = 0 ; curr ; curr = curr->nextparam, numParam++ );
-    DebugMsg(("PushInvokeParam: numparams=%u\n", numParam ));
+    DebugMsg(("InvokeDef: numparams=%u\n", numParam ));
 
     curr = info->paralist;
 
@@ -974,8 +975,8 @@ ret_code InvokeDirective( int i )
 
     if (!(info->is_vararg)) {
         /* check if there is a superfluous parameter in the INVOKE call */
-        if (PushInvokeParam( proc, NULL, i, numParam, procofssize, &r0used) != ERROR) {
-            DebugMsg(("PushInvokeParam: superfluous argument, i=%u\n", i));
+        if ( PushInvokeParam( proc, NULL, i, numParam, procofssize, &r0used) != ERROR ) {
+            DebugMsg(("InvokeDef: superfluous argument, i=%u\n", i));
             AsmErr(TOO_MANY_ARGUMENTS_TO_INVOKE);
             return( ERROR );
         }
@@ -986,7 +987,7 @@ ret_code InvokeDirective( int i )
         */
         numParam--;
         size_vararg = 0; /* reset the VARARG parameter size count */
-        DebugMsg(("PushInvokeParam: VARARG proc, numparams=%u, actual (max) params=%u, parasize=%u\n", numParam, j, info->parasize));
+        DebugMsg(("InvokeDef: VARARG proc, numparams=%u, actual (max) params=%u, parasize=%u\n", numParam, j, info->parasize));
         for (;j >= numParam; j--)
             PushInvokeParam( proc, curr, i, j, procofssize, &r0used);
         /* VARARG procs have at least 1 param, the VARARG param */
@@ -1036,7 +1037,7 @@ ret_code InvokeDirective( int i )
     if (( sym->langtype == LANG_C || sym->langtype == LANG_SYSCALL ) &&
         ( info->parasize || ( info->is_vararg && size_vararg ) )) {
         if ( info->is_vararg ) {
-            DebugMsg(("PushInvokeParam: size of fix args=%u, var args=%u\n", info->parasize, size_vararg));
+            DebugMsg(("InvokeDef: size of fix args=%u, var args=%u\n", info->parasize, size_vararg));
             sprintf( buffer, " add %csp, %u", reg_prefix[ModuleInfo.Ofssize], info->parasize + size_vararg );
         } else
             sprintf( buffer, " add %csp, %u", reg_prefix[ModuleInfo.Ofssize], info->parasize );

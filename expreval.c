@@ -407,6 +407,7 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                             new->sym = sym2;
                         } else if ( ModuleInfo.oldstructs &&
                                    ( sym2->state == SYM_STRUCT_FIELD ||
+                                    sym2->state == SYM_EXTERNAL || /* v2.01: added */
                                     ( sym2->state == SYM_INTERNAL && sym2->mem_type == MT_ABS ) ) )
                             new->sym = sym2;
                     }
@@ -551,17 +552,23 @@ static ret_code get_operand( expr_list *new, int *start, int end )
             new->mbr = new->sym;
             new->sym = NULL;
             break;
-        default: /* SYM_INTERNAL, SYM_EXTERNAL, SYM_STACK, SYM_PROC,... */
-            /* remove the symbol reference if it's a constant and isn't external */
-            if( new->sym->mem_type == MT_ABS && new->sym->state == SYM_INTERNAL ) {
-                new->llvalue = new->sym->value;
-                new->kind = EXPR_CONST;
-#if 1
-                /* call internal function (@Line, ... ) */
-                if ( new->sym->predefined && new->sym->sfunc_ptr )
-                    new->llvalue = new->sym->sfunc_ptr( new->sym );
-#endif
-                new->sym = NULL;
+        default: /* SYM_INTERNAL, SYM_EXTERNAL, SYM_STACK, ... */
+            if( new->sym->mem_type == MT_ABS ) {
+                if( new->sym->state == SYM_INTERNAL ) {
+                    new->kind = EXPR_CONST;
+                    new->uvalue = new->sym->uvalue;
+                    new->hvalue = new->sym->sign ? -1 : 0;
+                    DebugMsg(("get_operand(%s): equate hval=%Xh, lval=%Xh\n", new->sym->name, new->hvalue, new->uvalue ));
+                    /* call internal function (@Line, ... ) */
+                    if ( new->sym->predefined && new->sym->sfunc_ptr )
+                        new->llvalue = new->sym->sfunc_ptr( new->sym );
+                    /* remove the symbol reference, it isn't a label */
+                    new->sym = NULL;
+                } else { /* ABS external? */
+                    /* type remains EXPR_ADDR, to force fixup creation */
+                    new->mem_type = new->sym->mem_type;
+                    new->abs = TRUE;
+                }
             } else {
                 new->label = i;
                 if( new->sym->type ) { /* a variable with arbitrary type? */
@@ -570,9 +577,6 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                     new->mem_type = sym2->mem_type;
                 } else {
                     new->mem_type = new->sym->mem_type;
-                    if ( new->sym->mem_type == MT_ABS ) { /* abs external? */
-                        new->abs = TRUE;
-                    }
                 }
                 /* since there is no fixup for auto variables, the "offset"
                  must be stored in the <value> field */
@@ -627,8 +631,8 @@ static ret_code get_operand( expr_list *new, int *start, int end )
         return( ERROR );
     }
     (*start)++;
-    DebugMsg(("get_operand exit, ok, value=%ld, mem_type=%Xh, abs=%u, string=%s, type=>%s<\n",
-              new->value, new->mem_type, new->abs, new->string ? new->string : "NULL", new->type ? new->type->name : "NULL" ));
+    DebugMsg(("get_operand exit, ok, value=%I64X, mem_type=%Xh, abs=%u, string=%s, type=>%s<\n",
+              new->llvalue, new->mem_type, new->abs, new->string ? new->string : "NULL", new->type ? new->type->name : "NULL" ));
     return( NOT_ERROR );
 }
 
@@ -993,7 +997,9 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
              * example: [bx+<struct_mbr>],-1
              * will set expression's mem_type to the struct_mbr's one.
              */
-            if ( ModuleInfo.oldstructs && token_1->mem_type == MT_EMPTY )
+            /* v2.01: use it for SYM_STRUCT_FIELDs ONLY! */
+            //if ( ModuleInfo.oldstructs && token_1->mem_type == MT_EMPTY )
+            if ( ModuleInfo.oldstructs && token_1->mem_type == MT_EMPTY && token_2->mbr )
                 token_1->mem_type = token_2->mem_type;
 
             token_1->llvalue += token_2->llvalue;
@@ -1371,9 +1377,10 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                   token_1->type, (token_1->type ? token_1->type->name : "NULL"),
                   token_2->type, (token_2->type ? token_2->type->name : "NULL") ));
         if( token_2->override != EMPTY ) {
-            CAsmError( MORE_THAN_ONE_OVERRIDE );
-            DebugMsg(("calculate ':' error 1\n"));
-            return( ERROR );
+            if ( error_msg && Parse_Pass == PASS_1 )
+                AsmWarn( 2, MULTIPLE_OVERRIDES, AsmBuffer[token_2->override]->string_ptr );
+            DebugMsg(("calculate ':' ignored override=%s\n", AsmBuffer[token_2->override]->string_ptr ));
+            //return( ERROR ); /* v2.01: emit a warning and continue */
         }
 
         if( token_1->kind == EXPR_REG ) {
@@ -1545,22 +1552,22 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
 
         switch( AsmBuffer[oper]->value ) {
         case T_EQ:
-            token_1->value = ( token_1->value == token_2->value ? -1:0 );
+            token_1->value64 = ( token_1->value64 == token_2->value64 ? -1:0 );
             break;
         case T_NE:
-            token_1->value = ( token_1->value != token_2->value ? -1:0 );
+            token_1->value64 = ( token_1->value64 != token_2->value64 ? -1:0 );
             break;
         case T_LT:
-            token_1->value = ( token_1->value <  token_2->value ? -1:0 );
+            token_1->value64 = ( token_1->value64 <  token_2->value64 ? -1:0 );
             break;
         case T_LE:
-            token_1->value = ( token_1->value <= token_2->value ? -1:0 );
+            token_1->value64 = ( token_1->value64 <= token_2->value64 ? -1:0 );
             break;
         case T_GT:
-            token_1->value = ( token_1->value >  token_2->value ? -1:0 );
+            token_1->value64 = ( token_1->value64 >  token_2->value64 ? -1:0 );
             break;
         case T_GE:
-            token_1->value = ( token_1->value >= token_2->value ? -1:0 );
+            token_1->value64 = ( token_1->value64 >= token_2->value64 ? -1:0 );
             break;
         case T_MOD:
             if ( token_2->llvalue == 0 ) {
@@ -1570,11 +1577,12 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 token_1->llvalue %= token_2->llvalue;
             break;
         case T_SHL:
-            if (token_1->hvalue == -1) {
+            token_1->llvalue = token_1->llvalue << token_2->value;
+            /* v2.01: result is 64-bit only if mode is USE64 */
+            if ( ModuleInfo.Ofssize < USE64 ) {
                 token_1->hvalue = 0;
                 token_1->hlvalue = 0;
             }
-            token_1->llvalue = token_1->llvalue << token_2->value;
             break;
         case T_SHR:
             if (token_1->hvalue == -1) {
@@ -1777,7 +1785,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
             case T_LENGTH:
                 if( token_2->kind == EXPR_CONST ) {
                     token_1->value = token_2->mbr->first_length ? token_2->mbr->first_length : 1;
-                } else if ( sym->state == SYM_EXTERNAL || sym->state == SYM_PROC ) {
+                } else if ( sym->state == SYM_EXTERNAL || ( sym->state == SYM_INTERNAL && sym->isproc ) ) {
                     token_1->value = 1;
                 } else if( sym->mem_type == MT_EMPTY ) {
                     token_1->value = 0;
@@ -1869,10 +1877,10 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
             } else if ( sym == NULL ) {
                 DebugMsg(("calculate, TYPE, operand without symbol\n" ));
                 /* for types, return total_size */
-                if ( token_2->is_type == TRUE )
+                if ( token_2->is_type == TRUE ) {
                     //token_1->value = token_2->value;
                     TokenAssign( token_1, token_2 );
-                else if (token_2->kind == EXPR_REG && token_2->indirect == FALSE ) {
+                } else if (token_2->kind == EXPR_REG && token_2->indirect == FALSE ) {
                     token_1->value = SizeFromRegister(AsmBuffer[token_2->base_reg]->value);
 #if 0 /* Masm returns 0 for TYPE <segment_register> */
                     /* if it is a segment register, use default word size */
@@ -2036,7 +2044,11 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
             /* skip memory type of operand, just address is needed */
             token_1->mem_type = MT_NEAR;
             /* clear overrides ("offset SEG:xxx") */
-            token_1->override = EMPTY;
+            /* v2.01: override information is important for fixup creation!
+             * the reason why it was cleared probably was to avoid creation
+             * of a segment prefix. This case is now handled in the parser.
+             */
+            // token_1->override = EMPTY;
             break;
         case T_LOWWORD:
             TokenAssign( token_1, token_2 );
@@ -2318,8 +2330,8 @@ static ret_code evaluate( expr_list *operand1, int *i, int end, enum process_fla
     if( !token_needed ) {
         /* is the expression a single item? */
         if( *i > end || IsCurrToken( T_CL_BRACKET ) || IsCurrToken( T_CL_SQ_BRACKET ) ) {
-            DebugMsg(("evaluate exit, ok, type=%X value=%d string=%X memtype=%Xh indirect=%u type=%X\n",
-                      operand1->type,      operand1->value,
+            DebugMsg(("evaluate exit, ok, kind=%u value=%d string=%X memtype=%Xh indirect=%u type=%X\n",
+                      operand1->kind,      operand1->value,
                       operand1->string,    operand1->mem_type,
                       operand1->indirect,  operand1->type ));
             return( NOT_ERROR );
@@ -2456,8 +2468,7 @@ static ret_code evaluate( expr_list *operand1, int *i, int end, enum process_fla
                 !IsCurrToken( T_CL_SQ_BRACKET ) ) );
 
 #ifdef DEBUG_OUT
-    if (( operand1->value < 0 && operand1->hvalue != -1) ||
-        (operand1->value >= 0 && operand1->hvalue != 0)) {
+    if ( operand1->hvalue != -1 && operand1->hvalue != 0 ) {
         DebugMsg(("evaluate exit, ok, value=%I64d(0x%I64X) kind=%u string=%s memtype=0x%X indirect=%u type=>%s<\n",
                   operand1->llvalue, operand1->llvalue,
                   operand1->kind,

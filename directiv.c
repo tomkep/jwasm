@@ -122,11 +122,11 @@ simpletype SimpleType[] = {
 #undef pick
 #define pick( name, memtype, ofssize ) { T_ ## name , memtype, ofssize },
 #include "stypes.h"
-    { T_PTR,     MT_PTR,      USE_EMPTY }
+//    { T_PTR,     MT_PTR,      USE_EMPTY }
 };
 
 obj_rec                 *ModendRec;     // Record for Modend (OMF)
-asm_sym                 *start_label;   // for COFF
+asm_sym                 *start_label;   // for COFF, ELF, BIN
 
 symbol_queue            Tables[TAB_LAST];// tables of definitions
 
@@ -261,9 +261,8 @@ void dir_add_table( dir_node *new )
     case SYM_SEG:     tab = TAB_SEG;   break;
     case SYM_GRP:     tab = TAB_GRP;   break;
     case SYM_EXTERNAL:tab = TAB_EXT;   break;
-    case SYM_PROC:    tab = TAB_PROC;  break;
+    case SYM_INTERNAL:tab = TAB_PROC;  break;
     case SYM_ALIAS:   tab = TAB_ALIAS; break;
-    case SYM_LIB:     tab = TAB_LIB;   break;
     default:
         return;
     }
@@ -286,11 +285,10 @@ void dir_remove_table( dir_node *dir )
     switch( dir->sym.state ) {
     case SYM_UNDEFINED:  tab = TAB_UNDEF; break;
     case SYM_EXTERNAL:   tab = TAB_EXT;   break;
-    case SYM_PROC:       tab = TAB_PROC;  break; /* shouldn't happen */
+    case SYM_INTERNAL:   tab = TAB_PROC;  break; /* shouldn't happen */
     case SYM_SEG:        tab = TAB_SEG;   break; /* shouldn't happen */
     case SYM_GRP:        tab = TAB_GRP;   break; /* shouldn't happen */
     case SYM_ALIAS:      tab = TAB_ALIAS; break; /* shouldn't happen */
-    case SYM_LIB:        tab = TAB_LIB;   break; /* shouldn't happen */
     default:
         return;
     }
@@ -434,15 +432,18 @@ void dir_free( dir_node *dir, bool remove )
         AsmFree( dir->e.seginfo );
         break;
     case SYM_EXTERNAL:
+        if ( dir->sym.isproc )
+            DeleteProc( dir );
         dir->sym.first_size = 0;
         /* for EXTERN, free the optional alternative name */
         if ( dir->sym.weak == FALSE && dir->sym.altname )
             AsmFree( dir->sym.altname );
         break;
-    case SYM_CLASS_LNAME:
-        break;
-    case SYM_PROC:
-        DeleteProc( dir );
+    //case SYM_CLASS_LNAME:
+    //    break;
+    case SYM_INTERNAL:
+        if ( dir->sym.isproc )
+            DeleteProc( dir );
         break;
     case SYM_MACRO:
         ReleaseMacroData( dir );
@@ -484,7 +485,8 @@ void dir_internal( dir_node *dir )
 /* Change node type from SYM_EXTERNAL + sym->weak=1 to SYM_INTERNAL */
 {
     dir_remove_table( dir );
-    dir->sym.first_size = 0;
+    if ( dir->sym.isproc == FALSE ) /* v2.01: don't clear flags for PROTO */
+        dir->sym.first_size = 0;
     dir->sym.state = SYM_INTERNAL;
 }
 
@@ -517,16 +519,32 @@ ret_code GetLangType( int *i, lang_type *plang )
     return( ERROR );
 }
 
-// returns an index into SimpleType table
+/* returns an index into SimpleType table.
+ * this is actually a ST_xxx value.
+ */
 
 int FindStdType( int token )
 /***************************/
 {
+#if 1
+    /* v2.01: avoid to scan the SimpleType table!
+     * It is to be removed.
+     */
+    switch ( token ) {
+    case T_PROC: return( ST_PROC );
+    case T_PTR:  return( ST_PTR );
+    default:
+        if ( AsmOpTable[token].rm_byte == RWT_TYPE ) {
+            return( AsmOpTable[token].opcode );
+        }
+    }
+#else
     int i;
     for( i = 0; i <= sizeof(SimpleType)/sizeof(simpletype); i++ ) {
         if( token == SimpleType[i].token )
             return( i );
     }
+#endif
     return( -1 );
 }
 
@@ -671,10 +689,14 @@ static ret_code IncludeLibDirective( int i )
             return( NOT_ERROR );
     }
     sym = SymCreate( name, FALSE );
-    if ( sym == NULL )
-        return( ERROR );
-    sym->state = SYM_LIB;
-    dir_add_table( (dir_node *)sym );
+    //if ( sym == NULL )  /* only error possible is "out of memory" */
+    //    return( ERROR );
+    if( Tables[TAB_LIB].head == NULL ) {
+        Tables[TAB_LIB].head = Tables[TAB_LIB].tail = (dir_node *)sym;
+    } else {
+        Tables[TAB_LIB].tail->next = (dir_node *)sym;
+        Tables[TAB_LIB].tail = (dir_node *)sym;
+    }
 
     return( NOT_ERROR );
 }
@@ -1173,7 +1195,7 @@ static ret_code EndDirective( int i, struct code_info *CodeInfo )
         if ( fix == NULL || sym == NULL ) {
             AsmError( INVALID_START_ADDRESS );
             return( ERROR );
-        } else if ( sym->state == SYM_INTERNAL || sym->state == SYM_EXTERNAL || sym->state == SYM_PROC ) {
+        } else if ( sym->state == SYM_INTERNAL || sym->state == SYM_EXTERNAL ) {
             if ( sym->mem_type == MT_NEAR || sym->mem_type == MT_FAR || sym->mem_type == MT_PROC )
                 ;
             else {
@@ -1287,7 +1309,7 @@ static ret_code AliasDirective( int i )
         if ( Parse_Pass == PASS_2 && Options.output_format == OFORMAT_COFF ) {
             sym = SymSearch( AsmBuffer[i+2]->string_ptr );
             if (sym == NULL ||
-                ( sym->state != SYM_INTERNAL && sym->state != SYM_EXTERNAL && sym->state != SYM_PROC )) {
+                ( sym->state != SYM_INTERNAL && sym->state != SYM_EXTERNAL )) {
                 AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i+2]->string_ptr );
                 return( ERROR );
             }
@@ -1700,7 +1722,7 @@ static ret_code SafeSEHDirective( int i )
         ( sym == NULL || sym->state == SYM_UNDEFINED )) {
         AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
         return( ERROR );
-    } else if ( sym && sym->state != SYM_UNDEFINED && sym->state != SYM_PROC && sym->state != SYM_EXTERNAL ) {
+    } else if ( sym && sym->state != SYM_UNDEFINED && sym->isproc == FALSE ) {
         AsmErr( SAFESEH_ARGUMENT_MUST_BE_A_PROC, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
@@ -1724,6 +1746,7 @@ static ret_code SafeSEHDirective( int i )
 
     return( NOT_ERROR );
 }
+
 // dispatcher for all directives (exception: data directives DB, DW, ...)
 
 ret_code directive( int i, struct code_info *CodeInfo )

@@ -3,8 +3,9 @@
 
   1. Prepare Tests
   
-  Tool jfc must be created. Source code is supplied in the Samples
+  - tool JFC must be created. Source code is supplied in the Samples
   directory.
+  - Tool WLINK is to be copied from Open Watcom.
 
   2. Run Tests
   

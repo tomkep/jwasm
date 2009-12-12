@@ -108,12 +108,12 @@ ret_code AddFloatingPointEmulationFixup( struct code_info *CodeInfo, bool second
     } else {
         switch( CodeInfo->prefix.RegOverride ) {
         case EMPTY:      patch = FPP_NORMAL;        break;
-        case PREFIX_ES:  patch = FPP_ES;            break;
-        case PREFIX_CS:  patch = FPP_CS;            break;
-        case PREFIX_SS:  patch = FPP_SS;            break;
-        case PREFIX_DS:  patch = FPP_DS;            break;
-        case PREFIX_FS:  patch = FPP_FS;            break;
-        case PREFIX_GS:  patch = FPP_GS;            break;
+        case ASSUME_ES:  patch = FPP_ES;            break;
+        case ASSUME_CS:  patch = FPP_CS;            break;
+        case ASSUME_SS:  patch = FPP_SS;            break;
+        case ASSUME_DS:  patch = FPP_DS;            break;
+        case ASSUME_FS:  patch = FPP_FS;            break;
+        case ASSUME_GS:  patch = FPP_GS;            break;
         default:
             never_reach();
         }

@@ -81,18 +81,18 @@ enum typestring {
     TS_LNEAR,  TS_LFAR,   TS_LNEAR16, TS_LFAR16, TS_LNEAR32, TS_LFAR32,
     TS_PTR,    TS_PROC,   TS_FUNC,    TS_NUMBER,
     TS_PRIVATE,TS_STACK,  TS_PUBLIC,  TS_EXTERNAL, TS_UNDEFINED,
-    TS_GROUP,  TS_NOSEG,  TS_TEXT,    TS_ALIAS
+    TS_GROUP,  TS_NOSEG,  TS_TEXT,    TS_ALIAS,  TS_ABS
 };
 
 static const char * const typestr[] = {
     "Byte", "Word", "DWord", "FWord",
-    "QWord", "TByte", "Para", "OWord",
+    "QWord", "TByte", "Para", "XmmWord",
     "Page",
     "Near", "Far", "Near16", "Far16", "Near32", "Far32",
     "L Near", "L Far", "L Near16", "L Far16", "L Near32", "L Far32",
     "Ptr", "Proc", "Func", "Number",
     "Private", "Stack", "Public", "External", "Undefined",
-    "GROUP", "No Seg", "Text", "Alias"
+    "GROUP", "No Seg", "Text", "Alias", "Abs"
 };
 
 /* don't change this order, must match enum lang_type in globals.h */
@@ -227,8 +227,10 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
     list_pos += p - buffer;
 
     p = CurrSource;
+    if ( !p )
+        p = "";
     //while( isspace( *p ) ) p++;
-    len = strlen(p);
+    len = strlen( p );
 
     /* calc new list position */
     if ( MacroLevel ) {
@@ -247,7 +249,7 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
 #endif
     /* if it's macro code, write the macro level before the line */
     if ( MacroLevel )
-        fwrite( buffer, 1, strlen(buffer), FileInfo.file[LST] );
+        fwrite( buffer, 1, strlen( buffer ), FileInfo.file[LST] );
 
     /* if it's generated code, write a '*' before the line */
     if ( GeneratedCode || StructInit )
@@ -296,6 +298,8 @@ static const char *get_seg_align( seg_info *seg, char * buffer )
     case 3:    return( typestr[TS_QWORD] );
     case 4:    return( typestr[TS_PARA]  );
     case 8:    return( typestr[TS_PAGE]  );
+    case MAX_SEGALIGNMENT:
+               return( typestr[TS_ABS]   );
     default:
         sprintf( buffer, "%u", 1 << seg->alignment );
         return( buffer );
@@ -635,7 +639,10 @@ static void log_symbol( struct asm_sym *sym )
         } else
             LstPrintf( "%-10s ", GetMemtypeString( sym, NULL ) );
 
-        LstPrintf( "%8X  ", sym->offset );
+        if ( ( sym->mem_type == MT_ABS ) && sym->sign )
+            LstPrintf( "-%08Xh ", 0 - sym->uvalue );
+        else
+            LstPrintf( " %8Xh ", sym->offset );
 
         if (sym->mem_type == MT_ABS)
             ;
@@ -833,9 +840,6 @@ void LstWriteCRef( void )
             else
                 q = &Structs;
             break;
-        case SYM_PROC:
-            q = &Procs;
-            break;
         case SYM_MACRO:
             q = &Macros;
             break;
@@ -845,6 +849,11 @@ void LstWriteCRef( void )
         case SYM_GRP:
             q = &Grps;
             break;
+        case SYM_INTERNAL:
+            if ( syms[i]->isproc ) {
+                q = &Procs;
+                break;
+            }
         default:
             continue;
         }

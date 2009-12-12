@@ -1,6 +1,70 @@
 
    Changelog
 
+   12/12/2009, v2.01:
+
+   Bugfixes:
+
+   -  shift and rotate opcodes accepted any 8-bit register as second
+      argument. If it wasn't CL, wrong code was generated.
+   -  IN/OUT opcodes accepted any 16-bit register as source/target, not
+      just DX. If it wasn't DX, wrong code was generated.
+   -  an unnecessary DS prefix for OUTS string instruction wasn't removed.
+   -  16-bit indirect addressing-mode with a scale > 1 wasn't rejected and
+      invalid code was generated.
+   -  if errors occured JWasm still returned error code 0.
+   -  indirect CALL/JMP needed a size, even if -Zm was set.
+   -  with -Zm, the offset of a struct member wasn't correct if the struct
+      was nested and the member was referenced without the 'dot' operator.
+   -  in v2.0, error 'Constant value too large' may have occured if the
+      SHL operator was used in expressions to define an immediate value
+      and the result didn't fit in 32-bits.
+   -  directive '=': expression wasn't rejected if it contained externals.
+      Now error 'Constant expected' is displayed.
+   -  JWASMR only: detecting the size of an immediate operand often failed,
+      which then gave error 'immediate data out of range'.
+   -  segment/group override used in an argument for the OFFSET operator
+      was ignored.
+   -  format BIN: offsets were always group-relative (OPTION OFFSET:SEGMENT
+      was ignored).
+   -  arithmetic instructions with immediate operand: the signed (=shortest)
+      variant of the instruction wasn't generated if the immediate operand
+      was a negative WORD value.
+   -  absolute segments weren't correctly displayed in the listing file.
+   -  formats MZ: fixups with references to absolute segments weren't
+      handled correctly.
+   -  SSE2 CMPSD/MOVSD: memory operand of type QWORD was rejected.
+   -  SSSE3 instructions: indirect addressing with ESP didn't emit the
+      SIB byte.
+   -  in v2.0, a struct field with a name which matched an arbitrary type
+      was rejected if the type of the struct field was a predefined TYPE
+      (example:  name1 WORD ? ; [<name1> is both a struct field name
+      and an arbitrary type name] ).
+   -  OMF format: if the LNAME index of a group name was > 255, the link
+      between the name and the group definition record became broken.
+   -  syntax "EXTERN:" and "EXTERNDEF:" (directive + colon, but no type),
+      was rejected, but seems to be valid Masm-syntax.
+   -  for PUSHD, only immediate operands were accepted.
+   -  in JWasm, using a text macro before it is defined is to cause
+      a warning. This worked for text macros defined with EQU only, but
+      didn't if the macro was defined with CATSTR or TEXTEQU.
+   -  for segment registers, the assume search order in v1.96 and v2.0
+      didn't match Masm's.
+   -  macro loop directives (REPEAT, FOR, FORC, WHILE) with no data
+      lines caused a GPF.
+   -  if a text macro contained multiple macro function calls, only the
+      first one was evaluated on some conditions.
+
+   Other changes:
+
+   -  equates and assembly time variables: magnitude of values has been
+      increased by 1 bit. Now it's 32bit plus a sign bit - similar to Masm v8.
+   -  multiple overrides in an expression will give a warning.
+   -  if an equate was assigned a PROC, the proc-specific info wasn't stored,
+      which made it impossible to use the equate for the INVOKE directive.
+   -  instruction sets SSE4.1 and SSE4.2 supported.
+   -  data types MMWORD and XMMWORD supported.
+
    10/12/2009, v2.00:
 
    Bugfixes:

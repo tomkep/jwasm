@@ -56,6 +56,7 @@
 #include "listing.h"
 #include "msgtext.h"
 #include "fatal.h"
+#include "myassert.h"
 
 #if COFF_SUPPORT
 #include "coff.h"
@@ -166,6 +167,7 @@ void AddLinnumDataRef( unsigned line_num )
         dmyproc->debuginfo->file != get_curr_srcfile() ) ) {
         char procname[10];
         if ( dmyproc ) {
+            myassert( dmyproc->segment );
             dmyproc->total_size =
                 ((dir_node *)dmyproc->segment)->e.seginfo->current_loc -
                 dmyproc->offset;
@@ -178,16 +180,16 @@ void AddLinnumDataRef( unsigned line_num )
         if ( dmyproc == NULL ) {
             dmyproc = CreateProc( NULL, procname, TRUE );
             DebugMsg(("AddLinnumDataRef: new proc %s created\n", procname ));
+            dmyproc->isproc = TRUE; /* fixme: should be set inside CreateProc */
             dmyproc->included = TRUE;
             AddPublicData( dmyproc );
         } else
             procidx++; /* for passes > 1, adjust procidx */
 
-        /* it state isn't SYM_PROC, the symbol name has been used
+        /* it the symbols isn't a PROC, the symbol name has been used
          * by the user - bad! A warning should be displayed */
-        if ( dmyproc->state == SYM_PROC ) {
+        if ( dmyproc->isproc == TRUE ) {
             SetSymSegOfs( dmyproc );
-            dmyproc->isproc = TRUE;
             dmyproc->Ofssize = ModuleInfo.Ofssize;
             dmyproc->langtype = ModuleInfo.langtype;
             if ( write_to_file == TRUE ) {
@@ -221,10 +223,12 @@ void AddLinnumDataRef( unsigned line_num )
         curr->line_number = LineNumber;
         curr->file        = get_curr_srcfile();
         /* set the function's size! */
-        if ( dmyproc )
+        if ( dmyproc ) {
+            myassert( dmyproc->segment );
             dmyproc->total_size =
                 ((dir_node *)dmyproc->segment)->e.seginfo->current_loc -
                 dmyproc->offset;
+        }
         dmyproc = NULL;
     } else {
         curr->offset = GetCurrOffset();
@@ -590,13 +594,17 @@ static ret_code WriteHeader( bool initial )
 #if BIN_SUPPORT
     case OFORMAT_BIN:
         /* check if PROTOs or externals are used */
+#if 0 /* v2.01: PROTOs are now in TAB_EXT */
         for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next )
             if( curr->sym.used == TRUE && curr->sym.isproc == FALSE ) {
+                DebugMsg(("WriteHeader: error, %s isproc=%u\n", curr->sym.name, curr->sym.isproc ));
                 AsmErr( FORMAT_DOESNT_SUPPORT_EXTERNALS, curr->sym.name );
                 return( ERROR );
             }
+#endif
         for ( curr = Tables[TAB_EXT].head; curr != NULL ; curr = curr->next )
-            if( curr->sym.weak == FALSE ) {
+            if( curr->sym.weak == FALSE || curr->sym.used == TRUE ) {
+                DebugMsg(("WriteHeader: error, %s weak=%u\n", curr->sym.name, curr->sym.weak ));
                 AsmErr( FORMAT_DOESNT_SUPPORT_EXTERNALS, curr->sym.name );
                 return( ERROR );
             }
@@ -1089,26 +1097,28 @@ static void set_ext_idx( void )
     dir_node    *curr;
     uint        index = 0;
 
-    // first scan the EXTERN/EXTERNDEF items
+    // scan the EXTERN/EXTERNDEF items
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
-        /* skip COMM and EXTERNDEF items */
-        if ((curr->sym.comm == 1) || (curr->sym.weak == 1))
+        /* v2.01: externdefs which have been "used" become "strong" */
+        if ( curr->sym.used )
+            curr->sym.weak = FALSE;
+        /* skip COMM and unused EXTERNDEF/PROTO items */
+        if (( curr->sym.comm == TRUE ) || ( curr->sym.weak == TRUE ))
             continue;
         index++;
         curr->sym.idx = index;
 #if FASTPASS
         if ( curr->sym.altname &&
-             curr->sym.altname->state != SYM_INTERNAL &&
-             curr->sym.altname->state != SYM_PROC ) {
+            curr->sym.altname->state != SYM_INTERNAL ) {
             /* do not use saved state, scan full source in second pass */
             SkipSavedState();
         }
 #endif
     }
 
+#if 0 /* v2.01: PROTOs are now in TAB_EXT */
     // now scan the PROTO items
-
     for(curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         /* the item must be USED and PROTO */
         if( curr->sym.used && (curr->sym.isproc == FALSE )) {
@@ -1116,11 +1126,12 @@ static void set_ext_idx( void )
             curr->sym.idx = index;
         }
     }
+#endif
 
     // now scan the COMM items
 
     for( curr = Tables[TAB_EXT].head; curr != NULL; curr = curr->next ) {
-        if (curr->sym.comm == 0)
+        if ( curr->sym.comm == FALSE )
             continue;
         index++;
         curr->sym.idx = index;
@@ -1298,6 +1309,11 @@ static void AssembleInit( void )
 /******************************/
 {
     DebugMsg(("AssembleInit() enter\n"));
+
+    memset( &ModuleInfo, 0, sizeof(ModuleInfo));
+#ifdef DEBUG_OUT
+    ModuleInfo.cref = TRUE; /* don't suppress debug displays */
+#endif
     ModendRec     = NULL; /* OMF */
     start_label   = NULL; /* COFF */
     write_to_file = FALSE;

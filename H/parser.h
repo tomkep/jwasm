@@ -35,16 +35,6 @@
 #include "symbols.h"
 #include "token.h"
 
-enum prefix_reg {
-    PREFIX_EMPTY = EMPTY,
-    PREFIX_ES = 0x26,
-    PREFIX_CS = 0x2E,
-    PREFIX_SS = 0x36,
-    PREFIX_DS = 0x3E,
-    PREFIX_FS = 0x64,
-    PREFIX_GS = 0x65
-};
-
 enum asm_stypes {
 #undef pick
 #define pick( name, memtype, ofssize ) ST_ ## name ,
@@ -187,9 +177,8 @@ struct asm_ins {
 
 struct code_info {
     struct {
-        struct asm_sym  *SegOverride;  // segment override if symbol
         enum asm_token  ins;           // prefix before instruction, e.g. lock, rep, repnz
-        enum prefix_reg RegOverride;   // segment override if register
+        enum assume_segreg RegOverride;// segment override (0=ES,1=CS,2=SS,3=DS,...)
 #if AMD64_SUPPORT
         unsigned char   rex;
 #endif
@@ -211,7 +200,7 @@ struct code_info {
         struct {
             unsigned char   isdirect:1;     /* 1=direct addressing mode */
             unsigned char   isfar:1;        /* CALL/JMP far */
-            unsigned char   mem_type_fixed:1;
+            unsigned char   const_size_fixed:1; /* v2.01 */
 #if AMD64_SUPPORT
             unsigned char   x86hi_used:1;   /* AH,BH,CH,DH used */
             unsigned char   x64lo_used:1;   /* SPL,BPL,SIL,DIL used */
@@ -279,7 +268,8 @@ extern bool   line_listed;
 
 extern int      OperandSize( OPNDTYPE opnd, const struct code_info * );
 extern int      InRange( long val, unsigned bytes );
-extern void     find_frame( struct code_info *, struct asm_sym *sym );
+extern void     find_frame( struct asm_sym *sym );
+extern void     find_frame2( struct asm_sym *sym );
 extern uint     IsKeywordDisabled( const char *, int );
 extern void     DisableKeyword( uint token );
 #if RENAMEKEY

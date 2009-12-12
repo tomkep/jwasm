@@ -179,8 +179,7 @@ static void set_symtab_values( void *hdr )
                 /* use a raw section reference */
                 if (fix->sym->variable) {
                     fix->sym = fix->segment;
-                } else if ((fix->sym->state == SYM_INTERNAL ||
-                     ( fix->sym->state == SYM_PROC && fix->sym->isproc == TRUE )) &&
+                } else if ((fix->sym->state == SYM_INTERNAL ) &&
                     fix->sym->included == FALSE &&
                     fix->sym->public == FALSE) {
                     fix->sym->included = TRUE;
@@ -200,14 +199,15 @@ static void set_symtab_values( void *hdr )
     }
     start_globals = symindex;
 
-    /* count EXTERNs and used EXTERNDEFs */
+    /* count EXTERNs and used EXTERNDEFs (and PROTOs [since v2.01]) */
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
-        if ( curr->sym.comm == 0 && curr->sym.weak == 1 )
+        if ( curr->sym.comm == FALSE && curr->sym.weak == TRUE )
             continue;
         curr->sym.idx = symindex++;
     }
     DebugMsg(("set_symtab_values: index after EXTERNALs: %u\n", symindex));
 
+#if 0 /* v2.01: PROTOs are now in TAB_EXT */
     /* count PROTOs which are used and external */
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         if( curr->sym.used == FALSE || curr->sym.isproc == TRUE )
@@ -215,13 +215,14 @@ static void set_symtab_values( void *hdr )
         curr->sym.idx = symindex++;
     }
     DebugMsg(("set_symtab_values: index after PROTOs: %u\n", symindex));
+#endif
 
     /* count publics */
     vp = NULL;
     while( sym = GetPublicData( &vp ) ) {
         if( sym->state == SYM_UNDEFINED ) {
             continue;
-        } else if( sym->state == SYM_PROC && sym->isproc == FALSE ) {
+        } else if( sym->state == SYM_EXTERNAL && sym->isproc == TRUE ) {
             continue;
         } else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
             continue;
@@ -287,7 +288,7 @@ static void set_symtab_values( void *hdr )
         p64++;
     }
 
-    /* 4. externals + communals */
+    /* 4. externals + communals ( + protos [since v2.01]) */
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
         /* skip "weak" (=unused) externdefs */
@@ -318,6 +319,7 @@ static void set_symtab_values( void *hdr )
         p64++;
     }
 
+#if 0 /* v2.01: PROTOS are now in TAB_EXT */
     // 5. PROTOs which have been "used" and have no matching PROC are also
     // externals.
 
@@ -340,6 +342,7 @@ static void set_symtab_values( void *hdr )
         DebugMsg(("set_symtab_values, PROTO: symbol %s, ofs=%X\n", buffer, p64->st_value));
         p64++;
     }
+#endif
 
     /* 6. PUBLIC entries */
     vp = NULL;
@@ -430,11 +433,11 @@ static void set_symtab_values( void *hdr )
         p32++;
     }
 
-    /* 4. externals + communals */
+    /* 4. externals + communals (+ protos [since v2.01]) */
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
         /* skip "weak" (=unused) externdefs */
-        if (curr->sym.comm == FALSE && curr->sym.weak == TRUE)
+        if ( curr->sym.comm == FALSE && curr->sym.weak == TRUE )
             continue;
         Mangle( &curr->sym, buffer );
         len = strlen( buffer );
@@ -461,6 +464,7 @@ static void set_symtab_values( void *hdr )
         p32++;
     }
 
+#if 0 /* v2.01: PROTOs are now in TAB_EXT */
     // 5. PROTOs which have been "used" and have no matching PROC are also
     // externals.
 
@@ -483,6 +487,7 @@ static void set_symtab_values( void *hdr )
         DebugMsg(("set_symtab_values, PROTO: symbol %s, ofs=%X\n", buffer, p32->st_value));
         p32++;
     }
+#endif
 
     /* 6. PUBLIC entries */
     vp = NULL;
@@ -545,17 +550,19 @@ static void set_symtab_values( void *hdr )
     }
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
-        if (curr->sym.comm == FALSE && curr->sym.weak == TRUE)
+        if ( curr->sym.comm == FALSE && curr->sym.weak == TRUE )
             continue;
         Mangle( &curr->sym, p2 );
         p2 += strlen(p2) + 1;
     }
+#if 0 /* v2.01: PROTOs are now in TAB_EXT */
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         if( curr->sym.used == FALSE || curr->sym.isproc == TRUE )
             continue;
         Mangle( &curr->sym, p2 );
         p2 += strlen(p2) + 1;
-    }
+	}
+#endif
     vp = NULL;
     while ( sym = GetPublicData( &vp ) ) {
         Mangle( sym, p2 );

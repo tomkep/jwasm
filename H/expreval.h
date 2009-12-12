@@ -107,7 +107,7 @@ typedef struct expr_list {
         struct {
             unsigned        indirect : 1;   // Whether inside [] or not
             unsigned        explicit : 1;   // Whether expression type explicitly given
-            unsigned        abs      : 1;
+            unsigned        abs      : 1;   // external ABS
 #if FLAG_LABELDIFF
             unsigned        labeldiff : 1;
 #endif
