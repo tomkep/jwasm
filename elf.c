@@ -561,7 +561,7 @@ static void set_symtab_values( void *hdr )
             continue;
         Mangle( &curr->sym, p2 );
         p2 += strlen(p2) + 1;
-	}
+    }
 #endif
     vp = NULL;
     while ( sym = GetPublicData( &vp ) ) {

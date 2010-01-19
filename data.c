@@ -358,8 +358,8 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
         if ( f->sym->mem_type == MT_BITS ) {
             opndx.kind = EXPR_CONST;
             opndx.string = NULL;
-            if (AsmBuffer[i]->token == T_COMMA || AsmBuffer[i]->token == T_FINAL) {
-                if (f->value) {
+            if ( AsmBuffer[i]->token == T_COMMA || AsmBuffer[i]->token == T_FINAL ) {
+                if ( f->value ) {
                     int j = Token_Count + 1;
                     int max_item = Tokenize(f->value, j);
                     EvalOperand(&j, max_item, &opndx, TRUE);
@@ -371,12 +371,12 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
                 EvalOperand(&i, Token_Count, &opndx, TRUE);
                 is_record_set = TRUE;
             }
-            if (opndx.kind != EXPR_CONST || opndx.string != NULL)
-                AsmError( SYNTAX_ERROR );
-            if (f->sym->total_size < 32) {
+            if ( opndx.kind != EXPR_CONST || opndx.string != NULL )
+                AsmError( CONSTANT_EXPECTED );
+            if ( f->sym->total_size < 32 ) {
                 unsigned long dwMax = (1 << f->sym->total_size);
-                if (opndx.value >= dwMax)
-                    AsmError(INITIALIZER_MAGNITUDE_TOO_LARGE);
+                if ( opndx.value >= dwMax )
+                    AsmError( INITIALIZER_MAGNITUDE_TOO_LARGE );
             }
             dwRecInit |= opndx.value << f->sym->offset;
 #if 0
@@ -1178,21 +1178,22 @@ next_item:
                     //if ( fixup_type == FIX_OFF64 )
                     //    CodeInfo->data[OPND2] = opndx.hvalue;
 #endif
-                    store_fixup( fixup, &opndx.value ); /* may fail, but ignore error! */
+                    //store_fixup( fixup, &opndx.value ); /* may fail, but ignore error! */
+                    OutputBytesAndFixup( fixup, (unsigned char *)&opndx.value, no_of_bytes );
+                } else {
+                    /* now actually output the data */
+                    //ptr = (char *)&CodeInfo->data[OPND1];
+                    ptr = (char *)&opndx.value;
+
+                    /* emit offset (segment is on fixup), max is sizeof(uint_64) */
+                    OutputBytes( ptr, no_of_bytes );
                 }
-
-                /* now actually output the data */
-                //ptr = (char *)&CodeInfo->data[OPND1];
-                ptr = (char *)&opndx.value;
-
-                /* emit offset (segment is on fixup), max is sizeof(uint_64) */
-                OutputBytes( ptr, no_of_bytes );
             }
             break;
         case EXPR_REG:
             AsmError( INVALID_USE_OF_REGISTER );
             break;
-        default:
+        default: /* type != EXPR_REG, EXPR_ADDR, EXPR_CONST, EXPR_EMPTY? */
             DebugMsg(("data_item: error, opndx.kind=%u\n", opndx.kind ));
             AsmError( SYNTAX_ERROR );
             return( ERROR );
@@ -1329,7 +1330,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
     }
     if( AsmBuffer[ initializer_loc + 1 ]->token == T_FINAL ) {
         DebugMsg(("data_init: no initializer found\n"));
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[initializer_loc]->pos );
         return( ERROR );
     }
 
@@ -1442,6 +1443,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
         }
         sym->defined = TRUE;
         sym->mem_type = mem_type;
+        /* fixme: backpatch for data items is probably nonsense */
         BackPatch( sym );
     }
 

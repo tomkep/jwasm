@@ -32,7 +32,6 @@
 #define _LABELS_H_
 
 extern void             LabelsInit( void );
-extern asm_sym *        IsLabelType( const char * );
 extern ret_code         LabelDirective( int );
 extern char *           GetCurrAnonLabel( char * );
 extern char *           GetNextAnonLabel( char * );

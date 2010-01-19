@@ -56,17 +56,6 @@ char * GetNextAnonLabel( char * buffer )
     return( buffer );
 }
 
-struct asm_sym * IsLabelType( const char *name )
-/**********************************************/
-{
-    asm_sym *sym;
-
-    sym = SymSearch( name );
-    if ( sym && (sym->state == SYM_TYPE ) )
-        return( sym );
-    return( NULL );
-}
-
 // define a label
 // symbol_name: name of the label
 // mem_type: its memory type
@@ -166,6 +155,12 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
     BackPatch( sym );
     return( sym );
 }
+
+/* LABEL directive.
+ * syntax: <label_name> LABEL <type>
+ * <type> can be a predefined or arbitrary type.
+ * PTR and "PTR type" is also accepted.
+ */
 
 ret_code LabelDirective( int i )
 /******************************/

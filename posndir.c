@@ -69,8 +69,19 @@ static const uint_8 NopList32[] = {
 };
 
 #if AMD64_SUPPORT
+static const uint_8 NopList64[] = {
+    7,
+    0x0f,0x1f,0x80,0,0,0,0,         // nop dword ptr [rax+0]
+    0x66,0x0f,0x1f,0x44,0,0,        // nop word ptr [rax+rax]
+    0x0f,0x1f,0x44,0,0,             // nop dword ptr [rax+rax]
+    0x0f,0x1f,0x40,0,               // nop dword ptr [rax]
+    0x0f,0x1f,0,                    // nop dword ptr [rax]
+    0x66,0x90,                      // xchg ax,ax
+    0x90,                           // nop
+};
+
 /* just use the 32bit nops for 64bit */
-static const uint_8 * const NopLists[] = { NopList16, NopList32, NopList32 };
+static const uint_8 * const NopLists[] = { NopList16, NopList32, NopList64 };
 #else
 static const uint_8 * const NopLists[] = { NopList16, NopList32 };
 #endif

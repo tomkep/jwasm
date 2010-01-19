@@ -152,6 +152,11 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
         if (CurrSeg == NULL)
             break;
         //if ( write_to_file == FALSE )
+#ifdef DEBUG_OUT
+        if ( Options.max_passes == 1 )
+            ; // write a listing in pass 1
+        else
+#endif
         if ( Parse_Pass == PASS_1 )  /* changed v1.96 */
             break;
 
@@ -198,7 +203,7 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
             p = buffer + strlen(buffer);
         } else if ( sym->state == SYM_TMACRO ) {
             char buffer2[MAX_LINE_LEN];
-            GetTextMacroValue( sym->string_ptr, buffer2 );
+            GetLiteralValue( buffer2, sym->string_ptr );
             sprintf( buffer, " = %-" PREFFMTSTR ".80s", buffer2 );
             p = buffer + strlen( buffer );
         }
@@ -665,7 +670,7 @@ static void log_symbol( struct asm_sym *sym )
         LstNL();
         break;
     case SYM_TMACRO:
-        GetTextMacroValue(sym->string_ptr, buffer);
+        GetLiteralValue( buffer, sym->string_ptr );
         LstPrintf( "%s %s        %s   %s", sym->name, pdots, typestr[TS_TEXT], buffer );
         LstNL();
         break;

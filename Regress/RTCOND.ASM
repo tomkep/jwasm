@@ -72,6 +72,10 @@ res macro
 		mov al,res()
 	.endif
 
+	.if (!(eax == 1 && ebx == 1))
+		mov al,res()
+	.endif
+
 	.if ((eax < 1) && (ebx > 1))
 		mov al,res()
 	.endif
@@ -81,6 +85,10 @@ res macro
 	.endif
 
 	.if (( eax == 1 || eax == 2 ) && ebx == 3 )
+		mov al,res()
+	.endif
+
+	.if (!(eax == 1 || ebx == 1))
 		mov al,res()
 	.endif
 
@@ -156,11 +164,19 @@ res macro
 		mov al,res()
 	.endw
 
+	.while !(eax == 1 && ebx == 2)
+		mov al,res()
+	.endw
+
 	.while eax == 1 && ebx == 2 && ecx == 3
 		mov al,res()
 	.endw
 
 	.while eax == 1 || ebx == 2
+		mov al,res()
+	.endw
+
+	.while !(eax == 1 || ebx == 2)
 		mov al,res()
 	.endw
 
@@ -235,11 +251,19 @@ res macro
 
 	.repeat
 		mov al,res()
+	.until !(eax == 1 && ebx == 2)
+
+	.repeat
+		mov al,res()
 	.until eax == 1 && ebx == 2 && ecx == 3
 
 	.repeat
 		mov al,res()
 	.until eax == 1 || ebx == 2
+
+	.repeat
+		mov al,res()
+	.until !(eax == 1 || ebx == 2)
 
 	.repeat
 		mov al,res()
@@ -281,6 +305,11 @@ res macro
 	.repeat
 		mov al,res()
 		.continue .if ( eax == 1 ) || ( eax == 2 )
+	.until eax > 10
+
+	.repeat
+		mov al,res()
+		.continue .if !( eax == 1 && ebx == 2 )
 	.until eax > 10
 
 	.repeat

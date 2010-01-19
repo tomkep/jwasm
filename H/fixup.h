@@ -67,7 +67,7 @@ enum fixup_types {
  */
 
 enum fixup_options {
-        OPTJ_NONE,               /* normal jump */
+        OPTJ_NONE,      /* normal jump, PUSH */
         OPTJ_EXPLICIT,
         OPTJ_EXTEND,
         OPTJ_JXX,

@@ -38,14 +38,10 @@ typedef struct pubdef_data  pubdef_data;
 #include "omfpc.h"
 #include "omffixup.h"
 
-#define ReadU16(p)      (*(uint_16*)(p))
-#define ReadU32(p)      (*(uint_32*)(p))
-#define ReadS16(p)      (*(int_16*)(p))
-#define ReadS32(p)      (*(int_16*)(p))
 #define WriteU16(p,n)   (*(uint_16*)(p) = (uint_16)(n))
 #define WriteU32(p,n)   (*(uint_32*)(p) = (uint_32)(n))
-#define WriteS16(p,n)   (*(int_16*)(p) = (int_16)(n))
-#define WriteS32(p,n)   (*(int_32*)(p) = (int_32)(n))
+//#define WriteS16(p,n)   (*(int_16*)(p) = (int_16)(n))
+//#define WriteS32(p,n)   (*(int_32*)(p) = (int_32)(n))
 
 #pragma pack( push, 1 )
 
@@ -304,25 +300,8 @@ extern void         OmfDetachData( obj_rec *objr );
     the actual object record itself.  Called as part of OmfKillRec().
 */
 
-
-extern void         OmfCanFree( obj_rec *objr );
-/*
-    Indicates that OmfDetachData or OmfKillRec can free the data associated
-    with this record.  Not necessary if the data was allocated with
-    OmfAllocData.
-*/
-
-
-//extern uint_8       OmfGet8( obj_rec *objr );
-//extern uint_16      OmfGet16( obj_rec *objr );
-//extern uint_32      OmfGet32( obj_rec *objr );
-//extern uint_32      OmfGetEither( obj_rec *objr );
-//extern size_t       OmfGetIndex( obj_rec *objr );
 extern uint_8       *OmfGet( obj_rec *objr, size_t len );
 //extern int          OmfEOR( obj_rec *objr );
-extern size_t       OmfRTell( obj_rec *objr );
-extern void         OmfRSeek( obj_rec *objr, size_t set );
-extern size_t       ObjRemain( obj_rec *objr );
 extern void         OmfPut8( obj_rec *objr, uint_8 byte );
 extern void         OmfPut16( obj_rec *objr, uint_16 word );
 extern void         OmfPut32( obj_rec *objr, uint_32 dword );
@@ -338,18 +317,10 @@ extern void         OmfPutName( obj_rec *objr, const char *name, size_t len );
     the data.  The following functions are used to read and write data
     and modify the "file" pointer.
 
-    OmfGet8         return uint_8 at pointer, and bump pointer by 1
-    OmfGet16        return uint_16 at pointer, and bump pointer by 2
-    OmfGet32        return uint_32 at pointer, and bump pointer by 4
-    OmfGetEither    if record is_32 then OmfGet32 else OmfGet16
-    OmfGetIndex     return the intel index at pointer, bump ptr by 1 or 2
     OmfGet          return ptr to len bytes, bump ptr by len.
                     The ptr to the entire data record is returned by
                     the call OmfGet( rec, 0 );
-    //OmfEOR          returns TRUE (non-zero) if pointer is at end of record
-    OmfRTell        returns the offset of the pointer into the data
-    OmfRSeek        sets the offset of the pointer into the data
-    OmfRemain       how many bytes left in record
+    OmfEOR          returns TRUE (non-zero) if pointer is at end of record
     OmfPut8         write uint_8 at pointer, and bump pointer by 1
     OmfPut16        write uint_16 at pointer, and bump pointer by 2
     OmfPut32        write uint_32 at pointer, and bump pointer by 4
@@ -359,39 +330,4 @@ extern void         OmfPutName( obj_rec *objr, const char *name, size_t len );
     OmfPutName      OmfPut8( len ) then OmfPut( name, len )
 */
 
-
-extern void         ObjTruncRec( obj_rec *objr );
-/*
-    The generator filters (genmsomf.c, genphar.c) write data starting from
-    the "file" pointer up to the point where ObjTruncRec was called.  For
-    example,
-
-        objr = OmfNewRec( CMD_COMENT );
-        objr->d.comment.attr = 0x80;
-        objr->d.comment.class = 0xff;
-        OmfAllocData( objr, 100 );
-        OmfRSeek( objr, 5 );
-        OmfPut( objr, "willy_wonka", 11 );
-        OmfTruncRec( objr );
-
-    The object record constructed by this would only have the bytes starting
-    at offset 5, and ending at offset 15 written out to the object file.
-    This is useful when creating records that contain Intel indicies...
-    since the indicies are variable length you have to either precalculate
-    the length of the record, or make an 'upper-bound' guess.  I chose to
-    make the upper-bound guess, then use ObjTruncRec to truncate the
-    record after writing all the data to it.
-*/
-
-
-/*
-    The following macros are just for speed.
-*/
-
-//#define OmfEOR(objr)            ( (objr)->curoff >= (objr)->length )
-#define OmfRTell(objr)          ( (objr)->curoff )
-#define OmfRSeek(objr,set)      (void)( (objr)->curoff = set )
-#define OmfRemain(objr)         ( (objr)->length - (objr)->curoff )
-#define OmfTruncRec(objr)       (void)( (objr)->length = (objr)->curoff )
-#define OmfCanFree(objr)        (void)( (objr)->free_data = 1 )
 #endif

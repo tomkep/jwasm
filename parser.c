@@ -595,7 +595,9 @@ static ret_code mem2code( struct code_info *CodeInfo, char ss, int index, int ba
 #endif
             rm_field = base_reg;
 #if AMD64_SUPPORT
-            rex = ( bit3_base << 2 ); /* set REX_R */
+            /* v2.02 */
+            //rex = ( bit3_base << 2 ); /* set REX_R */
+            rex = bit3_base; /* set REX_R */
 #endif
             // default is DS:[], DS: segment override is not needed
         }
@@ -676,13 +678,20 @@ static ret_code mem2code( struct code_info *CodeInfo, char ss, int index, int ba
             rex = (bit3_idx << 1) + (bit3_base); /* set REX_X + REX_B */
 #endif
             seg_override( CodeInfo, base, sym, FALSE );
-        }
+        } /* end switch(index) */
+#if AMD64_SUPPORT
+        DebugMsg(("mem2code, indirect, base+index: mod_field=%X, rm_field=%X, rex=%X\n", mod_field, rm_field, rex ));
+#else
+        DebugMsg(("mem2code, indirect, base+index: rm_field=%X\n", rm_field ));
+#endif
     }
     if( Opnd_Count == OPND2 ) {
         // shift the register field to left by 3 bit
         CodeInfo->rm_byte = mod_field | ( rm_field << 3 ) | ( CodeInfo->rm_byte & BIT_012 );
 #if AMD64_SUPPORT
-        CodeInfo->prefix.rex |= (rex >> 2 );
+        //v2.02: exchange B and R, keep X
+        //CodeInfo->prefix.rex |= (rex >> 2 );
+        CodeInfo->prefix.rex |= ( ( rex >> 2 ) | ( rex & REX_X ) | (( rex & 1) << 2 ) );
 #endif
     } else if( Opnd_Count == OPND1 ) {
         CodeInfo->rm_byte = mod_field | rm_field;
@@ -1067,7 +1076,9 @@ static ret_code idata_fixup( struct code_info *CodeInfo, expr_list *opndx )
             case T_PUSHD:
             case T_PUSH:
                 /* for forward reference, assume BYTE */
-                if ( opndx->mem_type == MT_EMPTY ) {
+                /* v2.02: don't assume BYTE if it is SEG/GRP */
+                //if ( opndx->mem_type == MT_EMPTY ) {
+                if ( opndx->mem_type == MT_EMPTY && opndx->instr != T_SEG ) {
                     opndx->mem_type = MT_BYTE;
                     break;
                 }
@@ -1796,7 +1807,7 @@ static ret_code process_register( struct code_info *CodeInfo, const expr_list *o
     case OP_EAX:
     case OP_R32:
 #ifdef DEBUG_OUT
-        DebugMsg(("process_register(%s), R32/R64, reg=%u\n", AsmBuffer[opndx->base_reg]->string_ptr, reg ));
+        DebugMsg(("process_register(%s) R32/R64 reg=%u prefix.rex=%X\n", AsmBuffer[opndx->base_reg]->string_ptr, reg, CodeInfo->prefix.rex ));
 #endif
         CodeInfo->opcode |= W_BIT;             // set w-bit
         if( CodeInfo->Ofssize == USE16 )
@@ -1924,15 +1935,21 @@ static void HandleStringInstructions( struct code_info *CodeInfo, const expr_lis
          /* cmps allows prefix for the first operand (=source) only */
         if ( CodeInfo->prefix.RegOverride != EMPTY ) {
             if ( opndx->override != EMPTY ) {
-                if ( CodeInfo->prefix.RegOverride == ASSUME_ES )
+                if ( CodeInfo->prefix.RegOverride == ASSUME_ES ) {
                     /* content of LastRegOverride is valid if
                      * CodeInfo->RegOverride is != EMPTY.
                      */
-                    CodeInfo->prefix.RegOverride = LastRegOverride;
-                else {
+                    if ( LastRegOverride == ASSUME_DS )
+                        CodeInfo->prefix.RegOverride = EMPTY;
+                    else
+                        CodeInfo->prefix.RegOverride = LastRegOverride;
+                } else {
                     DebugMsg(("HandleStringInstructions: CMPS: CodeInfo->RegOverride=%X, opndx->override=%s\n", CodeInfo->prefix.RegOverride, AsmBuffer[opndx->override]->string_ptr ));
                     AsmError( INVALID_INSTRUCTION_OPERANDS );
                 }
+            } else if ( CodeInfo->prefix.RegOverride == ASSUME_DS ) {
+                /* prefix for first operand? */
+                CodeInfo->prefix.RegOverride = EMPTY;
             }
         }
         break;
@@ -2239,6 +2256,16 @@ static ret_code check_size( struct code_info *CodeInfo, const expr_list * opndx 
         break;
 #if SSE4SUPP
     case T_CRC32:
+        /* v2.02: for CRC32, the second operand determines whether an
+         * OPSIZE prefix byte is to be written.
+         */
+        op2_size = OperandSize( op2, CodeInfo );
+        if ( op2_size < 2)
+            CodeInfo->prefix.opsiz = FALSE;
+        else if ( op2_size == 2 )
+            CodeInfo->prefix.opsiz = CodeInfo->Ofssize ? TRUE : FALSE;
+        else
+            CodeInfo->prefix.opsiz = CodeInfo->Ofssize ? FALSE : TRUE;
         break;
 #endif
     case T_MOVD:
@@ -2504,8 +2531,8 @@ ret_code ParseItems( void )
             if( AsmBuffer[i+1]->token != T_DIRECTIVE &&
                /* v2.01: the second item might be a predefined byte (T_RES_ID)! */
                ( AsmBuffer[i+1]->token != T_RES_ID || AsmBuffer[i+1]->rm_byte != RWT_TYPE ) &&
-                ( sym = IsLabelType( AsmBuffer[i]->string_ptr ) ) &&
-                ( CurrStruct == NULL || ( IsLabelType( AsmBuffer[i+1]->string_ptr ) == FALSE ) ) ) {
+                ( sym = SymIsType( AsmBuffer[i]->string_ptr ) ) &&
+                ( CurrStruct == NULL || ( SymIsType( AsmBuffer[i+1]->string_ptr ) == FALSE ) ) ) {
                 DebugMsg(("ParseItems: anonymous data item >%s<\n", AsmBuffer[i]->string_ptr ));
                 return( data_init( CodeInfo, label, i, (dir_node *)sym ) );
             }
@@ -2544,7 +2571,7 @@ ret_code ParseItems( void )
             break;
         case T_ID:
             DebugMsg(("ParseItems: T_ID >%s<\n", AsmBuffer[i]->string_ptr ));
-            if( sym = IsLabelType( AsmBuffer[i]->string_ptr ) ) {
+            if( sym = SymIsType( AsmBuffer[i]->string_ptr ) ) {
                 return( data_init( CodeInfo, label, i, (dir_node *)sym ) );
             }
             break;
@@ -2796,7 +2823,12 @@ ret_code ParseItems( void )
                 if ( CodeInfo->opnd_type[OPND1] & OP_R64 )
                     CodeInfo->prefix.rex &= 0x7;
             } else if ( CodeInfo->token == T_CALL || CodeInfo->token == T_JMP ) {
-                CodeInfo->prefix.rex = 0;
+                /* v2.02: previously rex-prefix was cleared entirely,
+                 * but bits 0-2 are needed to make "call rax" and "call r8"
+                 * distinguishable!
+                 */
+                //CodeInfo->prefix.rex = 0;
+                CodeInfo->prefix.rex &= 0x7;
             } else if ( CodeInfo->token == T_MOV ) {
                 if ( CodeInfo->opnd_type[OPND1] & OP_SPEC_REG || CodeInfo->opnd_type[OPND2] & OP_SPEC_REG )
                     CodeInfo->prefix.rex &= 0x7;

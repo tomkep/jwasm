@@ -20,7 +20,7 @@
 "\0"                "x=NOTPUBLIC (default).\0"
 "-D<name>[=text]\0" "Define text macro\0"
 #ifdef DEBUG_OUT
-"-d6\0"             "Display debug trace on stdout\0"
+"-d6\0"             "DBG: Display debug trace on stdout\0"
 #endif
 "-e<number>\0"      "Set error limit number (default=50)\0"
 #if ELF_SUPPORT
@@ -41,7 +41,7 @@
 "-G<c|d|z>\0"       "Use Pascal, C or Stdcall calling convention\0"
 "-I<directory>\0"   "Add directory to list of include directories\0"
 #ifdef DEBUG_OUT
-"-ls\0"             "Display preprocessed line storage on stdout\0"
+"-ls\0"             "DBG: Display preprocessed line storage on stdout\0"
 #endif
 "-m<t|s|m|c|l|h|f>\0" "Set memory model:\0"
 "\0"                "(Tiny, Small, Medium, Compact, Large, Huge, Flat)\0"
@@ -56,7 +56,7 @@
 #endif
 "-omf\0"            "Generate OMF format object file (default)\0"
 #ifdef DEBUG_OUT
-"-pm=<n>\0"         "Stop assembly after <n> passes\0"
+"-pm=<n>\0"         "DBG: Stop assembly after <n> passes\0"
 #endif
 "-q, -nologo\0"     "Don't display version and copyright information\0"
 "-Sa\0"             "Maximize source listing\0"

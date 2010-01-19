@@ -316,7 +316,7 @@ static bool GetLineFromFile( char *ptr, unsigned max, FILE *fp )
     got_something = FALSE;
 #if DETECTEOC
     /* don't skip comments inside a COMMENT */
-    if (inside_comment) {
+    if ( inside_comment ) {
 #ifdef DEBUG_OUT
         char *p2 = ptr;
 #endif

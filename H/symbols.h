@@ -208,6 +208,7 @@ extern  struct asm_sym **SymSort( unsigned int * );
 extern  void            SymMakeAllSymbolsPublic( void );
 //extern  void            SymSetCurrPC( void );
 extern  int             SymEnum( struct asm_sym * *, int * );
+extern  struct asm_sym  *SymIsType( const char * );
 
 #ifdef __WATCOMC__
 typedef int (__watcall * StrCmpFunc)(const char *, const char * );

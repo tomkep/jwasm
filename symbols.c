@@ -310,7 +310,7 @@ static void FreeASym( struct asm_sym *sym )
     struct asmfixup     *next;
 
 //    DebugMsg(("FreeASym: delete %s, state=%X\n", sym->name, sym->state));
-    for(curr = sym->fixup ;curr; ) {
+    for( curr = sym->fixup ; curr; ) {
         next = curr->nextbp;
         AsmFree( curr );
         curr = next;
@@ -425,6 +425,17 @@ struct asm_sym *SymSearch( const char *name )
         SymSetCurrPC();
 
     return( *sym_ptr );
+}
+
+struct asm_sym * SymIsType( const char *name )
+/********************************************/
+{
+    struct asm_sym *sym;
+
+    sym = SymSearch( name );
+    if ( sym && (sym->state == SYM_TYPE ) )
+        return( sym );
+    return( NULL );
 }
 
 void SymMakeAllSymbolsPublic( void )

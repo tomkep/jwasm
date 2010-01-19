@@ -31,7 +31,6 @@
 
 #ifndef CARVE_H
 #define CARVE_H 1
-#include <stddef.h>
 
 typedef void *carve_t;
 

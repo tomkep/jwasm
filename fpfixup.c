@@ -40,10 +40,7 @@
 #include "segment.h"
 #include "omf.h"
 
-extern int_8           Frame;          // Frame of current fixup
-
 typedef enum {
-    FPP_NONE,
     FPP_WAIT,
     FPP_NORMAL,
     FPP_ES,
@@ -51,12 +48,10 @@ typedef enum {
     FPP_SS,
     FPP_DS,
     FPP_FS,
-    FPP_GS,
-    FPP_NUMBER_OF_TYPES
+    FPP_GS
 } fp_patches;
 
 static const char * const FPPatchName[] = {
-    NULL,
     "FIWRQQ",
     "FIDRQQ",
     "FIERQQ",
@@ -71,7 +66,6 @@ static const char * const FPPatchAltName[] = {
     NULL,
     NULL,
     NULL,
-    NULL,
     "FJCRQQ",
     "FJSRQQ",
     "FJARQQ",
@@ -79,27 +73,14 @@ static const char * const FPPatchAltName[] = {
     "FJGRQQ"
 };
 
-static ret_code MakeFpFixup( struct code_info *CodeInfo, struct asm_sym *sym )
-/****************************************************************************/
-{
-    struct asmfixup *fixup;
-    int_32          data;
-    if ( write_to_file ) {
-        fixup = AddFixup( sym, FIX_OFF16, OPTJ_NONE );
-        fixup->frame = FRAME_LOC;
-        fixup->fixup_loc = GetCurrOffset();
-        data = 0;
-        return ( store_fixup( fixup, &data ) );
-    }
-    return( NOT_ERROR );
-}
-
 ret_code AddFloatingPointEmulationFixup( struct code_info *CodeInfo, bool secondary )
 /************************************************************************************/
 {
     fp_patches patch;
     struct asm_sym *sym;
     const char * const *patch_name_array;
+    struct asmfixup *fixup;
+    int_32 data;
 
     patch_name_array = ( secondary ? FPPatchAltName : FPPatchName );
 
@@ -119,19 +100,31 @@ ret_code AddFloatingPointEmulationFixup( struct code_info *CodeInfo, bool second
         }
     }
 
-    /* put out an extern def for the patch */
     if( patch_name_array[patch] == NULL )
-        return( NOT_ERROR );
+        return( NOT_ERROR ); /* no fixup needed */
+
+    DebugMsg(("AddFloatingPointEmulationFixup( %X, %u )\n", CodeInfo, secondary ));
+    /* put out an extern def for the patch if not done already */
     sym = SymSearch( patch_name_array[patch] );
     if( sym == NULL ) {
         sym = MakeExtern( patch_name_array[patch], MT_FAR, NULL, NULL, USE16 );
         SetMangler( sym, NULL, LANG_NONE );
     }
+    /* no need for fixups if no object file is written */
+    if ( write_to_file == FALSE )
+        return( NOT_ERROR );
+
     /* make sure the next 2 bytes in code stream aren't separated */
-    if( write_to_file == TRUE &&
-       Options.output_format == OFORMAT_OMF &&
+    if( Options.output_format == OFORMAT_OMF &&
        (CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc + 2) >= MAX_LEDATA )
         omf_FlushCurrSeg();
 
-    return( MakeFpFixup( CodeInfo, sym ) );
+    fixup = AddFixup( sym, FIX_OFF16, OPTJ_NONE );
+    /* v2.02: use TARGET, as Masm does! */
+    //fixup->frame = FRAME_LOC;
+    fixup->frame = FRAME_TARG;
+    /* v2.02: this has been done in AddFixup() already */
+    //fixup->fixup_loc = GetCurrOffset();
+    data = 0;
+    return ( store_fixup( fixup, &data ) );
 }

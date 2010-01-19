@@ -660,7 +660,7 @@ static ret_code IncludeLibDirective( int i )
 
     if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
         if ( AsmBuffer[i+1]->token != T_FINAL ) {
-            AsmError( SYNTAX_ERROR );
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i+1]->string_ptr );
             return( ERROR );
         }
         name = AsmBuffer[i]->string_ptr;
@@ -1068,7 +1068,7 @@ static ret_code ModelDirective( int i )
 
     i++;
     if ( AsmBuffer[i]->token == T_FINAL ) {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->string_ptr );
         return( ERROR );
     }
     /* get the model argument */
@@ -1180,7 +1180,7 @@ static ret_code EndDirective( int i, struct code_info *CodeInfo )
         return( ERROR );
     }
     if( AsmBuffer[i]->token != T_FINAL) {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
 
@@ -1275,7 +1275,7 @@ static ret_code AliasDirective( int i )
         AsmBuffer[i+1]->value != T_EQU ||
         AsmBuffer[i+1]->dirtype != DRT_EQUALSGN ) {
         DebugMsg(("AliasDirective: syntax error: %s\n", AsmBuffer[i+1]->string_ptr ));
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i+1]->string_ptr );
         return( ERROR );
     }
 
@@ -1352,8 +1352,8 @@ static ret_code NameDirective( int i )
           AsmBuffer[i]->value == T_UNION   ||
           AsmBuffer[i]->value == T_TYPEDEF ||
           AsmBuffer[i]->value == T_RECORD)) ||
-         AsmBuffer[i]->token == T_COLON) {
-        AsmError(SYNTAX_ERROR);
+         AsmBuffer[i]->token == T_COLON ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->pos );
         return( ERROR );
     }
 
@@ -1392,7 +1392,7 @@ static ret_code RadixDirective( int i )
         return( ERROR );
     }
     if (AsmBuffer[i]->token != T_FINAL) {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
 

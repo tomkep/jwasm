@@ -38,7 +38,7 @@
 extern ret_code ExpandToken( int count, char * string, bool addbrackets, bool Equ_Mode );
 extern ret_code ExpandLine( char * );
 extern int      RunMacro( dir_node *, char *, char *, bool, bool, bool );
-extern int      GetTextMacroValue( const char *, char * );
+extern int      GetLiteralValue( char *, const char * );
 
 /* functions in macro.c */
 

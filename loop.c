@@ -51,7 +51,7 @@ ret_code LoopDirective( int i, int directive )
     int arg_loc;
     int len;
     //bool first = TRUE;
-    char c;
+    //char c;
     char *parmstring;
     char *oldbufferend;
     char *ptr;
@@ -105,34 +105,39 @@ ret_code LoopDirective( int i, int directive )
     default: /* FOR, FORC, IRP, IRPC */
         /* get the formal parameter and the argument list */
         /* the format parameter will become a macro parameter, so it can
-          be a simple T_ID, but also an instruction or something else */
+         * be a simple T_ID, but also an instruction or something else.
+         * v2.02: And it can begin with a '.'!
+         */
         if( AsmBuffer[i]->token == T_FINAL) {
             AsmError( OPERAND_EXPECTED );
             return( ERROR );
         }
-        c = *AsmBuffer[i]->string_ptr;
-        if( ( is_valid_id_char(c) == FALSE ) || ( isdigit(c) == TRUE ) ) {
-            DebugMsg(( "LoopDirective(FOR): token %s is not an ID\n", AsmBuffer[i]->string_ptr ));
+        /* v2.02: allow parameter name to begin with a '.' */
+        //c = *AsmBuffer[i]->string_ptr;
+        //if( ( is_valid_id_char(c) == FALSE ) || ( isdigit(c) == TRUE ) ) {
+        if( is_valid_id_first_char( *AsmBuffer[i]->string_ptr ) == FALSE ) {
+            DebugMsg(( "LoopDirective(FOR/FORC): token %s is not a valid parameter name\n", AsmBuffer[i]->string_ptr ));
             AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         arg_loc = i;
-
         i++;
-        while ( AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA )
-            i++;
 
-        if( AsmBuffer[i]->token != T_COMMA ) {
-            AsmError( EXPECTING_COMMA );
-            return( ERROR );
-        }
-
-        i++;
-        /* FORC accepts anything as "argument list", even nothing! */
         if( directive == T_FORC || directive == T_IRPC ) {
-            if( AsmBuffer[i]->token == T_STRING) {
+            if( AsmBuffer[i]->token != T_COMMA ) {
+                AsmError( EXPECTING_COMMA );
+                return( ERROR );
+            }
+            i++;
+            /* FORC accepts anything as "argument list", even nothing! */
+            if( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
                 parmstring = AsmTmpAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1 );
                 strcpy( parmstring, AsmBuffer[i]->string_ptr );
+                /* v2.02: if there's additional stuff behind the <> literal,
+                 * it's an error!
+                 */
+                if ( AsmBuffer[i+1]->token != T_FINAL )
+                    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i+1]->string_ptr );
             } else {
                 char *ptr2;
                 /* AsmBuffer[i]->pos cannot be used (T_NUM!) */
@@ -140,7 +145,10 @@ ret_code LoopDirective( int i, int directive )
                 ptr++; /* skip comma */
                 while ( isspace(*ptr) ) ptr++;
                 ptr2 = ptr;
-                while (*ptr2 && (isspace(*ptr2) == FALSE))
+                /* this is what Masm does: use the string until a space
+                 * is detected. Anything beyond the space is ignored.
+                 */
+                while (*ptr2 && ( isspace(*ptr2) == FALSE) )
                     ptr2++;
                 len = ptr2 - ptr;
                 parmstring = AsmTmpAlloc( len + 1 );
@@ -148,23 +156,32 @@ ret_code LoopDirective( int i, int directive )
                 *(parmstring+len) = NULLC;
             }
         } else {
-            if ( AsmBuffer[i]->token == T_FINAL ) {
-                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->string_ptr );
+            /* for FOR, skip everything between the name and the comma!
+             * these items will be stored as (first) macro parameter.
+             * for example, valid syntax is:
+             * FOR xxx,<a, ...>
+             * FOR xxx:REQ,<a, ...>
+             */
+            while ( AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA )
+                i++;
+            if( AsmBuffer[i]->token != T_COMMA ) {
+                AsmError( EXPECTING_COMMA );
                 return( ERROR );
             }
+            i++;
             /* FOR/IRP accepts a literal enclosed in <> only */
             if( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
                 AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
                 return( ERROR );
             }
             parmstring = AsmTmpAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1 );
-            //v2.0: use GetTextMacroValue() instead of strcpy!!!
+            //v2.0: use GetLiteralValue() instead of strcpy!!!
             //strcpy( parmstring, AsmBuffer[i]->string_ptr );
-            GetTextMacroValue( AsmBuffer[i]->string_ptr, parmstring );
+            GetLiteralValue( parmstring, AsmBuffer[i]->string_ptr );
             DebugMsg(("LoopDirective(FOR): param string >%s<\n", parmstring));
         }
         /* to run StoreMacro(), AsmBuffer must be setup correctly. */
-        /* the comma and the string must be made invisible */
+        /* clear contents beginning with the comma! */
         i--;
         AsmBuffer[i]->token = T_FINAL;
         Token_Count = i;

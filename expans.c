@@ -10,7 +10,7 @@
 * - RunMacro          run a macro
 * - ExpandToken       expand one token
 * - ExpandLine        expand a source line
-* - GetTextMacroValue get contents of a text macro
+* - GetLiteralValue   get contents of a literal
 *
 ****************************************************************************/
 
@@ -324,7 +324,7 @@ static ret_code ExpandText( char * line, bool substitute, bool addbrackets )
                     }
                     DebugMsg(("ExpandText(): %s is to be replaced by >%s<\n", pIdent, dir->sym.string_ptr));
                     //strcpy( pIdent, dir->sym.string_ptr);
-                    GetTextMacroValue( dir->sym.string_ptr, pIdent );
+                    GetLiteralValue( pIdent, dir->sym.string_ptr );
                     pDst = pIdent + strlen(pIdent);
                     rc = STRING_EXPANDED;
                     expanded = TRUE;
@@ -977,7 +977,7 @@ static ret_code ExpandTextMacro( dir_node * dir, int pos, char * string, int add
             start = AsmBuffer[pos]->pos - string;
             strcpy( buffer2, string );
 
-            GetTextMacroValue( dst, buffer3 );
+            GetLiteralValue( buffer3, dst );
 
             i = RunMacro( tmpdir, buffer3, buffer, TRUE, TRUE, addbrackets );
             DebugMsg(("ExpandTextMacro: replace >%s< by >%s<\n", dir->sym.string_ptr, buffer));
@@ -1342,10 +1342,10 @@ std_expansion:
     return( rc );
 }
 
-/* get text macro value */
+/* get value of a literal, skip literal-character operators(!) */
 /* returns no of characters copied into buffer (without terminating 00) */
 
-int GetTextMacroValue( const char * p, char * buffer )
+int GetLiteralValue( char * buffer, const char * p )
 /****************************************************/
 {
     char *dest = buffer;

@@ -209,7 +209,7 @@ typedef enum {
     CMD_STATIC_EXTD32   = 0xb5,
     CMD_LPUBDEF         = 0xb6,     /* local public names def record    */
     CMD_LPUBDEF32       = 0xb7,
-    CMD_LCOMDEF         = 0xb8,     /* local comdev                     */
+    CMD_LCOMDEF         = 0xb8,     /* local communal names def record  */
     CMD_STATIC_COMDEF   = 0xb8,
     CMD_CEXTDF          = 0xbc,     /* external reference to a COMDAT   */
     CMD_COMDAT          = 0xc2,     /* initialized communal data record */

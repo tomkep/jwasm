@@ -174,7 +174,7 @@ ret_code ExterndefDirective( int i )
         if ( AsmBuffer[i]->token == T_ID ) {
             if (0 == _stricmp(AsmBuffer[i]->string_ptr, "ABS")) {
                 mem_type = MT_ABS;
-            } else if( symtype = IsLabelType( AsmBuffer[i]->string_ptr ) ) {
+            } else if( symtype = SymIsType( AsmBuffer[i]->string_ptr ) ) {
                 mem_type = MT_TYPE;
             }
         } else if ( AsmBuffer[i]->token == T_DIRECTIVE ) {
@@ -386,7 +386,7 @@ ret_code ExternDirective( int i )
         if (AsmBuffer[i]->token == T_ID) {
             if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "ABS" ) ) {
                 mem_type = MT_ABS;
-            } else if ( symtype = IsLabelType( typetoken ) ) {
+            } else if ( symtype = SymIsType( typetoken ) ) {
                 mem_type = MT_TYPE;
             }
         } else if ( AsmBuffer[i]->token == T_DIRECTIVE ) {

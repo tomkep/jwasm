@@ -60,5 +60,5 @@ extern void         OmfWrite32( OBJ_WFILE *obj, uint_32 dword );
 extern void         OmfWriteIndex( OBJ_WFILE *obj, uint_16 index );
 extern void         OmfWrite( OBJ_WFILE *obj, const uint_8 *buffer, size_t len );
 extern void         OmfWriteRec( OBJ_WFILE *obj, uint_8 command, size_t length, const uint_8 *contents );
-extern void         OmfWFlushBuffer( OBJ_WFILE *out );
+//extern void         OmfFlushBuffer( OBJ_WFILE *out );
 #endif

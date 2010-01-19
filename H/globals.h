@@ -124,7 +124,7 @@
 /* JWasm version info */
 
 #define _BETA_
-#define _JWASM_VERSION_ "2.01" _BETA_
+#define _JWASM_VERSION_ "2.02" _BETA_
 #define _JWASM_VERSION_INT_ 201
 
 #include "errmsg.h"
@@ -519,6 +519,7 @@ extern bool             write_to_file;  // 1=write the object module
 
 extern void             OutputByte( unsigned char );
 extern void             OutputBytes( unsigned char *, int len );
+extern void             OutputBytesAndFixup( struct asmfixup *, unsigned char *, int len );
 extern void             FillDataBytes( unsigned char, int len );
 extern void             OutputCodeByte( unsigned char );
 extern void             OutSelect( bool );

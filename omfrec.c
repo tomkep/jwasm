@@ -59,8 +59,8 @@ obj_rec *OmfNewRec( uint_8 command )
     new->data = NULL;
     new->length = 0;
     new->curoff = 0;
-    new->is_32 = 0;
-    new->free_data = 0;
+    new->is_32 = FALSE;
+    new->free_data = FALSE;
     return( new );
 }
 

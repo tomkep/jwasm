@@ -93,6 +93,7 @@ enum operand_type {
     OP_M48      = 0x00400000,
     OP_M80      = 0x00800000,
 
+    OP_MGT8     = ( OP_M16 | OP_M32 | OP_M64 ),
     OP_MGT16    = ( OP_M32 | OP_M64 ),
     OP_MFPTR    = ( OP_M32 | OP_M48 | OP_M80 ),
     OP_M_ANY    = ( OP_M8 | OP_M16 | OP_M32 | OP_M48 | OP_M64 | OP_M80 | OP_M128 ),

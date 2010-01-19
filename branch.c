@@ -154,7 +154,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
     CodeInfo->data[Opnd_Count] = opndx->value;
     sym = opndx->sym;
     if( sym == NULL ) { /* no symbolic label specified? */
-        DebugMsg(("branch(%X): sym=NULL, op.memtype=%Xh\n", GetCurrOffset(), opndx->mem_type ));
+        DebugMsg(("process_branch(%X): sym=NULL, op.memtype=%Xh\n", GetCurrOffset(), opndx->mem_type ));
 
         /* Masm rejects: "jump dest must specify a label */
 #if NEEDLABEL
@@ -172,17 +172,32 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
         return( NOT_ERROR );
 #endif
     }
-    DebugMsg(("branch(%X): explicit=%u op.memtype=%X sym=>%s< sym.state=%u/mem_type=%Xh/ofs=%X\n", GetCurrOffset(), opndx->explicit, opndx->mem_type, sym->name, sym->state, sym->mem_type, sym->offset));
+    DebugMsg(("process_branch(%X, %s): explicit=%u op.memtype=%X sym.state=%u/mem_type=%Xh/ofs=%X/seg=%s\n",
+              GetCurrOffset(), sym->name, opndx->explicit, opndx->mem_type,
+              sym->state, sym->mem_type, sym->offset, sym->segment ? sym->segment->name : "NULL" ));
 
     state = sym->state;
-    if ( state == SYM_UNDEFINED || state == SYM_INTERNAL || state == SYM_EXTERNAL ) {
+    addr = sym->offset; /* v2.02: init addr, so sym->offset keeps changed */
+
+    /* v2.02: if symbol is GLOBAL and it isn't clear yet were
+     * it's located, then assume it is in the same segment as the caller!
+     * This applies to PROTOs and EXTERNDEFs in Pass 1.
+     */
+    if ( ( state == SYM_EXTERNAL ) && sym->weak ) {
+        DebugMsg(("process_branch: Global (PROTO/EXTERNDEF) assumed UNDEFINED!\n" ));
+        state = SYM_UNDEFINED;
+    } else
+
+    /* v2.02: removed SYM_UNDEFINED. Don't check segment of such symbols! */
+//    if ( state == SYM_UNDEFINED || state == SYM_INTERNAL || state == SYM_EXTERNAL ) {
+    if ( state == SYM_INTERNAL || state == SYM_EXTERNAL ) {
         seg = GetSeg( sym );
         if( seg == NULL || ( CurrSeg != seg ) ) {
             /* if label has a different segment and jump/call is near or short,
              report an error */
             if ( ModuleInfo.flatgrp_idx != 0 )
                 ;
-            else if (seg != NULL && CurrSeg != NULL) {
+            else if ( seg != NULL && CurrSeg != NULL ) {
                 /* if the segments belong to the same group, it's ok */
                 if (((dir_node *)seg)->e.seginfo->group != NULL &&
                     CurrSeg->e.seginfo->group != NULL &&
@@ -202,54 +217,51 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
     fixup_type = FIX_RELOFF8;
     switch( state ) {
     case SYM_UNDEFINED:
-        SetSymSegOfs( sym ); /* set symbol's seg:ofs to current seg:ofs */
+        /* v2.02: don't change field sym->offset! */
+        addr = GetCurrOffset(); /* force distance to SHORT */
+        //SetSymSegOfs( sym ); /* set symbol's seg:ofs to current seg:ofs */
         /* fall through */
     case SYM_INTERNAL:
-        /* if a segment override is active,
+        /* v1.94: if a segment override is active,
          check if it's matching the assumed value of CS.
          If no, assume a FAR call.
          */
         if ( SegOverride != NULL && CodeInfo->mem_type == MT_EMPTY ) {
-            if ( SegOverride != GetOverrideAssume( ASSUME_CS) ) {
+            if ( SegOverride != GetOverrideAssume( ASSUME_CS ) ) {
                 CodeInfo->mem_type = MT_FAR;
             }
         }
         if(  ( CodeInfo->mem_type == MT_EMPTY ||
               CodeInfo->mem_type == MT_SHORT ||
-              CodeInfo->mem_type == MT_NEAR )
-#if 0
-           /* 1. opndx memtype preferable, the symbol's memtype shouldn't be
-            *  used.
-            * 2. it's useless because it won't occur.
-            */
-           && sym->mem_type != MT_WORD
-           && sym->mem_type != MT_DWORD
-           && sym->mem_type != MT_FWORD
-#endif
-            && CodeInfo->isfar == FALSE ) {
+              CodeInfo->mem_type == MT_NEAR ) &&
+           CodeInfo->isfar == FALSE ) {
 
             /* if the label is FAR - or there is a segment override
-             which equals assumed value of CS - and there is no type cast,
-             then do "far call translation".
+             * which equals assumed value of CS - and there is no type cast,
+             * then do "far call translation".
+             * this optimization is NEVER done if destination is external.
+             * (it could be done if destination's segment is known).
              */
             if( CodeInfo->token == T_CALL &&
                 CodeInfo->mem_type == MT_EMPTY &&
                 ( sym->mem_type == MT_FAR || SegOverride ) ) {
-                FarCallToNear( CodeInfo );
+                DebugMsg(("process_branch: FAR call optimization applied!\n" ));
+                FarCallToNear( CodeInfo ); /* switch mem_type to NEAR */
             }
 
-            addr = sym->offset;
+            //addr = sym->offset; /* v2.02: this has been done above */
             addr -= ( GetCurrOffset() + 2 );  // calculate the displacement
             addr += CodeInfo->data[Opnd_Count];
             /*  JCXZ, LOOPW, LOOPEW, LOOPZW, LOOPNEW, LOOPNZW,
                JECXZ, LOOPD, LOOPED, LOOPZD, LOOPNED, LOOPNZD? */
-            if (( CodeInfo->Ofssize && AsmOpTable[opidx].byte1_info == F_16A) ||
-                ( CodeInfo->Ofssize != USE32 && AsmOpTable[opidx].byte1_info == F_32A))
+            if (( CodeInfo->Ofssize && AsmOpTable[opidx].byte1_info == F_16A ) ||
+                ( CodeInfo->Ofssize != USE32 && AsmOpTable[opidx].byte1_info == F_32A ))
                 addr--; /* 1 extra byte for ADRSIZ (0x67) */
 
-            if( CodeInfo->token == T_CALL && CodeInfo->mem_type == MT_EMPTY ) {
-                CodeInfo->mem_type = MT_NEAR;
-            }
+            //v2.02
+            //if( CodeInfo->token == T_CALL && CodeInfo->mem_type == MT_EMPTY ) {
+            //    CodeInfo->mem_type = MT_NEAR;
+            //}
 
             if( CodeInfo->mem_type != MT_NEAR && CodeInfo->token != T_CALL
                 && ( addr >= SCHAR_MIN && addr <= SCHAR_MAX ) ) {
@@ -260,7 +272,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                      * "smallest" to "largest" distance, an "out of range"
                      * error can be detected at any time.
                      */
-                    DebugMsg(("branch: 1, jump out of range, addr=%Xh\n", addr ));
+                    DebugMsg(("process_branch: 1, jump out of range, addr=%Xh\n", addr ));
                     if ( addr < 0 ) {
                         addr -= SCHAR_MIN;
                         addr = 0 - addr;
@@ -297,7 +309,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
 
             /* store the displacement */
             CodeInfo->data[Opnd_Count] = addr;
-            DebugMsg(("branch: displacement=%X\n", addr ));
+            DebugMsg(("process_branch: displacement=%X\n", addr ));
 
             /* automatic (conditional) jump expansion.
              * for 386 and above this is not needed, since there exists
@@ -313,17 +325,28 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                         //return( SCRAP_INSTRUCTION );
                     //} else if( !PhaseError ) {
                     } else {
-                        DebugMsg(("%u branch: 2, jump out of range, mem_type=%X, curr_ofs=%X, sym->offs=%X, addr=%d\n", Parse_Pass + 1, CodeInfo->mem_type, GetCurrOffset(), sym->offset, addr ));
+                        DebugMsg(("%u process_branch: 2, jump out of range, mem_type=%X, curr_ofs=%X, addr=%d\n", Parse_Pass + 1, CodeInfo->mem_type, GetCurrOffset(), addr ));
                         AsmErr( JUMP_OUT_OF_RANGE, addr );
                         return( ERROR );
                     }
                 }
             }
-            break;
+            /* v2.02: in pass one, write "backpatch" fixup for forward
+             * references.
+             */
+            /* the "if" line below is somewhat problematic. It "should" be
+             * active, but it's disabled because backpatching doesn't fully
+             * work. Thus JWasm needs more passes than necessary.
+             * If the line is activated, fixups will be written for forward
+             * references. Those fixups will then be scanned when the label
+             * is met.
+             */
+            //if ( state != SYM_UNDEFINED )
+            break; /* exit switch, no fixup is written! */
         }
         /* fall through, handle FAR destinations like external symbols */
     case SYM_EXTERNAL:
-        DebugMsg(("branch: SYM_EXTERNAL\n" ));
+        DebugMsg(("process_branch: case SYM_EXTERNAL\n" ));
 
         /* v1.95: explicit flag to be removed! */
         //if ( opndx->explicit )
@@ -350,7 +373,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                         CodeInfo->isfar = TRUE;
                 break;
             default:
-                DebugMsg(("branch: strange mem_type %Xh\n", mem_type ));
+                DebugMsg(("process_branch: strange mem_type %Xh\n", mem_type ));
                 CodeInfo->mem_type = mem_type;
             }
         }
@@ -359,7 +382,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
         if ( IS_JMPCALL( CodeInfo->token ) &&
             ( CodeInfo->isfar == TRUE || CodeInfo->mem_type == MT_FAR )) {
             CodeInfo->isfar = TRUE; /* flag isn't set if explicit is true */
-            DebugMsg(("branch: FAR call/jmp\n"));
+            DebugMsg(("process_branch: FAR call/jmp\n"));
             switch( CodeInfo->mem_type ) {
             case MT_SHORT:
             case MT_NEAR:
@@ -564,7 +587,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
         CodeInfo->InsFixup[Opnd_Count] = AddFixup( sym, fixup_type, fixup_option );
         break; /* end case SYM_EXTERNAL */
     default: /* other types: SYM_SEG, SYM_GRP, SYM_STACK?, SYM_STRUCT_FIELD, SYM_TYPE,  ... */
-        DebugMsg(("branch: error, sym=%s, state=%u, memtype=%u\n", sym->name, sym->state, sym->mem_type));
+        DebugMsg(("process_branch: error, sym=%s, state=%u, memtype=%u\n", sym->name, sym->state, sym->mem_type));
         AsmErr( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL );
         return( ERROR );
     }

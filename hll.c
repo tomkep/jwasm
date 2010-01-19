@@ -53,7 +53,7 @@ typedef enum {
     HLL_IF,
     HLL_WHILE,
     HLL_REPEAT,
-    HLL_BREAK
+    HLL_BREAK  /* .IF behind .BREAK or .CONTINUE */
 } hll_cmd;
 
 // item for .IF, .WHILE, .REPEAT, ...
@@ -621,7 +621,12 @@ static ret_code GetAndExpression( hll_list * hll, int *i, int ilabel, bool is_tr
         op = GetCOp(i);
         if (op != COP_AND)
             break;
-        if ( hll->cmd == HLL_WHILE || hll->cmd == HLL_BREAK ) {
+        /* v2.02: query is_true var instead of cmd field!
+         * this is important if the '!' operator was used.
+         */
+        //if ( hll->cmd == HLL_WHILE || hll->cmd == HLL_BREAK ) {
+        if ( is_true ) {
+            /* todo: please describe what's done here and why! */
             if (*lastjmp) {
                 char * p = *lastjmp;
                 InvertJmp( p+1 );         /* step 1 */
@@ -686,7 +691,11 @@ static ret_code GetExpression( hll_list * hll, int *i, int ilabel, bool is_true,
          4b. replace the "false" label in the generated code by the new label
 
          */
-        if (*lastjmp && ( hll->cmd != HLL_BREAK ) && ( hll->cmd != HLL_WHILE ) ) {
+        /* v2.02: query is_true var instead of cmd field!
+         * this is important if the '!' operator was used.
+         */
+        //if (*lastjmp && ( hll->cmd != HLL_BREAK ) && ( hll->cmd != HLL_WHILE ) ) {
+        if ( *lastjmp && is_true == FALSE ) {
             char * p = *lastjmp;
             InvertJmp(p+1);         /* step 1 */
             p += 4;
@@ -739,13 +748,23 @@ static ret_code WriteExprSrc( hll_list * hll, char * buffer )
     return( NOT_ERROR );
 }
 
-// evaluate the C like boolean expression found in HLL structs
-// like .IF, .ELSEIF, .WHILE, .UNTIL and .UNTILCXZ
-// might return multiple lines (strings separated by 0x0A)
-// i = index in AsmBuffer where expression starts. Is restricted
-// to one source line (till T_FINAL)
-// label: label to jump to if expression is <is_true>!
-// is_true: TRUE/FALSE
+/*
+ * evaluate the C like boolean expression found in HLL structs
+ * like .IF, .ELSEIF, .WHILE, .UNTIL and .UNTILCXZ
+ * might return multiple lines (strings separated by 0x0A)
+ * i = index in AsmBuffer where expression starts. Is restricted
+ * to one source line (till T_FINAL)
+ * label: label to jump to if expression is <is_true>!
+ * is_true:
+ *   .IF:       FALSE
+ *   .ELSEIF:   FALSE
+ *   .WHILE:    TRUE
+ *   .UNTIL:    FALSE
+ *   .UNTILCXZ: FALSE
+ *   .BREAK .IF:TRUE
+ *   .CONT .IF: TRUE
+ */
+
 
 static ret_code EvaluateHllExpression( hll_list * hll, int *i, int ilabel, bool is_true )
 /***************************************************************************************/

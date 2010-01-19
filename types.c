@@ -387,7 +387,9 @@ ret_code EndstructDirective( int i )
 
     /* Pad bytes at the end of the structure. */
 #if 1
-    if ( dir->e.structinfo->alignment > 1 && Options.masm_compat_gencode == FALSE ) {
+    /* v2.02: this is to be done in any case, whether -Zg is set or not */
+    //if ( dir->e.structinfo->alignment > 1 && Options.masm_compat_gencode == FALSE ) {
+    if ( dir->e.structinfo->alignment > 1 ) {
         size = dir->sym.max_mbr_size;
         if ( size == 0 )
             size++;
@@ -758,7 +760,7 @@ asm_sym *CreateTypeDef(char * name, int * pi)
             return( sym );
         }
         /* besides PROTO typedef, an arbitrary type is ok */
-        if( !(symtype = IsLabelType( token ) ) ) {
+        if( !(symtype = SymIsType( token ) ) ) {
             AsmError( INVALID_QUALIFIED_TYPE );
             return( NULL );
         }

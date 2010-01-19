@@ -41,7 +41,7 @@ extern int              GetSymOfssize( struct asm_sym * );
 extern direct_idx       GetLnameIdx( const char * );
 extern uint_32          GetCurrOffset( void );  // Get current segment's offset
 extern ret_code         SetCurrOffset( int_32, bool, bool );
-extern direct_idx       SetSegmentClass( struct asm_sym *, const char * );
+//extern direct_idx       SetSegmentClass( struct asm_sym *, const char * );
 extern asm_sym          *CreateSegment( const char *name, const char *classname, uint_8 alignment, uint_8 is32 );
 //extern dir_node         *GetCurrSeg( void );  /* Get current segment; NULL means none */
 //extern int              GetCurrClass( void ); /* get curr segment's class index */

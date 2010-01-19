@@ -478,6 +478,7 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
             store_fixup( fixup, (int_32 *)ps );
         } else {
             fixup = AddFixup( sym, rectype, OPTJ_NONE );
+            /* todo: for OMF, delay fixup store until checkflush has been called! */
             store_fixup( fixup, (int_32 *)ps );
         }
         ps += len - ofs;

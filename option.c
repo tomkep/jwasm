@@ -81,7 +81,7 @@ static int SetCaseMap( int *pi )
         i++;
         SymSetCmpFunc();
     } else {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
     *pi = i;
@@ -93,7 +93,7 @@ static int SetCaseMap( int *pi )
 static int SetM510( int *pi )
 /***************************/
 {
-    SetMasm510(TRUE);
+    SetMasm510( TRUE );
     return( NOT_ERROR );
 }
 
@@ -218,18 +218,18 @@ static int SetNoKeyword( int *pi )
         *pi = Token_Count;
         return( NOT_ERROR);
     }
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token != T_STRING) {
-        AsmError( SYNTAX_ERROR );
+    if ( AsmBuffer[i]->token != T_STRING ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
-    for (p = AsmBuffer[i]->string_ptr; *p; ) {
-        while (isspace(*p)) p++;
-        if (*p) {
+    for ( p = AsmBuffer[i]->string_ptr; *p; ) {
+        while ( isspace( *p ) ) p++;
+        if ( *p ) {
             char buffer[64];
             int cnt = sizeof(buffer) - 1;
             char * p2 = buffer;
@@ -256,7 +256,7 @@ static int SetNoKeyword( int *pi )
     }
     i++;
     *pi = i;
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 /* OPTION LANGUAGE */
@@ -282,7 +282,7 @@ static int SetLanguage( int *pi )
             return( NOT_ERROR );
         }
     }
-    AsmError( SYNTAX_ERROR );
+    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
     return( ERROR );
 }
 
@@ -293,26 +293,24 @@ static int SetSetIF2( int *pi )
 {
     int i = *pi;
 
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token != T_ID) {
-        AsmError( SYNTAX_ERROR );
+    if ( AsmBuffer[i]->token == T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->string_ptr );
         return( ERROR );
     }
-    if (0 == _stricmp(AsmBuffer[i]->string_ptr, "TRUE"))
+    if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "TRUE" ) ) {
         ModuleInfo.setif2 = TRUE;
-    else if (0 == _stricmp(AsmBuffer[i]->string_ptr, "FALSE"))
+        i++;
+    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "FALSE" ) ) {
         ModuleInfo.setif2 = FALSE;
-    else {
-        AsmError( SYNTAX_ERROR );
-        return( ERROR );
+        i++;
     }
-    i++;
     *pi = i;
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 /* OPTION PROLOGUE:macroname
@@ -345,7 +343,7 @@ static int SetPrologue( int *pi )
     }
     i++;
     if (AsmBuffer[i]->token != T_ID) {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
     if (0 == _stricmp(AsmBuffer[i]->string_ptr,"NONE")) {
@@ -362,7 +360,7 @@ static int SetPrologue( int *pi )
     ModuleInfo.proc_prologue = name;
     i++;
     *pi = i;
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 /* OPTION EPILOGUE:macroname */
@@ -383,7 +381,7 @@ static int SetEpilogue( int *pi )
     }
     i++;
     if (AsmBuffer[i]->token != T_ID) {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
     if (0 == _stricmp(AsmBuffer[i]->string_ptr,"NONE")) {
@@ -401,7 +399,7 @@ static int SetEpilogue( int *pi )
     ModuleInfo.proc_epilogue = name;
     i++;
     *pi = i;
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 /* OPTION OFFSET: GROUP | FLAT | SEGMENT
@@ -413,13 +411,13 @@ static int SetOffset( int *pi )
 {
     int i = *pi;
 
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token == T_FINAL) {
-        AsmError( SYNTAX_ERROR );
+    if ( AsmBuffer[i]->token == T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->string_ptr );
         return( ERROR );
     }
     if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"GROUP" ) ) {
@@ -429,7 +427,7 @@ static int SetOffset( int *pi )
     } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"SEGMENT" ) ) {
         ModuleInfo.offsettype = OT_SEGMENT;
     } else {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
     i++;
@@ -444,33 +442,35 @@ static int SetProc( int *pi )
 {
     int i = *pi;
 
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
     i++;
-    switch (AsmBuffer[i]->token) {
+    if ( AsmBuffer[i]->token == T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->string_ptr );
+        return( ERROR );
+    }
+
+    switch ( AsmBuffer[i]->token ) {
     case T_ID:
-        if (0 == _stricmp(AsmBuffer[i]->string_ptr,"PRIVATE")) {
+        if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "PRIVATE" ) ) {
             ModuleInfo.procs_private = TRUE;
             ModuleInfo.procs_export = FALSE;
             i++;
-        } else if (0 == _stricmp(AsmBuffer[i]->string_ptr,"EXPORT")) {
+        } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "EXPORT" ) ) {
             ModuleInfo.procs_private = FALSE;
             ModuleInfo.procs_export = TRUE;
             i++;
         }
         break;
     case T_DIRECTIVE: /* word PUBLIC is a directive */
-        if (AsmBuffer[i]->value == T_PUBLIC) {
+        if ( AsmBuffer[i]->value == T_PUBLIC ) {
             ModuleInfo.procs_private = FALSE;
             ModuleInfo.procs_export = FALSE;
             i++;
         }
         break;
-    default:
-        AsmError( SYNTAX_ERROR );
-        return( ERROR );
     }
     *pi = i;
     return( NOT_ERROR );
@@ -486,7 +486,7 @@ static int SetSegment( int *pi )
 {
     int i = *pi;
 
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
@@ -507,12 +507,12 @@ static int SetSegment( int *pi )
         ModuleInfo.defOfssize = USE64;
 #endif
     } else {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
     i++;
     *pi = i;
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 
 #if FIELDALIGN
@@ -529,7 +529,7 @@ static int SetFieldAlign( int *pi )
         (*pi)--;
         return( NOT_ERROR );
     }
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
@@ -569,7 +569,7 @@ static int SetProcAlign( int *pi )
         (*pi)--;
         return( NOT_ERROR );
     }
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
@@ -590,7 +590,7 @@ static int SetProcAlign( int *pi )
     }
     ModuleInfo.procalign = temp2;
     *pi = i;
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 #endif
 
@@ -608,7 +608,7 @@ static int SetMZ( int *pi )
         (*pi)--;
         return( NOT_ERROR );
     }
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
@@ -660,19 +660,17 @@ static int SetFrame( int *pi )
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token == T_FINAL) {
+    if ( AsmBuffer[i]->token == T_FINAL ) {
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
     if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"AUTO" ) ) {
         ModuleInfo.frame_auto = 1;
+        i++;
     } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"NOAUTO" ) ) {
         ModuleInfo.frame_auto = 0;
-    } else {
-        AsmError( SYNTAX_ERROR );
-        return( ERROR );
+        i++;
     }
-    i++;
     *pi = i;
     return( NOT_ERROR );
 }
@@ -731,7 +729,7 @@ static int SetRenameKey( int *pi )
     /* do nothing if pass > 1 */
     if( Parse_Pass != PASS_1 ) {
         *pi = Token_Count;
-        return( NOT_ERROR);
+        return( NOT_ERROR );
     }
     if (AsmBuffer[i]->token != T_COLON) {
         AsmError( COLON_EXPECTED );
@@ -762,7 +760,7 @@ static int SetRenameKey( int *pi )
     RenameKeyword( resw - AsmResWord, AsmBuffer[i]->string_ptr, strlen( AsmBuffer[i]->string_ptr ) );
     i++;
     *pi = i;
-    return(NOT_ERROR);
+    return( NOT_ERROR );
 }
 #endif
 
@@ -854,7 +852,7 @@ ret_code OptionDirective( int i )
             }
             break;
         default:
-            AsmError( SYNTAX_ERROR );
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         if ( AsmBuffer[i]->token == T_COMMA )
@@ -864,7 +862,7 @@ ret_code OptionDirective( int i )
     }
     if ( po == NULL || po->name == NULL || AsmBuffer[i]->token != T_FINAL ) {
         DebugMsg(( "option syntax error: >%s<\n", AsmBuffer[i]->string_ptr ));
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
     return( NOT_ERROR );

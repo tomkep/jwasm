@@ -120,7 +120,7 @@ ret_code CatStrDef( int i )
         i++;
         if ( ( AsmBuffer[i]->token != T_COMMA ) &&
             ( AsmBuffer[i]->token != T_FINAL ) ) {
-            AsmError( SYNTAX_ERROR );
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         i++;
@@ -309,7 +309,7 @@ ret_code SubStrDef( int i )
         size = opndx.value;
         if ( AsmBuffer[i]->token != T_FINAL ) {
             DebugMsg(("SubStrDef(%s): additional items found\n", name));
-            AsmError( SYNTAX_ERROR );
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
         if (size < 0) {
@@ -387,17 +387,21 @@ ret_code SizeStrDef( int i )
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
-    if ( AsmBuffer[0]->token != T_ID || Token_Count != 3 ) {
-        DebugMsg(("SizeStrDef: syntax error, name=%s, Token_Count=%u\n", AsmBuffer[0]->string_ptr, Token_Count));
-        AsmError( SYNTAX_ERROR );
+    if ( AsmBuffer[0]->token != T_ID ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
         return( ERROR );
     }
     if ( AsmBuffer[2]->token != T_STRING || AsmBuffer[2]->string_delim != '<') {
         AsmError( TEXT_ITEM_REQUIRED );
         return( ERROR );
     }
+    if ( Token_Count > 3 ) {
+        DebugMsg(("SizeStrDef: syntax error, name=%s, Token_Count=%u\n", AsmBuffer[0]->string_ptr, Token_Count));
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[3]->string_ptr );
+        return( ERROR );
+    }
 
-    sizestr = GetTextMacroValue(AsmBuffer[2]->string_ptr, buffer);
+    sizestr = GetLiteralValue( buffer, AsmBuffer[2]->string_ptr );
 
     if ( sym = CreateConstantEx( AsmBuffer[0]->string_ptr, sizestr ) ) {
         DebugMsg(("SizeStrDef(%s) exit, value=%u\n", AsmBuffer[0]->string_ptr, sizestr));
@@ -454,7 +458,7 @@ ret_code InStrDef( int i )
         if (start <= 0)
             start = 1;
         if ( AsmBuffer[i]->token != T_COMMA ) {
-            AsmError( SYNTAX_ERROR );
+            AsmError( EXPECTING_COMMA );
             return( ERROR );
         }
         i++; /* skip comma */
@@ -464,7 +468,7 @@ ret_code InStrDef( int i )
         AsmError( TEXT_ITEM_REQUIRED );
         return( ERROR );
     }
-    sizestr = GetTextMacroValue( AsmBuffer[i]->string_ptr, buffer1 );
+    sizestr = GetLiteralValue( buffer1, AsmBuffer[i]->string_ptr );
 #ifdef DEBUG_OUT
     DebugMsg(("InStrDef: first string >%s< \n", buffer1));
 #endif
@@ -474,7 +478,7 @@ ret_code InStrDef( int i )
     }
     i++;
     if (AsmBuffer[i]->token != T_COMMA) {
-        AsmError( SYNTAX_ERROR );
+        AsmError( EXPECTING_COMMA );
         return( ERROR );
     }
     i++;
@@ -483,13 +487,13 @@ ret_code InStrDef( int i )
         AsmError( TEXT_ITEM_REQUIRED );
         return( ERROR );
     }
-    j = GetTextMacroValue(AsmBuffer[i]->string_ptr, buffer2);
+    j = GetLiteralValue( buffer2, AsmBuffer[i]->string_ptr );
 #ifdef DEBUG_OUT
     DebugMsg(("InStrDef: second string >%s< \n", buffer2));
 #endif
     i++;
     if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
 
@@ -543,7 +547,7 @@ static ret_code GetNumber( char * string, int * pi )
         return( ERROR );
     }
     if( opndx.kind != EXPR_CONST || opndx.string != NULL || AsmBuffer[i]->token != T_FINAL ) {
-        AsmError( SYNTAX_ERROR );
+        AsmErr( SYNTAX_ERROR_EX, string );
         return( ERROR );
     }
     *pi = opndx.value;

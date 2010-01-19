@@ -165,21 +165,26 @@ static int get_precedence( int i, int bracket_precedence )
 //    14            SHORT, OPATTR, .TYPE, ADDR
 
     /* japheth: the first table is the prefered one. Reasons:
-     - () and [] must be first
+     - () and [] must be first.
      - it contains operators SIZEOF, LENGTHOF, HIGHWORD, LOWWORD, LROFFSET
-     - ADDR is no operator for expressions
+     - ADDR is no operator for expressions. It's exclusively used inside
+       INVOKE directive.
 
      However, what's wrong in both tables is the precedence of
      the dot operator: Actually for both JWasm and Wasm the dot precedence
      is 2 and LENGTH, SIZE, ... have precedence 3 instead.
 
-     Precedence of TYPE was 5 in original Wasm source. It has been changed
-     to 4, as described in the Masm docs. This allows syntax
+     Precedence of operator TYPE was 5 in original Wasm source. It has
+     been changed to 4, as described in the Masm docs. This allows syntax
      "TYPE DWORD ptr xxx"
 
-     Also, the precedence of '(' and '[' depends on the context.
-     If the bracket is the current operator, its precedence is 1.
-     However, for a new operator, the precedence is 9, the same as for '+'.
+     v2.02: another case which is problematic:
+         mov al,BYTE PTR CS:[]
+     Since PTR and ':' have the very same priority, the evaluator will
+     first calculate 'BYTE PTR CS'. This is invalid, but didn't matter
+     prior to v2.02 because register coercion was never checked for
+     plausibility. Solution: priority of ':' is changed from 4 to 3.
+
      */
 
     switch( AsmBuffer[i]->token ) {
@@ -193,7 +198,8 @@ static int get_precedence( int i, int bracket_precedence )
     case T_DOT:
         return( 2 );
     case T_COLON:
-        return( 4 );
+        //return( 4 );
+        return( 3 ); /* changed for v2.02 */
     case T_POSITIVE:
     case T_NEGATIVE:
         return( 7 );
@@ -206,7 +212,7 @@ static int get_precedence( int i, int bracket_precedence )
     }
     /* shouldn't happen! */
     DebugMsg(("get_precedence: unexpected operator=%s\n", AsmBuffer[i]->string_ptr));
-    AsmError( SYNTAX_ERROR );
+    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
     return( ERROR );
 }
 
@@ -1042,7 +1048,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
             if ( index_connect( token_1, token_2 ) == ERROR )
                 return( ERROR );
             if( token_2->sym != NULL ) {
-                if( (Parse_Pass > PASS_1) && (token_1->sym != NULL) ) {
+                if( ( Parse_Pass > PASS_1 ) && ( token_1->sym != NULL ) ) {
                     CAsmError( SYNTAX_ERROR );
                     DebugMsg(("calculate '.' error 2\n"));
                     return( ERROR );
@@ -1503,6 +1509,22 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 }
             }
             token_2->explicit = TRUE;
+            /* v2.02: if operand is a register, make sure
+             * that invalid combinations ("DWORD PTR AX") are flagged.
+             */
+            if ( token_2->kind == EXPR_REG && token_2->indirect == FALSE ) {
+                temp = AsmBuffer[token_2->base_reg]->value;
+                /* for segment registers, both size 2 and 4 is ok.*/
+                if ( GetOpndType( temp, 1 ) & OP_SR ) {
+                    if ( token_1->value != 2 && token_1->value != 4 ) {
+                        CAsmError( INVALID_USE_OF_REGISTER );
+                        return( ERROR );
+                    }
+                } else if ( token_1->value != SizeFromRegister( temp ) ) {
+                    CAsmError( INVALID_USE_OF_REGISTER );
+                    return( ERROR );
+                }
+            }
             token_2->mem_type = token_1->mem_type;
             token_2->Ofssize  = token_1->Ofssize;
             if ( token_1->override != EMPTY ) {
@@ -2176,14 +2198,16 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
             break;
         default: /* shouldn't happen */
             DebugMsg(("calculate: unknown UNARY operator %s\n", AsmBuffer[oper]->string_ptr ));
-            CAsmError( SYNTAX_ERROR );
+            if ( error_msg )
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[oper]->string_ptr );
             return( ERROR );
         }
         break; /* end case T_UNARY_OPERATOR */
     //case T_RES_ID:
     default: /* shouldn't happen */
         DebugMsg(("calculate: unknown operator %s\n", AsmBuffer[oper]->string_ptr ));
-        CAsmError( SYNTAX_ERROR );
+        if ( error_msg )
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[oper]->string_ptr );
         return( ERROR );
     } /* end switch( AsmBuffer[oper]->token ) */
 #ifdef DEBUG_OUT

@@ -1,21 +1,24 @@
 
-# this makefile creates JWASM.EXE (Win32) and optionally JWASMD.EXE (DOS).
+# this makefile in OW WMake style creates JWASM.EXE (Win32) and optionally
+# JWASMD.EXE (DOS).
 # tools used:
 # - Open Watcom v1.8
-# - HXDEV (optionally, only if DOS=1 is set below to create JWASMD.EXE)
+# - HXDEV (only needed if DOS=1 is set below to create JWASMD.EXE)
 #
-# is's also possible to create a debug version (debug=1)
+# to create a debug version, run "WMake debug=1".
 
-name = JWasm
-
-DOS=1
 WIN=1
+DOS=1
+
+# Open Watcom root directory
 
 WATCOM = \Watcom
 
-# if DOS=1, the HX directory must be set below.
+# if DOS=1, HXDIR must contain the HX root directory
 
 HXDIR = \HX
+
+name = JWasm
 
 !ifndef DEBUG
 DEBUG=0

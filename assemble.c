@@ -98,8 +98,6 @@ unsigned int            Parse_Pass;     // phase of parsing
 global_vars             GlobalVars;     // used for OMF comment records
 
 static unsigned long    lastLineNumber;
-static unsigned         seg_pos;        // OMF: file pos of SEGDEF record(s)
-static unsigned         public_pos;     // OMF: file pos of PUBDEF record(s)
 unsigned int            GeneratedCode;
 
 static asm_sym          *dmyproc;
@@ -422,6 +420,29 @@ void OutputBytes( unsigned char *pbytes, int len )
         CurrSeg->sym.max_offset = CurrSeg->e.seginfo->current_loc;
 }
 
+/* new for v2.02. this function ensures that data and fixup
+ * is never separated ( required for OMF ). in v2.00-v2.01, this
+ * might have happened.
+ */
+
+void OutputBytesAndFixup( struct asmfixup *fixup, unsigned char *pbytes, int len )
+/********************************************************************************/
+{
+    if( write_to_file == TRUE ) {
+        uint_32 idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
+        if( Options.output_format == OFORMAT_OMF && ((idx + len) >= MAX_LEDATA ) ) {
+            omf_FlushCurrSeg();
+            idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
+        }
+        store_fixup( fixup, (int_32 *)pbytes );
+        memcpy( &CurrSeg->e.seginfo->CodeBuffer[idx], pbytes, len );
+    }
+    CurrSeg->e.seginfo->current_loc += len;
+    CurrSeg->e.seginfo->bytes_written += len;
+    if( CurrSeg->e.seginfo->current_loc >= CurrSeg->sym.max_offset )
+        CurrSeg->sym.max_offset = CurrSeg->e.seginfo->current_loc;
+}
+
 void OutputCodeByte( unsigned char byte )
 /***************************************/
 {
@@ -501,7 +522,7 @@ static ret_code WriteContent( void )
         /* -if Zi is set, write symbols and types */
         if ( Options.debug_symbols )
             omf_write_debug_tables();
-        omf_write_record( ModendRec, TRUE );
+        omf_write_modend();
         break;
 #if COFF_SUPPORT
     case OFORMAT_COFF:
@@ -525,11 +546,11 @@ static ret_code WriteContent( void )
 }
 
 /*
- write the OMF/COFF/ELF header
- for OMF, this is called twice, once after Pass 1 is done
- and then again after assembly has finished without errors.
- for COFF/ELF/BIN, it's just called once.
-*/
+ * write the OMF/COFF/ELF header
+ * for OMF, this is called twice, once after Pass 1 is done
+ * and then again after assembly has finished without errors.
+ * for COFF/ELF/BIN, it's just called once.
+ */
 static ret_code WriteHeader( bool initial )
 /*****************************************/
 {
@@ -543,10 +564,16 @@ static ret_code WriteHeader( bool initial )
         if( ( curr->sym.segment == NULL )
           && ( curr->e.seginfo->group == NULL ) )
             AsmErr( SEG_NOT_DEFINED, curr->sym.name );
+        else if ( curr->e.seginfo->Ofssize == USE16 && curr->sym.max_offset > 0x10000 ) {
+            if ( Options.output_format == OFORMAT_OMF )
+                AsmErr( SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
+            else
+                AsmWarn( 2, SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
+        }
         ModuleInfo.total_segs++;
     }
 
-    switch (Options.output_format) {
+    switch ( Options.output_format ) {
     case OFORMAT_OMF:
         if ( initial == TRUE ) {
             omf_write_header();
@@ -559,25 +586,18 @@ static ret_code WriteHeader( bool initial )
                 SortSegments();
             omf_write_lib();
             omf_write_lnames();
-            seg_pos = ftell( FileInfo.file[OBJ] );
-        } else {
-            fseek( FileInfo.file[OBJ], seg_pos, SEEK_SET);
         }
-
-        omf_write_seg();
-        if (initial == TRUE) {
+        omf_write_seg( initial );
+        if ( initial == TRUE ) {
             omf_write_grp();
             omf_write_extdef();
             omf_write_comdef();
             omf_write_alias();
-            public_pos = ftell( FileInfo.file[OBJ] );
-        } else {
-            fseek( FileInfo.file[OBJ], public_pos, SEEK_SET);
         }
-        omf_write_pub();
-        if (initial == TRUE) {
+        omf_write_public( initial );
+        if ( initial == TRUE ) {
             omf_write_export();
-            omf_write_end_of_pass1();
+            omf_end_of_pass1();
         }
         break;
 #if COFF_SUPPORT
@@ -1374,7 +1394,6 @@ void AssembleModule( void )
 {
     unsigned long       prev_total = -1;
     unsigned long       curr_total;
-    unsigned long       end_of_header;
     int                 starttime;
     int                 endtime;
     dir_node            *dir;
@@ -1426,7 +1445,6 @@ void AssembleModule( void )
 
             if ( write_to_file && ( Options.output_format == OFORMAT_OMF ) ) {
                 WriteHeader( TRUE );
-                end_of_header = ftell( FileInfo.file[OBJ] );
             }
 #ifdef DEBUG_OUT
             DebugMsg(("AssembleModule forward references:\n"));
@@ -1481,11 +1499,6 @@ void AssembleModule( void )
 
         prev_total = curr_total;
 
-        /* set file position of OBJ, ASM, LST files for next pass */
-
-        if ( ( Options.output_format == OFORMAT_OMF ) && write_to_file )
-            fseek( FileInfo.file[OBJ], end_of_header, SEEK_SET );
-
         if ( Parse_Pass % 10000 == 9999 )
             AsmWarn( 2, ASSEMBLY_PASSES, Parse_Pass+1);
 #ifdef DEBUG_OUT
@@ -1505,7 +1518,12 @@ void AssembleModule( void )
             }
         }
 
+        /* set file position of ASM and LST files for next pass */
+
         rewind( FileInfo.file[ASM] );
+        if ( Options.output_format == OFORMAT_OMF )
+            omf_set_filepos();
+
 #if FASTPASS
         if ( UseSavedState == FALSE && FileInfo.file[LST] ) {
 #else

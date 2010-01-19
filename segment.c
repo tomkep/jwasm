@@ -713,8 +713,8 @@ static seg_type TypeFromSegmentName( const char *name )
     }
 }
 
-direct_idx SetSegmentClass( asm_sym *seg, const char *classname )
-/***************************************************************/
+static direct_idx SetSegmentClass( asm_sym *seg, const char *classname )
+/**********************************************************************/
 {
     direct_idx          classidx;
 
@@ -900,14 +900,14 @@ ret_code SegDef( int i )
                 }
                 i++;
                 if ( AsmBuffer[i]->token != T_OP_BRACKET ) {
-                    AsmError( SYNTAX_ERROR );
+                    AsmErr( EXPECTED, "(" );
                     continue;
                 }
                 i++;
                 if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
                     continue;
                 if ( AsmBuffer[i]->token != T_CL_BRACKET ) {
-                    AsmError( SYNTAX_ERROR );
+                    AsmErr( EXPECTED, ")" );
                     continue;
                 }
                 if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
@@ -1418,13 +1418,15 @@ void SegmentInit( int pass )
                 //    break;
                 //i = curr->sym.max_offset;
                 i = curr->sym.max_offset - curr->e.seginfo->start_loc;
-                /* the segment can grow in step 2-n due to jump
-                  modifications. worst case is no_of_short_jumps * 3 for 32bit.
-                  for a quick solution just add 25% to the size if segment
-                  contains labels */
-                if ( curr->e.seginfo->labels )
+                /* the segment can grow in step 2-n due to forward references.
+                 * for a quick solution just add 25% to the size if segment
+                 * is a code segment. (v2.02: previously if was added only if
+                 * code segment contained labels, but this isn't sufficient.)
+                 */
+                //if ( curr->e.seginfo->labels ) /* v2.02: changed */
+                if ( curr->e.seginfo->segtype == SEGTYPE_CODE )
                     i = i + (i >> 2);
-                DebugMsg(("SegmentInit(%u), %s: max_ofs=%lX, alloc_size=%lu\n", pass, curr->sym.name, curr->sym.max_offset, i ));
+                DebugMsg(("SegmentInit(%u), %s: max_ofs=%lX, alloc_size=%lXh\n", pass, curr->sym.name, curr->sym.max_offset, i ));
                 curr->e.seginfo->CodeBuffer = AsmAlloc(i);
 #if FASTMEM==0
                 /* fastmem clears the memory blocks, but malloc() won't */

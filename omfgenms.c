@@ -39,6 +39,10 @@
 #include "myassert.h"
 #include "queue.h"
 
+#define OmfRTell(objr)          ( (objr)->curoff )
+#define OmfRSeek(objr,set)      (void)( (objr)->curoff = set )
+#define OmfRemain(objr)         ( (objr)->length - (objr)->curoff )
+
 typedef int (*pobj_filter)( OBJ_WFILE *out, obj_rec *objr );
 
 typedef struct {
@@ -240,6 +244,10 @@ static int writeLedata( OBJ_WFILE *out, obj_rec *objr )
     return( 0 );
 }
 
+/* CMD_LIDATA isn't used currently. JWasm always uses
+ * LEDATA instead. This differs from Masm.
+ */
+
 static int writeLidata( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
@@ -322,6 +330,11 @@ static void writeBase( OBJ_WFILE *out, obj_rec *objr )
     }
 }
 
+/* COMDATs are initialized communal data records.
+ * This isn't used currently, the Masm COMM directive
+ * defines uninitialized communal data items.
+ */
+
 static int writeComdat( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
@@ -335,6 +348,7 @@ static int writeComdat( OBJ_WFILE *out, obj_rec *objr )
 
     save = OmfRTell( objr );
     is_32 = objr->is_32;
+    /* write CMD_COMDAT or CMD_COMD32 */
     OmfWBegRec( out, objr->command | ( is_32 ? 1 : 0 ) );
     OmfWrite8( out, objr->d.comdat.flags );
     OmfWrite8( out, objr->d.comdat.attributes );
@@ -457,6 +471,10 @@ static int writeLinnum( OBJ_WFILE *out, obj_rec *objr )
     return( 0 );
 }
 
+/* Not used. these record types are only used in conjunction
+ * with CMD_COMDAT.
+ */
+
 static int writeLinsym( OBJ_WFILE *out, obj_rec *objr )
 /*****************************************************/
 {
@@ -477,7 +495,7 @@ static const pobj_list myFuncs[] = {
     { CMD_COMENT,       writeComent },  /* 0x88 */
     { CMD_MODEND,       writeModend },  /* 0x8a */
     { CMD_EXTDEF,       writeMisc },    /* 0x8c */
-    { CMD_TYPDEF,       writeMisc },    /* 0x8e */
+    { CMD_TYPDEF,       writeMisc },    /* 0x8e not used */
     { CMD_PUBDEF,       writePubdef },  /* 0x90 */
     { CMD_LINNUM,       writeLinnum },  /* 0x94 */
     { CMD_LNAMES,       writeMisc },    /* 0x96 */
@@ -485,18 +503,18 @@ static const pobj_list myFuncs[] = {
     { CMD_GRPDEF,       writeMisc },    /* 0x9a */
     { CMD_FIXUP,        writeFixup },   /* 0x9c */
     { CMD_LEDATA,       writeLedata },  /* 0xa0 */
-    { CMD_LIDATA,       writeLidata },  /* 0xa2 */
+    { CMD_LIDATA,       writeLidata },  /* 0xa2 not used */
     { CMD_COMDEF,       writeMisc },    /* 0xb0 */
-    { CMD_BAKPAT,       writeMisc32 },  /* 0xb2 */
-    { CMD_STATIC_EXTDEF,writeMisc32 },  /* 0xb4 */
-    { CMD_LPUBDEF,      writePubdef },  /* 0xb6 */
-    { CMD_STATIC_COMDEF,writeMisc },    /* 0xb8 */
-    { CMD_CEXTDF,       writeMisc },    /* 0xbc */
-    { CMD_COMDAT,       writeComdat },  /* 0xc2 */
-    { CMD_LINSYM,       writeLinsym },  /* 0xc4 */
+    { CMD_BAKPAT,       writeMisc32 },  /* 0xb2 not used */
+    { CMD_STATIC_EXTDEF,writeMisc32 },  /* 0xb4 not used */
+    { CMD_LPUBDEF,      writePubdef },  /* 0xb6 not used */
+    { CMD_STATIC_COMDEF,writeMisc },    /* 0xb8 not used */
+    { CMD_CEXTDF,       writeMisc },    /* 0xbc not used */
+    { CMD_COMDAT,       writeComdat },  /* 0xc2 not used */
+    { CMD_LINSYM,       writeLinsym },  /* 0xc4 not used */
     { CMD_ALIAS,        writeMisc },    /* 0xc6 */
-    { CMD_NBKPAT,       writeMisc32 },  /* 0xc8 */
-    { CMD_LLNAMES,      writeMisc }     /* 0xca */
+    { CMD_NBKPAT,       writeMisc32 },  /* 0xc8 not used */
+    { CMD_LLNAMES,      writeMisc }     /* 0xca not used */
 };
 #define NUM_FUNCS   ( sizeof( myFuncs ) / sizeof( pobj_list ) )
 

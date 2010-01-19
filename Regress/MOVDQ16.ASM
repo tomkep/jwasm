@@ -1,14 +1,14 @@
 
 ;--- regression test
 ;--- code generation
-;--- MOVD/MOVQ
+;--- MOVD/MOVQ in 16-bit code segment
 
+	.model small
 	.686
-	.model flat
 	.xmm
 
 	.data
-	
+
 vo	OWORD 112233445566778899AABBCCDDEEFF00h
 vq	dq 123456789ABCDEF0h
 vd	dd 12345678h
@@ -51,7 +51,6 @@ endif
 	movq qword ptr [ebx], mm0
 	movq qword ptr [ebx], xmm0
 	movq [ebx], mm1
-
 
 	ret
 

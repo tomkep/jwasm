@@ -144,10 +144,13 @@ insn(name, 1,                   OP_R,        0,      OP_M,          OP3_NONE,1, 
 insn(name, 2,                   OP_R,        0,      OP_R,          OP3_NONE,1,  0,      code+2,   0x00,       P_86,        0) \
 insn(name, 3,                   OP_A,        0,      OP_I,          OP3_NONE,0,  no_RM,  code+4,   0x00,       P_86,        0) \
 insn(name, 4,                   OP_R,        0,      OP_I,          OP3_NONE,0,  0,      0x80,     code,       P_86,        0) \
-insn(name, 5,                   OP_MGT16,    0,      OP_I8,         OP3_NONE,0,  no_WDS, 0x83,     code,       P_386,       AP_LOCK) \
-insn(name, 6,                   OP_M16,      0,      OP_I8,         OP3_NONE,0,  no_WDS, 0x83,     code,       P_86,        AP_LOCK) \
+insn(name, 6,                   OP_MGT8,     0,      OP_I8,         OP3_NONE,0,  no_WDS, 0x83,     code,       P_86,        AP_LOCK) \
 insn(name, 7,                   OP_M,        0,      OP_R,          OP3_NONE,0,  0,      code,     0x00,       P_86,        AP_LOCK) \
 insn(name, 8,                   OP_M,        0,      OP_I,          OP3_NONE,0,  0,      0x80,     code,       P_86,        AP_LOCK)
+
+//v2.02: entries 5+6 replaced by 6
+//insn(name, 5,                   OP_MGT16,    0,      OP_I8,         OP3_NONE,0,  no_WDS, 0x83,     code,       P_386,       AP_LOCK)
+//insn(name, 6,                   OP_M16,      0,      OP_I8,         OP3_NONE,0,  no_WDS, 0x83,     code,       P_86,        AP_LOCK)
 
 ari( ADD, add, 0x00, 3 )
 ari(  OR,  or, 0x08, 2 )
@@ -495,7 +498,7 @@ ins (XADD, xadd, 4,             OP_R,        F_0F,   OP_R,          OP3_NONE,0, 
 insn(XADD, 1,                   OP_M,        F_0F,   OP_R,          OP3_NONE,0,  0,      0xC0,     0x00,       P_486,       AP_LOCK)
 ins (XCHG, xchg, 4,             OP_A,        0,      OP_RGT8,       OP3_NONE,0,  R_in_OP,0x90,     0x00,       P_86,        0)
 insn(XCHG, 1,                   OP_RGT8,     0,      OP_A,          OP3_NONE,0,  R_in_OP,0x90,     0x00,       P_86,        0)
-insn(XCHG, 2,                   OP_R,        0,      OP_R,          OP3_NONE,0,  0,      0x86,     0x00,       P_86,        0)
+insn(XCHG, 2,                   OP_R,        0,      OP_R,          OP3_NONE,1,  0,      0x86,     0x00,       P_86,        0)
 insn(XCHG, 3,                   OP_R,        0,      OP_M,          OP3_NONE,1,  0,      0x86,     0x00,       P_86,        AP_LOCK)
 insn(XCHG, 4,                   OP_M,        0,      OP_R,          OP3_NONE,0,  0,      0x86,     0x00,       P_86,        AP_LOCK)
 ins (XLAT, xlat, 4,             OP_NONE,     0,      OP_NONE,       OP3_NONE,0,  no_RM,  0xD7,     0x00,       P_86,        0)

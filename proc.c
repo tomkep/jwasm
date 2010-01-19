@@ -390,7 +390,7 @@ ret_code LocalDef( int i )
                 }
             }
             if( type == ERROR ) {
-                if( !(symtype = IsLabelType( AsmBuffer[i]->string_ptr ) ) ) {
+                if( !(symtype = SymIsType( AsmBuffer[i]->string_ptr ) ) ) {
                     AsmError( INVALID_QUALIFIED_TYPE );
                     return( ERROR );
                 }
@@ -532,7 +532,14 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsInternal )
         }
 
         is_ptr = FALSE;
-        is_far = FALSE;
+        /* v2.02: init is_far depending on memory model */
+        //is_far = FALSE;
+        if ( ModuleInfo.model == MOD_COMPACT ||
+            ModuleInfo.model == MOD_LARGE ||
+            ModuleInfo.model == MOD_HUGE )
+            is_far = TRUE;
+        else
+            is_far = FALSE;
         is_vararg = FALSE;
         Ofssize = ModuleInfo.Ofssize;
         ptrpos = EMPTY;
@@ -556,40 +563,41 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsInternal )
         i++;
 
         /* allow NEARxx | FARxx [PTR] [<type>] param types */
-        if (AsmBuffer[i]->token == T_RES_ID)
-            switch(AsmBuffer[i]->value) {
-            case T_FAR:
-            case T_FAR16:
-            case T_FAR32:
+        if ( AsmBuffer[i]->token == T_RES_ID &&
+            AsmBuffer[i]->rm_byte == RWT_TYPE ) {
+            if ( SimpleType[AsmBuffer[i]->opcode].mem_type == MT_FAR ) {
                 is_far = TRUE;
-            case T_NEAR:
-            case T_NEAR16:
-            case T_NEAR32:
+                ptrpos = i++;
+            } else if ( SimpleType[AsmBuffer[i]->opcode].mem_type == MT_NEAR ) {
+                is_far = FALSE;
                 ptrpos = i++;
             }
+        }
 
         /* now read qualified type */
 #ifdef DEBUG_OUT
         typetoken = AsmBuffer[i]->string_ptr;
 #endif
         type = ERROR;
-        if (AsmBuffer[i]->token == T_RES_ID)
-            if (AsmBuffer[i]->value == T_PTR && ptrpos != EMPTY)
+        if ( AsmBuffer[i]->token == T_RES_ID )
+            if ( AsmBuffer[i]->value == T_PTR && ptrpos != EMPTY )
                 type = FindStdType( AsmBuffer[ptrpos]->value );
             else
                 type = FindStdType( AsmBuffer[i]->value );
         if (( AsmBuffer[i]->token == T_RES_ID) && (AsmBuffer[i]->value == T_PTR )) {
             is_ptr = TRUE;
             /* a valid syntax is 'name:ptr near' */
-            if (AsmBuffer[i+1]->token == T_RES_ID && ptrpos == EMPTY) {
-                switch (AsmBuffer[i+1]->value) {
-                case T_FAR:
-                case T_FAR16:
-                case T_FAR32:
+            if ( AsmBuffer[i+1]->token == T_RES_ID &&
+                ptrpos == EMPTY &&
+                AsmBuffer[i+1]->rm_byte == RWT_TYPE ) {
+                if ( SimpleType[AsmBuffer[i+1]->opcode].mem_type == MT_FAR ) {
+                    type = AsmBuffer[i+1]->opcode;
                     is_far = TRUE;
-                case T_NEAR:
-                case T_NEAR16:
-                case T_NEAR32:
+                    ptrpos = i++;
+                    goto no_arbitrary;
+                } else if ( SimpleType[AsmBuffer[i+1]->opcode].mem_type == MT_NEAR ) {
+                    type = AsmBuffer[i+1]->opcode;
+                    is_far = FALSE;
                     ptrpos = i++;
                     goto no_arbitrary;
                 }
@@ -635,7 +643,7 @@ static ret_code ParseParams( dir_node *proc, int i, bool IsInternal )
                 is_vararg = TRUE;
                 mem_type = MT_EMPTY;
             } else {
-                if( !(symtype = IsLabelType( AsmBuffer[i]->string_ptr ) ) ) {
+                if( !(symtype = SymIsType( AsmBuffer[i]->string_ptr ) ) ) {
                     DebugMsg(("ParseParams: type invalid for parameter %u: %s\n", cntParam+1, AsmBuffer[i]->string_ptr ));
                     AsmError( INVALID_QUALIFIED_TYPE );
                     return( ERROR );
@@ -1071,8 +1079,14 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsInternal )
                 DebugMsg(("ExamineProc: USES found in PROTO\n"));
                 AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             }
-            /* check for register name */
-            for( i++; ( i < Token_Count ) && ( AsmBuffer[i]->token == T_REG ); i++ ) {
+            i++;
+             /* at least 1 register name must be present*/
+            if ( AsmBuffer[i]->token != T_REG ) {
+                DebugMsg(("ExamineProc: no registers for regslist\n"));
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->pos );
+            }
+            /* read in register names */
+            for( ; ( i < Token_Count ) && ( AsmBuffer[i]->token == T_REG ); i++ ) {
                 if ( SizeFromRegister(AsmBuffer[i]->value) == 1 ) {
                     AsmError( INVALID_USE_OF_REGISTER );
                 }
@@ -1086,10 +1100,6 @@ ret_code ExamineProc( dir_node *proc, int i, bool IsInternal )
                     lastreg->next = regist;
                     lastreg = regist;
                 }
-            }
-            if (proc->e.procinfo->regslist == NULL) {
-                DebugMsg(("ExamineProc: regslist is NULL\n"));
-                AsmError( SYNTAX_ERROR );
             }
         }
     }

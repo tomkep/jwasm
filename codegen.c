@@ -79,13 +79,27 @@ static ret_code output_opc( struct code_info *CodeInfo )
     if( Options.line_numbers )
         AddLinnumDataRef( LineNumber );
 
+    /* if it's a FPU instr, reset opsiz */
+    //if( ins->cpu & P_FPU_MASK ) {
+    /* v2.02: if it's a FPU or MMX/SSE instr, reset opsiz!
+     * [this code has been moved here from match_phase_1()]
+     */
+    if( ins->cpu & ( P_FPU_MASK | P_MMX | P_SSEALL ) ) {
+#if SSE4SUPP
+        /* there are 2 exceptions. how to avoid this ugly hack? */
+        if ( CodeInfo->token != T_CRC32 &&
+            CodeInfo->token != T_POPCNT )
+#endif
+        CodeInfo->prefix.opsiz = FALSE;
+    }
+
     /*
      * Output FP fixup if required
      */
     if(( ModuleInfo.emulator == TRUE )
-        && ( CodeInfo->Ofssize == USE16 )
-        && ( ins->allowed_prefix != AP_NO_FWAIT )
-        && (( ins->allowed_prefix == AP_FWAIT ) || ( ins->cpu & P_FPU_MASK ))) {
+       && ( CodeInfo->Ofssize == USE16 )
+       && ( ins->allowed_prefix != AP_NO_FWAIT )
+       && (( ins->allowed_prefix == AP_FWAIT ) || ( ins->cpu & P_FPU_MASK ))) {
         if( AddFloatingPointEmulationFixup( CodeInfo, FALSE ) == ERROR ) {
             DebugMsg(( "output_opc: AddFloatingPointEmulationFixup returned ERROR\n"));
             return( ERROR );
@@ -139,6 +153,7 @@ static ret_code output_opc( struct code_info *CodeInfo )
             }
             break;
         default:
+            DebugMsg(("output_opc: unknown prefix instruction %X\n", CodeInfo->prefix.ins ));
             break;
         }
         OutputCodeByte( AsmOpTable[optable_idx[CodeInfo->prefix.ins]].opcode );
@@ -181,7 +196,7 @@ static ret_code output_opc( struct code_info *CodeInfo )
     }
 
     /*
-     * Output FP fixup if required
+     * Output FP fixup if required ( secondary fixup )
      */
     if(( ModuleInfo.emulator == TRUE )
         && ( CodeInfo->Ofssize == USE16 )
@@ -378,11 +393,7 @@ static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int i
     }
     DebugMsg(("output_data(idx=%u, op=%X [data=%X fixup=%X] ) enter [rm=%X]\n", index, determinant, CodeInfo->data[index], CodeInfo->InsFixup[index], CodeInfo->rm_byte ));
 
-    if ( CodeInfo->InsFixup[index] && write_to_file ) {
-        CodeInfo->InsFixup[index]->fixup_loc = GetCurrOffset();
-        mark_fixupp( CodeInfo, CodeInfo->InsFixup[index], determinant );
-        store_fixup( CodeInfo->InsFixup[index], &CodeInfo->data[index] );
-    }
+    /* determine size */
 
     if( determinant & OP_I8 ) {
         size = 1;
@@ -431,8 +442,17 @@ static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int i
     }
     DebugMsg(( "output_data: size=%u\n", size ));
 
-    if ( size )
-        OutputBytes( (unsigned char *)&CodeInfo->data[index], size );
+    if ( size ) {
+        if ( CodeInfo->InsFixup[index] && write_to_file ) {
+            CodeInfo->InsFixup[index]->fixup_loc = GetCurrOffset();
+            mark_fixupp( CodeInfo, CodeInfo->InsFixup[index], determinant );
+            //store_fixup( CodeInfo->InsFixup[index], &CodeInfo->data[index] );
+            OutputBytesAndFixup( CodeInfo->InsFixup[index],
+                                (unsigned char *)&CodeInfo->data[index], size );
+        } else {
+            OutputBytes( (unsigned char *)&CodeInfo->data[index], size );
+        }
+    }
     return;
 }
 
@@ -674,6 +694,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                 || ( last_opnd & OP_M16 ) && ( IS_MEM_TYPE( CodeInfo->mem_type, WORD ) ) ) ) {
                 if( (int_8)CodeInfo->data[OPND2] ==
                     (int_16)CodeInfo->data[OPND2] ) {
+                    DebugMsg(("match_phase_3: OP_I8, op1=R16/M16, CI->mem_type=%Xh\n", CodeInfo->mem_type ));
                     CodeInfo->opnd_type[OPND2] = OP_I8;
                     CodeInfo->data[OPND2] = (int_8)CodeInfo->data[OPND2];
                 } else {
@@ -685,6 +706,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                 || ( last_opnd & OP_M32 ) && ( IS_MEM_TYPE( CodeInfo->mem_type, DWORD ) ) ) ) {
                 if( (int_8)CodeInfo->data[OPND2] ==
                     (int_32)CodeInfo->data[OPND2] ) {
+                    DebugMsg(("match_phase_3: OP_I8, op1=R32/M32\n"));
                     CodeInfo->opnd_type[OPND2] = OP_I8;
                     CodeInfo->data[OPND2] = (int_8)CodeInfo->data[OPND2];
                 } else {
@@ -810,11 +832,6 @@ ret_code match_phase_1( struct code_info *CodeInfo )
     //signed char     temp_opsiz = 0;
     OPNDTYPE        cur_opnd;
     OPNDTYPE        asm_op1;
-
-    /* if it's a FPU instr, reset opsiz */
-    if( CodeInfo->pcurr->cpu & P_FPU_MASK ) {
-        CodeInfo->prefix.opsiz = FALSE;
-    }
 
     /* privileged instructions ok? */
     if( ( CodeInfo->pcurr->cpu & P_PM ) > ( ModuleInfo.curr_cpu & P_PM ) ) {

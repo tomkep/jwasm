@@ -63,26 +63,31 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
      * they must be removed after patching or skiped ( next processed as normal fixup )
      */
 
-    DebugMsg(("DoPatch(%u, %s): sym=%s fixup->ofs=%Xh,loc=%Xh,opt=%u,def_seg=%Xh\n",
+    DebugMsg(("DoPatch(%u, %s): sym=%s fixup->ofs=%Xh loc=%Xh opt=%u def_seg=%s\n",
               Parse_Pass + 1, sym->name, fixup->sym ? fixup->sym->name : "",
-              fixup->offset, fixup->fixup_loc, fixup->option, fixup->def_seg ));
+              fixup->offset, fixup->fixup_loc, fixup->option,
+              fixup->def_seg ? fixup->def_seg->sym.name : "NULL" ));
     seg = GetSeg( sym );
     if( seg == NULL || fixup->def_seg != seg ) {
         /* if fixup location is in another segment, backpatch is possible, but
          * complicated and it's a pretty rare case, so nothing's done.
          */
+        DebugMsg(("DoPatch: skipped due to seg incompat: %s - %s\n",
+                  fixup->def_seg ? fixup->def_seg->sym.name : "NULL",
+                  seg ? seg->sym.name : "NULL" ));
         SkipFixup();
         return( NOT_ERROR );
     }
 
     if( Parse_Pass == PASS_1 ) {
         if( sym->mem_type == MT_FAR && fixup->option == OPTJ_CALL ) {
-            // convert far call to push cs + near call, only at first pass
+            /* convert near call to push cs + near call,
+             * (only at first pass) */
             DebugMsg(("DoPatch: Phase error! caused by far call optimization\n"));
             PhaseError = TRUE;
             sym->offset++;  /* a PUSH CS will be added */
             /* todo: insert LABELOPT block here */
-            OutputByte( 0xCC );
+            OutputByte( 0 ); /* it's pass one, nothing is written */
             AsmFree( fixup );
             return( NOT_ERROR );
         //} else if( sym->mem_type == MT_NEAR ) {
@@ -178,10 +183,14 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
                 break;
             }
         }
+#ifdef DEBUG_OUT
+        else
+            DebugMsg(("DoPatch: displacement still short: %Xh\n", disp ));
+#endif
         AsmFree( fixup );
         break;
     default:
-        DebugMsg(("DoPatch: default branch\n"));
+        DebugMsg(("DoPatch: default branch, unhandled fixup type=%u\n", fixup->type ));
         SkipFixup();
         break;
     }
@@ -191,16 +200,19 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
 ret_code BackPatch( struct asm_sym *sym )
 /***************************************/
 /*
-- patching for forward reference labels in Jmp/Call instructions;
-- called by LabelCreate(), ProcDef() and data_init(), that is, whenever
-- a new label appears. The new label is the <sym> parameter.
-- During the process, the label's offset might be changed!
-*/
+ * patching for forward reference labels in Jmp/Call instructions;
+ * called by LabelCreate(), ProcDef() and data_init(), that is, whenever
+ * a (new) label is defined. The new label is the <sym> parameter.
+ * During the process, the label's offset might be changed!
+ *
+ * field sym->fixup is a "descending" list of forward references
+ * to this symbol. These fixups are only generated during pass 1.
+ */
 {
     struct asmfixup     *fixup;
     struct asmfixup     *next;
 
-    DebugMsg(("BackPatch(%s) enter, offset=%X\n", sym->name, sym->offset ));
+    DebugMsg(("BackPatch(%s) enter, seg.ofs=%s.%X\n", sym->name, CurrSeg->sym.name, sym->offset ));
     fixup = sym->fixup;
     sym->fixup = NULL;
     for( ; fixup != NULL; fixup = next ) {

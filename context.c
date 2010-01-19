@@ -101,26 +101,26 @@ ret_code ContextDirective( int directive, int i )
 
     DebugMsg(( "xxxCONTEXT directive enter\n"));
     i++;
-    if (AsmBuffer[i]->token == T_ID) {
+    if ( AsmBuffer[i]->token == T_ID ) {
         char **p;
-        for (p = context, type = CONT_ASSUMES; *p ; p++, type++) {
-            if (_stricmp(*p, AsmBuffer[i]->string_ptr) == 0) {
+        for ( p = context, type = CONT_ASSUMES; *p ; p++, type++ ) {
+            if ( _stricmp(*p, AsmBuffer[i]->string_ptr ) == 0 ) {
                 i++;
                 if ( type == CONT_ALIGNMENT && ( Options.strict_masm_compat ) )
                     break;
-                if (AsmBuffer[i]->token == T_FINAL) {
-                    if (directive == T_POPCONTEXT) {
+                if ( AsmBuffer[i]->token == T_FINAL ) {
+                    if ( directive == T_POPCONTEXT ) {
                         DebugMsg(( "POPCONTEXT %s\n", AsmBuffer[i-1]->string_ptr ));
                         /* for POPCONTEXT, check if the proper item is pushed */
                         pcontext = ContextStack;
-                        if (pcontext == NULL || pcontext->type != type) {
+                        if ( pcontext == NULL || pcontext->type != type ) {
                             AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i-2]->pos);
                             return( ERROR );
                         }
                         ContextStack = pcontext->next;
 
                         // restore the values
-                        switch (type) {
+                        switch ( type ) {
                         case CONT_ASSUMES:
                             acontext = (assumes_context *)&pcontext->data;
                             break;
@@ -144,25 +144,25 @@ ret_code ContextDirective( int directive, int i )
                             lcontext = &alcontext->lc;
                             ccontext = &alcontext->cc;
                         }
-                        if (acontext) {
+                        if ( acontext ) {
                             SetSegAssumeTable( acontext->SegAssumeTable );
                             SetStdAssumeTable( acontext->StdAssumeTable );
                         }
-                        if (rcontext) {
+                        if ( rcontext ) {
                             ModuleInfo.radix = rcontext->radix;
                         }
-                        if (icontext && ( Options.strict_masm_compat == FALSE ) ) {
+                        if ( icontext && ( Options.strict_masm_compat == FALSE ) ) {
                             ModuleInfo.fieldalign = icontext->fieldalign;
                             ModuleInfo.procalign = icontext->procalign;
                         }
-                        if (lcontext) {
+                        if ( lcontext ) {
                             ModuleInfo.list_macro = lcontext->list_macro;
                             ModuleInfo.list = lcontext->list;
                             ModuleInfo.cref = lcontext->cref;
                             ModuleInfo.listif = lcontext->listif;
                             ModuleInfo.list_generated_code = lcontext->list_generated_code;
                         }
-                        if (ccontext) {
+                        if ( ccontext ) {
                             ModuleInfo.cpu     = ccontext->cpu;
                             if (sym_Cpu)
                                 sym_Cpu->value = ccontext->cpu;
@@ -173,7 +173,7 @@ ret_code ContextDirective( int directive, int i )
                     } else {
                         DebugMsg(( "PUSHCONTEXT %s\n", AsmBuffer[i-1]->string_ptr ));
                         // setup a context item
-                        switch (type) {
+                        switch ( type ) {
                         case CONT_ASSUMES:
                             pcontext = AsmAlloc(sizeof(context) + sizeof(assumes_context));
                             acontext = (assumes_context *)&pcontext->data;
@@ -207,25 +207,25 @@ ret_code ContextDirective( int directive, int i )
 
                         pcontext->type = type;
 
-                        if (acontext) {
+                        if ( acontext ) {
                             GetSegAssumeTable( acontext->SegAssumeTable );
                             GetStdAssumeTable( acontext->StdAssumeTable );
                         }
-                        if (rcontext) {
+                        if ( rcontext ) {
                             rcontext->radix = ModuleInfo.radix;
                         }
-                        if (icontext) {
+                        if ( icontext ) {
                             icontext->fieldalign = ModuleInfo.fieldalign;
                             icontext->procalign = ModuleInfo.procalign;
                         }
-                        if (lcontext) {
+                        if ( lcontext ) {
                             lcontext->list_macro = ModuleInfo.list_macro;
                             lcontext->list   = ModuleInfo.list;
                             lcontext->cref   = ModuleInfo.cref;
                             lcontext->listif = ModuleInfo.listif;
                             lcontext->list_generated_code = ModuleInfo.list_generated_code;
                         }
-                        if (ccontext) {
+                        if ( ccontext ) {
                             ccontext->cpu      = ModuleInfo.cpu;
                             ccontext->curr_cpu = ModuleInfo.curr_cpu;
                         }
@@ -238,7 +238,7 @@ ret_code ContextDirective( int directive, int i )
             }
         }
     }
-    AsmError( SYNTAX_ERROR );
+    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
     return( ERROR );
 }
 

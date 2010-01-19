@@ -126,8 +126,8 @@
 
     agner, BlackVortex, drizz, Paul Edwards, filofel, Peter Flass,
     James C. Fuller, gfalen, Japheth, Jimg, jj2007, Khusraw, Alex Kozlov,
-    Peter Kuznetsov, misca, Michal Necasek, RotateRight, Ito Toshimitsu,
-    Vortex.
+    Peter Kuznetsov, misca, Michal Necasek, H. Nidudsson, RotateRight, 
+    Ito Toshimitsu, Vortex.
 
     Japheth
 
