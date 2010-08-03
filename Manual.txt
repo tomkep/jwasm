@@ -1,3 +1,4 @@
+JWasm Manual
 
     0.    Contents
 
@@ -83,9 +84,13 @@
      Some values in the "MZ" header can be adjusted by directive OPTION MZ
      (see below).
 
-    -n<d|m|t>=<name>: -nt/-nd will set the names of the code/data segments
+    -nc=<name>: sets the code segment's class name if simplified
+     segment directives are used (default:CODE).
+
+    -n<d|t>=<name>: -nt/-nd will set the name of the code/data segments
      if simplified segment directives are used (default:_TEXT/_DATA).
-     -nm sets the module name (default:filename without extension).
+
+    -nm=<name> sets the module name (default:filename without extension).
 
     -win64: this option makes JWasm produce an object module for Win64.
      Additionally, the option will set cpu to x86-64, model to FLAT and
@@ -148,6 +153,7 @@
       - attribute LABEL for macro parameter (see 3.14)
       - integer initializer values for items of type [X]MMWORD (see 3.15)
       - parameters for IF[N]DEF directive (see 3.16)
+      - name argument for .DATA, .DATA? and .CONST directives
 
     -zt<n>: "Set name decoration for STDCALL symbols". Options "-zt0" will
      make object modules compatible to ALINK + Win32.lib.

@@ -25,9 +25,7 @@
 *  ========================================================================
 *
 * Description:  Processing of segment and group related directives:
-*               - SEGMENT, ENDS
-*               - GROUP
-*               - .CODE, .DATA, .DATA?, .CONST, .STACK, .FARDATA, .FARDATA?
+*               - SEGMENT, ENDS, GROUP
 ****************************************************************************/
 
 #include <ctype.h>
@@ -38,14 +36,10 @@
 #include "parser.h"
 #include "directiv.h"
 #include "segment.h"
-#include "input.h"
-#include "tokenize.h"
 #include "queues.h"
 #include "expreval.h"
 #include "omf.h"
 #include "fastpass.h"
-#include "macro.h"
-#include "fixup.h"
 #include "coffspec.h"
 #include "assume.h"
 #include "listing.h"
@@ -58,8 +52,6 @@
 extern symbol_queue     Tables[];       /* tables of definitions */
 extern asm_sym          *sym_CurSeg;    /* @CurSeg symbol */
 extern asm_sym          symPC;          /* '$' symbol */
-
-#define DEFAULT_STACK_SIZE      1024
 
 #define INIT_ATTR       0x01
 #define INIT_ALIGN      0x02
@@ -77,6 +69,9 @@ static const typeinfo SegAttr[] = {
     { "DWORD",        2,              INIT_ALIGN      },
     { "PARA",         4,              INIT_ALIGN      },
     { "PAGE",         8,              INIT_ALIGN      },
+#if PAGE4K
+    { "PAGE4K",       12,             INIT_ALIGN      },
+#endif
     { "ALIGN",        0,              INIT_ALIGN | INIT_ALIGNPARAM },
     { "PRIVATE",      COMB_INVALID,   INIT_COMBINE    },
     { "PUBLIC",       COMB_ADDOFF,    INIT_COMBINE    },
@@ -104,54 +99,15 @@ uint                    segdefidx;      /* Number of segment definitions */
 static uint             grpdefidx;      /* Number of group definitions   */
 uint                    LnamesIdx;      /* Number of LNAMES definitions  */
 
-dir_node                *flat_grp;      /* magic FLAT group */
-
 dir_node                *CurrSeg;       /* currently active segment */
 static dir_node         *SegStack[MAX_SEG_NESTING]; /* stack of open segments */
 static int              stkindex;       /* current top of stack */
 
-/* variables used by simplified segment directives */
-
-enum sim_seg {
-    SIM_CODE = 0,
-    SIM_STACK,
-    SIM_DATA,
-    SIM_DATA_UN,            // .DATA?
-    SIM_FARDATA,
-    SIM_FARDATA_UN,         // .FARDATA?
-    SIM_CONST,
-    SIM_NONE,
-    SIM_LAST = SIM_NONE
-};
-
-static uint_8           first_issued;   /* flags if seg is initialized    */
-static enum sim_seg     lastseg;        /* last opened simplified segment */
-
-static const char * const SimCodeBegin[ SIM_LAST ] = {
-        "%s SEGMENT %s %s PUBLIC '%s'",
-        "%s SEGMENT %s %s STACK 'STACK'",
-        "%s SEGMENT %s %s PUBLIC 'DATA'",
-        "%s SEGMENT %s %s PUBLIC 'BSS'",
-        "%s SEGMENT %s %s PRIVATE 'FAR_DATA'",
-        "%s SEGMENT %s %s PRIVATE 'FAR_BSS'",
-//        "%s SEGMENT %s %s PUBLIC 'CONST' READONLY"
-        "%s SEGMENT %s %s PUBLIC 'CONST'"
-};
-
-static char *SegmNames[ SIM_LAST ];
-
-static const char * const SegmNamesDef[ SIM_LAST ] = {
-    "_TEXT", "STACK", "_DATA", "_BSS", "FAR_DATA", "FAR_BSS", "CONST"
-};
-
 #if FASTPASS
-// saved state
-static enum sim_seg     saved_lastseg;
+/* saved state */
 static dir_node         *saved_CurrSeg;
-static int              saved_stkindex;
 static dir_node         **saved_SegStack;
-//static char             *saved_CurSeg_name;
-static uint_8           saved_first_issued;
+static int              saved_stkindex;
 #endif
 
 /* generic byte buffer, used for OMF LEDATA records only */
@@ -183,7 +139,7 @@ static void UpdateCurrSegVars( void )
         /* fixme: OPTION OFFSET:SEGMENT? */
         if( CurrSeg->e.seginfo->group != NULL ) {
             info->symbol = CurrSeg->e.seginfo->group;
-            if ( info->symbol == &flat_grp->sym )
+            if ( info->symbol == &ModuleInfo.flat_grp->sym )
                 info->flat = TRUE;
         } else {
             info->symbol = &CurrSeg->sym;
@@ -199,7 +155,7 @@ static void push_seg( dir_node *seg )
 /***********************************/
 /* Push a segment into the current segment stack */
 {
-    //pushitem( &CurrSeg, seg ); //changed in v1.96
+    //pushitem( &CurrSeg, seg ); /* changed in v1.96 */
     if ( stkindex >= MAX_SEG_NESTING ) {
         AsmError( NESTING_LEVEL_TOO_DEEP );
         return;
@@ -215,8 +171,8 @@ static void pop_seg( void )
 /*************************/
 /* Pop a segment out of the current segment stack */
 {
-    //seg = popitem( &CurrSeg ); //changed in v1.96
-    if ( stkindex == 0) {
+    //seg = popitem( &CurrSeg ); /* changed in v1.96 */
+    if ( stkindex == 0 ) {
         AsmError( BLOCK_NESTING_ERROR );
         return;
     }
@@ -225,6 +181,10 @@ static void pop_seg( void )
     UpdateCurrSegVars();
     return;
 }
+
+#if 0 /* v2.03: obsolete */
+
+/* get a symbol's lname index. used by OMF output format only */
 
 direct_idx GetLnameIdx( const char *name )
 /****************************************/
@@ -247,8 +207,9 @@ direct_idx GetLnameIdx( const char *name )
         return( dir->sym.idx );
     }
 }
+#endif
 
-// add a class name to the queue of names
+/* add a class name to the queue of names */
 
 static direct_idx InsertClassLname( const char *name )
 /****************************************************/
@@ -305,8 +266,8 @@ uint_32 GetCurrSegAlign( void )
 {
     if( CurrSeg == NULL )
         return( 0 );
-    if ( CurrSeg->e.seginfo->alignment == MAX_SEGALIGNMENT ) // ABS?
-        return( 0x10 ); // assume PARA alignment for AT segments
+    if ( CurrSeg->e.seginfo->alignment == MAX_SEGALIGNMENT ) /* ABS? */
+        return( 0x10 ); /* assume PARA alignment for AT segments */
     return( 1 << CurrSeg->e.seginfo->alignment );
 }
 
@@ -319,11 +280,11 @@ static dir_node *CreateGroup( const char *name )
 
     if( grp == NULL || grp->sym.state == SYM_UNDEFINED ) {
         if (grp == NULL)
-            grp = dir_insert( name, SYM_GRP );
+            grp = dir_create( name, SYM_GRP );
         else
             dir_settype( grp, SYM_GRP );
         grp->sym.list = TRUE;
-        grp->e.grpinfo->idx = ++grpdefidx;
+        grp->e.grpinfo->grp_idx = ++grpdefidx;
         grp->e.grpinfo->lname_idx = ++LnamesIdx;
         AddLnameData( &grp->sym );
     } else if( grp->sym.state != SYM_GRP ) {
@@ -333,7 +294,7 @@ static dir_node *CreateGroup( const char *name )
     return( grp );
 }
 
-// handle GROUP directive
+/* handle GROUP directive */
 
 ret_code GrpDef( int i )
 /**********************/
@@ -351,12 +312,12 @@ ret_code GrpDef( int i )
     }
 
     /* GROUP valid for OMF + BIN only */
-    if (Options.output_format == OFORMAT_COFF
+    if ( Options.output_format == OFORMAT_COFF
 #if ELF_SUPPORT
         || Options.output_format == OFORMAT_ELF
 #endif
        ) {
-        AsmError(GROUP_DIRECTIVE_INVALID_FOR_COFF);
+        AsmError( GROUP_DIRECTIVE_INVALID_FOR_COFF );
         return( ERROR );
     }
 
@@ -389,9 +350,9 @@ ret_code GrpDef( int i )
         i++;
 
         seg = (dir_node *)SymSearch( name );
-        if (Parse_Pass == PASS_1) {
+        if ( Parse_Pass == PASS_1 ) {
             if( seg == NULL ) {
-                seg = dir_insert( name, SYM_SEG );
+                seg = dir_create( name, SYM_SEG );
                 /* inherit the offset magnitude from the group */
                 if ( grp->e.grpinfo->seglist )
                     seg->e.seginfo->Ofssize = grp->sym.Ofssize;
@@ -404,7 +365,7 @@ ret_code GrpDef( int i )
                 return( ERROR );
             } else if( seg->e.seginfo->group != NULL &&
                        seg->e.seginfo->group != &grp->sym ) {
-                // segment is in another group
+                /* segment is in another group */
                 DebugMsg(("GrpDef: segment >%s< is in group >%s< already\n", name, seg->e.seginfo->group->name));
                 AsmErr( SEGMENT_IN_ANOTHER_GROUP, name );
                 return( ERROR );
@@ -423,10 +384,10 @@ ret_code GrpDef( int i )
             }
         }
 
-        // insert segment in group if it's not there already
+        /* insert segment in group if it's not there already */
         if ( seg->e.seginfo->group == NULL ) {
 
-            /* set the grp index of the segment */
+            /* set the segment's grp */
             seg->e.seginfo->group = &grp->sym;
 
             new = AsmAlloc( sizeof(seg_item) );
@@ -465,11 +426,11 @@ ret_code SetOfssize( void )
 {
     if( CurrSeg == NULL ) {
         ModuleInfo.Ofssize = ModuleInfo.defOfssize;
-    } else {                  
-        GlobalVars.code_seg = (CurrSeg->e.seginfo->segtype == SEGTYPE_CODE);
+    } else {
         ModuleInfo.Ofssize = CurrSeg->e.seginfo->Ofssize;
         if( ModuleInfo.Ofssize > USE16 && ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) ) {
-            DebugMsg(("SetOfssize, error: CurrSeg=%Xh, ModuleInfo.Ofssize=%u, curr_cpu=%X, defOfssize=%u\n", CurrSeg, ModuleInfo.Ofssize, ModuleInfo.curr_cpu, ModuleInfo.defOfssize ));
+            DebugMsg(("SetOfssize, error: CurrSeg=%Xh, ModuleInfo.Ofssize=%u, curr_cpu=%X, defOfssize=%u\n",
+                      CurrSeg, ModuleInfo.Ofssize, ModuleInfo.curr_cpu, ModuleInfo.defOfssize ));
             AsmError( WRONG_CPU_FOR_32BIT_SEGMENT );
             return( ERROR );
         }
@@ -484,7 +445,7 @@ ret_code SetOfssize( void )
     return( NOT_ERROR );
 }
 
-// close segment
+/* close segment */
 
 static ret_code CloseSeg( const char * name )
 /*******************************************/
@@ -493,7 +454,7 @@ static ret_code CloseSeg( const char * name )
 
     DebugMsg(("CloseSeg(%s) enter\n", name));
 
-    if( CurrSeg == NULL || ( SymCmpFunc(CurrSeg->sym.name, name ) != 0 ) ) {
+    if( CurrSeg == NULL || ( SymCmpFunc( CurrSeg->sym.name, name ) != 0 ) ) {
         DebugMsg(("CloseSeg(%s): nesting error, CurrSeg=%s\n", name, CurrSeg ? CurrSeg->sym.name : "(null)" ));
         AsmErr( BLOCK_NESTING_ERROR, name );
         return( ERROR );
@@ -512,51 +473,14 @@ static ret_code CloseSeg( const char * name )
     return( NOT_ERROR );
 }
 
-// SEGMENT/ENDS if pass is > 1
-
-ret_code SetCurrSeg( int i )
-/**************************/
-{
-    char        *name;
-    struct asm_sym *sym;
-
-    name = AsmBuffer[0]->string_ptr;
-
-    switch( AsmBuffer[i]->value ) {
-    case T_SEGMENT:
-        if ( CurrSeg && Options.output_format == OFORMAT_OMF )
-            omf_FlushCurrSeg();
-        sym = SymSearch( name );
-        DebugMsg(("SetCurrSeg(%s) sym=%X\n", name, sym));
-        if ( sym == NULL || sym->state != SYM_SEG ) {
-            AsmErr( SEG_NOT_DEFINED, name );
-            return( ERROR );
-        }
-        push_seg( (dir_node *)sym );
-
-        if ( ModuleInfo.list )
-            LstWrite( LSTTYPE_LABEL, 0, NULL );
-
-        break;
-    case T_ENDS:
-        if ( ModuleInfo.list )
-            LstWrite( LSTTYPE_LABEL, 0, NULL );
-
-        CloseSeg(name);
-        break;
-    }
-
-    return( SetOfssize() );
-}
-
 void DefineFlatGroup( void )
 /**************************/
 {
-    if( ModuleInfo.flatgrp_idx == 0 ) {
-        flat_grp = CreateGroup( "FLAT" );
-        if( flat_grp != NULL ) {
-            flat_grp->sym.Ofssize = ModuleInfo.defOfssize;
-            ModuleInfo.flatgrp_idx = GetGrpIdx( &flat_grp->sym );
+    if( ModuleInfo.flat_grp == NULL ) {
+        ModuleInfo.flat_grp = CreateGroup( "FLAT" );
+        if( ModuleInfo.flat_grp != NULL ) {
+            ModuleInfo.flat_grp->sym.Ofssize = ModuleInfo.defOfssize;
+            //ModuleInfo.flatgrp_idx = ModuleInfo.flat_grp->e.grpinfo->grp_idx;
         }
     }
 }
@@ -572,18 +496,9 @@ uint GetSegIdx( struct asm_sym *sym )
     return( 0 );
 }
 
-uint GetGrpIdx( struct asm_sym *sym )
-/***********************************/
-/* get index of sym's group */
-{
-    if( sym == NULL )
-        return( 0 );
-    return( ((dir_node *)sym)->e.grpinfo->idx );
-}
-
-struct asm_sym *GetGrp( struct asm_sym *sym )
-/*******************************************/
-/* get ptr to sym's group sym */
+struct asm_sym *GetGroup( struct asm_sym *sym )
+/*********************************************/
+/* get a symbol's group */
 {
     dir_node            *curr;
 
@@ -626,15 +541,19 @@ static seg_type TypeFromClassName( dir_node * dir, const char *name )
 /*******************************************************************/
 {
     int     slen;
-    char    uname[257];
+    char    uname[MAX_ID_LEN+1];
 
     if ( dir->e.seginfo->alignment == MAX_SEGALIGNMENT )
         return( SEGTYPE_ABS );
 
+    /* v2.03: added */
+    if ( dir->e.seginfo->segrec->d.segdef.combine == COMB_STACK )
+        return( SEGTYPE_STACK );
+
     if( name == NULL )
         return( SEGTYPE_UNDEF );
 
-    if( _stricmp( name, ModuleInfo.code_class ) == 0 )
+    if( _stricmp( name, GetCodeClass() ) == 0 )
         return( SEGTYPE_CODE );
 
     slen = strlen( name );
@@ -643,27 +562,23 @@ static seg_type TypeFromClassName( dir_node * dir, const char *name )
     switch( slen ) {
     default:
     case 5:
-        // 'CONST'
         if( memcmp( uname, "CONST", 6 ) == 0 )
             return( SEGTYPE_DATA );
-        // 'STACK'
-        if( memcmp( uname, "STACK", 6 ) == 0 )
-            return( SEGTYPE_DATA );
-        // 'DBTYP'
+        //if( memcmp( uname, "STACK", 6 ) == 0 )
+        //    return( SEGTYPE_DATA );
         if( memcmp( uname, "DBTYP", 6 ) == 0 )
             return( SEGTYPE_DATA );
-        // 'DBSYM'
         if( memcmp( uname, "DBSYM", 6 ) == 0 )
             return( SEGTYPE_DATA );
     case 4:
-        // 'CODE'
-        if( memcmp( uname , "CODE", 5 ) == 0 )
+        /* v2.03: changed */
+        //if( memcmp( uname , "CODE", 5 ) == 0 )
+        //    return( SEGTYPE_CODE );
+        if( memcmp( uname + slen - 4, "CODE", 4 ) == 0 )
             return( SEGTYPE_CODE );
-        // '...DATA'
         if( memcmp( uname + slen - 4, "DATA", 4 ) == 0 )
             return( SEGTYPE_DATA );
     case 3:
-        // '...BSS'
         if( memcmp( uname + slen - 3, "BSS", 3 ) == 0 )
             return( SEGTYPE_BSS );
     case 2:
@@ -673,9 +588,11 @@ static seg_type TypeFromClassName( dir_node * dir, const char *name )
     }
 }
 
-/* get the type of the segment by checking it's name */
-/* this is called only if the class gives no hint */
+#if 0   /* v2.03: obsolete */
 
+/* get the type of the segment by checking it's name.
+ * this is called only if the class gives no hint
+ */
 static seg_type TypeFromSegmentName( const char *name )
 /*****************************************************/
 {
@@ -693,15 +610,15 @@ static seg_type TypeFromSegmentName( const char *name )
             if( memcmp( uname + slen - 5, SegmNamesDef[SIM_CODE], 5 ) == 0 )
                 return( SEGTYPE_CODE );
         }
-        // '..._DATA'
+        /* '..._DATA' */
         if( memcmp( uname + slen - 5, SegmNamesDef[SIM_DATA], 5 ) == 0 )
             return( SEGTYPE_DATA );
-        // 'CONST'
+        /* 'CONST' */
         if( memcmp( uname + slen - 5, SegmNamesDef[SIM_CONST], 5 ) == 0 )
             return( SEGTYPE_DATA );
     case 4:
         if ( Options.output_format != OFORMAT_COFF ) {
-            // '..._BSS'
+            /* '..._BSS' */
             if( memcmp( uname + slen - 4, "_BSS", 4 ) == 0 )
                 return( SEGTYPE_BSS );
         }
@@ -712,6 +629,10 @@ static seg_type TypeFromSegmentName( const char *name )
         return( SEGTYPE_UNDEF );
     }
 }
+#endif
+
+/* set the segment's class. report an error if the class has been set
+ * already and the new value differs. */
 
 static direct_idx SetSegmentClass( asm_sym *seg, const char *classname )
 /**********************************************************************/
@@ -725,15 +646,24 @@ static direct_idx SetSegmentClass( asm_sym *seg, const char *classname )
             return( ERROR );
         }
     }
-    ((dir_node *)seg)->e.seginfo->segrec->d.segdef.class_name_idx = classidx;
-    return(classidx);
+    /* default class name index is 1, which is the NULL class name */
+    if ( ((dir_node *)seg)->e.seginfo->segrec->d.segdef.class_name_idx == 1 )
+        ((dir_node *)seg)->e.seginfo->segrec->d.segdef.class_name_idx = classidx;
+    else if ( ((dir_node *)seg)->e.seginfo->segrec->d.segdef.class_name_idx != classidx ) {
+        AsmErr( SEGDEF_CHANGED, seg->name, MsgGetEx( TXT_CLASS ) );
+        return( ERROR );
+    }
+    return( classidx );
 }
+
+/* CreateSegment(): used to define the codeview debugging segments
+ */
 
 asm_sym *CreateSegment( const char *name, const char *classname, uint_8 alignment, uint_8 Ofssize )
 /*************************************************************************************************/
 {
     dir_node *seg;
-    if ( seg = dir_insert( name, SYM_SEG ) ) {
+    if ( seg = dir_create( name, SYM_SEG ) ) {
         seg->e.seginfo->segrec->d.segdef.idx = ++segdefidx;
         seg->sym.segment = &seg->sym;
         seg->e.seginfo->alignment = alignment;
@@ -747,21 +677,67 @@ asm_sym *CreateSegment( const char *name, const char *classname, uint_8 alignmen
     return( NULL );
 }
 
-// SEGMENT and ENDS directives (Pass ONE only!)
+/* ENDS directive */
 
-ret_code SegDef( int i )
-/**********************/
+ret_code EndsDir( int i )
+/***********************/
+{
+    /* a label must precede ENDS */
+    if( i != 1 ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+    if ( Parse_Pass != PASS_1 ) {
+        if ( ModuleInfo.list )
+            LstWrite( LSTTYPE_LABEL, 0, NULL );
+    }
+    if ( CloseSeg( AsmBuffer[0]->string_ptr ) == ERROR )
+        return( ERROR );
+    i++;
+    if ( AsmBuffer[i]->token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    }
+    return( SetOfssize() );
+}
+
+/* SEGMENT directive if pass is > 1 */
+
+ret_code SetCurrSeg( int i )
+/**************************/
+{
+    struct asm_sym *sym;
+
+    sym = SymSearch( AsmBuffer[0]->string_ptr );
+    DebugMsg(("SetCurrSeg(%s) sym=%X\n", AsmBuffer[0]->string_ptr, sym));
+    if ( sym == NULL || sym->state != SYM_SEG ) {
+        AsmErr( SEG_NOT_DEFINED, AsmBuffer[0]->string_ptr );
+        return( ERROR );
+    }
+    if ( CurrSeg && Options.output_format == OFORMAT_OMF )
+        omf_FlushCurrSeg();
+    push_seg( (dir_node *)sym );
+
+    if ( ModuleInfo.list )
+        LstWrite( LSTTYPE_LABEL, 0, NULL );
+
+    return( SetOfssize() );
+}
+
+/* SEGMENT directive (Pass ONE only!) */
+
+ret_code SegmentDir( int i )
+/**************************/
 {
     char                defined;
     char                *token;
     obj_rec             *seg;
 //    obj_rec             *oldobj;
-    const typeinfo      *type;           // type of option
+    const typeinfo      *type;          /* type of option */
     int                 temp;
     int                 temp2;
-    uint                initstate = 0;  // to show if a field is initialized
-    unsigned char       oldreadonly;    // readonly value of a defined segment
-    unsigned char       oldsegtype;     // iscode value of a defined segment
+    uint                initstate = 0;  /* flags for attribute initialization */
+    unsigned char       oldreadonly;    /* readonly value of a defined segment */
+    //unsigned char       oldsegtype;
     unsigned char       oldOfssize;
     char                oldalign;
     char                oldcombine;
@@ -781,605 +757,279 @@ ret_code SegDef( int i )
 
     DebugMsg(("SegDef enter, segment=%s, cmd=%s, ModuleInfo.Ofssize=%u\n", name, AsmBuffer[i]->string_ptr, ModuleInfo.Ofssize ));
 
-    switch( AsmBuffer[i]->value ) {
-    case T_SEGMENT:
-        /* Check to see if the segment is already defined */
-        sym = SymSearch( name );
-        if( sym == NULL || sym->state == SYM_UNDEFINED ) {
-            // segment is not defined (yet)
-            if ( sym == NULL ) {
-                sym = (asm_sym *)dir_insert( name, SYM_SEG );
-            } else
-                dir_settype( (dir_node *)sym, SYM_SEG );
-            sym->list = TRUE; /* always list segments */
-            dir = (dir_node *)sym;
-            seg = dir->e.seginfo->segrec;
-            seg->d.segdef.idx = ++segdefidx;
-            defined = FALSE;
-            /*
-             * initialize segment with values from the one without suffix
-             */
-            if (Options.output_format == OFORMAT_COFF
+    /* See if the segment is already defined */
+    sym = SymSearch( name );
+    if( sym == NULL || sym->state == SYM_UNDEFINED ) {
+        /* segment is not defined (yet) */
+        if ( sym == NULL ) {
+            sym = (asm_sym *)dir_create( name, SYM_SEG );
+        } else
+            dir_settype( (dir_node *)sym, SYM_SEG );
+        sym->list = TRUE; /* always list segments */
+        dir = (dir_node *)sym;
+        seg = dir->e.seginfo->segrec;
+        seg->d.segdef.idx = ++segdefidx;
+        defined = FALSE;
+        /*
+         * initialize segment with values from the one without suffix
+         */
+        if (Options.output_format == OFORMAT_COFF
 #if ELF_SUPPORT
-                || Options.output_format == OFORMAT_ELF
+            || Options.output_format == OFORMAT_ELF
 #endif
-               ) {
-                char * p;
-                if (p = strchr(sym->name, '$')) {
-                    char buffer[MAX_ID_LEN+1];
-                    dir_node *dir2;
-                    memcpy(buffer, sym->name, p - sym->name);
-                    buffer[p - sym->name] = NULLC;
-                    if ((dir2 = (dir_node *)SymSearch(buffer)) && dir2->sym.state == SYM_SEG) {
-                        dir->e.seginfo->readonly = dir2->e.seginfo->readonly;
-                        dir->e.seginfo->segtype  = dir2->e.seginfo->segtype;
-                        dir->e.seginfo->Ofssize  = dir2->e.seginfo->Ofssize;
-                        dir->e.seginfo->alignment= dir2->e.seginfo->alignment;
-                        dir->e.seginfo->characteristics = dir2->e.seginfo->characteristics;
-                        dir->e.seginfo->segrec->d.segdef.combine        = dir2->e.seginfo->segrec->d.segdef.combine;
-                        dir->e.seginfo->segrec->d.segdef.class_name_idx = dir2->e.seginfo->segrec->d.segdef.class_name_idx;
-                    }
+           ) {
+            char * p;
+            if ( p = strchr(sym->name, '$') ) {
+                char buffer[MAX_ID_LEN+1];
+                dir_node *dir2;
+                memcpy(buffer, sym->name, p - sym->name);
+                buffer[p - sym->name] = NULLC;
+                if ((dir2 = (dir_node *)SymSearch(buffer)) && dir2->sym.state == SYM_SEG) {
+                    dir->e.seginfo->readonly = dir2->e.seginfo->readonly;
+                    dir->e.seginfo->segtype  = dir2->e.seginfo->segtype;
+                    dir->e.seginfo->Ofssize  = dir2->e.seginfo->Ofssize;
+                    dir->e.seginfo->alignment= dir2->e.seginfo->alignment;
+                    dir->e.seginfo->characteristics = dir2->e.seginfo->characteristics;
+                    dir->e.seginfo->segrec->d.segdef.combine        = dir2->e.seginfo->segrec->d.segdef.combine;
+                    dir->e.seginfo->segrec->d.segdef.class_name_idx = dir2->e.seginfo->segrec->d.segdef.class_name_idx;
                 }
             }
-        } else if ( sym->state == SYM_SEG ) {
-            // segment already defined
-            dir = (dir_node *)sym;
-            seg = dir->e.seginfo->segrec;
-            defined = TRUE;
-            oldreadonly = dir->e.seginfo->readonly;
-            oldsegtype  = dir->e.seginfo->segtype;
-            oldOfssize  = dir->e.seginfo->Ofssize;
-            oldalign    = dir->e.seginfo->alignment;
-            oldcharacteristics = dir->e.seginfo->characteristics;
-            oldcombine  = dir->e.seginfo->segrec->d.segdef.combine;
-            oldclassidx = dir->e.seginfo->segrec->d.segdef.class_name_idx;
-            if( dir->e.seginfo->lname_idx == 0 ) {
-                // segment was mentioned in a group statement, but not really set up
-                defined = FALSE;
-                seg->d.segdef.idx = ++segdefidx;
+        }
+    } else if ( sym->state == SYM_SEG ) {
+        /* segment already defined */
+        dir = (dir_node *)sym;
+        seg = dir->e.seginfo->segrec;
+        defined = TRUE;
+        oldreadonly = dir->e.seginfo->readonly;
+        //oldsegtype  = dir->e.seginfo->segtype;
+        oldOfssize  = dir->e.seginfo->Ofssize;
+        oldalign    = dir->e.seginfo->alignment;
+        oldcharacteristics = dir->e.seginfo->characteristics;
+        oldcombine  = dir->e.seginfo->segrec->d.segdef.combine;
+        oldclassidx = dir->e.seginfo->segrec->d.segdef.class_name_idx;
+        if( dir->e.seginfo->lname_idx == 0 ) {
+            /* segment was mentioned in a group statement, but not really set up */
+            defined = FALSE;
+            seg->d.segdef.idx = ++segdefidx;
+        }
+    } else {
+        /* symbol is different kind, error */
+        DebugMsg(("SegDef: symbol redefinition\n"));
+        AsmErr( SYMBOL_REDEFINITION, name );
+        return( ERROR );
+    }
+
+    i++; /* go past SEGMENT */
+
+    for( ; i < Token_Count; i++ ) {
+        token = AsmBuffer[i]->string_ptr;
+        DebugMsg(("SegDef: i=%u, string=%s token=%X\n", i, token, AsmBuffer[i]->token ));
+        if( AsmBuffer[i]->token == T_STRING ) {
+
+            /* the class name - the only token which is of type STRING */
+            /* string must be delimited by [double]quotes */
+            if ( AsmBuffer[i]->string_delim != '"' &&
+                AsmBuffer[i]->string_delim != '\'' ) {
+                AsmErr( SYNTAX_ERROR_EX, token );
+                continue;
             }
-        } else {
-            // symbol is different kind, error
-            DebugMsg(("SegDef: symbol redefinition\n"));
-            AsmErr( SYMBOL_REDEFINITION, name );
-            return( ERROR );
+            /* remove the quote delimiters */
+            token++;
+            *(token+AsmBuffer[i]->value) = NULLC;
+
+            SetSegmentClass( &dir->sym, token );
+
+            DebugMsg(("SegDef: class found: %s\n", token ));
+            continue;
         }
 
-        i++; /* go past SEGMENT */
+        /* check the rest of segment attributes.
+         */
+        type = FindToken( token, SegAttr, sizeof(SegAttr)/sizeof(typeinfo) );
+        if( type == NULL ) {
+            AsmErr( UNKNOWN_SEGMENT_ATTRIBUTE, token );
+            continue;
+        }
 
-        for( ; i < Token_Count; i ++ ) {
-            DebugMsg(("SegDef: i=%u, string=%s token=%X\n", i, AsmBuffer[i]->string_ptr, AsmBuffer[i]->token));
-            if( AsmBuffer[i]->token == T_STRING ) {
+        /* initstate is used to check if any field is already
+         * initialized
+         */
+        if( ( type->init != INIT_CHAR ) && ( initstate & type->init ) ) {
+            AsmErr( SEGMENT_ATTRIBUTE_DEFINED_ALREADY, token );
+            continue;
+        } else {
+            initstate |= type->init; /* mark it initialized */
+        }
 
-                /* the class name - the only token which is of type STRING */
-                token = AsmBuffer[i]->string_ptr;
-                /* string must be delimited by [double]quotes */
-                if (AsmBuffer[i]->string_delim == '<' ||
-                    (*token != '"' && *token != '\'')) {
-                    AsmErr( SYNTAX_ERROR_EX, token );
-                    continue;
-                }
-                /* remove the quote delimiters */
-                token++;
-                *(token+AsmBuffer[i]->value) = NULLC;
-
-                SetSegmentClass( &dir->sym, token );
-
-                DebugMsg(("SegDef: class found: %s\n", token ));
+        if ( type->init & INIT_ATTR ) {
+            dir->e.seginfo->readonly = TRUE;
+        } else if ( type->init & INIT_ALIGNPARAM ) {
+            DebugMsg(("SegDef: ALIGN() found\n" ));
+            if ( Options.output_format == OFORMAT_OMF ) {
+                AsmErr( NOT_SUPPORTED_WITH_OMF_FORMAT, AsmBuffer[i]->string_ptr );
+                break;
+            }
+            i++;
+            if ( AsmBuffer[i]->token != T_OP_BRACKET ) {
+                AsmErr( EXPECTED, "(" );
                 continue;
             }
-
-            /* go through all tokens EXCEPT the class name */
-            token = AsmBuffer[i]->string_ptr;
-
-            /* look up the type of token.
-             check readonly, align, combine and word size types */
-
-            type = FindToken( token, SegAttr, sizeof(SegAttr)/sizeof(typeinfo) );
-            if( type == NULL ) {
-                AsmErr( UNKNOWN_SEGMENT_ATTRIBUTE, token );
+            i++;
+            if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+                continue;
+            if ( AsmBuffer[i]->token != T_CL_BRACKET ) {
+                AsmErr( EXPECTED, ")" );
                 continue;
             }
-
-            /* initstate is used to check if any field is already
-            initialized */
-            if( ( type->init != INIT_CHAR ) && (initstate & type->init )) {
-                AsmErr( SEGMENT_ATTRIBUTE_DEFINED_ALREADY, token );
+            if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+                AsmError( CONSTANT_EXPECTED );
                 continue;
-            } else {
-                initstate |= type->init; // mark it initialized
             }
+            /*
+             COFF allows alignment values
+             1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192
+             */
+            for( temp = 1, temp2 = 0; temp < opndx.value && temp < 8192 ; temp <<= 1, temp2++ );
+            if( temp != opndx.value ) {
+                AsmError( POWER_OF_2 );
+            }
+            dir->e.seginfo->alignment = temp2;
 
-            if ( type->init & INIT_ATTR ) {
-                dir->e.seginfo->readonly = TRUE;
-            } else if ( type->init & INIT_ALIGNPARAM ) {
-                DebugMsg(("SegDef: ALIGN() found\n" ));
-                if ( Options.output_format == OFORMAT_OMF ) {
-                    AsmErr( NOT_SUPPORTED_WITH_OMF_FORMAT, AsmBuffer[i]->string_ptr );
-                    break;
-                }
-                i++;
-                if ( AsmBuffer[i]->token != T_OP_BRACKET ) {
-                    AsmErr( EXPECTED, "(" );
-                    continue;
-                }
-                i++;
-                if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
-                    continue;
-                if ( AsmBuffer[i]->token != T_CL_BRACKET ) {
-                    AsmErr( EXPECTED, ")" );
-                    continue;
-                }
-                if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
+        } else if ( type->init & INIT_ALIGN ) {
+            DebugMsg(("SegDef: align attribute found\n" ));
+            dir->e.seginfo->alignment = type->value;
+        } else if ( type->init & INIT_AT ) {
+            DebugMsg(("SegDef: AT found\n" ));
+            seg->d.segdef.combine = type->value;
+            dir->e.seginfo->alignment = -1;
+            i++;
+            if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) != ERROR ) {
+                if ( opndx.kind == EXPR_CONST && opndx.string == NULL ) {
+                    seg->d.segdef.abs.frame = opndx.value;
+                    seg->d.segdef.abs.offset = 0;
+                } else {
                     AsmError( CONSTANT_EXPECTED );
-                    continue;
                 }
-                /*
-                 COFF allows alignment values
-                  1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192
-                 */
-                for( temp = 1, temp2 = 0; temp < opndx.value && temp < 8192 ; temp <<= 1, temp2++ );
-                if( temp != opndx.value ) {
-                    AsmError( POWER_OF_2 );
-                }
-                dir->e.seginfo->alignment = temp2;
-
-            } else if ( type->init & INIT_ALIGN ) {
-                DebugMsg(("SegDef: align attribute found\n" ));
-                dir->e.seginfo->alignment = type->value;
-            } else if ( type->init & INIT_AT ) {
-                DebugMsg(("SegDef: AT found\n" ));
-                seg->d.segdef.combine = type->value;
-                dir->e.seginfo->alignment = -1;
-                i++;
-                if (EvalOperand( &i, Token_Count, &opndx, TRUE ) != ERROR) {
-                    if (opndx.kind == EXPR_CONST && opndx.string == NULL) {
-                        seg->d.segdef.abs.frame = opndx.value;
-                        seg->d.segdef.abs.offset = 0;
-                    } else {
-                        AsmError( CONSTANT_EXPECTED );
-                    }
-                }
-            } else if ( type->init & INIT_COMBINE ) {
-                DebugMsg(("SegDef: combine attribute found\n" ));
-                seg->d.segdef.combine = type->value;
-            } else if ( type->init & INIT_FLAT ) {
-                DefineFlatGroup();
-#if AMD64_SUPPORT
-                dir->e.seginfo->Ofssize = ModuleInfo.defOfssize;
-#else
-                dir->e.seginfo->Ofssize = USE32;
-#endif
-                dir->e.seginfo->group = &flat_grp->sym;
-            } else if ( type->init & INIT_SEGSIZE ) {
-                dir->e.seginfo->Ofssize = type->value;
-            } else if( type->init & INIT_CHAR ) {
-                DebugMsg(("SegDef: characteristics found\n" ));
-                ; // characteristics restricted to COFF/ELF
-                if ( Options.output_format == OFORMAT_OMF || Options.output_format == OFORMAT_BIN ) {
-                    AsmErr( NOT_SUPPORTED_WITH_CURR_FORMAT, AsmBuffer[i]->string_ptr );
-                    continue;
-                }
-                dir->e.seginfo->characteristics |= type->value;
             }
-        } /* end for */
+        } else if ( type->init & INIT_COMBINE ) {
+            DebugMsg(("SegDef: combine attribute found\n" ));
+            seg->d.segdef.combine = type->value;
+        } else if ( type->init & INIT_FLAT ) {
+            DefineFlatGroup();
+#if AMD64_SUPPORT
+            dir->e.seginfo->Ofssize = ModuleInfo.defOfssize;
+#else
+            dir->e.seginfo->Ofssize = USE32;
+#endif
+            dir->e.seginfo->group = &ModuleInfo.flat_grp->sym;
+        } else if ( type->init & INIT_SEGSIZE ) {
+            dir->e.seginfo->Ofssize = type->value;
+        } else if( type->init & INIT_CHAR ) {
+            DebugMsg(("SegDef: characteristics found\n" ));
+            ; /* characteristics are restricted to COFF/ELF */
+            if ( Options.output_format == OFORMAT_OMF || Options.output_format == OFORMAT_BIN ) {
+                AsmErr( NOT_SUPPORTED_WITH_CURR_FORMAT, AsmBuffer[i]->string_ptr );
+                continue;
+            }
+            dir->e.seginfo->characteristics |= type->value;
+        }
+    } /* end for */
+
+    /* make a guess about the segment's type */
+    if( dir->e.seginfo->segtype != SEGTYPE_CODE ) {
+        seg_type res;
 
         token = GetLname( seg->d.segdef.class_name_idx );
-        if( dir->e.seginfo->segtype != SEGTYPE_CODE ) {
-            seg_type res;
-
-            res = TypeFromClassName( dir, token );
-            if( res != SEGTYPE_UNDEF ) {
-                dir->e.seginfo->segtype = res;
-            } else {
-                res = TypeFromSegmentName( name );
-                dir->e.seginfo->segtype = res;
-            }
+        res = TypeFromClassName( dir, token );
+        if( res != SEGTYPE_UNDEF ) {
+            dir->e.seginfo->segtype = res;
         }
-
-        if( defined ) {
-            int txt = 0;
-
-            /* Check if new definition is different from previous one */
-
-            // oldobj = dir->e.seginfo->segrec;
-            if(  oldreadonly      != dir->e.seginfo->readonly )
-                txt = TXT_READONLY;
-            else if ( oldalign    != dir->e.seginfo->alignment )
-                txt = TXT_ALIGNMENT;
-            else if ( oldcombine  != seg->d.segdef.combine )
-                txt = TXT_COMBINE;
-            else if ( oldOfssize  != dir->e.seginfo->Ofssize )
-                txt = TXT_SEG_WORD_SIZE;
-            else if ( oldclassidx != seg->d.segdef.class_name_idx )
-                txt = TXT_CLASS;
-            else if ( oldcharacteristics != dir->e.seginfo->characteristics )
-                txt = TXT_CHARACTERISTICS;
-
-            if (txt) {
-                DebugMsg(("seg attr changed: %s, %s\n", dir->sym.name, MsgGetEx( txt ) ));
-                AsmErr( SEGDEF_CHANGED, dir->sym.name, MsgGetEx( txt ) );
-                //return( ERROR ); /* v2: display error, but continue */
-            }
-
-            push_seg( dir );
-
-        } else {
-            /* A new definition */
-
-            push_seg( dir );
-
-            sym = &dir->sym;
-            sym->defined = TRUE;
-            SetSymSegOfs( sym );
-            sym->offset = 0;
-            if( dir->e.seginfo->lname_idx == 0 ) {
-                dir->e.seginfo->lname_idx = ++LnamesIdx;
-            }
-            AddLnameData( sym );
+#if 0
+        else {
+            res = TypeFromSegmentName( name );
+            dir->e.seginfo->segtype = res;
         }
-
-        break;
-    case T_ENDS:
-        if ( CloseSeg(name) == ERROR )
-            return( ERROR );
-        i++;
-        if ( AsmBuffer[i]->token != T_FINAL ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-        }
-        break;
-#ifdef DEBUG_OUT
-    default: /* shouldn't happen */
-        DebugMsg(("SegDef: unknown directive %s\n", AsmBuffer[i]->string_ptr ));
-        return( ERROR );
 #endif
     }
+
+    if( defined ) {
+        int txt = 0;
+
+        /* Check if new definition is different from previous one */
+
+        // oldobj = dir->e.seginfo->segrec;
+        if(  oldreadonly      != dir->e.seginfo->readonly )
+            txt = TXT_READONLY;
+        else if ( oldalign    != dir->e.seginfo->alignment )
+            txt = TXT_ALIGNMENT;
+        else if ( oldcombine  != seg->d.segdef.combine )
+            txt = TXT_COMBINE;
+        else if ( oldOfssize  != dir->e.seginfo->Ofssize )
+            txt = TXT_SEG_WORD_SIZE;
+        else if ( oldclassidx != seg->d.segdef.class_name_idx )
+            txt = TXT_CLASS;
+        else if ( oldcharacteristics != dir->e.seginfo->characteristics )
+            txt = TXT_CHARACTERISTICS;
+
+        if ( txt ) {
+            DebugMsg(("seg attr changed: %s, %s\n", dir->sym.name, MsgGetEx( txt ) ));
+            AsmErr( SEGDEF_CHANGED, dir->sym.name, MsgGetEx( txt ) );
+            //return( ERROR ); /* v2: display error, but continue */
+        }
+
+        push_seg( dir );
+
+    } else {
+        /* A new definition */
+
+        push_seg( dir );
+
+        sym = &dir->sym;
+        sym->defined = TRUE;
+        SetSymSegOfs( sym );
+        sym->offset = 0;
+        if( dir->e.seginfo->lname_idx == 0 ) {
+            dir->e.seginfo->lname_idx = ++LnamesIdx;
+        }
+        AddLnameData( sym );
+    }
+
     return( SetOfssize() );
 }
 
-/*
- * functions for simplified segment definitions
- */
-
-char *GetCodeSegName( void )
-/**************************/
-{
-    return( SegmNames[SIM_CODE] );
-}
-
-static void AddToDgroup( int type, const char *name )
-/***************************************************/
-/* for simplified segment directives, emit DGROUP GROUP instruction */
-{
-    char        buffer[MAX_ID_LEN+1+20];
-
-    /* no DGROUP for FLAT or COFF/ELF */
-    if( ModuleInfo.model == MOD_FLAT ||
-       Options.output_format == OFORMAT_COFF
-#if ELF_SUPPORT
-       || Options.output_format == OFORMAT_ELF
-#endif
-      )
-        return;
-
-    strcpy( buffer, "DGROUP GROUP " );
-    if( name != NULL ) {
-        strcat( buffer, name );
-    } else {
-        switch( type ) {
-        case T_DOT_DATA:
-            strcat( buffer, SegmNames[SIM_DATA] );
-            break;
-        case T_DOT_DATA_UN:
-            strcat( buffer, SegmNames[SIM_DATA_UN] );
-            break;
-        case T_DOT_CONST:
-            strcat( buffer, SegmNames[SIM_CONST] );
-            break;
-        case T_DOT_STACK:
-            if ( ModuleInfo.distance == STACK_FAR )
-                return;
-            strcat( buffer, SegmNames[SIM_STACK] );
-            break;
-        }
-    }
-    AddLineQueue( buffer );
-}
-
-static void close_lastseg( void )
-/*******************************/
-/* close the last opened simplified segment?
- * sounds like a bad idea! the only segment which can be closed
- * is the current one.
- */
-{
-    lastseg = SIM_NONE;
-    DebugMsg(("close_lastseg: current seg=%s\n", sym_CurSeg->string_ptr));
-    if ( sym_CurSeg->string_ptr && (*sym_CurSeg->string_ptr != '\0') ) {
-        char buffer[MAX_ID_LEN+1+8];
-        strcpy( buffer, sym_CurSeg->string_ptr );
-        strcat( buffer, " ENDS" );
-        AddLineQueue( buffer );
-    }
-}
-
-/* translate a simplified segment directive to
- * a standard segment directive line
- */
-
-static char * SetSimSeg( int segm, const char * name, char * buffer )
-/*******************************************************************/
-{
-    char *pAlign = "WORD";
-    char *pAlignSt = "PARA";
-    char *pUse = "";
-    char *pCC = ModuleInfo.code_class;
-
-    if ( ModuleInfo.defOfssize > USE16 ) {
-        if ( ModuleInfo.model == MOD_FLAT )
-            pUse = "FLAT";
-        else
-            pUse = "USE32";
-        if (( ModuleInfo.curr_cpu & P_CPU_MASK ) <= P_386)
-            pAlign = "DWORD";
-        else
-            pAlign = "PARA";
-        pAlignSt = pAlign;
-    }
-
-    if ( segm == SIM_STACK || segm == SIM_FARDATA || segm == SIM_FARDATA_UN )
-        pAlign = pAlignSt;
-
-    if ( name == NULL ) {
-        if ( first_issued & ( 1 << segm ) )
-            sprintf( buffer, "%s SEGMENT", SegmNames[segm] );
-        else {
-            first_issued |= ( 1 << segm );
-            sprintf( buffer, SimCodeBegin[segm], SegmNames[segm], pAlign, pUse, pCC );
-        }
-    } else {
-        asm_sym * sym = SymSearch(name);
-        if (sym && sym->state == SYM_SEG)
-            sprintf( buffer, "%s SEGMENT", name );
-        else
-            sprintf( buffer, SimCodeBegin[segm], name, pAlign, pUse, pCC );
-    }
-    return( buffer );
-}
-
-static char * EndSimSeg( int segm, char * buffer )
-/************************************************/
-{
-    sprintf( buffer, "%s ENDS", SegmNames[segm] );
-    return(buffer);
-}
-
-static char *get_sim_segm_end( char *buffer, const char *name )
-/*************************************************************/
-{
-    strcpy( buffer, name );
-    strcat( buffer, " ENDS");
-    return( buffer );
-}
-
-ret_code SimplifiedSegDir( int i )
-/********************************/
-/*
- Handles simplified segment, based on optasm pg. 142-146
- directives:
- .CODE, .STACK, .DATA, .DATA?, .FARDATA, .FARDATA?, .CONST
- */
-{
-    char        buffer[ MAX_ID_LEN+1+64 ];
-    unsigned    size;
-    const char  *string;
-    int         type;
-    int         seg;
-
-    DebugMsg(("SimplifiedSegDir(%u) enter\n", i ));
-
-    LstWrite( LSTTYPE_DIRECTIVE, 0, NULL );
-
-    if( ModuleInfo.model == MOD_NONE ) {
-        AsmError( MODEL_IS_NOT_DECLARED );
-        return( ERROR );
-    }
-
-    PushLineQueue();
-
-    type = AsmBuffer[i]->value;
-
-    if( type != T_DOT_STACK ) {
-        close_lastseg();  /* emit a "xxx ENDS" line to close current seg */
-    }
-
-    buffer[0] = NULLC;
-    i++; /* get past the directive token */
-    if( AsmBuffer[i]->token == T_ID && type != T_DOT_STACK ) {
-        string = AsmBuffer[i]->string_ptr;
-        i++;
-    } else {
-        string = NULL;
-    }
-
-    switch( type ) {
-    case T_DOT_CODE:
-        if( string == NULL )
-            string = SegmNames[SIM_CODE];
-        AddLineQueue( SetSimSeg( SIM_CODE, string, buffer ) );
-//        get_sim_segm_end( lastseg.closestr, string );
-        lastseg = SIM_CODE;
-
-        if( ModuleInfo.model == MOD_TINY ) {
-            AddLineQueue( "ASSUME CS:DGROUP" );
-        } else if( ModuleInfo.model == MOD_FLAT ) {
-            //if ( SegAssumeTable[ASSUME_CS].flat == FALSE || SegAssumeTable[ASSUME_CS].error == TRUE )
-                AddLineQueue( "ASSUME CS:FLAT" );
-        } else {
-            strcpy( buffer, "ASSUME CS:" );
-            strcat( buffer, string );
-            AddLineQueue( buffer );
-        }
-        break;
-    case T_DOT_STACK:
-        size = DEFAULT_STACK_SIZE;
-        if( i < Token_Count ) {
-            expr_list opndx;
-            if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
-                return( ERROR );
-            if( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
-                AsmError( CONSTANT_EXPECTED );
-                return( ERROR );
-            }
-            size = opndx.value;
-        }
-        AddLineQueue( SetSimSeg( SIM_STACK, NULL, buffer ));
-        /* add stack to dgroup for some segmented models */
-        AddToDgroup( type, NULL );
-        AddLineQueue( "ORG 0" );
-        sprintf( buffer, "db %u dup (?)", size );
-        AddLineQueue( buffer );
-        AddLineQueue( EndSimSeg( SIM_STACK, buffer ));
-        break;
-    case T_DOT_DATA:
-    case T_DOT_DATA_UN:             // .data?
-    case T_DOT_CONST:
-        if( type == T_DOT_DATA ) {
-            if( string == NULL )
-                string = Options.data_seg;
-            seg = SIM_DATA;
-        } else if( type == T_DOT_DATA_UN ) {
-            seg = SIM_DATA_UN;
-            string = NULL;
-        } else {
-            seg = SIM_CONST;
-            string = NULL;
-        }
-
-        AddLineQueue( SetSimSeg(seg, string, buffer));
-        AddLineQueue( "ASSUME CS:ERROR" );
-        AddToDgroup( type, string );
-        lastseg = seg;
-        break;
-    case T_DOT_FARDATA:
-    case T_DOT_FARDATA_UN:  // .fardata?
-        seg = ( type == T_DOT_FARDATA ) ? SIM_FARDATA : SIM_FARDATA_UN;
-
-        AddLineQueue( SetSimSeg( seg, string, buffer ));
-        AddLineQueue( "ASSUME CS:ERROR" );
-        lastseg = seg;
-        break;
-    default:
-        /**/myassert( 0 );
-        break;
-    }
-    if ( AsmBuffer[i]->token != T_FINAL )
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-    RunLineQueue();
-    DebugMsg(("SimSeg exit\n"));
-    return( NOT_ERROR );
-}
-
-/*
- * set default values for .CODE and .DATA segment names
- * called by ModelDirective()
- */
-
-void SetModelDefaultSegNames( void )
-/**********************************/
-{
-    /* set SegmNames[SIM_CODE] */
-    if( Options.text_seg ) {
-        SegmNames[SIM_CODE] = AsmAlloc( strlen( Options.text_seg ) + 1 );
-        strcpy( SegmNames[SIM_CODE], Options.text_seg );
-    } else {
-        switch( ModuleInfo.model ) {
-        case MOD_MEDIUM:
-        case MOD_LARGE:
-        case MOD_HUGE:
-            SegmNames[SIM_CODE] = AsmAlloc( strlen( SegmNamesDef[SIM_CODE] ) + strlen( ModuleInfo.name ) + 1 );
-            strcpy( SegmNames[SIM_CODE], ModuleInfo.name );
-            strcat( SegmNames[SIM_CODE], SegmNamesDef[SIM_CODE] );
-        }
-    }
-
-    /* set SegmNames[SIM_DATA] */
-    if ( Options.data_seg ) {
-        SegmNames[SIM_DATA] = AsmAlloc( strlen( Options.data_seg ) + 1 );
-        strcpy( SegmNames[SIM_DATA], Options.data_seg );
-    }
-    return;
-}
-
-// called for .MODEL directive
-// allowes to use simplified segment directives
-// PushLineQueue() has already been called
-
-ret_code ModelSegmentInit( int type )
-/***********************************/
-{
-    char        buffer[ MAX_ID_LEN+1+64 ];
-
-    if (Parse_Pass == PASS_1) {
-        /* Generates codes for code segment */
-        AddLineQueue( SetSimSeg( SIM_CODE, SegmNames[SIM_CODE], buffer ) );
-        AddLineQueue( get_sim_segm_end( buffer, SegmNames[SIM_CODE] ) );
-
-        /* Generates codes for data segment */
-        AddLineQueue( SetSimSeg( SIM_DATA, SegmNames[SIM_DATA], buffer )) ;
-        AddLineQueue( get_sim_segm_end( buffer, SegmNames[SIM_DATA] ));
-
-        /* create DGROUP for BIN/OMF if model isn't FLAT */
-        if( type != MOD_FLAT &&
-            (Options.output_format == OFORMAT_OMF ||
-             Options.output_format == OFORMAT_BIN)) {
-            /* Generates codes for grouping */
-            strcpy( buffer, "DGROUP GROUP " );
-            if( type == MOD_TINY ) {
-                strcat( buffer, SegmNames[SIM_CODE] );
-                strcat( buffer, "," );
-            }
-            strcat( buffer, SegmNames[SIM_DATA] );
-            AddLineQueue( buffer );
-        }
-    }
-    return( NOT_ERROR );
-}
-
-// END directive has been found, close all segments
+/* END directive has been found. */
 
 ret_code SegmentModuleExit( void )
 /********************************/
 {
-    /* if simplified segment directives are used,
-     * don't complain if a segment is still open.
+    /* close current segment if model is set.
+     * This strategy is sufficient for segments opened with
+     * simplified segment directives.
      */
-    if( lastseg != SIM_NONE ||
-        ( CurrSeg != NULL && ModuleInfo.model != MOD_NONE ) ) {
-        DebugMsg(("SegmentModuleExit: segment index %u must be closed\n", lastseg ));
-    } else if ( CurrSeg ) {
+    if ( CurrSeg && ModuleInfo.model != MOD_NONE )
+        CloseSeg( CurrSeg->sym.name );
+
+    /* if there's still an open segment, it's an error */
+    if ( CurrSeg ) {
         AsmErr( BLOCK_NESTING_ERROR, CurrSeg->sym.name );
+        /* but close the still open segments anyway */
+        while( CurrSeg && ( CloseSeg( CurrSeg->sym.name ) == NOT_ERROR ) );
     }
-
-    /* clear segment stack */
-
-    while( CurrSeg && ( CloseSeg( CurrSeg->sym.name ) == NOT_ERROR ) );
 
     return( NOT_ERROR );
 }
 
-// init. called for each pass
+/* init. called for each pass */
 
 void SegmentInit( int pass )
 /**************************/
 {
     dir_node    *curr;
     uint_32     i;
-    int         size;
-    //struct asmfixup *fix;
+    //int         size;
+    //struct genfixup *fix;
 
     DebugMsg(("SegmentInit(%u) enter\n", pass ));
-    first_issued = 0;
     CurrSeg      = NULL;
     stkindex     = 0;
 
@@ -1387,9 +1037,8 @@ void SegmentInit( int pass )
         segdefidx   = 0;
         grpdefidx   = 0;
         LnamesIdx   = 1; /* the first Lname is a null-string */
-        lastseg     = SIM_NONE;
-        flat_grp    = NULL;
-        memcpy( SegmNames, SegmNamesDef, sizeof(SegmNames) );
+        //flat_grp    = NULL;
+#if 0 /* v2.03: obsolete, also belongs to simplified segment handling */
         /* set ModuleInfo.code_class */
         if( Options.code_class  )
             size = strlen( Options.code_class ) + 1;
@@ -1400,6 +1049,7 @@ void SegmentInit( int pass )
             strcpy( ModuleInfo.code_class, Options.code_class );
         else
             strcpy( ModuleInfo.code_class, "CODE" );
+#endif
     }
 
     /* Reset length of all segments to zero */
@@ -1438,14 +1088,17 @@ void SegmentInit( int pass )
         if( curr->e.seginfo->segrec->d.segdef.combine != COMB_STACK ) {
             curr->sym.max_offset = 0;
         }
-        curr->e.seginfo->start_loc = 0;
+        if ( Options.output_format == OFORMAT_OMF ) { /* v2.03: do this selectively */
+            curr->e.seginfo->start_loc = 0;
+            curr->e.seginfo->data_in_code = FALSE;
+        }
         curr->e.seginfo->current_loc = 0;
         curr->e.seginfo->bytes_written = 0;
 
-        if ( Options.output_format != OFORMAT_OMF ) {
+        //if ( Options.output_format != OFORMAT_OMF ) {
             curr->e.seginfo->FixupListHeadGen = NULL;
             curr->e.seginfo->FixupListTailGen = NULL;
-        }
+        //}
     }
 
     ModuleInfo.Ofssize = USE16;
@@ -1457,9 +1110,7 @@ void SegmentInit( int pass )
         if ( stkindex )
             memcpy( &SegStack, saved_SegStack, stkindex * sizeof(dir_node *) );
 
-        lastseg                = saved_lastseg;
         //sym_CurSeg->string_ptr = saved_CurSeg_name;
-        first_issued           = saved_first_issued;
 
         UpdateCurrSegVars();
     }
@@ -1480,8 +1131,6 @@ void SegmentSaveState( void )
         memcpy( saved_SegStack, &SegStack, stkindex * sizeof(dir_node *) );
     }
 
-    saved_lastseg      = lastseg;
     //saved_CurSeg_name  = sym_CurSeg->string_ptr;
-    saved_first_issued = first_issued;
 }
 #endif

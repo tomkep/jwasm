@@ -22,11 +22,12 @@ void      omf_end_of_pass1( void );
 void      omf_set_filepos( void );
 void      omf_write_ledata( dir_node * );
 void      omf_write_linnum( void );
+void      omf_create_modend( struct genfixup *, uint_32 );
 void      omf_write_modend( void );
 void      omf_OutSelect( bool );
 void      omf_FlushCurrSeg( void );
 
-struct fixup *omf_create_fixup( struct asmfixup * );
+struct omffixup *omf_create_fixup( struct genfixup * );
 
 void      omf_write_header_dbgcv( void );
 void      omf_write_debug_tables( void );

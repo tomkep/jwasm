@@ -78,10 +78,10 @@ static char delim_char;
 
 // fixme char *IfSymbol;        /* save symbols in IFDEF's so they don't get expanded */
 
-static int StartComment( const char * p )
-/***************************************/
+static ret_code StartComment( const char * p )
+/********************************************/
 {
-    while (isspace(*p)) p++;
+    while ( isspace( *p ) ) p++;
     if ( *p == NULLC ) {
         AsmError( COMMENT_DELIMITER_EXPECTED );
         return( ERROR );
@@ -89,18 +89,41 @@ static int StartComment( const char * p )
     delim_char = *p;
     p++;
 #if 0
-    if (*p != NULLC && isspace(*p) == FALSE) {
+    if ( *p != NULLC && isspace(*p) == FALSE ) {
         AsmError( COMMENT_DELIMITER_EXPECTED );
         return( ERROR );
     }
 #endif
-    for (;*p;p++)
-        if (*p == delim_char)
+    for ( ; *p; p++ )
+        if ( *p == delim_char )
             return( NOT_ERROR );
 
     inside_comment = TRUE;
     return( NOT_ERROR );
 }
+
+#ifdef DEBUG_OUT
+static char *GetCurrIfStatString( void )
+/**************************************/
+{
+    char *p;
+    switch ( CurrIfState ) {
+    case BLOCK_ACTIVE:
+        p = "BLOCK_ACTIVE";
+        break;
+    case COND_CHECK:
+        p = "COND_CHECK";
+        break;
+    case BLOCK_INACTIVE:
+        p = "BLOCK_INACTIVE";
+        break;
+    default:
+        p = "BLOCK_DONE";
+        break;
+    }
+    return( p );
+}
+#endif
 
 /*
  this code runs always. it handles the following:
@@ -109,8 +132,8 @@ static int StartComment( const char * p )
  active -> done
 */
 
-void conditional_assembly_prepare( char *line )
-/*********************************************/
+ret_code conditional_assembly_prepare( char *line )
+/*************************************************/
 {
     char        *ptr;
     char        *end;
@@ -123,17 +146,17 @@ void conditional_assembly_prepare( char *line )
             DebugMsg(("COMMENT mode exited\n"));
             inside_comment = FALSE;
         }
-        *line = NULLC;
-        return;
+        //*line = NULLC;
+        return( EMPTY );
     }
 
     ptr = line;
-    while (isspace(*ptr)) ptr++;
+    while ( isspace( *ptr ) ) ptr++;
     /* the expansion operator is still present here, since
      it could have been used as a comment delimiter */
-    if (*ptr == '%') {
+    if ( *ptr == '%' ) {
         ptr++;
-        while (isspace(*ptr)) ptr++;
+        while ( isspace( *ptr ) ) ptr++;
     }
 
     fix = *ptr | 0x20;
@@ -143,7 +166,7 @@ void conditional_assembly_prepare( char *line )
         while ( is_valid_id_char( *end )) ++end;
         if (*end == ':') {
             end++;
-            while (isspace(*end)) end++;
+            while ( isspace( *end ) ) end++;
             ptr = end;
             while ( is_valid_id_char( *end )) ++end;
         }
@@ -166,17 +189,19 @@ void conditional_assembly_prepare( char *line )
         /* it's not a conditional directive or COMMENT */
         if(( CurrIfState == BLOCK_INACTIVE ) || ( CurrIfState == BLOCK_DONE ) ) {
             DebugMsg(("%lu. suppressed: >%s<\n", GetTopLine(), line));
-            if ( ModuleInfo.listif ) LstWriteSrcLine();
-            *line = NULLC;
+            //if ( ModuleInfo.listif ) LstWriteSrcLine();
+            //*line = NULLC;
+            return( EMPTY );
         }
-        return;
+        return( NOT_ERROR );
     }
 
     switch( resw - AsmResWord ) {
     case T_COMMENT:
         StartComment( end );
         DebugMsg(("COMMENT starting, delim is >%c<\n", delim_char));
-        *line = NULLC;
+        //*line = NULLC;
+        return( EMPTY );
         break;
     case T_IF:
     case T_IF1:
@@ -195,31 +220,14 @@ void conditional_assembly_prepare( char *line )
          */
         if( CurrIfState == BLOCK_INACTIVE || CurrIfState == BLOCK_DONE ) {
             falseblocknestlevel++;
-            if ( ModuleInfo.listif ) LstWriteSrcLine();
-            *line = NULLC;
+            //if ( ModuleInfo.listif ) LstWriteSrcLine();
+            //*line = NULLC;
+            DebugMsg(("%lu. conditional_assembly_prepare IFx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
+            return( EMPTY );
         } else {
             CurrIfState = COND_CHECK;
         }
-#ifdef DEBUG_OUT
-        {
-            char * ptr2;
-        switch (CurrIfState) {
-        case BLOCK_ACTIVE:
-            ptr2 = "BLOCK_ACTIVE";
-            break;
-        case COND_CHECK:
-            ptr2 = "COND_CHECK";
-            break;
-        case BLOCK_INACTIVE:
-            ptr2 = "BLOCK_INACTIVE";
-            break;
-        case BLOCK_DONE:
-            ptr2 = "BLOCK_DONE";
-            break;
-        }
-        DebugMsg(("%lu. conditional_assembly_prepare IFx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, ptr2, blocknestlevel, falseblocknestlevel));
-        }
-#endif
+        DebugMsg(("%lu. conditional_assembly_prepare IFx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
         break;
     case T_ELSEIF:
     case T_ELSEIF1:
@@ -234,10 +242,12 @@ void conditional_assembly_prepare( char *line )
     case T_ELSEIFNB:
     case T_ELSEIFNDEF:
     case T_ELSE:
-        if (falseblocknestlevel > 0) {
-            if ( ModuleInfo.listif ) LstWriteSrcLine();
-            *line = NULLC;
-        } else if (CurrIfState == BLOCK_INACTIVE || CurrIfState == COND_CHECK)
+        if ( falseblocknestlevel > 0 ) {
+            //if ( ModuleInfo.listif ) LstWriteSrcLine();
+            //*line = NULLC;
+            DebugMsg(("%lu. conditional_assembly_prepare ELSEx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
+            return( EMPTY );
+        } else if ( CurrIfState == BLOCK_INACTIVE || CurrIfState == COND_CHECK )
             /* the block might become active */
             /* expansion must "run" */
             CurrIfState = COND_CHECK;
@@ -246,47 +256,33 @@ void conditional_assembly_prepare( char *line )
             /* in any case this block is DONE then */
             /* don't run expansion! */
             CurrIfState = BLOCK_DONE;
-            if ( ModuleInfo.listif ) LstWriteSrcLine();
-            *line = NULLC;
+            //if ( ModuleInfo.listif ) LstWriteSrcLine();
+            //*line = NULLC;
+            DebugMsg(("%lu. conditional_assembly_prepare ELSEx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
+            return( EMPTY );
         }
-#ifdef DEBUG_OUT
-        {
-            char * ptr2;
-        switch (CurrIfState) {
-        case BLOCK_ACTIVE:
-            ptr2 = "BLOCK_ACTIVE";
-            break;
-        case COND_CHECK:
-            ptr2 = "COND_CHECK";
-            break;
-        case BLOCK_INACTIVE:
-            ptr2 = "BLOCK_INACTIVE";
-            break;
-        case BLOCK_DONE:
-            ptr2 = "BLOCK_DONE";
-            break;
-        }
-        DebugMsg(("%lu. conditional_assembly_prepare ELSEx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, ptr2, blocknestlevel, falseblocknestlevel));
-        }
-#endif
+        DebugMsg(("%lu. conditional_assembly_prepare ELSEx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
         break;
     case T_ENDIF:
         if (falseblocknestlevel > 0) {
             falseblocknestlevel--;
-            if ( ModuleInfo.listif ) LstWriteSrcLine();
-            *line = NULLC;
+            //if ( ModuleInfo.listif ) LstWriteSrcLine();
+            //*line = NULLC;
+            DebugMsg(("%lu. conditional_assembly_prepare ENDIF: state=%u, level=%u, falselevel=%u\n", GetTopLine(), CurrIfState, blocknestlevel, falseblocknestlevel));
+            return( EMPTY );
         }
         DebugMsg(("%lu. conditional_assembly_prepare ENDIF: state=%u, level=%u, falselevel=%u\n", GetTopLine(), CurrIfState, blocknestlevel, falseblocknestlevel));
         break;
     default: /* shouldn't happen */
-        *end = NULLC;
+        //*end = NULLC;
         DebugMsg(("conditional_assembly_prepare: unhandled directive %s\n", ptr ));
-        AsmErr( SYNTAX_ERROR_EX, ptr);
+        AsmErr( SYNTAX_ERROR_EX, ptr );
+        return( EMPTY );
     }
-    return;
+    return( NOT_ERROR );
 }
 
-/*
+/* handle [ELSE]IF[N]DEF
  * <string> is
  * - the value of a T_ID item!
  * - "" (item is T_FINAL)
@@ -317,7 +313,7 @@ static bool check_defd( const char *string )
 #endif
 
     if( sym != NULL ) {
-        DebugMsg(("check_defd: sym->state=%u\n", sym->state));
+        DebugMsg(("check_defd(%s): sym->state=%u\n", string, sym->state));
         //if ( sym->state == SYM_INTERNAL || sym->state == SYM_MACRO || sym->state == SYM_TMACRO ) {
         if ( sym->state == SYM_INTERNAL || sym->state == SYM_MACRO || sym->state == SYM_TMACRO || sym->state == SYM_UNDEFINED ) {
             DebugMsg(("check_defd: sym->defined=%u\n", sym->defined));
@@ -325,9 +321,12 @@ static bool check_defd( const char *string )
         }
         return( TRUE );
     }
+    DebugMsg(("check_defd(%s): sym=NULL\n", string ));
     return( FALSE );
 }
 
+/* handle [ELSE]IF[N]B
+ */
 static bool check_blank( const char *string )
 /*******************************************/
 {

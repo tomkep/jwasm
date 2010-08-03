@@ -29,6 +29,7 @@
 
 #define SETDATAPOS   1
 #define HELPSYMS     0 /* use helper symbols for assembly time symbol refs */
+#define MANGLE_BYTES 8 /* extra size required for name decoration */
 
 typedef struct stringitem {
     struct stringitem *next;
@@ -42,9 +43,9 @@ typedef struct stacknode {
 
 extern void cv_write_debug_tables( dir_node *, dir_node *);
 
-extern symbol_queue     Tables[];       // tables of definitions
-extern asm_sym          *start_label;   // symbol for Modend (COFF)
-extern uint             segdefidx;      // current segment index
+extern symbol_queue     Tables[];       /* tables of definitions */
+extern asm_sym          *start_label;   /* start label */
+extern uint             segdefidx;      /* current segment index */
 extern stacknode        *SafeSEHStack;
 
 qdesc  DebugS;
@@ -117,7 +118,7 @@ static char * CoffConvertSectionName( asm_sym * sym )
     return( sym->name );
 }
 
-// alloc a string which will be stored in the COFF string table
+/* alloc a string which will be stored in the COFF string table */
 
 static uint_32 Coff_AllocString( const char * string, int len )
 /*************************************************************/
@@ -155,7 +156,7 @@ ret_code coff_write_section_table( module_info *ModuleInfo )
     dir_node    *curr;
     //obj_rec     *objr;
     char        *p;
-    struct asmfixup *fix;
+    struct genfixup *fix;
     uint        seg_index;
     uint        offset;
     uint        len;
@@ -199,7 +200,7 @@ ret_code coff_write_section_table( module_info *ModuleInfo )
 
         ish.Characteristics = 0;
 
-        if ( curr->e.seginfo->alignment != MAX_SEGALIGNMENT ) // ABS not possible
+        if ( curr->e.seginfo->alignment != MAX_SEGALIGNMENT ) /* ABS not possible */
             ish.Characteristics |= (uint_32)(curr->e.seginfo->alignment + 1) << 20;
 
         if ( curr->e.seginfo->segtype == SEGTYPE_CODE )
@@ -321,7 +322,7 @@ static short CoffGetClass( const asm_sym * sym )
     return( IMAGE_SYM_CLASS_STATIC );
 }
 
-// update the file header once all has been written
+/* update the file header once all has been written */
 
 static void update_header( FILE *file )
 /*************************************/
@@ -348,14 +349,14 @@ static uint GetFileAuxEntries( uint_16 file, char * *fname )
     return ( len / sizeof( IMAGE_AUX_SYMBOL ) + ( len % sizeof( IMAGE_AUX_SYMBOL ) ? 1 : 0 ) );
 }
 
-// write COFF symbol table and string table
-// contents of the table
-// 0+1: file (+aux)
-// 2-l: 2 entries per section
-// l-m: externals, communals and publics
-// m-n: entries for relocations (internal)
-// n-o: aliases (weak externals)
-
+/* write COFF symbol table and string table
+ * contents of the table
+ * 0+1: file (+aux)
+ * 2-l: 2 entries per section
+ * l-m: externals, communals and publics
+ * m-n: entries for relocations (internal)
+ * n-o: aliases (weak externals)
+ */
 ret_code coff_write_symbols( module_info *ModuleInfo )
 /****************************************************/
 {
@@ -368,13 +369,13 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
     stringitem  *pName;
     IMAGE_SYMBOL is;
     IMAGE_AUX_SYMBOL ias;
-    uint lastfile = 0;
-    char        buffer[MAX_ID_LEN+1];
+    uint        lastfile = 0;
+    char        buffer[MAX_ID_LEN + MANGLE_BYTES + 1];
 
     DebugMsg(("coff_write_symbols: enter\n"));
     ifh.NumberOfSymbols = 0;
 
-    // first entry is the .file (optional)
+    /* first entry is the .file (optional) */
 
     if (Options.no_file_entry == FALSE) {
         strncpy( is.N.ShortName, ".file", IMAGE_SIZEOF_SHORT_NAME );
@@ -400,7 +401,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
         ifh.NumberOfSymbols = is.NumberOfAuxSymbols + 1;
     }
 
-    // second are section entries
+    /* second are section entries */
 
     for( i = 1, curr = Tables[TAB_SEG].head; curr; curr = curr->next, i++) {
         p = CoffConvertSectionName(&curr->sym);
@@ -442,7 +443,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
         }
     }
 
-    // third are externals + communals ( + protos [since v2.01] )
+    /* third are externals + communals ( + protos [since v2.01] ) */
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
         /* skip "weak" (=unused) externdefs */
@@ -478,8 +479,8 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
     }
 
 #if 0 /* v2.01: PROTOs are now in TAB_EXT */
-    // PROTOs which have been "used" and have no matching PROC are also
-    // externals.
+    /* PROTOs which have been "used" and have no matching PROC are also
+     * externals. */
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         if( curr->sym.used == FALSE || curr->sym.state != SYM_EXTERNAL )
             continue;
@@ -506,9 +507,9 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
         ifh.NumberOfSymbols++;
     }
 #endif
-    // publics and internal symbols. The internal symbols have
-    // been written to the "public" queue inside coff_write_data().
-
+    /* publics and internal symbols. The internal symbols have
+     * been written to the "public" queue inside coff_write_data().
+     */
     vp = NULL;
     while ( sym = GetPublicData(&vp) ) {
         Mangle( sym, buffer );
@@ -620,9 +621,8 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
         }
     }
 
-    // aliases. A weak external entry with 1 aux entry is created for
-    // each alias.
-
+    /* aliases. A weak external entry with 1 aux entry is created for
+     */
     for( curr = Tables[TAB_ALIAS].head ; curr != NULL ;curr = curr->next ) {
         asm_sym * sym;
 
@@ -684,7 +684,7 @@ static int GetStartLabel( char * buffer, bool msg )
 /*************************************************/
 {
     int size = 0;
-    char temp[ MAX_ID_LEN+1 ];
+    char temp[ MAX_ID_LEN + MANGLE_BYTES + 1 ];
 
     if ( start_label ) {
         Mangle( start_label, temp );
@@ -726,7 +726,7 @@ ret_code coff_write_header( module_info *ModuleInfo )
 /***************************************************/
 {
     dir_node *dir;
-    char buffer[MAX_ID_LEN + 1];
+    char buffer[MAX_ID_LEN + MANGLE_BYTES + 1];
 
     DebugMsg(("coff_write_header: enter\n"));
 
@@ -788,7 +788,7 @@ ret_code coff_write_header( module_info *ModuleInfo )
     if (start_label != NULL ||
         Tables[TAB_LIB].head != NULL ||
         dir != NULL) {
-        directives = dir_insert( ".drectve", SYM_SEG );
+        directives = dir_create( ".drectve", SYM_SEG );
         if (directives) {
             int size = 0;
             uint_8 *p;
@@ -861,7 +861,7 @@ ret_code coff_write_header( module_info *ModuleInfo )
     if ( SafeSEHStack ) {
         stacknode *sehp;
         unsigned cnt = 0;
-        sxdata = dir_insert( ".sxdata", SYM_SEG );
+        sxdata = dir_create( ".sxdata", SYM_SEG );
         sxdata->e.seginfo->segrec->d.segdef.idx = ++segdefidx;
         sxdata->e.seginfo->alignment = MAX_SEGALIGNMENT;
         sxdata->sym.segment = &sxdata->sym;
@@ -901,10 +901,10 @@ ret_code coff_write_header( module_info *ModuleInfo )
     return( NOT_ERROR );
 }
 
-// calc the current number of entries in the symbol table
-// so we know the index if a new entry has to be added
-// called by coff_write_data()
-
+/* calc the current number of entries in the symbol table
+ * so we know the index if a new entry has to be added
+ * called by coff_write_data()
+ */
 static uint_32 SetSymbolIndices( void )
 /*************************************/
 {
@@ -979,14 +979,14 @@ static uint_32 SetSymbolIndices( void )
     return( index );
 }
 
-// write section contents and fixups
-// this is done after the last step only!
-
+/* write section contents and fixups
+ * this is done after the last step only!
+ */
 ret_code coff_write_data( module_info *ModuleInfo )
 /*************************************************/
 {
     dir_node *section;
-    struct asmfixup *fix;
+    struct genfixup *fix;
     uint_32 offset = 0;
     IMAGE_RELOCATION ir;
     int i;
@@ -1026,7 +1026,7 @@ ret_code coff_write_data( module_info *ModuleInfo )
     }
 #endif
 
-    /* now scan all section's relocations. If a relocation refers to
+    /* now scan the section's relocations. If a relocation refers to
      a symbol which is not public/external, it must be added to the
      symbol table. If the symbol is an assembly time variable, a helper
      symbol - name is $$<offset:6> is to be added.
@@ -1113,11 +1113,14 @@ ret_code coff_write_data( module_info *ModuleInfo )
                         /* not supported by COFF64! shouldn't reach this point */
                     default:
                         AsmErr( UNKNOWN_FIXUP_TYPE, fix->type );
-                        break;
+                        continue; /* v2.03: skip this fixup */
+                        //break;
                     }
                 } else
 #endif
                 switch (fix->type) {
+                case FIX_VOID:
+                    continue;
                 case FIX_RELOFF16: /* 16bit offset */
                     ir.Type = IMAGE_REL_I386_REL16;
                     break;
@@ -1153,7 +1156,8 @@ ret_code coff_write_data( module_info *ModuleInfo )
                     // break;
                 default:
                     AsmErr( UNKNOWN_FIXUP_TYPE, fix->type );
-                    break;
+                    continue; /* v2.03: skip this fixup */
+                    //break;
                 }
                 /* if it's not EXTERNAL/PUBLIC, add symbol */
                 /* if it's an assembly time variable, create helper symbol */
@@ -1197,7 +1201,7 @@ ret_code coff_write_data( module_info *ModuleInfo )
                           section->sym.name, offset, ir.VirtualAddress, ir.Type, ir.SymbolTableIndex, fix->sym->name));
                 offset += sizeof(ir);
                 section->e.seginfo->num_relocs++;
-            }
+            } /* end for */
             /* write line number data. The peculiarity of COFF (compared to OMF) is
              * that line numbers are always relative to a function start.
              */

@@ -24,7 +24,7 @@
 *
 *  ========================================================================
 *
-* Description:  Label directive, anonymous labels
+* Description:  Label directive, (anonymous) code labels
 *
 ****************************************************************************/
 
@@ -56,12 +56,12 @@ char * GetNextAnonLabel( char * buffer )
     return( buffer );
 }
 
-// define a label
-// symbol_name: name of the label
-// mem_type: its memory type
-// vartype: arbitrary type if mem_type is MT_TYPE
-// bLocal: local should be defined locally if possible
-
+/* define a label
+ * symbol_name: name of the label
+ * mem_type: its memory type
+ * vartype: arbitrary type if mem_type is MT_TYPE
+ * bLocal: label should be defined locally if possible
+ */
 asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym *vartype, bool bLocal )
 /*****************************************************************************************************/
 {
@@ -96,7 +96,8 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
         return( NULL );
     }
 
-    if( strcmp( symbol_name, "@@" ) == 0 ) {
+    //if( strcmp( symbol_name, "@@" ) == 0 ) {
+    if( symbol_name[0] == '@' && symbol_name[1] == '@' && symbol_name[2] == NULLC ) {
         sprintf( buffer, "L&_%04u", ++ModuleInfo.anonymous_label );
         symbol_name = buffer;
     }
@@ -147,10 +148,10 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
 
     if( Parse_Pass != PASS_1 && sym->offset != addr ) {
 #ifdef DEBUG_OUT
-        if (!PhaseError)
+        if ( !ModuleInfo.PhaseError )
             DebugMsg(("LabelCreate: Phase error, pass %u, sym >%s< first time, new=%lX - old=%lX\n", Parse_Pass+1, sym->name, sym->offset, addr));
 #endif
-        PhaseError = TRUE;
+        ModuleInfo.PhaseError = TRUE;
     }
     BackPatch( sym );
     return( sym );

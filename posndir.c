@@ -54,30 +54,30 @@ static const uint_8 NopList16[] = {
 
 static const uint_8 NopList32[] = {
     7,
-    0x8d,0xa4,0x24,0,0,0,0,         // lea     esp,[esp+00000000]
-    0x8d,0x80,0,0,0,0,              // lea     eax,[eax+00000000]
+    0x8d,0xa4,0x24,0,0,0,0,         /* lea     esp,[esp+00000000] */
+    0x8d,0x80,0,0,0,0,              /* lea     eax,[eax+00000000] */
 #if 0
-    0x8d,0x40,0x00,                 // lea     eax,[eax+00]
-    0x8b,0xc9,                      // mov     ecx,ecx
+    0x8d,0x40,0x00,                 /* lea     eax,[eax+00] */
+    0x8b,0xc9,                      /* mov     ecx,ecx */
 #else
-    0x2e,0x8d,0x44,0x20,0x00,       // lea     eax,cs:[eax+no_index_reg+00H]
+    0x2e,0x8d,0x44,0x20,0x00,       /* lea     eax,cs:[eax+no_index_reg+00H] */
 #endif
-    0x8d,0x44,0x20,0x00,            // lea     eax,[eax+no_index_reg+00H]
-    0x8d,0x40,0x00,                 // lea     eax,[eax+00H]
-    0x8b,0xff,                      // mov     edi,edi
-    0x90                            // nop
+    0x8d,0x44,0x20,0x00,            /* lea     eax,[eax+no_index_reg+00H] */
+    0x8d,0x40,0x00,                 /* lea     eax,[eax+00H] */
+    0x8b,0xff,                      /* mov     edi,edi */
+    0x90                            /* nop */
 };
 
 #if AMD64_SUPPORT
 static const uint_8 NopList64[] = {
     7,
-    0x0f,0x1f,0x80,0,0,0,0,         // nop dword ptr [rax+0]
-    0x66,0x0f,0x1f,0x44,0,0,        // nop word ptr [rax+rax]
-    0x0f,0x1f,0x44,0,0,             // nop dword ptr [rax+rax]
-    0x0f,0x1f,0x40,0,               // nop dword ptr [rax]
-    0x0f,0x1f,0,                    // nop dword ptr [rax]
-    0x66,0x90,                      // xchg ax,ax
-    0x90,                           // nop
+    0x0f,0x1f,0x80,0,0,0,0,         /* nop dword ptr [rax+0] */
+    0x66,0x0f,0x1f,0x44,0,0,        /* nop word ptr [rax+rax] */
+    0x0f,0x1f,0x44,0,0,             /* nop dword ptr [rax+rax] */
+    0x0f,0x1f,0x40,0,               /* nop dword ptr [rax] */
+    0x0f,0x1f,0,                    /* nop dword ptr [rax] */
+    0x66,0x90,                      /* xchg ax,ax */
+    0x90,                           /* nop */
 };
 
 /* just use the 32bit nops for 64bit */
@@ -163,7 +163,7 @@ static void fill_in_objfile_space( uint size )
     }
 }
 
-// align current offset to value ( alignment is 2^value )
+/* align current offset to value ( alignment is 2^value ) */
 
 void AlignCurrOffset( int value )
 /*******************************/
@@ -204,8 +204,12 @@ ret_code AlignDirective( int directive, int i )
                 AsmError( POWER_OF_2 );
                 return( ERROR );
             }
-        } else if ( opndx.kind == EXPR_EMPTY ) {
-            align_val = GetCurrSegAlign();
+        } else if ( opndx.kind == EXPR_EMPTY ) { /* ALIGN without argument? */
+            /* v2.03: special STRUCT handling was missing */
+            if ( CurrStruct )
+                align_val = CurrStruct->e.structinfo->alignment;
+            else
+                align_val = GetCurrSegAlign();
         } else {
             AsmError( EXPECTING_NUMBER );
             return( ERROR );
@@ -229,7 +233,7 @@ ret_code AlignDirective( int directive, int i )
         SaveState();
     }
 #endif
-    seg_align = GetCurrSegAlign(); // # of bytes
+    seg_align = GetCurrSegAlign(); /* # of bytes */
     if( seg_align <= 0 ) {
         AsmError( MUST_BE_IN_SEGMENT_BLOCK );
         return( ERROR );
@@ -240,7 +244,7 @@ ret_code AlignDirective( int directive, int i )
         //return( ERROR ); /* v2.0: don't exit */
     }
     /* find out how many bytes past alignment we are & add the remainder */
-    //store temp. value
+    /* store temp. value */
     CurrAddr = GetCurrOffset();
     seg_align = CurrAddr % align_val;
     if( seg_align ) {

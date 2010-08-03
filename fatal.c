@@ -43,10 +43,10 @@ extern void PutMsg( FILE *fp, int severity, int msgnum, va_list args );
 typedef void (*err_act)( void );
 
 typedef struct {
-    short     message;        // message displayed
-    uint_8    num;            // arguments
-    uint_8    ret;            // exit code
-    err_act   action;         // function to call, if any
+    short     message;        /* message displayed */
+    uint_8    num;            /* arguments         */
+    uint_8    ret;            /* exit code         */
+    err_act   action;         /* function to call, if any */
 } Msg_Struct;
 
 static const Msg_Struct Fatal_Msg[] = {
@@ -55,9 +55,9 @@ static const Msg_Struct Fatal_Msg[] = {
 #include "fatalmsg.h"
 };
 
-// fatal error (out of memory, unable to open files for write, ...)
-// don't use functions which need to alloc memory here!
-
+/* fatal error (out of memory, unable to open files for write, ...)
+ * don't use functions which need to alloc memory here!
+ */
 void Fatal( unsigned msg, ... )
 /*****************************/
 {

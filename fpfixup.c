@@ -79,7 +79,7 @@ ret_code AddFloatingPointEmulationFixup( struct code_info *CodeInfo, bool second
     fp_patches patch;
     struct asm_sym *sym;
     const char * const *patch_name_array;
-    struct asmfixup *fixup;
+    struct genfixup *fixup;
     int_32 data;
 
     patch_name_array = ( secondary ? FPPatchAltName : FPPatchName );

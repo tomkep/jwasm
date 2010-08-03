@@ -46,10 +46,21 @@ static uint_32 equcnt;
 /* use this version to ensure that uppercase letters are used! */
 extern void myltoa( uint_32 value, char *buffer, uint radix, bool sign, bool addzero );
 
-// generic parameter names. In case the parameter name is
-// displayed in an error message ("required parameter %s missing")
-
+/* generic parameter names. In case the parameter name is
+ * displayed in an error message ("required parameter %s missing")
+ */
 static const char * parmnames[] = {"p1","p2","p3"};
+
+static void TextItemError( int i )
+/********************************/
+{
+    if ( AsmBuffer[i]->token == T_STRING && *AsmBuffer[i]->string_ptr == '<' ) {
+        AsmError( MISSING_ANGLE_BRACKET_OR_BRACE_IN_LITERAL );
+        return;
+    }
+    AsmError( TEXT_ITEM_REQUIRED );
+    return;
+}
 
 /* CatStr()
  * defines a text equate
@@ -62,7 +73,7 @@ ret_code CatStrDef( int i )
 {
     asm_sym *sym;
     int count;
-    //expr_list opndx;
+    /* expr_list opndx; */
     char buffer[MAX_LINE_LEN];
 
 #ifdef DEBUG_OUT
@@ -108,7 +119,7 @@ ret_code CatStrDef( int i )
         DebugMsg(("CatStrDef(%s): item=%s\n", AsmBuffer[0]->string_ptr, AsmBuffer[i]->string_ptr));
         if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
             DebugMsg(("CatStrDef: bad item: token=%u\n", AsmBuffer[i]->token));
-            AsmError( TEXT_ITEM_REQUIRED );
+            TextItemError( i );
             return( ERROR );
         }
         if ( ( count + AsmBuffer[i]->value ) >= MAX_LINE_LEN) {
@@ -147,8 +158,8 @@ ret_code CatStrDef( int i )
 }
 
 /*
- used by EQU if the value to be assigned to a symbol is text.
-*/
+ * used by EQU if the value to be assigned to a symbol is text.
+ */
 asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
 /*************************************************************************/
 {
@@ -158,7 +169,7 @@ asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
 #ifdef DEBUG_OUT
     equcnt++;
 #endif
-#if 0 // FASTPASS
+#if 0 /* FASTPASS */
     /* there's no need to set the value if FASTPASS is on, because
      the input are just preprocessed lines.
      this check is probably obsolete by now, since it won't be called
@@ -215,10 +226,10 @@ asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
     return( sym );
 }
 
-// SubStr()
-// defines a text equate
-// syntax: name SUBSTR <string>, pos [, size]
-
+/* SubStr()
+ * defines a text equate
+ * syntax: name SUBSTR <string>, pos [, size]
+ */
 ret_code SubStrDef( int i )
 /*************************/
 {
@@ -229,7 +240,7 @@ ret_code SubStrDef( int i )
     int                 pos;
     int                 size = MAX_LINE_LEN;
     int                 cnt;
-    //char                buffer[MAX_LINE_LEN];
+    /* char                buffer[MAX_LINE_LEN]; */
     expr_list           opndx;
 
     DebugMsg(("SubStrDef entry\n"));
@@ -237,10 +248,10 @@ ret_code SubStrDef( int i )
     substrcnt++;
 #endif
 
-    // at least 5 items are needed
-    // 0  1      2      3 4    5   6
-    // ID SUBSTR SRC_ID , POS [, LENGTH]
-
+    /* at least 5 items are needed
+     * 0  1      2      3 4    5   6
+     * ID SUBSTR SRC_ID , POS [, LENGTH]
+     */
     if ( i != 1 ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
@@ -254,11 +265,11 @@ ret_code SubStrDef( int i )
 
     i++; /* go past SUBSTR */
 
-    // third item must be a string
+    /* third item must be a string */
 
     if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
         DebugMsg(("SubStrDef: error, no text item\n"));
-        AsmError( TEXT_ITEM_REQUIRED );
+        TextItemError( i );
         return( ERROR );
     }
     p = AsmBuffer[i]->string_ptr;
@@ -271,7 +282,7 @@ ret_code SubStrDef( int i )
     }
     i++;
 
-    // get pos, must be a numeric value and > 0
+    /* get pos, must be a numeric value and > 0 */
 
     if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR ) {
         DebugMsg(("SubStrDef(%s): invalid pos value\n", name));
@@ -296,7 +307,7 @@ ret_code SubStrDef( int i )
             return( ERROR );
         }
         i++;
-        // get size, must be a numeric value
+        /* get size, must be a numeric value */
         if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR ) {
             DebugMsg(("SubStrDef(%s): invalid size value\n", name));
             return( ERROR );
@@ -368,9 +379,9 @@ ret_code SubStrDef( int i )
     return( NOT_ERROR );
 }
 
-// SizeStr()
-// defines a numeric variable which contains size of a string
-
+/* SizeStr()
+ * defines a numeric variable which contains size of a string
+ */
 ret_code SizeStrDef( int i )
 /**************************/
 {
@@ -392,7 +403,7 @@ ret_code SizeStrDef( int i )
         return( ERROR );
     }
     if ( AsmBuffer[2]->token != T_STRING || AsmBuffer[2]->string_delim != '<') {
-        AsmError( TEXT_ITEM_REQUIRED );
+        TextItemError( i );
         return( ERROR );
     }
     if ( Token_Count > 3 ) {
@@ -412,18 +423,18 @@ ret_code SizeStrDef( int i )
 
 }
 
-// InStr()
-// defines a numeric variable which contains position of substring
-// syntax
-// name INSTR [pos,]string,substr
-
+/* InStr()
+ * defines a numeric variable which contains position of substring
+ * syntax
+ * name INSTR [pos,]string,substr
+ */
 ret_code InStrDef( int i )
 /************************/
 {
     asm_sym *sym;
     int sizestr;
     int j;
-    //int commas;
+    /* int commas; */
     char *string1;
     char buffer1[MAX_LINE_LEN];
     char buffer2[MAX_LINE_LEN];
@@ -464,27 +475,27 @@ ret_code InStrDef( int i )
         i++; /* skip comma */
     }
 
-    if (AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<') {
-        AsmError( TEXT_ITEM_REQUIRED );
+    if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
+        TextItemError( i );
         return( ERROR );
     }
     sizestr = GetLiteralValue( buffer1, AsmBuffer[i]->string_ptr );
 #ifdef DEBUG_OUT
     DebugMsg(("InStrDef: first string >%s< \n", buffer1));
 #endif
-    if (start > sizestr) {
+    if ( start > sizestr ) {
         AsmErr( INDEX_PAST_END_OF_STRING, start );
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token != T_COMMA) {
+    if ( AsmBuffer[i]->token != T_COMMA ) {
         AsmError( EXPECTING_COMMA );
         return( ERROR );
     }
     i++;
 
-    if (AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<') {
-        AsmError( TEXT_ITEM_REQUIRED );
+    if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
+        TextItemError( i );
         return( ERROR );
     }
     j = GetLiteralValue( buffer2, AsmBuffer[i]->string_ptr );
@@ -511,7 +522,7 @@ ret_code InStrDef( int i )
 
 #define CATSTRMAX 20
 
-// internal @CatStr macro function
+/* internal @CatStr macro function */
 
 static ret_code CatStrFunc( char * buffer, char * *params )
 /*********************************************************/
@@ -554,9 +565,9 @@ static ret_code GetNumber( char * string, int * pi )
     return( NOT_ERROR );
 }
 
-// internal @InStr macro function
-// the result is returned as string in current radix
-
+/* internal @InStr macro function
+ * the result is returned as string in current radix
+ */
 static ret_code InStrFunc( char * buffer, char * *params )
 /********************************************************/
 {
@@ -595,9 +606,9 @@ static ret_code InStrFunc( char * buffer, char * *params )
     return( NOT_ERROR );
 }
 
-// internal @SizeStr macro function
-// the result is returned as string in current radix
-
+/* internal @SizeStr macro function
+ * the result is returned as string in current radix
+ */
 static ret_code SizeStrFunc( char * buffer, char * *params )
 /**********************************************************/
 {
@@ -611,7 +622,7 @@ static ret_code SizeStrFunc( char * buffer, char * *params )
     return( NOT_ERROR );
 }
 
-// internal @SubStr macro function
+/* internal @SubStr macro function */
 
 static ret_code SubStrFunc( char * buffer, char * *params )
 /*********************************************************/
@@ -661,9 +672,9 @@ static ret_code SubStrFunc( char * buffer, char * *params )
     return( NOT_ERROR );
 }
 
-// string macro initialization
-// this proc is called once per module
-
+/* string macro initialization
+ * this proc is called once per module
+ */
 void StringInit( void )
 /*********************/
 {
@@ -680,7 +691,7 @@ void StringInit( void )
     equcnt = 0;
 #endif
 
-    // add @CatStr() macro func
+    /* add @CatStr() macro func */
 
     macro = CreateMacro("@CatStr" );
     macro->sym.defined = TRUE;
@@ -690,12 +701,12 @@ void StringInit( void )
     macro->e.macroinfo->parmcnt = CATSTRMAX;
     macro->e.macroinfo->parmlist = AsmAlloc(sizeof(mparm_list) * CATSTRMAX);
     for (i = 0; i < CATSTRMAX; i++) {
-        macro->e.macroinfo->parmlist[i].def = NULL;
+        macro->e.macroinfo->parmlist[i].deflt = NULL;
         macro->e.macroinfo->parmlist[i].label = "p";
         macro->e.macroinfo->parmlist[i].required = FALSE;
     }
 
-    // add @InStr() macro func
+    /* add @InStr() macro func */
 
     macro = CreateMacro("@InStr" );
     macro->sym.defined = TRUE;
@@ -705,12 +716,12 @@ void StringInit( void )
     macro->e.macroinfo->parmcnt = 3;
     macro->e.macroinfo->parmlist = AsmAlloc(sizeof(mparm_list) * 3);
     for (i = 0; i < 3; i++) {
-        macro->e.macroinfo->parmlist[i].def = NULL;
+        macro->e.macroinfo->parmlist[i].deflt = NULL;
         macro->e.macroinfo->parmlist[i].label = parmnames[i];
         macro->e.macroinfo->parmlist[i].required = (i != 0);
     }
 
-    // add @SizeStr() macro func
+    /* add @SizeStr() macro func */
 
     macro = CreateMacro("@SizeStr" );
     macro->sym.defined = TRUE;
@@ -719,13 +730,13 @@ void StringInit( void )
     macro->sym.isfunc = TRUE;
     macro->e.macroinfo->parmcnt = 1;
     macro->e.macroinfo->parmlist = AsmAlloc(sizeof(mparm_list));
-    macro->e.macroinfo->parmlist[0].def = NULL;
+    macro->e.macroinfo->parmlist[0].deflt = NULL;
     macro->e.macroinfo->parmlist[0].label = parmnames[0];
-    //macro->e.macroinfo->parmlist[0].required = TRUE;
-    //the string parameter is NOT required, '@SizeStr()' is valid
+    /* macro->e.macroinfo->parmlist[0].required = TRUE; */
+    /* the string parameter is NOT required, '@SizeStr()' is valid */
     macro->e.macroinfo->parmlist[0].required = FALSE;
 
-    // add @SubStr() macro func
+    /* add @SubStr() macro func */
 
     macro = CreateMacro("@SubStr" );
     macro->sym.defined = TRUE;
@@ -735,7 +746,7 @@ void StringInit( void )
     macro->e.macroinfo->parmcnt = 3;
     macro->e.macroinfo->parmlist = AsmAlloc(sizeof(mparm_list) * 3);
     for (i = 0; i < 3; i++) {
-        macro->e.macroinfo->parmlist[i].def = NULL;
+        macro->e.macroinfo->parmlist[i].deflt = NULL;
         macro->e.macroinfo->parmlist[i].label = parmnames[i];
         macro->e.macroinfo->parmlist[i].required = (i < 2);
     }

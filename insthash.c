@@ -131,7 +131,7 @@ struct ReservedWord *AddResWord( struct ReservedWord *inst )
     return( inst );
 }
 
-// remove a reserved word from the hash table.
+/* remove a reserved word from the hash table. */
 
 int RemoveResWord( struct ReservedWord *inst )
 /********************************************/

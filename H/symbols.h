@@ -45,12 +45,12 @@ enum sym_state {
         SYM_STACK,          /*  3 stack variable */
         SYM_SEG,            /*  4 segment        */
         SYM_GRP,            /*  5 group          */
-        SYM_CLASS_LNAME,    /*  6 lname entry for segment class ... not in symbol table */
-        SYM_STRUCT_FIELD,   /*  7 field defined in some structure   */
-        SYM_TYPE,           /*  8 structure, union, typedef, record */
-        SYM_ALIAS,          /*  9 alias name    */
-        SYM_MACRO,          /* 10 macro         */
-        SYM_TMACRO          /* 11 text macro    */
+        SYM_STRUCT_FIELD,   /*  6 field defined in some structure */
+        SYM_TYPE,           /*  7 structure, union, typedef, record */
+        SYM_ALIAS,          /*  8 alias name    */
+        SYM_MACRO,          /*  9 macro         */
+        SYM_TMACRO,         /* 10 text macro    */
+        SYM_CLASS_LNAME     /* 11 lname item for segm class - not in symbol table */
 };
 
 typedef enum {
@@ -156,8 +156,12 @@ typedef struct asm_sym {
             uint_16         cv_typeref;   /* codeview type index */
             uint_32         max_mbr_size; /* SYM_TYPE: max size members */
         };
-        /* for SYM_INTERNAL, SYM_STRUCT_FIELD, SYM_TYPE */
-        uint_32         total_size;   /* total number of bytes (sizeof) */
+        union {
+            /* for SYM_INTERNAL, SYM_STRUCT_FIELD, SYM_TYPE */
+            uint_32         total_size;   /* total number of bytes (sizeof) */
+            /* for SYM_INTERNAL ABS (equates) */
+            int_32          value3264;    /* high bits for equates */
+        };
         union {
             uint_32        total_length; /* SYM_INTERNAL, SYM_STRUCT_FIELD: total number of elements (LENGTHOF) */
             struct asm_sym *altname;     /* SYM_EXTERNAL: alternative name */
@@ -176,17 +180,21 @@ typedef struct asm_sym {
         unsigned short  isarray:1;    /* symbol is an array */
         unsigned short  included:1;   /* symbol is in COFF symbol table */
         unsigned short  saved:1;      /* symbol has been saved ("fast pass") */
-        unsigned char   isproc:1;     /* symbol is PROC or PROTO */
+        unsigned short  isproc:1;     /* symbol is PROC or PROTO */
+        unsigned short  labelinexpr:1;/* equates: expression contains label */
 #if FASTMEM==0
         unsigned short  staticmem:1;  /* symbol stored in static memory */
 #endif
-        unsigned short  sign:1;       /* for equates allow full 32-bit value */
         lang_type       langtype;
         enum sym_state  state;
         memtype         mem_type;
+#if (MAX_ID_LEN <= 255)
         uint_8          name_size;
+#else
+        uint_16         name_size;
+#endif
         struct asm_sym  *type;        /* set if memtype is MT_TYPE */
-        struct asmfixup *fixup;
+        struct genfixup *fixup;
 #if 0 //MANGLERSUPP /* obsolete */
         char            *(*mangler)( struct asm_sym *sym, char *buffer );
 #endif

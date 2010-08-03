@@ -89,12 +89,12 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   \
            $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  \
            $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   \
-           $(OUTD)/context.obj  $(OUTD)/extern.obj  \
+           $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
 !endif
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
-           $(OUTD)/dbgcv.obj
+           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj
 ######
 
 !if $(WIN)

@@ -55,6 +55,17 @@
  */
 #define PLACEHOLDER_SIZE 2
 
+/* store empty macro lines, to ensure correct line numbering
+ */
+#define STORE_EMPTY_LINES 1
+
+/* 1="undefine" macros with PURGE - this isn't Masm-compatible,
+ * and offers no real benefit because the name remains in the namespace.
+ * The macro is marked "undefined" and cannot be invoked anymore.
+ * 0=just delete the macro content.
+ */
+#define TRUEPERGE 0
+
 /* the list of macro local names is hold temporarily only.
  once the local names have been replaced by placeholders,
  the list of labels is superfluous. What's stored permanently
@@ -62,7 +73,7 @@
  */
 typedef struct mlocal_list {
     struct mlocal_list  *next;
-    char                label[];         // name of local
+    char                label[];         /* name of local */
 } mlocal_list;
 
 static int replace_parm( const char *line, char *start, int len, int parmcnt, mparm_list *parms , mlocal_list *locals )
@@ -150,7 +161,15 @@ static int store_placeholders( char *line, int cnt, mparm_list *parms, mlocal_li
     bool substprf;  /* substitution character before ID? */
 
     for( p = line; *p != NULLC; ) {
-        if ( is_valid_id_first_char( *p ) ) {
+        if ( isdigit( *p) ) {
+            /* skip numbers (they may contain alphas) */
+            while ( is_valid_id_char( *p )) p++;
+        } else if ( ( is_valid_id_char( *p ) ) ||
+                   ( *p == '.' &&
+                    ModuleInfo.dotname &&
+                    is_valid_id_char(*(p+1)) &&
+                    ( p == line ||
+                     ( *(p-1) != ']' && ( is_valid_id_char( *(p-1) ) == FALSE ) ) ) ) ) {
             DebugMsg(("store_placeholders: found ID: %s\n", p));
             start = p++;
             while ( is_valid_id_char( *p )) p++;
@@ -162,9 +181,6 @@ static int store_placeholders( char *line, int cnt, mparm_list *parms, mlocal_li
                     p = start + PLACEHOLDER_SIZE - (substprf ? 1 : 0);
                 }
             }
-        } else if ( isdigit( *p) ) {
-            /* skip numbers (they may contain alphas) */
-            while ( is_valid_id_char( *p )) p++;
         } else {
             switch (*p) {
             case '!':
@@ -214,8 +230,10 @@ static bool lineis( const char *string, const char *substr, int len )
     return( TRUE );
 }
 
-// store a macro's parameter, local and content list.
-// i = start index of macro params
+/*
+ * store a macro's parameter, local and content list.
+ * i = start index of macro params in AsmBuffer[]
+ */
 
 ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 /*************************************************************/
@@ -237,8 +255,8 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
     if( store_data ) {
         int j;
 
-        if ( i < Token_Count) {
-            for ( j = i, info->parmcnt = 1; j < Token_Count; j++)
+        if ( i < Token_Count ) {
+            for ( j = i, info->parmcnt = 1; j < Token_Count; j++ )
                 if (AsmBuffer[j]->token == T_COMMA)
                     info->parmcnt++;
             info->parmlist = AsmAlloc( info->parmcnt * sizeof(mparm_list));
@@ -251,13 +269,13 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 
             token = AsmBuffer[i]->string_ptr;
             /* Masm accepts reserved words and instructions as parameter
-             names! So just check that the token is a valid id.
+             * names! So just check that the token is a valid id.
              */
             if ( !is_valid_id_first_char( *token ) ) {
                 AsmErr( SYNTAX_ERROR_EX, token );
                 break;
             }
-#if 0 /* v2.0: tokenizer handles dotnames ok */
+#if 0 /* v2.0: tokenizer handles dotnames ok, so this code is obsolete */
             /* allow parameter names beginning with '.' */
             if ( AsmBuffer[i]->token == T_DOT ) {
                 if ( ( AsmBuffer[i+1]->pos != (AsmBuffer[i]->pos + 1)) ||
@@ -271,12 +289,13 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                 token = buffer;
             }
 #endif
-            paranode->def = NULL;
+            paranode->deflt = NULL;
             paranode->required = FALSE;
 
             /* first get the parm. name */
-            paranode->label = AsmAlloc( strlen( token ) + 1 );
-            strcpy( (char *)paranode->label, token );
+            j = strlen( token ) + 1;
+            paranode->label = AsmAlloc( j );
+            memcpy( (char *)paranode->label, token, j );
             i++;
 
             /* now see if it has a default value or is required */
@@ -284,12 +303,13 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                 i++;
                 if( *AsmBuffer[i]->string_ptr == '=' ) {
                     i++;
-                    if( AsmBuffer[i]->token != T_STRING ) {
+                    /* allowed syntax is parm:=<literal> */
+                    if( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
                         AsmError( LITERAL_EXPECTED_AFTER_EQ );
                         break; // return( ERROR );
                     }
-                    paranode->def = AsmAlloc( AsmBuffer[i]->value + 1 );
-                    strcpy( paranode->def, AsmBuffer[i]->string_ptr );
+                    paranode->deflt = AsmAlloc( AsmBuffer[i]->value + 1 );
+                    memcpy( paranode->deflt, AsmBuffer[i]->string_ptr, AsmBuffer[i]->value + 1 );
                     i++;
                 } else if( _stricmp( AsmBuffer[i]->string_ptr, "REQ" ) == 0 ) {
                     /* required parameter */
@@ -307,7 +327,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                 } else if( AsmBuffer[i]->token == T_DIRECTIVE &&
                           AsmBuffer[i]->value == T_LABEL &&
                           Options.strict_masm_compat == FALSE ) { /* parm:LABEL? */
-                    /* must be first param */
+                    /* LABEL attribute for first param only! */
                     if ( paranode != info->parmlist ) {
                         AsmError( LABEL_PARAMETER_MUST_BE_FIRST );
                         break;
@@ -321,7 +341,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                 }
             }
             DebugMsg(("StoreMacro(%s): param=>%s< found\n", macro->sym.name, paranode->label));
-            if( i< Token_Count && AsmBuffer[i]->token != T_COMMA ) {
+            if( i < Token_Count && AsmBuffer[i]->token != T_COMMA ) {
                 AsmError( EXPECTING_COMMA );
                 break; // return( ERROR );
             }
@@ -334,18 +354,19 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 
     locals_done = FALSE;
     nextline = &info->data;
-    /* now read in all the contents of the macro, and store them */
+    /* now read in the lines of the macro, and store them */
     for( ; ; ) {
         char *ptr;
         char *ptr2;
 
-        string = GetTextLine( buffer, sizeof(buffer) );
+        string = GetTextLine( buffer, sizeof( buffer ) );
         if( string == NULL ) {
             AsmError( UNMATCHED_MACRO_NESTING );
-            ModuleInfo.EndDirectiveFound = TRUE; /* avoid error "END not found" */
+            ModuleInfo.EndDirFound = TRUE; /* avoid error "END not found" */
             return( ERROR );
         }
 
+        /* add the macro line to the listing file */
         if ( ModuleInfo.list && store_data ) {
             char *oldsrc = CurrSource;
             CurrSource = buffer;
@@ -356,8 +377,19 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
         while ( isspace(*string) ) string++;
         //wipe_space( string );
 
-        if ( *string == NULLC )
+        /* skip empty lines! */
+        if ( *string == NULLC ) {
+#if STORE_EMPTY_LINES
+            if( store_data ) {
+                *nextline = AsmAlloc( sizeof( asmlines ) + 1 );
+                (*nextline)->next = NULL;
+                (*nextline)->ph_count = 0;
+                (*nextline)->line[0] = NULLC;
+                nextline = &(*nextline)->next;
+            }
+#endif
             continue;
+        }
 
         /* macro label? */
         if (*string == ':' && is_valid_id_char(*(string+1))) {
@@ -398,7 +430,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                     localcurr->next = localnode;
                 }
                 info->localcnt++;
-                DebugMsg(("StoreMacro(%s, %u): local=>%s< added\n", macro->sym.name, nesting_depth, localnode->label ));
+                DebugMsg(("%lu. StoreMacro(%s, %u): local=>%s< added\n", LineNumber, macro->sym.name, nesting_depth, localnode->label ));
                 ptr = ptr2;
                 while( isspace( *ptr ) ) ptr++;
                 if (*ptr == ',') ptr++;
@@ -419,7 +451,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
             if (nesting_depth == 0)
                 macro->sym.runsync = TRUE;
         } else if( lineis( string, "endm", 4 ) ) {
-            DebugMsg(("StoreMacro(%s, %u): endm found\n", macro->sym.name, nesting_depth ));
+            DebugMsg(("%lu. StoreMacro(%s, %u): endm found\n", LineNumber, macro->sym.name, nesting_depth ));
             if( nesting_depth ) {
                 nesting_depth--;
             } else {
@@ -429,25 +461,25 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
         ptr = string;
         if (*ptr == '%') {
             ptr++;
-            while(isspace(*ptr)) ptr++;
+            while( isspace( *ptr ) ) ptr++;
         }
 
         locals_done = TRUE;
 
         /* Skip a possible label. This isn't a trivial task, because
-         the source might contain a & operator or a macro function call.
+         * the source might contain a & operator or a macro function call.
          */
-        if ( is_valid_id_first_char(*ptr )) {
+        if ( is_valid_id_first_char( *ptr )) {
             ptr2 = ptr+1;
-            while( is_valid_id_char(*ptr2 ) || *ptr2 == '&' ) ptr2++;
+            while( is_valid_id_char( *ptr2 ) || *ptr2 == '&' ) ptr2++;
             if (*ptr2 == ':') {
                 ptr2++;
                 if (*ptr2 == ':')
                     ptr2++;
-                while (isspace(*ptr2)) ptr2++;
+                while ( isspace(*ptr2) ) ptr2++;
                 ptr = ptr2;
             } else {
-                while (isspace(*ptr2)) ptr2++;
+                while ( isspace(*ptr2) ) ptr2++;
                 /* skip possible macro function parameter block enclosed
                  in '()' */
                 if ( *ptr2 == '(' ) {
@@ -459,7 +491,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                         else if (*ptr2 == ')')
                             brlevel--;
                     }
-                    while (isspace(*ptr2)) ptr2++;
+                    while ( isspace( *ptr2 ) ) ptr2++;
                 }
                 /* a "local" macro? */
                 if( lineis( ptr2, "macro", 5 )) {
@@ -480,13 +512,15 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
         }
     check_done:
         if( store_data ) {
+            int j;
             uint_8 phs = 0;
             if ( info->parmcnt || localfirst )
                 phs = store_placeholders( string, info->parmcnt, info->parmlist, localfirst );
-            *nextline = AsmAlloc( sizeof( asmlines ) + strlen(string) + 1 );
+            j = strlen( string ) + 1;
+            *nextline = AsmAlloc( sizeof( asmlines ) + j );
             (*nextline)->next = NULL;
             (*nextline)->ph_count = phs;
-            strcpy( (*nextline)->line, string );
+            memcpy( (*nextline)->line, string, j );
             nextline = &(*nextline)->next;
 #ifdef DEBUG_OUT
             /* the stored line cannot be displayed due to the format of
@@ -511,17 +545,17 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                         *dst = *src;
                 }
                 *dst = NULLC;
-                DebugMsg(("StoreMacro(%s, %u): cnt=%u, line >%s<\n", macro->sym.name, nesting_depth, phs, dbgbuff ));
+                DebugMsg(("%lu. StoreMacro(%s, %u): cnt=%u, line >%s<\n", LineNumber, macro->sym.name, nesting_depth, phs, dbgbuff ));
             }
 #endif
         }
-    }
+    } /* end for */
     macro->sym.defined = TRUE;
     DebugMsg(("StoreMacro(%s): exit, no error, isfunc=%u\n", macro->sym.name, macro->sym.isfunc));
     return( NOT_ERROR );
 }
 
-// create a macro symbol
+/* create a macro symbol */
 
 dir_node *CreateMacro( const char *name )
 /***************************************/
@@ -541,7 +575,7 @@ dir_node *CreateMacro( const char *name )
     return( macro );
 }
 
-// clear macro data
+/* clear macro data */
 
 void ReleaseMacroData( dir_node *macro )
 /**************************************/
@@ -558,7 +592,7 @@ void ReleaseMacroData( dir_node *macro )
          */
         if ( macro->sym.predefined == FALSE )
             AsmFree( (void *)macro->e.macroinfo->parmlist[i].label );
-        AsmFree( macro->e.macroinfo->parmlist[i].def );
+        AsmFree( macro->e.macroinfo->parmlist[i].deflt );
     }
 
     macro->e.macroinfo->parmcnt = 0;
@@ -570,7 +604,7 @@ void ReleaseMacroData( dir_node *macro )
     }
 
     /* free the lines list */
-    for(datacurr = macro->e.macroinfo->data ;datacurr; ) {
+    for( datacurr = macro->e.macroinfo->data ;datacurr; ) {
         datanext = datacurr->next;
         AsmFree( datacurr );
         datacurr = datanext;
@@ -582,9 +616,9 @@ void ReleaseMacroData( dir_node *macro )
     return;
 }
 
-// MACRO directive: define a macro
-// i: index of macro name (is always 0)
-
+/* MACRO directive: define a macro
+ * i: index of macro name (is always 0)
+ */
 ret_code MacroDef( int i )
 /************************/
 {
@@ -594,7 +628,7 @@ ret_code MacroDef( int i )
 
     DebugMsg(("MacroDef(%u) enter, token=%s\n", i, AsmBuffer[i]->string_ptr ));
 
-    if (AsmBuffer[i]->token != T_ID) {
+    if ( AsmBuffer[i]->token != T_ID ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
@@ -610,7 +644,7 @@ ret_code MacroDef( int i )
         return( ERROR );
     }
 
-    if (( Parse_Pass == PASS_1) || (macro->sym.variable)) {
+    if (( Parse_Pass == PASS_1 ) || (macro->sym.variable) ) {
         /* is the macro redefined? */
         if ( macro->e.macroinfo->data != NULL) {
             DebugMsg(("MacroDef(%s): macro already defined\n", name));
@@ -633,13 +667,14 @@ ret_code MacroDef( int i )
  and cannot be used for something else.
  Text macros cannot be purged, because the PURGE arguments are expanded.
 */
-ret_code PurgeDef( int i)
-/***********************/
+ret_code PurgeDef( int i )
+/************************/
 {
     dir_node *dir;
 
+    i++; /* skip directive */
     do {
-        if (AsmBuffer[i]->token != T_ID) {
+        if ( AsmBuffer[i]->token != T_ID ) {
             AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
@@ -652,11 +687,15 @@ ret_code PurgeDef( int i)
             AsmErr( EXPECTED, "macro name" );
             return( ERROR );
         }
+#if TRUEPURGE
         dir->sym.defined = FALSE;
+#else
+        ReleaseMacroData( dir );
+#endif
         i++;
-        if (AsmBuffer[i]->token == T_FINAL)
+        if ( AsmBuffer[i]->token == T_FINAL )
             break;
-        if (AsmBuffer[i]->token != T_COMMA) {
+        if ( AsmBuffer[i]->token != T_COMMA ) {
             AsmError( EXPECTING_COMMA );
             return( ERROR );
         }
@@ -666,27 +705,28 @@ ret_code PurgeDef( int i)
     return( NOT_ERROR );
 }
 
-// internal @Environ macro function
+/* internal @Environ macro function */
 
-static ret_code EnvironFunc(char * buffer, char * *params)
-/********************************************************/
+static ret_code EnvironFunc( char * buffer, char * *params )
+/**********************************************************/
 {
     char * p = getenv( *params );
-    if (p)
+    /* todo: ensure that variable isn't > MAX_LINE_LENGTH */
+    if ( p )
         strcpy( buffer, p );
     else
         buffer[0] = '\0';
     return( NOT_ERROR );
 }
 
-// generic parameter names. In case the parameter name is
-// displayed in an error message ("required parameter %s missing")
-
+/* generic parameter names. In case the parameter name is
+ * displayed in an error message ("required parameter %s missing")
+ */
 static char * parmnames[] = {"p1"};
 
-// macro initialization
-// this proc is called once per pass
-
+/* macro initialization
+ * this proc is called once per pass
+ */
 ret_code MacroInit( int pass )
 /****************************/
 {
@@ -698,7 +738,7 @@ ret_code MacroInit( int pass )
 
         StringInit();
 
-        // add @Environ() macro func
+        /* add @Environ() macro func */
 
         macro = CreateMacro("@Environ" );
         macro->sym.defined = TRUE;
@@ -707,7 +747,7 @@ ret_code MacroInit( int pass )
         macro->sym.isfunc = TRUE;
         macro->e.macroinfo->parmcnt = 1;
         macro->e.macroinfo->parmlist = AsmAlloc(sizeof(mparm_list));
-        macro->e.macroinfo->parmlist->def = NULL;
+        macro->e.macroinfo->parmlist->deflt = NULL;
         macro->e.macroinfo->parmlist->label = parmnames[0];
         macro->e.macroinfo->parmlist->required = TRUE;
     }

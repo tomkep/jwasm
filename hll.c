@@ -56,41 +56,41 @@ typedef enum {
     HLL_BREAK  /* .IF behind .BREAK or .CONTINUE */
 } hll_cmd;
 
-// item for .IF, .WHILE, .REPEAT, ...
+/* item for .IF, .WHILE, .REPEAT, ... */
 
 typedef struct hll_list {
     struct hll_list     *next;
-    char                *symfirst;      // symbol first (local) label
-    char                *symtest;       // continue, test for exit
-    char                *symexit;       // exit loop
-    char                *condlines;     // for .WHILE: lines to add after test
-    hll_cmd             cmd;            // start cmd (IF, WHILE, REPEAT)
+    char                *symfirst;      /* symbol first (local) label */
+    char                *symtest;       /* continue, test for exit    */
+    char                *symexit;       /* exit loop                  */
+    char                *condlines;     /* for .WHILE: lines to add after test */
+    hll_cmd             cmd;            /* start cmd (IF, WHILE, REPEAT) */
 } hll_list;
 
 static ret_code GetExpression( hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp, expr_list *opndx );
 
-// c binary ops
+/* c binary ops */
 
 typedef enum {
     COP_NONE,
-    COP_EQ,   // ==
-    COP_NE,   // !=
-    COP_GT,   // >
-    COP_LT,   // <
-    COP_GE,   // >=
-    COP_LE,   // <=
-    COP_AND,  // &&
-    COP_OR,   // ||
-    COP_ANDB, // &
-    COP_NEG,  // !
-    COP_ZERO, // ZERO?   not really a valid C operator
-    COP_CARRY,// CARRY?  not really a valid C operator
-    COP_SIGN, // SIGN?   not really a valid C operator
-    COP_PARITY,  // PARITY?   not really a valid C operator
-    COP_OVERFLOW // OVERFLOW? not really a valid C operator
+    COP_EQ,   /* == */
+    COP_NE,   /* != */
+    COP_GT,   /* >  */
+    COP_LT,   /* <  */
+    COP_GE,   /* >= */
+    COP_LE,   /* <= */
+    COP_AND,  /* && */
+    COP_OR,   /* || */
+    COP_ANDB, /* &  */
+    COP_NEG,  /* !  */
+    COP_ZERO, /* ZERO?   not really a valid C operator */
+    COP_CARRY,/* CARRY?  not really a valid C operator */
+    COP_SIGN, /* SIGN?   not really a valid C operator */
+    COP_PARITY,  /* PARITY?   not really a valid C operator */
+    COP_OVERFLOW /* OVERFLOW? not really a valid C operator */
 } c_bop;
 
-static hll_list     *HllStack; // for .WHILE, .IF, .REPEAT
+static hll_list     *HllStack; /* for .WHILE, .IF, .REPEAT */
 
 static char * MakeAnonymousLabel( void )
 /**************************************/
@@ -101,13 +101,13 @@ static char * MakeAnonymousLabel( void )
     return ( p );
 }
 
-// get a C binary operator from the token stream.
-// there is a problem with the '<' because it is a "string delimiter"
-// which Tokenize() usually is to remove.
-// There has been a hack implemented in Tokenize() so that it won't touch the
-// '<' if .IF, .ELSEIF, .WHILE, .UNTIL, .UNTILCXZ or .BREAK/.CONTINUE has been
-// detected
-
+/* get a C binary operator from the token stream.
+ * there is a problem with the '<' because it is a "string delimiter"
+ * which Tokenize() usually is to remove.
+ * There has been a hack implemented in Tokenize() so that it won't touch the
+ * '<' if .IF, .ELSEIF, .WHILE, .UNTIL, .UNTILCXZ or .BREAK/.CONTINUE has been
+ * detected
+ */
 static c_bop GetCOp( int * i )
 /****************************/
 {
@@ -168,7 +168,7 @@ static c_bop GetCOp( int * i )
     return( rc );
 }
 
-// render an instruction operand
+/* render an instruction operand */
 
 static void RenderOpnd( expr_list * op, char * buffer, int start, int end )
 /*************************************************************************/
@@ -181,7 +181,7 @@ static void RenderOpnd( expr_list * op, char * buffer, int start, int end )
     return;
 }
 
-// a "token" in a C expression actually is a set of ASM tokens
+/* a "token" in a C expression actually is a set of ASM tokens */
 
 static ret_code GetToken( hll_list * hll, int *i, bool is_true, expr_list * opndx )
 /*********************************************************************************/
@@ -230,12 +230,12 @@ static void SetLabel( hll_list *hll, int label, char * labelname )
         hll->symexit = labelname;
 }
 #endif
-// a "simple" expression is
-// 1. two tokens, coupled with a <cmp> operator: == != >= <= > <
-// 2. two tokens, coupled with a "&" operator
-// 3. unary operator "!" + one token
-// 4. one token (short form for "<token> != 0")
-
+/* a "simple" expression is
+ * 1. two tokens, coupled with a <cmp> operator: == != >= <= > <
+ * 2. two tokens, coupled with a "&" operator
+ * 3. unary operator "!" + one token
+ * 4. one token (short form for "<token> != 0")
+ */
 static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **jmp, expr_list *opndx )
 /**********************************************************************************************************************************/
 {
@@ -598,7 +598,7 @@ static void ReplaceLabel( char * p, char * olabel, char * nlabel )
     }
 }
 
-// operator &&, which has the second lowest precedence, is handled here
+/* operator &&, which has the second lowest precedence, is handled here */
 
 static ret_code GetAndExpression( hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp, expr_list *opndx )
 /***********************************************************************************************************************************/
@@ -648,7 +648,7 @@ static ret_code GetAndExpression( hll_list * hll, int *i, int ilabel, bool is_tr
     return( NOT_ERROR );
 }
 
-// operator ||, which has the lowest precedence, is handled here
+/* operator ||, which has the lowest precedence, is handled here */
 
 static ret_code GetExpression( hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp, expr_list *opndx )
 /********************************************************************************************************************************/
@@ -723,7 +723,7 @@ static ret_code GetExpression( hll_list * hll, int *i, int ilabel, bool is_true,
     return( NOT_ERROR );
 }
 
-// update hll->condlines
+/* update hll->condlines */
 
 static ret_code WriteExprSrc( hll_list * hll, char * buffer )
 /***********************************************************/
@@ -787,7 +787,7 @@ static ret_code EvaluateHllExpression( hll_list * hll, int *i, int ilabel, bool 
     return( NOT_ERROR );
 }
 
-// write ASM test lines
+/* write ASM test lines */
 
 static ret_code HllPushTestLines( hll_list * hll )
 /************************************************/
@@ -817,7 +817,7 @@ static ret_code HllPushTestLines( hll_list * hll )
     return( NOT_ERROR );
 }
 
-// for .UNTILCXZ check if expression is simple enough
+/* for .UNTILCXZ check if expression is simple enough */
 
 static ret_code HllCheckTestLines( hll_list * hll )
 /*************************************************/
@@ -850,7 +850,7 @@ static ret_code HllCheckTestLines( hll_list * hll )
     return( NOT_ERROR );
 }
 
-// Start a .IF, .WHILE, .REPEAT item
+/* Start a .IF, .WHILE, .REPEAT item */
 
 ret_code HllStartDef( int i )
 /***************************/
@@ -899,33 +899,33 @@ ret_code HllStartDef( int i )
 
     hll->condlines = NULL;
 
-    // structure for .IF .ELSE .ENDIF
-    //    cond jump to symtest
-    //    ...
-    //    jmp symexit
-    //  symtest:
-    //    ...
-    //  symexit:
+    /* structure for .IF .ELSE .ENDIF
+     *    cond jump to symtest
+     *    ...
+     *    jmp symexit
+     *  symtest:
+     *    ...
+     *  symexit:
 
-    // structure for .IF .ELSEIF
-    //    cond jump to symtest
-    //    ...
-    //    jmp symexit
-    //  symtest:
-    //    cond jump to (new) symtest
-    //    ...
-    //    jmp symexit
-    //  symtest:
-    //    ...
+     * structure for .IF .ELSEIF
+     *    cond jump to symtest
+     *    ...
+     *    jmp symexit
+     *  symtest:
+     *    cond jump to (new) symtest
+     *    ...
+     *    jmp symexit
+     *  symtest:
+     *    ...
 
-    // structure for .WHILE and .REPEAT:
-    //   jmp symtest (for .WHILE only)
-    // symfirst:
-    //   ...
-    // symtest: (jumped to by .continue)
-    //   test end condition, cond jump to symfirst
-    // symexit: (jumped to by .break)
-
+     * structure for .WHILE and .REPEAT:
+     *   jmp symtest (for .WHILE only)
+     * symfirst:
+     *   ...
+     * symtest: (jumped to by .continue)
+     *   test end condition, cond jump to symfirst
+     * symexit: (jumped to by .break)
+     */
     PushLineQueue();
 
     switch (cmd) {
@@ -993,9 +993,9 @@ ret_code HllStartDef( int i )
     return( NOT_ERROR );
 }
 
-// End a .IF, .WHILE, .REPEAT item
-// that is: .ENDIF, .ENDW, .UNTIL and .UNTILCXZ are handled here
-
+/* End a .IF, .WHILE, .REPEAT item
+ * that is: .ENDIF, .ENDW, .UNTIL and .UNTILCXZ are handled here
+ */
 ret_code HllEndDef( int i )
 /*************************/
 {
@@ -1132,9 +1132,9 @@ ret_code HllEndDef( int i )
     return( NOT_ERROR );
 }
 
-// Exit current .IF, .WHILE, .REPEAT item
-// that is: .ELSE, .ELSEIF, .CONTINUE and .BREAK are handled here
-
+/* Exit current .IF, .WHILE, .REPEAT item
+ * that is: .ELSE, .ELSEIF, .CONTINUE and .BREAK are handled here
+ */
 ret_code HllExitDef( int i )
 /**************************/
 {
@@ -1246,19 +1246,24 @@ ret_code HllExitDef( int i )
     return( NOT_ERROR );
 }
 
+/* check if an hll block has been left open */
+
 void HllCheckOpen( void )
 /***********************/
 {
     if ( HllStack ) {
-        AsmErr( BLOCK_NESTING_ERROR, ".if-.repeat-.while" );
+        //AsmErr( BLOCK_NESTING_ERROR, ".if-.repeat-.while" );
+        AsmErr( UNMATCHED_BLOCK_NESTING, ".if-.repeat-.while" );
     }
 }
+
+/* HllInit() is called for each pass */
 
 void HllInit( void )
 /******************/
 {
-    HllStack = NULL;
-    ModuleInfo.hll_label = 0;
+    HllStack = NULL; /* empty stack of open hll directives */
+    ModuleInfo.hll_label = 0; /* init hll label counter */
     return;
 }
 

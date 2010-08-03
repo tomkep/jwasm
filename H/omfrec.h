@@ -35,7 +35,7 @@ typedef struct obj_rec      obj_rec;
 typedef struct linnum_data  linnum_data;
 typedef struct pubdef_data  pubdef_data;
 
-#include "omfpc.h"
+//#include "omfpc.h"
 #include "omffixup.h"
 
 #define WriteU16(p,n)   (*(uint_16*)(p) = (uint_16)(n))
@@ -98,11 +98,11 @@ enum segdef_align_values {
 
 struct segdef_info {
     uint_16 idx;            /* index for this segment                   */
-    uint_8      align       :4; /* align field (enum segdef_align_values)   */
-    uint_8      combine     :4; /* combine field (values in omfpc.h)        */
-    uint_8      use_32      :1; /* use_32 for this segment                  */
-    uint_8      access_valid:1; /* does next field have valid value         */
-    uint_8      access_attr :2; /* easy omf access attributes (see omfpc.h) */
+    uint_8  align       :4; /* align field (enum segdef_align_values)   */
+    uint_8  combine     :4; /* combine field (values in omfpc.h)        */
+    uint_8  use_32      :1; /* use_32 for this segment                  */
+    //uint_8  access_valid:1; /* does next field have valid value         */
+    //uint_8  access_attr :2; /* easy omf access attributes (see omfpc.h) */
     physref abs;            /* (conditional) absolute physical reference*/
     uint_32 seg_length;     /* length of this segment                   */
     uint_16 seg_name_idx;   /* name index of this segment               */
@@ -152,7 +152,7 @@ struct comdat_info {
 
 struct fixup_info {
     obj_rec *data_rec;      /* ptr to the data record this belongs to   */
-    fixup   *fixup;         /* linked list of processed fixups          */
+    omffixup *fixup;        /* linked list of processed fixups          */
 };
 /*
     No data should be attached to these records; all information is in

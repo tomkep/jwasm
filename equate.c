@@ -1,31 +1,12 @@
 /****************************************************************************
 *
-*                            Open Watcom Project
-*
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
-*    This file contains Original Code and/or Modifications of Original
-*    Code as defined in and that are subject to the Sybase Open Watcom
-*    Public License version 1.0 (the 'License'). You may not use this file
-*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
-*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
-*    provided with the Original Code and Modifications, and is also
-*    available at www.sybase.com/developer/opensource.
-*
-*    The Original Code and all software distributed under the License are
-*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
-*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
-*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
-*    NON-INFRINGEMENT. Please see the License for the specific language
-*    governing rights and limitations under the License.
-*
-*  ========================================================================
-*
-* Description:  handles EQU and EQU2 ('=') directives
-* this file has been rewritten for JWasm.
+* Description:  handles EQU and '=' directives
+*               equate and assembly time variable handling
+*               has been rewritten for JWasm.
 *
 ****************************************************************************/
 
@@ -44,6 +25,15 @@
 #include "fastpass.h"
 #include "listing.h"
 #include "input.h"
+
+#if defined(LLONG_MAX) || defined(__GNUC__) || defined(__TINYC__)
+/* gcc needs suffixes if the constants won't fit in long type */
+const int_64 maxintvalues[] = { 0x00000000ffffffffULL, 0x00000000ffffffffULL, 0x7fffffffffffffffULL };
+const int_64 minintvalues[] = { 0xffffffff00000000ULL, 0xffffffff00000000ULL, 0x8000000000000000ULL };
+#else
+const int_64 maxintvalues[] = { 0x00000000ffffffff, 0x00000000ffffffff, 0x7fffffffffffffff };
+const int_64 minintvalues[] = { 0xffffffff00000000, 0xffffffff00000000, 0x8000000000000000 };
+#endif
 
 #if FASTPASS
 
@@ -74,9 +64,12 @@ static void SaveEquateState(asm_sym *sym)
 }
 #endif
 
-// CreateConstant (the worker)
-// EQU:     redefine = FALSE
-// '=':     redefine = TRUE
+
+/*
+ * CreateConstant (the worker)
+ * EQU:     redefine = FALSE
+ * '=':     redefine = TRUE
+ */
 
 asm_sym * CreateConstant( bool redefine )
 /***************************************/
@@ -126,7 +119,7 @@ asm_sym * CreateConstant( bool redefine )
         }
     }
 
-    // try to evalate the expression for EQU and '='
+    /* try to evalate the expression for EQU and '=' */
 
     if (AsmBuffer[i]->token == T_NUM &&
         AsmBuffer[i+1]->token == T_FINAL &&
@@ -184,9 +177,15 @@ asm_sym * CreateConstant( bool redefine )
             AsmBuffer[i]->token == T_FINAL &&
             (opndx.kind == EXPR_CONST ||
              (opndx.kind == EXPR_ADDR && opndx.sym != NULL ))) {
-            DebugMsg(( "CreateConstant(%s): expression evaluated, value=%lX, string=%X, labeldiff=%u\n", name, opndx.value, opndx.string, opndx.labeldiff ));
-            if ( opndx.kind == EXPR_CONST && sym->value == opndx.value ) {
-                return( sym );
+            DebugMsg(( "CreateConstant(%s): expression evaluated, value=%lX, string=%X, labelinexpr=%u\n", name, opndx.value, opndx.string, opndx.labelinexpr ));
+            if ( opndx.kind == EXPR_CONST ) {
+                if ( sym->value == opndx.value )
+                    return( sym );
+                /* v2.03: if equate is a difference of two labels,
+                 * don't report errors so long as phase errors occur
+                 */
+                if ( sym->labelinexpr && ModuleInfo.PhaseError )
+                    return( sym );
             }
             // if ((opndx.kind == EXPR_ADDR) && (dir->e.constinfo->sym->offset == opndx.sym->offset))
             if ( opndx.kind == EXPR_ADDR ) {
@@ -207,14 +206,16 @@ asm_sym * CreateConstant( bool redefine )
                 if ((sym->offset == (opndx.sym->offset + opndx.value)) && (sym->segment == opndx.sym->segment)) {
                     return( sym );
                 }
-                PhaseError = TRUE;
 #ifdef DEBUG_OUT
-                printf("%u: %s: equate caused a phase error >%s<\n", Parse_Pass + 1, sym->name, AsmBuffer[0]->pos );
-                printf("%u: %s: curr: type=%u addr=%X:%lX\n", Parse_Pass + 1, sym->name,
-                       sym->type, sym->segment, sym->offset );
-                printf("%u: %s: new: name=%s type=%u addr=%X:%lX, value=%lX\n", Parse_Pass + 1, sym->name,
-                       opndx.sym->name, opndx.sym->type, opndx.sym->segment, opndx.sym->offset, opndx.value );
+                if ( ModuleInfo.PhaseError == FALSE ) {
+                    printf("%u: %s: equate caused a phase error >%s<\n", Parse_Pass + 1, sym->name, AsmBuffer[0]->pos );
+                    printf("%u: %s: curr: type=%u addr=%X:%lX\n", Parse_Pass + 1, sym->name,
+                           sym->type, sym->segment, sym->offset );
+                    printf("%u: %s: new: name=%s type=%u addr=%X:%lX, value=%lX\n", Parse_Pass + 1, sym->name,
+                           opndx.sym->name, opndx.sym->type, opndx.sym->segment, opndx.sym->offset, opndx.value );
+                }
 #endif
+                ModuleInfo.PhaseError = TRUE;
                 sym->offset = opndx.sym->offset + opndx.value;
                 sym->segment = opndx.sym->segment;
                 sym->mem_type = opndx.mem_type;
@@ -230,18 +231,17 @@ asm_sym * CreateConstant( bool redefine )
             DebugMsg(("CreateConstant(%s), ADDR value changed: old=%X, new sym=NULL, value=%X\n", name, sym->offset, opndx.value));
 #endif
         if ( opndx.kind == EXPR_CONST ) {
-#if FLAG_LABELDIFF
-            /* skip error if constant is the difference of 2 labels and
+            /* skip error if a label was used in the expression.
+             * for constants this happens when the difference of 2 labels has been computed and
              * a phase error has occured.
              * v2.01: the PhaseError variable cannot be queried here. It is
              * set when a label's value changes, but this needn't have happened
              * yet.
              */
-            //if ( opndx.labeldiff && PhaseError ) {
-            if ( opndx.labeldiff ) {
+            //if ( opndx.labelinexpr && ModuleInfo.PhaseError ) {
+            if ( opndx.labelinexpr ) {
                 goto noerr;
             }
-#endif
             AsmErr( SYMBOL_REDEFINITION, name );
             return( NULL );
         }
@@ -260,8 +260,9 @@ noerr:
         
          /* CONSTs must be internal, and the magnitude must be <= 32 */
         ( ( opndx.kind == EXPR_CONST && opndx.abs == FALSE &&
-          (( opndx.hvalue == 0 && opndx.hlvalue == 0 ) ||
-           ( opndx.hvalue == -1 && opndx.uvalue != 0 ) ) ) ||
+           opndx.hlvalue == 0 && /* magnitude > 64 bits? */
+           opndx.value64 >= minintvalues[ModuleInfo.Ofssize]  &&
+           opndx.value64 <= maxintvalues[ModuleInfo.Ofssize] ) ||
          ( opndx.kind == EXPR_ADDR && opndx.sym != NULL && opndx.sym->state != SYM_EXTERNAL ) ) &&
         ( opndx.instr == EMPTY || redefine == TRUE ) ) {
         if (!sym) {
@@ -288,8 +289,10 @@ noerr:
         if ( opndx.kind == EXPR_CONST ) {
             sym->mem_type = MT_ABS;
             sym->uvalue = opndx.uvalue;
-            sym->sign = (opndx.hvalue < 0);
-            DebugMsg(("%lu. CreateConstant(%s), CONST, pass=%u, value=%lX, sign=%u, labeldiff=%u\n", LineNumber, name, Parse_Pass+1, sym->uvalue, sym->sign, opndx.labeldiff ));
+            sym->value3264 = opndx.hvalue;
+            /* v2.03: store new flag in symbol */
+            sym->labelinexpr = opndx.labelinexpr;
+            DebugMsg(("%lu. CreateConstant(%s), CONST, pass=%u, value=%I64X, labelinexpr=%u\n", LineNumber, name, Parse_Pass+1, sym->uvalue, sym->value3264, opndx.labelinexpr ));
         } else {
 #if 1 /* v2.01: allow PROC equates */
             if ( opndx.sym->isproc ) {
@@ -335,7 +338,7 @@ noerr:
         }
 #endif
         DebugMsg(("%u:CreateConstant(%s): value is NOT numeric/constant: >%s<\n", Parse_Pass+1, name, AsmBuffer[1]->pos + strlen( AsmBuffer[1]->string_ptr) ));
-        if ( opndx.hvalue != 0 && opndx.hvalue != -1 )
+        if ( opndx.hlvalue != 0 || ( opndx.hvalue != 0 && opndx.hvalue != -1) )
             AsmError( CONSTANT_VALUE_TOO_LARGE );
         else
             AsmError( CONSTANT_EXPECTED );
@@ -358,10 +361,11 @@ noerr:
     return ( SetTextMacro( sym, name, buffer ) );
 }
 
-// CreateConstantEx
-// define an assembly time variable directly without using the token buffer.
-// this is used for some internally generated variables.
-
+/* CreateConstantEx
+ * define an assembly time variable directly without using the token buffer.
+ * this is used for some internally generated variables.
+ * NO listing is written!
+ */
 asm_sym * CreateConstantEx( const char *name, int value )
 /*******************************************************/
 {
@@ -395,10 +399,10 @@ asm_sym * CreateConstantEx( const char *name, int value )
     return( sym );
 }
 
-// DefineConstant is used by
-//   EQU:    redefine=FALSE
-//   '=':    redefine=TRUE
-
+/* DefineConstant is used by
+ *   EQU:    redefine=FALSE
+ *   '=':    redefine=TRUE
+ */
 ret_code DefineConstant( bool redefine )
 /**************************************/
 {

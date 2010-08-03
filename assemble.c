@@ -51,7 +51,7 @@
 #include "types.h"
 #include "fixup.h"
 #include "omf.h"
-#include "omfgenms.h"
+//#include "omfgenms.h"
 #include "fastpass.h"
 #include "listing.h"
 #include "msgtext.h"
@@ -71,11 +71,9 @@
 extern void             CheckProcOpen( void );
 extern void             SortSegments( void );
 
-extern symbol_queue     Tables[];       // tables of definitions
+extern symbol_queue     Tables[];       /* tables of definitions */
 extern void             *SafeSEHStack;
-extern obj_rec          *ModendRec;     // Record for Modend (OMF)
-extern asm_sym          *start_label;   // symbol for Modend (COFF)
-extern int              StructInit;     // see data.c
+extern int              StructInit;     /* see data.c */
 extern uint_32          LastCodeBufSize;
 extern int              procidx;
 
@@ -93,20 +91,20 @@ const struct format_options formatoptions[] = {
 };
 
 module_info             ModuleInfo;
-unsigned int            Parse_Pass;     // phase of parsing
-
-global_vars             GlobalVars;     // used for OMF comment records
+unsigned int            Parse_Pass;     /* assembly pass */
+obj_rec                 *ModendRec;     /* Record for Modend (OMF) */
+asm_sym                 *start_label;   /* start for COFF, ELF, BIN */
 
 static unsigned long    lastLineNumber;
 unsigned int            GeneratedCode;
 
 static asm_sym          *dmyproc;
-qdesc                   LinnumQueue;    // queue of line_num_info items
+qdesc                   LinnumQueue;    /* queue of line_num_info items */
 
-// buffer for source lines
-// since the lines are sometimes concatenated
-// the buffer must be a multiple of MAX_LINE_LEN
-
+/* buffer for source lines
+ * since the lines are sometimes concatenated
+ * the buffer must be a multiple of MAX_LINE_LEN
+ */
 static char srclinebuffer[ MAX_LINE_LEN * MAX_SYNC_MACRO_NESTING ];
 
 #if FASTPASS
@@ -120,10 +118,10 @@ bool UseSavedState;
 
 #endif
 
-bool            write_to_file;  // write object module
-bool            Modend;         // end of module is reached
-bool            PhaseError;     // phase error occured
-bool            CommentDataInCode;
+bool write_to_file;     /* write object module */
+//bool Modend;            /* end of module is reached */
+//bool PhaseError;        /* phase error occured */
+bool CommentDataInCode; /* write OMF comments about data in code */
 
 static void AddLinnumData( struct line_num_info *data )
 /*****************************************************/
@@ -184,7 +182,7 @@ void AddLinnumDataRef( unsigned line_num )
         } else
             procidx++; /* for passes > 1, adjust procidx */
 
-        /* it the symbols isn't a PROC, the symbol name has been used
+        /* if the symbols isn't a PROC, the symbol name has been used
          * by the user - bad! A warning should be displayed */
         if ( dmyproc->isproc == TRUE ) {
             SetSymSegOfs( dmyproc );
@@ -213,11 +211,18 @@ void AddLinnumDataRef( unsigned line_num )
     curr = AsmAlloc( sizeof( struct line_num_info ) );
     curr->number = line_num;
     if ( line_num == 0 ) { /* happens for COFF only */
-        if ( Options.output_format == OFORMAT_COFF && CurrProc->sym.public == FALSE ) {
+        /* changed v2.03 */
+        /* if ( Options.output_format == OFORMAT_COFF && CurrProc->sym.public == FALSE ) { */
+        if ( Options.output_format == OFORMAT_COFF && CurrProc && CurrProc->sym.public == FALSE ) {
             CurrProc->sym.included = TRUE;
             AddPublicData( (asm_sym *)CurrProc );
         }
-        curr->sym = (asm_sym *)CurrProc;
+        /* changed v2.03 */
+        /* curr->sym = (asm_sym *)CurrProc; */
+        if ( CurrProc )
+            curr->sym = (asm_sym *)CurrProc;
+        else
+            curr->sym = (asm_sym *)dmyproc;
         curr->line_number = LineNumber;
         curr->file        = get_curr_srcfile();
         /* set the function's size! */
@@ -262,9 +267,9 @@ void StoreLine( char * string )
 {
     int i;
 
-    DebugMsg(("StoreLine: Line=%u, listpos=%u\n", LineNumber, list_pos ));
     i = strlen(string) + 1;
     LineStoreCurr = AsmAlloc( i + sizeof(line_item) );
+    DebugMsg(("%lu. StoreLine: listpos=%u, cur=%X\n", LineNumber, list_pos, LineStoreCurr ));
     LineStoreCurr->next = NULL;
     LineStoreCurr->lineno = LineNumber;
     if ( MacroLevel ) {
@@ -348,7 +353,7 @@ static void RestoreState( void )
         equ_item *curr;
         int i;
         for (curr = modstate.EquHead; curr; curr = curr->next) {
-//            printf("RestoreState: sym >%s<, value=%u, defined=%u\n", curr->sym->name, curr->value, curr->defined);
+            /* printf("RestoreState: sym >%s<, value=%u, defined=%u\n", curr->sym->name, curr->value, curr->defined); */
             if (curr->sym->mem_type == MT_ABS) {
                 curr->sym->value   = curr->value;
                 curr->sym->defined = curr->defined;
@@ -387,69 +392,43 @@ static void RestoreState( void )
 void OutputByte( unsigned char byte )
 /***********************************/
 {
-    CurrSeg->e.seginfo->current_loc++;
-    CurrSeg->e.seginfo->bytes_written++;
-    if( CurrSeg->e.seginfo->current_loc >= CurrSeg->sym.max_offset )
-        CurrSeg->sym.max_offset = CurrSeg->e.seginfo->current_loc;
     if( write_to_file == TRUE ) {
-        uint_32 idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc - 1;
-        CurrSeg->e.seginfo->CodeBuffer[idx] = byte;
+        uint_32 idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
+#ifdef DEBUG_OUT
+        if ( CurrSeg->e.seginfo->current_loc < CurrSeg->e.seginfo->start_loc )
+            _asm int 3;
+#endif
+        myassert( CurrSeg->e.seginfo->current_loc >= CurrSeg->e.seginfo->start_loc );
         if( Options.output_format == OFORMAT_OMF && idx >= MAX_LEDATA_THRESHOLD ) {
             omf_FlushCurrSeg();
-        }
-    }
-}
-
-/* this is to output small amounts ( <= 8) of bytes which must
- * not be separated ( for omf, because of fixups )
- */
-void OutputBytes( unsigned char *pbytes, int len )
-/************************************************/
-{
-    if( write_to_file == TRUE ) {
-        uint_32 idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
-        if( Options.output_format == OFORMAT_OMF && ((idx + len) >= MAX_LEDATA ) ) {
-            omf_FlushCurrSeg();
             idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
         }
-        memcpy( &CurrSeg->e.seginfo->CodeBuffer[idx], pbytes, len );
+        CurrSeg->e.seginfo->CodeBuffer[idx] = byte;
     }
-    CurrSeg->e.seginfo->current_loc += len;
-    CurrSeg->e.seginfo->bytes_written += len;
-    if( CurrSeg->e.seginfo->current_loc >= CurrSeg->sym.max_offset )
+#if 1
+    /* check this in pass 1 only */
+    else if( CurrSeg->e.seginfo->current_loc < CurrSeg->e.seginfo->start_loc ) {
+        DebugMsg(("OutputByte: segment start loc changed from %Xh to %Xh\n",
+                  CurrSeg->e.seginfo->start_loc,
+                  CurrSeg->e.seginfo->current_loc));
+        CurrSeg->e.seginfo->start_loc = CurrSeg->e.seginfo->current_loc;
+    }
+#endif
+    CurrSeg->e.seginfo->current_loc++;
+    CurrSeg->e.seginfo->bytes_written++;
+    if( CurrSeg->e.seginfo->current_loc > CurrSeg->sym.max_offset )
         CurrSeg->sym.max_offset = CurrSeg->e.seginfo->current_loc;
 }
 
-/* new for v2.02. this function ensures that data and fixup
- * is never separated ( required for OMF ). in v2.00-v2.01, this
- * might have happened.
- */
-
-void OutputBytesAndFixup( struct asmfixup *fixup, unsigned char *pbytes, int len )
-/********************************************************************************/
-{
-    if( write_to_file == TRUE ) {
-        uint_32 idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
-        if( Options.output_format == OFORMAT_OMF && ((idx + len) >= MAX_LEDATA ) ) {
-            omf_FlushCurrSeg();
-            idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
-        }
-        store_fixup( fixup, (int_32 *)pbytes );
-        memcpy( &CurrSeg->e.seginfo->CodeBuffer[idx], pbytes, len );
-    }
-    CurrSeg->e.seginfo->current_loc += len;
-    CurrSeg->e.seginfo->bytes_written += len;
-    if( CurrSeg->e.seginfo->current_loc >= CurrSeg->sym.max_offset )
-        CurrSeg->sym.max_offset = CurrSeg->e.seginfo->current_loc;
-}
-
+#if 0 /* v2.03: OutputCodeByte is obsolete */
 void OutputCodeByte( unsigned char byte )
 /***************************************/
 {
-    if ( CommentDataInCode )
-        omf_OutSelect( FALSE );
+    // if ( CommentDataInCode )
+    // omf_OutSelect( FALSE );
     OutputByte( byte );
 }
+#endif
 
 void FillDataBytes( unsigned char byte, int len )
 /***********************************************/
@@ -460,10 +439,48 @@ void FillDataBytes( unsigned char byte, int len )
         OutputByte( byte );
 }
 
-// set current position in current segment without to write anything
+/*
+ * this function is to output (small, <= 8) amounts of bytes which must
+ * not be separated ( for omf, because of fixups )
+ */
 
-ret_code SetCurrOffset( int_32 value, bool relative, bool select_data )
-/*********************************************************************/
+void OutputBytes( const unsigned char *pbytes, int len, struct genfixup *fixup )
+/******************************************************************************/
+{
+    if( write_to_file == TRUE ) {
+        uint_32 idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
+#if 0 /* def DEBUG_OUT */
+        if ( CurrSeg->e.seginfo->current_loc < CurrSeg->e.seginfo->start_loc )
+            _asm int 3;
+#endif
+        myassert( CurrSeg->e.seginfo->current_loc >= CurrSeg->e.seginfo->start_loc );
+        if( Options.output_format == OFORMAT_OMF && ((idx + len) >= MAX_LEDATA ) ) {
+            omf_FlushCurrSeg();
+            idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
+        }
+        if ( fixup )
+            store_fixup( fixup, (int_32 *)pbytes );
+        memcpy( &CurrSeg->e.seginfo->CodeBuffer[idx], pbytes, len );
+    }
+#if 1
+    /* check this in pass 1 only */
+    else if( CurrSeg->e.seginfo->current_loc < CurrSeg->e.seginfo->start_loc ) {
+        DebugMsg(("OutputBytes: segment start loc changed from %Xh to %Xh\n",
+                  CurrSeg->e.seginfo->start_loc,
+                  CurrSeg->e.seginfo->current_loc));
+        CurrSeg->e.seginfo->start_loc = CurrSeg->e.seginfo->current_loc;
+    }
+#endif
+    CurrSeg->e.seginfo->current_loc += len;
+    CurrSeg->e.seginfo->bytes_written += len;
+    if( CurrSeg->e.seginfo->current_loc > CurrSeg->sym.max_offset )
+        CurrSeg->sym.max_offset = CurrSeg->e.seginfo->current_loc;
+}
+
+/* set current position in current segment without to write anything */
+
+ret_code SetCurrOffset( uint_32 value, bool relative, bool select_data )
+/**********************************************************************/
 {
     if( CurrSeg == NULL ) {
         AsmError( MUST_BE_IN_SEGMENT_BLOCK );
@@ -474,51 +491,58 @@ ret_code SetCurrOffset( int_32 value, bool relative, bool select_data )
         value += GetCurrOffset();
     }
 
-    if ( write_to_file && ( Options.output_format == OFORMAT_OMF ) )
-        omf_FlushCurrSeg( );
+    if ( Options.output_format == OFORMAT_OMF ) {
+        if ( write_to_file == TRUE )
+            omf_FlushCurrSeg( );
 
+        /* for debugging, tell if data is located in code sections*/
+        if( select_data )
+            if ( CommentDataInCode )
+                omf_OutSelect( TRUE );
+
+        CurrSeg->e.seginfo->start_loc = value;
+        LastCodeBufSize = value;
     /* for -bin, if there's an ORG (relative==false) and no initialized data
      * has been set yet, set start_loc!
      * v1.96: this is now also done for COFF and ELF
      */
-    //else if ( Options.output_format == OFORMAT_BIN && relative == FALSE ) {
-    else if ( relative == FALSE ) {
-        if ( CurrSeg->e.seginfo->bytes_written == 0 ) {
-            CurrSeg->e.seginfo->start_loc = value;
+    /* else if ( Options.output_format == OFORMAT_BIN && relative == FALSE ) { */
+    } else {
+        if ( write_to_file == FALSE ) {
+            if ( relative ) {
+#if 0 /* don't include "preceding" uninitialized data */
+                if( CurrSeg->e.seginfo->current_loc < CurrSeg->e.seginfo->start_loc )
+                    CurrSeg->e.seginfo->start_loc = CurrSeg->e.seginfo->current_loc;
+#endif
+            } else {
+                if ( CurrSeg->e.seginfo->bytes_written == 0 )
+                    CurrSeg->e.seginfo->start_loc = value;
+            }
         }
     }
 
-    if( select_data )
-        if ( CommentDataInCode )
-            omf_OutSelect( TRUE );
     CurrSeg->e.seginfo->current_loc = value;
-    if ( Options.output_format == OFORMAT_OMF ) {
-        CurrSeg->e.seginfo->start_loc = value;
-        LastCodeBufSize = value;
-    }
 
-    if( CurrSeg->e.seginfo->current_loc >=
-        CurrSeg->sym.max_offset ) {
+    if( CurrSeg->e.seginfo->current_loc > CurrSeg->sym.max_offset )
         CurrSeg->sym.max_offset = CurrSeg->e.seginfo->current_loc;
-    }
 
     return( NOT_ERROR );
 }
 
-// finish module writes
-// for OMF, just write the MODEND record
-// for COFF,ELF and BIN, write the section data and symbol table
-
+/* finish module writes
+ * for OMF, just write the MODEND record
+ * for COFF,ELF and BIN, write the section data and symbol table
+ */
 static ret_code WriteContent( void )
 /**********************************/
 {
     DebugMsg(("WriteContent enter\n"));
     switch (Options.output_format) {
     case OFORMAT_OMF:
-        if( ModendRec == NULL ) {
-            AsmError( UNEXPECTED_END_OF_FILE );
-            return ERROR;
-        }
+        //if( ModendRec == NULL ) {
+        //    AsmError( UNEXPECTED_END_OF_FILE );
+        //    return ERROR;
+        //}
         /* -if Zi is set, write symbols and types */
         if ( Options.debug_symbols )
             omf_write_debug_tables();
@@ -577,7 +601,7 @@ static ret_code WriteHeader( bool initial )
     case OFORMAT_OMF:
         if ( initial == TRUE ) {
             omf_write_header();
-            //if( Options.no_dependencies == FALSE )
+            /* if( Options.no_dependencies == FALSE ) */
             if( Options.line_numbers )
                 omf_write_autodep();
             if( ModuleInfo.segorder == SEGORDER_DOSSEG )
@@ -728,9 +752,9 @@ static void set_cpu_parameters( void )
     return;
 }
 
-// this is called for every pass.
-// symbol table and ModuleInfo are initialized.
-
+/* this is called for every pass.
+ * symbol table and ModuleInfo are initialized.
+ */
 static void CmdlParamsInit( int pass )
 /************************************/
 {
@@ -742,7 +766,7 @@ static void CmdlParamsInit( int pass )
         char * p;
 
         _strupr( Options.build_target );
-        tmp = AsmTmpAlloc( strlen( Options.build_target ) + 5 ); // null + 4 uscores
+        tmp = AsmTmpAlloc( strlen( Options.build_target ) + 5 ); /* null + 4 uscores */
         strcpy( tmp, uscores );
         strcat( tmp, Options.build_target );
         strcat( tmp, uscores );
@@ -774,7 +798,7 @@ static void CmdlParamsInit( int pass )
         } else if( stricmp( Options.build_target, "LINUX" ) == 0 ) {
             p = "__UNIX__";
         }
-        if (p) {
+        if ( p ) {
             sym = SymCreate( p, TRUE );
             sym->state = SYM_INTERNAL;
             sym->mem_type = MT_ABS;
@@ -787,7 +811,7 @@ static void CmdlParamsInit( int pass )
     if( Options.ForceInclude != NULL )
         InputQueueFile( Options.ForceInclude, NULL );
 
-    if (pass == PASS_1) {
+    if ( pass == PASS_1 ) {
         char *env;
         set_cpu_parameters();
         add_cmdline_tmacros();
@@ -829,14 +853,14 @@ void WritePreprocessedLine( const char *string )
     }
 }
 
-// set Masm v5.1 compatibility options
+/* set Masm v5.1 compatibility options */
 
 void SetMasm510( bool value )
 /***************************/
 {
     ModuleInfo.m510 = value;
     ModuleInfo.oldstructs = value;
-    //ModuleInfo.oldmacros = value; not implemented yet
+    /* ModuleInfo.oldmacros = value; not implemented yet */
     ModuleInfo.dotname = value;
     ModuleInfo.setif2 = value;
 
@@ -865,8 +889,10 @@ static void SetModelCmdline( void )
     switch( Options.model ) {
     case MOD_FLAT:
         model = "FLAT";
-        if (Options.cpu < 3) /* ensure that a 386 cpu is set */
-            Options.cpu = 3;
+        /* if (Options.cpu < 3) */ /* ensure that a 386 cpu is set */
+        /*    Options.cpu = 3; */
+        if ( ( Options.cpu & P_CPU_MASK ) < P_386 ) /* ensure that a 386 cpu is set */
+            Options.cpu = P_386;
         break;
     case MOD_COMPACT:  model = "COMPACT";   break;
     case MOD_HUGE:     model = "HUGE";      break;
@@ -882,11 +908,12 @@ static void SetModelCmdline( void )
     AddLineQueue( buffer );
 }
 
-// called for each pass
+/* called for each pass */
 
 static void ModulePassInit( void )
 /********************************/
 {
+    DebugMsg(( "ModulePassInit enter\n" ));
     /* set default values not affected by the masm 5.1 compat switch */
     ModuleInfo.langtype = Options.langtype;
     ModuleInfo.procs_private = FALSE;
@@ -894,7 +921,12 @@ static void ModulePassInit( void )
     ModuleInfo.offsettype = OT_GROUP;
     ModuleInfo.scoped = TRUE;
 
+#if FASTPASS
+    /* v2.03: don't generate the code if fastpass is active */
+    if ( Options.model != MOD_NONE && StoreState == FALSE )
+#else
     if ( Options.model != MOD_NONE )
+#endif
         SetModelCmdline(); /* if memory model has been set with -m{s|f|...} */
 
     SetMasm510( Options.masm51_compat );
@@ -928,15 +960,20 @@ void RunLineQueue( void )
     int i;
 
     DebugMsg(( "%lu. RunLineQueue() enter\n", LineNumber ));
-    CurrSource += strlen( CurrSource ) + 1;
+    /* v2.03: ensure the current source buffer is still aligned */
+    CurrSource += ( strlen( CurrSource ) + 1 + 3 ) & ~3;
     GeneratedCode++;
     while ( queue_level >= currlevel ) {
         while (0 == (i = GetPreprocessedLine( CurrSource )));
         if ( i > 0 )
             ParseItems();
+#ifdef DEBUG_OUT /* this cannot happen because no real file is read here */
+        else if ( i < 0 )
+            break;
+#endif
     }
 #ifdef DEBUG_OUT
-    if ( ModuleInfo.EndDirectiveFound == TRUE ) {
+    if ( ModuleInfo.EndDirFound == TRUE ) {
         DebugMsg(("!!!!! Error: End directive found in generated-code parser loop!\n"));
     }
 #endif
@@ -948,7 +985,7 @@ void RunLineQueue( void )
     return;
 }
 
-// this is called by InitializeStructure(), which is a special case
+/* this is called by InitializeStructure(), which is a special case */
 
 void RunLineQueueEx( void )
 /*************************/
@@ -960,7 +997,8 @@ void RunLineQueueEx( void )
     int i;
 
     DebugMsg(( "RunLineQueueEx() enter\n" ));
-    CurrSource += strlen( CurrSource ) + 1;
+    /* v2.03: ensure the current source buffer is still aligned */
+    CurrSource += ( strlen( CurrSource ) + 1 + 3 ) & ~3;
     while ( queue_level >= currlevel ) {
         while (0 == (i = GetPreprocessedLine( CurrSource )));
         if ( i > 0 ) {
@@ -976,7 +1014,7 @@ void RunLineQueueEx( void )
         }
     }
 #ifdef DEBUG_OUT
-    if ( ModuleInfo.EndDirectiveFound == TRUE ) {
+    if ( ModuleInfo.EndDirFound == TRUE ) {
         DebugMsg(("!!!!! Error: End directive found in generated-code parser loop!\n"));
     }
 #endif
@@ -987,17 +1025,17 @@ void RunLineQueueEx( void )
     return;
 }
 
-// do ONE assembly pass
-// the FASTPASS variant (which is default now) doesn't scan the full source
-// for each pass. For this to work, the following things are implemented:
-// 1. in pass one, save state if the first byte is to be emitted.
-//    <state> is the segment stack, moduleinfo state, ...
-// 2. once the state is saved, all preprocessed lines must be stored.
-//    this can be done here, in OnePass, the line is in <string>.
-// 3. for subsequent passes do
-//    - restore the state
-//    - read preprocessed lines and feed ParseItems() with it
-
+/* do ONE assembly pass
+ * the FASTPASS variant (which is default now) doesn't scan the full source
+ * for each pass. For this to work, the following things are implemented:
+ * 1. in pass one, save state if the first byte is to be emitted.
+ *    <state> is the segment stack, moduleinfo state, ...
+ * 2. once the state is saved, all preprocessed lines must be stored.
+ *    this can be done here, in OnePass, the line is in <string>.
+ * 3. for subsequent passes do
+ *    - restore the state
+ *    - read preprocessed lines and feed ParseItems() with it
+ */
 static unsigned long OnePass( void )
 /**********************************/
 {
@@ -1016,14 +1054,12 @@ static unsigned long OnePass( void )
     AssumeInit();
     CmdlParamsInit( Parse_Pass );
 
-    ModuleInfo.EndDirectiveFound = FALSE;
-    PhaseError = FALSE;
-    Modend = FALSE;
-    //LineNumber = 0;
+    ModuleInfo.EndDirFound = FALSE;
+    ModuleInfo.PhaseError = FALSE;
+    //Modend = FALSE;
+    /* LineNumber = 0; */
     lastLineNumber = 0;
     dmyproc = NULL;
-    GlobalVars.code_seg = FALSE;
-    GlobalVars.data_in_code = FALSE;
 
 #if FASTPASS
     StoreState = FALSE;
@@ -1033,18 +1069,19 @@ static unsigned long OnePass( void )
             RunLineQueue();
         RestoreState();
 #ifdef DEBUG_OUT
-        DebugMsg(("OnePass(%u) segment sizes:\n", Parse_Pass + 1));
+        DebugMsg(("OnePass(%u) segments:\n", Parse_Pass + 1));
         {
             dir_node *dir;
             for( dir = Tables[TAB_SEG].head; dir; dir = dir->next ) {
                 if( ( dir->sym.state != SYM_SEG ) || ( dir->sym.segment == NULL ) )
                     continue;
-                DebugMsg(("OnePass(%u): segm=%-8s size=%8X\n", Parse_Pass + 1, dir->sym.name, dir->sym.max_offset ));
+                DebugMsg(("OnePass(%u): segm=%-8s typ=%X start=%8X max_ofs=%8X\n", Parse_Pass + 1,
+                          dir->sym.name, dir->e.seginfo->segtype, dir->e.seginfo->start_loc, dir->sym.max_offset ));
             }
         }
 #endif
         LineStoreCurr = LineStoreHead;
-        while ( LineStoreCurr && ModuleInfo.EndDirectiveFound == FALSE ) {
+        while ( LineStoreCurr && ModuleInfo.EndDirFound == FALSE ) {
             strcpy( srclinebuffer, LineStoreCurr->line );
             if ( LineStoreCurr->srcfile == 0xFFF ) {
                 MacroLevel = 1;
@@ -1052,19 +1089,19 @@ static unsigned long OnePass( void )
                 set_curr_srcfile( LineStoreCurr->srcfile, LineStoreCurr->lineno );
                 MacroLevel = 0;
             }
-            DebugMsg(("%u. OnePass(%u) mlvl=%u: >%s<\n", LineNumber, Parse_Pass+1, MacroLevel, srclinebuffer ));
+            DebugMsg(("%u. OnePass(%u) cur/nxt=%X/%X mlvl=%u: >%s<\n", LineNumber, Parse_Pass+1, LineStoreCurr, LineStoreCurr->next, MacroLevel, srclinebuffer ));
             if ( Token_Count = Tokenize( srclinebuffer, 0 ) )
                 ParseItems();
             LineStoreCurr = LineStoreCurr->next;
         }
     } else
 #endif
-    while ( ModuleInfo.EndDirectiveFound == FALSE ) {
+    while ( ModuleInfo.EndDirFound == FALSE ) {
         while (0 == (i = GetPreprocessedLine( srclinebuffer )));
         if (i < 0)
             break;
 #if FASTPASS
-        if (StoreState)
+        if ( StoreState )
             StoreLine( srclinebuffer );
 #endif
         ParseItems();
@@ -1086,7 +1123,7 @@ static unsigned long OnePass( void )
         CheckProcOpen();
         HllCheckOpen();
 
-        if( ModuleInfo.EndDirectiveFound == FALSE )
+        if( ModuleInfo.EndDirFound == FALSE )
             AsmError( END_DIRECTIVE_REQUIRED );
     }
     ClearFileStack();
@@ -1102,8 +1139,8 @@ static void scan_global( void )
     if ( Options.all_symbols_public )
         SymMakeAllSymbolsPublic();
 
-    /* turn EXTERNDEFs into either EXTERNs or PUBLICs as appropriate */
-    GetGlobalData();
+    /* turn EXTERNDEFs into PUBLICs if defined in the module */
+    GlobalToPublic();
 }
 
 /*
@@ -1117,7 +1154,7 @@ static void set_ext_idx( void )
     dir_node    *curr;
     uint        index = 0;
 
-    // scan the EXTERN/EXTERNDEF items
+    /* scan the EXTERN/EXTERNDEF items */
 
     for( curr = Tables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
         /* v2.01: externdefs which have been "used" become "strong" */
@@ -1138,7 +1175,7 @@ static void set_ext_idx( void )
     }
 
 #if 0 /* v2.01: PROTOs are now in TAB_EXT */
-    // now scan the PROTO items
+    /* now scan the PROTO items */
     for(curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         /* the item must be USED and PROTO */
         if( curr->sym.used && (curr->sym.isproc == FALSE )) {
@@ -1148,7 +1185,7 @@ static void set_ext_idx( void )
     }
 #endif
 
-    // now scan the COMM items
+    /* now scan the COMM items */
 
     for( curr = Tables[TAB_EXT].head; curr != NULL; curr = curr->next ) {
         if ( curr->sym.comm == FALSE )
@@ -1206,19 +1243,19 @@ static void get_module_name( void )
     }
 }
 
-// called by AssembleInit(), once per source module
-// symbol table has been initialized
-
+/* called by AssembleInit(), once per source module
+ * symbol table has been initialized
+ */
 static void ModuleInit( void )
 /****************************/
 {
     ModuleInfo.error_count = 0;
     ModuleInfo.warning_count = 0;
     ModuleInfo.model = MOD_NONE;
-    //ModuleInfo.distance = STACK_NONE;
+    /* ModuleInfo.distance = STACK_NONE; */
     ModuleInfo.ostype = OPSYS_DOS;
     ModuleInfo.emulator = (Options.floating_point == FPO_EMULATION);
-    ModuleInfo.flatgrp_idx = 0;
+    //ModuleInfo.flatgrp_idx = 0;
 
     get_module_name(); /* set ModuleInfo.name */
 
@@ -1238,11 +1275,11 @@ static void ReswTableInit( void )
      * this must be called for each source module.
      */
     if ( ParseInit() == ERROR )
-        exit( 1 );        // tables wrong, internal error
+        exit( 1 );        /* tables wrong, internal error */
 
     /* this must be done AFTER ParseInit has been called */
     if ( Options.output_format == OFORMAT_OMF ) {
-        //DebugMsg(("InitAsm: disable IMAGEREL+SECTIONREL\n"));
+        /* DebugMsg(("InitAsm: disable IMAGEREL+SECTIONREL\n")); */
         /* for OMF, IMAGEREL and SECTIONREL make no sense */
 #if IMAGERELSUPP
         DisableKeyword( T_IMAGEREL );
@@ -1267,7 +1304,7 @@ static void open_files( void )
     /* open ASM file */
     DebugMsg(("open_files() enter\n" ));
 
-//    FileInfo.file[ASM] = fopen( FileInfo.fname[ASM], "r" );
+    /* FileInfo.file[ASM] = fopen( FileInfo.fname[ASM], "r" ); */
     FileInfo.file[ASM] = fopen( FileInfo.fname[ASM], "rb" );
 
     if( FileInfo.file[ASM] == NULL ) {
@@ -1323,7 +1360,7 @@ void close_files( void )
     }
 }
 
-// init assembler. called once per module
+/* init assembler. called once per module */
 
 static void AssembleInit( void )
 /******************************/
@@ -1335,7 +1372,7 @@ static void AssembleInit( void )
     ModuleInfo.cref = TRUE; /* don't suppress debug displays */
 #endif
     ModendRec     = NULL; /* OMF */
-    start_label   = NULL; /* COFF */
+    start_label   = NULL; /* COFF, ELF, BIN */
     write_to_file = FALSE;
     StructInit = 0;
     GeneratedCode = 0;
@@ -1370,7 +1407,7 @@ static void AssembleInit( void )
     void DumpInstrStats( void );
 #endif
 
-// called once per module. AssembleModule() cleanup
+/* called once per module. AssembleModule() cleanup */
 
 static void AssembleFini( void )
 /******************************/
@@ -1387,7 +1424,7 @@ static void AssembleFini( void )
     InputFini();
 }
 
-// AssembleModule() assembles the source and writes the object module
+/* AssembleModule() assembles the source and writes the object module */
 
 void AssembleModule( void )
 /*************************/
@@ -1404,7 +1441,7 @@ void AssembleModule( void )
 
     LstOpenFile();
 
-#if 0 //ndef __UNIX__
+#if 0 /* ndef __UNIX__ */
     starttime = GetTickCount();
 #else
     starttime = clock();
@@ -1439,7 +1476,7 @@ void AssembleModule( void )
                  * However, v1.95 final won't need this anymore, because both
                  * filename + lineno for every line is known now in pass 2.
                  */
-                // SkipSavedState();
+                /* SkipSavedState(); */
             }
 #endif
 
@@ -1452,7 +1489,7 @@ void AssembleModule( void )
                 int i;
                 int j;
                 asm_sym * sym;
-                struct asmfixup * fix;
+                struct genfixup * fix;
                 if( ( dir->sym.state != SYM_SEG ) || ( dir->sym.segment == NULL ) )
                     continue;
                 for (i = 0, j = 0, sym = dir->e.seginfo->labels;sym;sym = (asm_sym *)((dir_node *)sym)->next) {
@@ -1471,8 +1508,8 @@ void AssembleModule( void )
         for ( curr_total = 0, dir = Tables[TAB_SEG].head; dir ; dir = dir->next ) {
             curr_total += dir->e.seginfo->bytes_written;
         }
-        DebugMsg(("AssembleModule(%u): PhaseError=%u, prev_total=%lX, curr_total=%lX\n", Parse_Pass + 1, PhaseError, prev_total, curr_total));
-        if( !PhaseError && prev_total == curr_total ) {
+        DebugMsg(("AssembleModule(%u): PhaseError=%u, prev_total=%lX, curr_total=%lX\n", Parse_Pass + 1, ModuleInfo.PhaseError, prev_total, curr_total));
+        if( !ModuleInfo.PhaseError && prev_total == curr_total ) {
             uint_32 tmp = LineNumber;
             if ( write_to_file == FALSE )
                 break;
@@ -1488,11 +1525,13 @@ void AssembleModule( void )
             break;
         }
 #ifdef DEBUG_OUT
-        DebugMsg(("AssembleModule(%u) segment sizes:\n", Parse_Pass + 1));
+        DebugMsg(("AssembleModule(%u) segments:\n", Parse_Pass + 1));
         for( dir = Tables[TAB_SEG].head; dir; dir = dir->next ) {
             if( ( dir->sym.state != SYM_SEG ) || ( dir->sym.segment == NULL ) )
                 continue;
-            DebugMsg(("AssembleModule(%u): segm=%-8s size=%8X\n", Parse_Pass + 1, dir->sym.name, dir->sym.max_offset ));
+            DebugMsg(("AssembleModule(%u): segm=%-8s start=%8X max_ofs=%8X\n",
+                      Parse_Pass + 1, dir->sym.name, dir->e.seginfo->start_loc,
+                      dir->sym.max_offset ));
         }
 #endif
         DebugMsg(("AssembleModule(%u): prepare for next pass\n", Parse_Pass + 1));
@@ -1539,10 +1578,10 @@ void AssembleModule( void )
     /* Write a symbol listing file (if requested) */
     LstWriteCRef();
 
-#if 0 //ndef __UNIX__
+#if 0 /* ndef __UNIX__ */
     endtime = GetTickCount();
 #else
-    endtime = clock(); // is in ms already
+    endtime = clock(); /* is in ms already */
 #endif
 
     sprintf( srclinebuffer, MsgGet( MSG_ASSEMBLY_RESULTS, NULL ),

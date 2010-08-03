@@ -44,8 +44,8 @@
 
 #include "globals.h"
 
-// FASTMEM is a simple memory alloc approach which allocates chunks of 512 kB
-// and will release it only at MemFini().
+/* FASTMEM is a simple memory alloc approach which allocates chunks of 512 kB
+ * and will release it only at MemFini(). */
 #if FASTMEM
  #define BLKSIZE 0x80000
  #ifndef __UNIX__
@@ -108,18 +108,18 @@ uint_32 sys_call2( uint_32 func, uint_32 r_ebx, uint_32 r_ecx );
     value [eax];
 
 typedef struct mmap {
-    uint_32 base;   // linear base (or 0)
-    uint_32 size;   // size in bytes
-    uint_32 access; // prot_read + prot_write = 3
-    uint_32 flags;  // 0x22 = map_anonymous + map_private
-    uint_32 fd;     // should be -1
-    uint_32 offset; // ignored
+    uint_32 base;   /* linear base (or 0) */
+    uint_32 size;   /* size in bytes */
+    uint_32 access; /* prot_read + prot_write = 3 */
+    uint_32 flags;  /* 0x22 = map_anonymous + map_private */
+    uint_32 fd;     /* should be -1 */
+    uint_32 offset; /* ignored */
 } mmap;
-// 0x22 = MAP_PRIVATE | MAP_ANON
+/* 0x22 = MAP_PRIVATE | MAP_ANON */
 static mmap mymmap = {0, 0, 3, 0x22, -1, 0};
 #endif
 #if defined(__GNUC__)
-uint_32 mymmap_size = 0;   // size in bytes
+uint_32 mymmap_size = 0;   /* size in bytes */
 #endif
 
 #if FASTMEM

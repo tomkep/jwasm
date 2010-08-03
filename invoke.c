@@ -65,7 +65,10 @@ static const char * const ms64_regs[] = {
 };
 #endif
 
-// get size of a register (for PUSH)
+/* segment register names, order must match ASSUME_ enum */
+static const char * segreg_tab[] = { "es", "cs", "ss", "ds", "fs", "gs" };
+
+/* get size of a register (for PUSH) */
 
 int SizeFromRegister( int registertoken )
 /***************************************/
@@ -184,6 +187,18 @@ static int ms64_param( dir_node *proc, int index, dir_node *param, bool addr, ex
                     memcpy( pstr, AsmResWord[i].name, AsmResWord[i].len );
                     *(pstr+AsmResWord[i].len) = NULLC;
                 } else {
+                    /* v2.03: added register overwrite check */
+                    if ( *r0used && opndx->indirect == TRUE )
+                        if (( opndx->base_reg != EMPTY &&
+                             (AsmBuffer[opndx->base_reg]->value == T_EAX ||
+                              AsmBuffer[opndx->base_reg]->value == T_RAX )) ||
+                            ( opndx->idx_reg != EMPTY &&
+                             AsmBuffer[opndx->idx_reg]->value == T_EAX ||
+                             AsmBuffer[opndx->idx_reg]->value == T_RAX )) {
+                            AsmErr( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE );
+                            *r0used = FALSE;
+                        }
+
                     size = SizeFromMemtype( opndx->mem_type, USE64 );
                     switch ( size ) {
                     case 1:  pstr =  "al"; break;
@@ -200,6 +215,7 @@ static int ms64_param( dir_node *proc, int index, dir_node *param, bool addr, ex
             } else {
                 sprintf( buffer, " lea rax, %s", paramvalue );
                 *r0used = TRUE;
+                pstr = "rax"; /* v2.03: line was missing */
             }
             AddLineQueue( buffer );
             sprintf( buffer, " mov [rsp+%u], %s", index*8, pstr );
@@ -240,7 +256,7 @@ static int ms64_param( dir_node *proc, int index, dir_node *param, bool addr, ex
 
 #if INVOKE_WC
 
-// FASTCALL for OW register calling convention doesn't work yet with INVOKE!
+/* FASTCALL for OW register calling convention doesn't work yet with INVOKE! */
 
 static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_number )
 /*************************************************************************************/
@@ -267,16 +283,16 @@ static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_n
             case 0:
                 sprintf( buffer, " [DX AX]" );
                 buffer[0] = 0;
-                *parm_number = 1; // take up 0 and 1
+                *parm_number = 1; /* take up 0 and 1 */
                 break;
             case 1:
             case 2:
                 sprintf( buffer, " [CX BX]" );
                 buffer[0] = 0;
-                *parm_number = 3; // take up 2 and 3
+                *parm_number = 3; /* take up 2 and 3 */
                 break;
             default:
-                // passed on stack ... it's ok
+                /* passed on stack ... it's ok */
                 return( FALSE );
             }
             return( TRUE );
@@ -290,44 +306,44 @@ static int get_watcom_argument_string( char *buffer, uint_8 size, uint_8 *parm_n
             case 0:
                 sprintf( buffer, " [DX EAX]" );
                 buffer[0]=0;
-                *parm_number = 1; // take up 0 and 1
+                *parm_number = 1; /* take up 0 and 1 */
                 break;
             case 1:
             case 2:
                 sprintf( buffer, " [CX EBX]" );
                 buffer[0]=0;
-                *parm_number = 3; // take up 2 and 3
+                *parm_number = 3; /* take up 2 and 3 */
                 break;
             default:
-                // passed on stack ... it's ok
+                /* passed on stack ... it's ok */
                 return( FALSE );
             }
             return( TRUE );
         }
-        // fall through for 16 bit to default
+        /* fall through for 16 bit to default */
     case 8:
         if( ModuleInfo.Ofssize ) {
             switch( parm ) {
             case 0:
                 sprintf( buffer, " [EDX EAX]" );
                 buffer[0]=0;
-                *parm_number = 1; // take up 0 and 1
+                *parm_number = 1; /* take up 0 and 1 */
                 break;
             case 1:
             case 2:
                 sprintf( buffer, " [ECX EBX]" );
                 buffer[0]=0;
-                *parm_number = 3; // take up 2 and 3
+                *parm_number = 3; /* take up 2 and 3 */
                 break;
             default:
-                // passed on stack ... it's ok
+                /* passed on stack ... it's ok */
                 return( FALSE );
             }
             return( TRUE );
         }
-        // fall through for 16 bit to default
+        /* fall through for 16 bit to default */
     default:
-        // something wierd
+        /* something wierd */
         AsmError( STRANGE_PARM_TYPE );
         return( ERROR );
     }
@@ -472,19 +488,10 @@ static int PushInvokeParam( dir_node *proc, dir_node *curr, int i, int reqParam,
                     else
                         as = search_assume( (asm_sym *)dir, ASSUME_CS, TRUE );
                     if ( as != ASSUME_NOTHING ) {
-                        char *p;
-                        switch ( as ) {
-                        case ASSUME_ES:  p = "es";  break;
-                        case ASSUME_CS:  p = "cs";  break;
-                        case ASSUME_SS:  p = "ss";  break;
-                        case ASSUME_DS:  p = "ds";  break;
-                        case ASSUME_FS:  p = "fs";  break;
-                        default:         p = "gs";  break;
-                        }
-                        strcat( buffer, p );
+                        strcat( buffer, segreg_tab[as] );
                     } else {
                         struct asm_sym *seg;
-                        seg = GetGrp( opndx.sym );
+                        seg = GetGroup( opndx.sym );
                         if (seg == NULL)
                             seg = &dir->sym;
                         if ( seg )
@@ -592,6 +599,27 @@ static int PushInvokeParam( dir_node *proc, dir_node *curr, int i, int reqParam,
 
         if ( ( opndx.kind == EXPR_ADDR && opndx.instr != T_OFFSET ) ||
             ( opndx.kind == EXPR_REG && opndx.indirect == TRUE ) ) {
+
+            /* catch the case when EAX has been used for ADDR,
+             * and is later used as addressing register!
+             *
+             */
+            if ( *r0used &&
+                (( opndx.base_reg != EMPTY &&
+                  (AsmBuffer[opndx.base_reg]->value == T_EAX
+#if AMD64_SUPPORT
+                   || AsmBuffer[opndx.base_reg]->value == T_RAX
+#endif
+                  )) ||
+                 ( opndx.idx_reg != EMPTY &&
+                  ( AsmBuffer[opndx.idx_reg]->value == T_EAX
+#if AMD64_SUPPORT
+                   || AsmBuffer[opndx.idx_reg]->value == T_RAX
+#endif
+                 )))) {
+                AsmErr( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE );
+                *r0used = FALSE;
+            }
 
             if ( asize > pushsize ) {
                 char dw = ' ';
@@ -824,7 +852,7 @@ static int PushInvokeParam( dir_node *proc, dir_node *curr, int i, int reqParam,
     return( NOT_ERROR );
 }
 
-// generate a call for a prototyped procedure
+/* generate a call for a prototyped procedure */
 
 ret_code InvokeDirective( int i )
 /*******************************/
@@ -834,7 +862,7 @@ ret_code InvokeDirective( int i )
     char                *name;
     //char                *param;
     int                 numParam;
-    int                 namepos = i;
+    int                 namepos = i+1;
     bool                r0used = FALSE;
     bool                uselabel = FALSE;
     uint_8              procofssize;
@@ -846,6 +874,8 @@ ret_code InvokeDirective( int i )
     /* the call address might be an expression! */
 
     DebugMsg(("InvokeDef(%s) enter\n", AsmBuffer[i]->pos ));
+
+    i++; /* skip INVOKE directive */
 
 #if FASTPASS
     /* make sure the directive is stored */
@@ -863,7 +893,7 @@ ret_code InvokeDirective( int i )
 #if 1
         /* a typecast with PTR? Since v1.95, this has highest priority */
         //if (opndx.explicit == TRUE && opndx.type != NULL && opndx.type->state == SYM_TYPE ) {
-        // v1.96: removed opndx.explicit!!!
+        /* v1.96: removed opndx.explicit!!! */
         if ( opndx.type != NULL && opndx.type->state == SYM_TYPE ) {
             sym = opndx.type;
             proc = (dir_node *)sym;
@@ -875,11 +905,11 @@ ret_code InvokeDirective( int i )
 #endif
         } else if ( opndx.mbr != NULL ) {
             sym = opndx.mbr;
-            // it may be a typecast. then the mbr member contains the explicit type
-            // and sym->state is SYM_TYPE
-            // v1.96: the sentence above describes an obsolete feature.
-            // Not sure if <mbr> can contain a type anymore.
-            // this code is to be removed/modified!
+            /* it may be a typecast. then the mbr member contains the explicit type
+             * and sym->state is SYM_TYPE
+             * v1.96: the sentence above describes an obsolete feature.
+             * Not sure if <mbr> can contain a type anymore.
+             * this code is to be removed/modified! */
             if ( sym->state == SYM_TYPE ) {
                 proc = (dir_node *)sym;
                 if ( opndx.label != EMPTY )

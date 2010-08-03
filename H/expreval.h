@@ -32,8 +32,6 @@
 #ifndef EXPREVAL_H
 #define EXPREVAL_H
 
-#define FLAG_LABELDIFF 1 /* flag if 2 label were subtracted in expression */
-
 enum exprtype {
     EXPR_EMPTY = EMPTY,
     EXPR_UNDEF = 0,     // undefined type when error occures or result is undefined
@@ -105,14 +103,12 @@ typedef struct expr_list {
     union {
         uint_8      flags;
         struct {
-            unsigned        indirect : 1;   // Whether inside [] or not
-            unsigned        explicit : 1;   // Whether expression type explicitly given
-            unsigned        abs      : 1;   // external ABS
-#if FLAG_LABELDIFF
-            unsigned        labeldiff : 1;
-#endif
-            unsigned        is_type : 1;     // constant is a type
-            unsigned        is_opattr : 1;   // current operator is OPATTR
+            unsigned indirect : 1;   // Whether inside [] or not
+            unsigned explicit : 1;   // Whether expression type explicitly given
+            unsigned abs      : 1;   // external ABS
+            unsigned labelinexpr : 1; // a label was used in expression
+            unsigned is_type : 1;    // constant is a type
+            unsigned is_opattr : 1;  // current operator is OPATTR
         };
     };
     struct asm_sym  *sym;   // label used

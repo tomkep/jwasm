@@ -31,8 +31,8 @@
 #ifndef _CONDASM_H_
 #define _CONDASM_H_
 
-extern void conditional_assembly_prepare( char *line );
-extern ret_code conditional_assembly_directive( int i, int directive);
+extern ret_code conditional_assembly_prepare( char *line );
+extern ret_code conditional_assembly_directive( int i, int directive );
 extern ret_code conditional_error_directive( int i );
 extern ret_code CheckForOpenConditionals( void );
 extern void CondInit( void );

@@ -35,14 +35,15 @@
 
 //extern long     GetQueueItems(void *);
 extern void     AddPublicData( asm_sym *sym );
-extern void     AddLnameData( asm_sym *sym );
-extern void     AddGlobalData( dir_node *data );
+extern asm_sym  *GetPublicData( void ** );
 
+extern void     AddLnameData( asm_sym *sym );
 extern direct_idx FindLnameIdx( const char * );
 extern char     *GetLname( direct_idx );
 extern void     GetLnameData( void **, struct asm_sym ** );
-extern void     GetGlobalData( void );
-extern asm_sym  *GetPublicData( void ** );
+
+extern void     AddGlobalData( dir_node *data );
+extern void     GlobalToPublic( void );
 
 extern void     QueueInit( void );
 extern void     QueueFini( void );

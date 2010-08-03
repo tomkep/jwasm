@@ -119,7 +119,7 @@ ret_code ContextDirective( int directive, int i )
                         }
                         ContextStack = pcontext->next;
 
-                        // restore the values
+                        /* restore the values */
                         switch ( type ) {
                         case CONT_ASSUMES:
                             acontext = (assumes_context *)&pcontext->data;
@@ -164,15 +164,15 @@ ret_code ContextDirective( int directive, int i )
                         }
                         if ( ccontext ) {
                             ModuleInfo.cpu     = ccontext->cpu;
-                            if (sym_Cpu)
+                            if ( sym_Cpu )
                                 sym_Cpu->value = ccontext->cpu;
                             ModuleInfo.curr_cpu = ccontext->curr_cpu;
                         }
-                        // remove the item
+                        /* remove the item */
                         AsmFree(pcontext);
                     } else {
                         DebugMsg(( "PUSHCONTEXT %s\n", AsmBuffer[i-1]->string_ptr ));
-                        // setup a context item
+                        /* setup a context item */
                         switch ( type ) {
                         case CONT_ASSUMES:
                             pcontext = AsmAlloc(sizeof(context) + sizeof(assumes_context));
@@ -244,7 +244,7 @@ ret_code ContextDirective( int directive, int i )
 
 #if FASTPASS
 
-// save current context status
+/* save current context status */
 
 void ContextSaveState( void )
 /***************************/
@@ -262,7 +262,7 @@ void ContextSaveState( void )
     }
 }
 
-// restore context status
+/* restore context status */
 
 static void ContextRestoreState( void )
 /*************************************/
@@ -279,7 +279,7 @@ static void ContextRestoreState( void )
 
 #endif
 
-// init context, called once per pass
+/* init context, called once per pass */
 
 void ContextInit( int pass )
 /**************************/

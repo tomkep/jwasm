@@ -35,6 +35,8 @@
 #include "myassert.h"
 #include "carve.h"
 
+#define MAX_ID_LEN_OMF 247
+
 static carve_t myCarver;
 
 void OmfRecInit( void )
@@ -74,8 +76,8 @@ void OmfKillRec( obj_rec *objr )
     switch( objr->command ) {
     case CMD_FIXUP:
         {
-            fixup   *cur;
-            fixup   *next;
+            omffixup   *cur;
+            omffixup   *next;
 
             cur = objr->d.fixup.fixup;
             while( cur != NULL ) {
@@ -197,7 +199,7 @@ void OmfPutIndex( obj_rec *objr, size_t idx )
 void OmfPut( obj_rec *objr, const uint_8 *data, size_t len )
 /***********************************************************/
 {
-/**/myassert( objr != NULL && objr->data != NULL );
+    /**/myassert( objr != NULL && objr->data != NULL );
     memcpy( objr->data + objr->curoff, data, len );
     objr->curoff += len;
 }
@@ -205,7 +207,13 @@ void OmfPut( obj_rec *objr, const uint_8 *data, size_t len )
 void OmfPutName( obj_rec *objr, const char *name, size_t len )
 /************************************************************/
 {
-/**/myassert( objr != NULL && objr->data != NULL );
+    /**/myassert( objr != NULL && objr->data != NULL );
+#if MAX_ID_LEN > MAX_ID_LEN_OMF
+    if ( len > MAX_ID_LEN_OMF ) {
+        AsmWarn( 1, IDENTIFIER_TOO_LONG );
+        len = MAX_ID_LEN_OMF;
+    }
+#endif
     OmfPut8( objr, len );
     OmfPut( objr, (uint_8 *)name, len );
 }

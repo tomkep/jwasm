@@ -24,8 +24,8 @@
 *
 *  ========================================================================
 *
-* Description:  handles
-*               - data definition directives DB,DW,DD,...
+* Description:  data definition. handles
+*               - directives DB,DW,DD,...
 *               - predefined types (BYTE, WORD, DWORD, ...)
 *               - arbitrary types
 *
@@ -69,21 +69,21 @@ extern uint_8 CommentDataInCode;
  */
 int StructInit;
 
-// initialize an array inside a structure
-// if there are no brackets, the next comma, '>' or '}' will terminate
-
-// valid initialization are:
-// - an expression, might contain DUP or a string enclosed in quotes.
-// - a literal enclosed in <> or {} which then is supposed to contain
-//   single items.
-
-// there's a problem with array initialization inside structures:
-// Since JWasm uses "generated code" for the initialization, it
-// doesn't know the "true" size of the data item. It makes some
-// guesses, but it is unsafe. To be improved...
-// v1.95: it has been improved, at least if a literal is used as
-// initialization - the "expression branch" still needs some work.
-
+/* initialize an array inside a structure
+ * if there are no brackets, the next comma, '>' or '}' will terminate
+ */
+/* valid initialization are:
+ * - an expression, might contain DUP or a string enclosed in quotes.
+ * - a literal enclosed in <> or {} which then is supposed to contain
+ *   single items.
+ */
+/* there's a problem with array initialization inside structures:
+ * Since JWasm uses "generated code" for the initialization, it
+ * doesn't know the "true" size of the data item. It makes some
+ * guesses, but it is unsafe. To be improved...
+ * v1.95: it has been improved, at least if a literal is used as
+ * initialization - the "expression branch" still needs some work.
+ */
 static ret_code InitializeArray( field_list *f, int *pi )
 /*******************************************************/
 {
@@ -130,7 +130,9 @@ static ret_code InitializeArray( field_list *f, int *pi )
                 AsmErr( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM, f->sym->name );
                 return( ERROR );
             }
-            if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+            /* v2.03: db 'AB' dup (0) is valid syntax! */
+            //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+            if ( opndx.kind != EXPR_CONST ) {
                 AsmError( CONSTANT_EXPECTED );
                 return( ERROR );
             }
@@ -246,14 +248,14 @@ static ret_code InitializeArray( field_list *f, int *pi )
     return( NOT_ERROR );
 }
 
-// initialize a STRUCT/UNION/RECORD data item
-// struct_symbol = type of data item
-// init_string = initializer string
-// delim = string start delimiter
+/* initialize a STRUCT/UNION/RECORD data item
+ * struct_symbol = type of data item
+ * init_string = initializer string
+ * delim = string start delimiter
 
-// currently this proc emits ASM lines with simple types
-// to actually "fill" the structure.
-
+ * currently this proc emits ASM lines with simple types
+ * to actually "fill" the structure.
+ */
 static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embedded )
 /************************************************************************************/
 {
@@ -355,6 +357,7 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
                   f->initializer ? f->initializer : "NULL",
                   f->value ));
 
+        /* is it a RECORD field? */
         if ( f->sym->mem_type == MT_BITS ) {
             opndx.kind = EXPR_CONST;
             opndx.string = NULL;
@@ -442,23 +445,29 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
             AddLineQueue( buffer );
         }
 
-        /* add padding bytes */
-        if ( f->next == NULL || symtype->e.structinfo->typekind == TYPE_UNION )
-            nextofs = symtype->sym.total_size;
-        else
-            nextofs = f->next->sym->offset;
+        /* Add padding bytes if necessary (never inside RECORDS!).
+         * f->next == NULL : it's the last field of the struct/union/record
+         */
+        if ( symtype->e.structinfo->typekind != TYPE_RECORD ) {
+            if ( f->next == NULL || symtype->e.structinfo->typekind == TYPE_UNION )
+                nextofs = symtype->sym.total_size;
+            else
+                nextofs = f->next->sym->offset;
 
-        if ( f->sym->offset + f->sym->total_size < nextofs ) {
-            sprintf( buffer,"db %u dup (?) ;padding",
-                    nextofs - (f->sym->offset + f->sym->total_size) );
-            AddLineQueue( buffer );
+            if ( f->sym->offset + f->sym->total_size < nextofs ) {
+                DebugMsg(("InitializeStructure: padding, field=%s ofs=%X total=%X nextofs=%X\n",
+                          f->sym->name, f->sym->offset, f->sym->total_size, nextofs ));
+                sprintf( buffer,"db %u dup (?) ;padding",
+                        nextofs - (f->sym->offset + f->sym->total_size) );
+                AddLineQueue( buffer );
+            }
         }
 
         /* for a union, just the first field is initialized */
         if ( symtype->e.structinfo->typekind == TYPE_UNION )
             break;
 
-        if (f->next != NULL) {
+        if ( f->next != NULL ) {
 
             if ( AsmBuffer[i]->token != T_FINAL )
                 if ( AsmBuffer[i]->token == T_COMMA)
@@ -509,40 +518,44 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
     return( NOT_ERROR );
 }
 
-static void little_endian( char *string, unsigned no_of_bytes )
-/*************************************************************/
-/* convert a string into little endian format - ( LSB 1st, LSW 1st ... etc ) */
+/*
+ * convert a string into little endian format - ( LSB 1st, LSW 1st ... etc ).
+ * <size> is the TYPE, may be 2,4,6,8,10?,16
+ */
+static void little_endian( char *string, unsigned string_len )
+/************************************************************/
 {
-    if ( no_of_bytes & 1 ) // must be even number
-        return;
-
-    for( ; no_of_bytes; no_of_bytes-- ) {
+    for( ; string_len > 1; string_len-- ) {
         char c = *string;
-        no_of_bytes--;
-        *string = *(string + no_of_bytes);
-        *(string + no_of_bytes) = c;
+        string_len--;
+        *string = *(string + string_len);
+        *(string + string_len) = c;
         string++;
     }
     return;
 }
 
+#if 0 /* changed in v2.03 */
 static void OutputDataBytes( const unsigned char *p, int len )
 /************************************************************/
 {
     for( ; len; len-- )
         OutputByte( *p++ );
 }
+#else
+#define OutputDataBytes( x, y ) OutputBytes( x, y, NULL )
+#endif
 
 static void output_float( int index, unsigned no_of_bytes, bool negative )
 /************************************************************************/
 {
     double              double_value;
     float               float_value;
-    char                *char_ptr;
+    unsigned char       *char_ptr;
     TB_LD               tbyte;
 
     if( no_of_bytes == 10 ) {
-        char_ptr = (char *)strtotb( AsmBuffer[index]->string_ptr, &tbyte, negative );
+        char_ptr = (unsigned char *)strtotb( AsmBuffer[index]->string_ptr, &tbyte, negative );
     } else {
         double_value = strtod( AsmBuffer[index]->string_ptr, NULL );
         if( negative )
@@ -550,17 +563,17 @@ static void output_float( int index, unsigned no_of_bytes, bool negative )
         switch( no_of_bytes ) {
         case 4:
             float_value = double_value;
-            char_ptr = (char *)&float_value;
+            char_ptr = (unsigned char *)&float_value;
             break;
         case 8:
-            char_ptr = (char *)&double_value;
+            char_ptr = (unsigned char *)&double_value;
             break;
         default:
             /* sizes != 4,8 or 10 aren't accepted.
              * Masm ignores silently, JWasm also unless -W4 is set.
              */
             if ( Parse_Pass == PASS_1 )
-                AsmWarn( 4, FLOAT_OPERAND );
+                AsmWarn( 4, FP_INITIALIZER_IGNORED );
             /* this is Masm-compatible: output 00 bytes */
             FillDataBytes( 0x00, no_of_bytes );
             return;
@@ -571,6 +584,11 @@ static void output_float( int index, unsigned no_of_bytes, bool negative )
 
     return;
 }
+
+/* update a symbols's total_length (operator LENGTHOF) and
+ * first_length (operator LENGTH) fields.
+ * Called in Pass 1 only.
+ */
 
 static void update_sizes( asm_sym *sym, bool first, unsigned no_of_bytes )
 /************************************************************************/
@@ -612,40 +630,11 @@ static ret_code data_item( struct code_info *CodeInfo, asm_sym *sym, dir_node *s
     for (;dup;dup--) {
     cur_pos = *start_pos;
 next_item:
-    if (AsmBuffer[cur_pos]->token == T_QUESTION_MARK) {
-        DebugMsg(("data_item: ? found, curr_ofs=%X\n", GetCurrOffset()));
-        /* tiny optimization for uninitialized arrays */
-        count = no_of_bytes;
-        if ( AsmBuffer[cur_pos+1]->token != T_COMMA && cur_pos == *start_pos ) {
-            count *= dup;
-            if( sym && Parse_Pass == PASS_1 ) {
-                sym->total_length += dup;
-                sym->total_size += count;
-                if( first ) {
-                    sym->first_length += dup;
-                    sym->first_size += count;
-                }
-            }
-            dup = 1;
-        } else {
-            if( sym && Parse_Pass == PASS_1 )
-                update_sizes( sym, first, count );
-        }
-        if( !struct_field ) {
-            SetCurrOffset( count, TRUE,
-                           ( ( CurrSeg != NULL ) && CurrSeg->e.seginfo->segtype == SEGTYPE_CODE ) );
-        } else {
-            UpdateStructSize( count );
-        }
-
-        cur_pos++;
-        goto item_done;
-
-        /* since v1.94, the expression evaluator won't handle strings
-         enclosed in <> or {}. That is, in previous versions syntax
-         "mov eax,<1>" was accepted, now it's rejected.
-         */
-    } else if ( AsmBuffer[cur_pos]->token == T_STRING &&
+    /* since v1.94, the expression evaluator won't handle strings
+     * enclosed in <> or {}. That is, in previous versions syntax
+     * "mov eax,<1>" was accepted, now it's rejected.
+     */
+    if ( AsmBuffer[cur_pos]->token == T_STRING &&
                 ( AsmBuffer[cur_pos]->string_delim == '<' ||
                   AsmBuffer[cur_pos]->string_delim == '{' )) {
         if( struct_sym != NULL ) {
@@ -699,14 +688,20 @@ next_item:
         }
     }
 
-    if ( EvalOperand(&cur_pos, Token_Count, &opndx, TRUE) == ERROR )
-        return( ERROR );
+    if ( AsmBuffer[cur_pos]->token == T_QUESTION_MARK )
+        opndx.kind = EXPR_EMPTY;
+    else
+        if ( EvalOperand( &cur_pos, Token_Count, &opndx, TRUE ) == ERROR )
+            return( ERROR );
+
     //DebugMsg(("data_item, EvalOperand() returned, opndx.kind=%u\n", opndx.kind ));
 
     /* handle DUP operator */
 
     if ( AsmBuffer[cur_pos]->token == T_RES_ID && AsmBuffer[cur_pos]->value == T_DUP ) {
-        if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
+        /* v2.03: db 'AB' dup (0) is valid syntax! */
+        //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+        if ( opndx.kind != EXPR_CONST ) {
             DebugMsg(("data_item, error, opndx.kind=%u, opndx.string=%X\n", opndx.kind, opndx.string));
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
@@ -726,14 +721,14 @@ next_item:
         if ( sym )
             sym->isarray = TRUE;
 
-        if (opndx.value == 0) {
+        if ( opndx.value == 0 ) {
             int level = 1;
             for ( ; AsmBuffer[cur_pos]->token != T_FINAL; cur_pos++ ) {
-                if (AsmBuffer[cur_pos]->token == T_OP_BRACKET)
+                if ( AsmBuffer[cur_pos]->token == T_OP_BRACKET )
                     level++;
-                else if (AsmBuffer[cur_pos]->token == T_CL_BRACKET)
+                else if ( AsmBuffer[cur_pos]->token == T_CL_BRACKET )
                     level--;
-                if (level == 0)
+                if ( level == 0 )
                     break;
             }
         } else {
@@ -755,6 +750,48 @@ next_item:
             AsmErr( STRUCTURE_IMPROPERLY_INITIALIZED, struct_sym->sym.name );
             return( ERROR );
         }
+
+        /* handle '?' */
+        if ( opndx.kind == EXPR_EMPTY && AsmBuffer[cur_pos]->token == T_QUESTION_MARK ) {
+            DebugMsg(("data_item: ? found, curr_ofs=%X\n", GetCurrOffset()));
+            /* tiny optimization for uninitialized arrays */
+            count = no_of_bytes;
+            if ( AsmBuffer[cur_pos+1]->token != T_COMMA && cur_pos == *start_pos ) {
+                count *= dup;
+                if( sym && Parse_Pass == PASS_1 ) {
+                    sym->total_length += dup;
+                    sym->total_size += count;
+                    if( first ) {
+                        sym->first_length += dup;
+                        sym->first_size += count;
+                    }
+                }
+                dup = 1;
+            } else {
+                if( sym && Parse_Pass == PASS_1 )
+                    update_sizes( sym, first, count );
+            }
+            if( !struct_field ) {
+                SetCurrOffset( count, TRUE, TRUE );
+            } else {
+                UpdateStructSize( count );
+            }
+            cur_pos++;
+            goto item_done;
+        }
+
+        /* warn about initialized data in BSS/AT segments */
+        if ( Parse_Pass == PASS_2 &&
+            struct_field == FALSE  &&
+            // CurrSeg != NULL &&  /* this is already ensured to be true */
+            (CurrSeg->e.seginfo->segtype == SEGTYPE_BSS ||
+             CurrSeg->e.seginfo->segtype == SEGTYPE_ABS) &&
+            initwarn == FALSE ) {
+            AsmWarn( 2,
+                    INITIALIZED_DATA_NOT_SUPPORTED_IN_SEGMENT,
+                    (CurrSeg->e.seginfo->segtype == SEGTYPE_BSS) ? "BSS" : "AT" );
+            initwarn = TRUE;
+        };
         switch( opndx.kind ) {
         case EXPR_EMPTY:
             negative = FALSE;
@@ -789,18 +826,6 @@ next_item:
                 AsmError( MUST_USE_FLOAT_INITIALIZER );
                 return( ERROR );
             }
-            /* warn about initialized data in BSS/AT */
-            if ( struct_field == FALSE  &&
-                 CurrSeg != NULL &&
-                (CurrSeg->e.seginfo->segtype == SEGTYPE_BSS ||
-                 CurrSeg->e.seginfo->segtype == SEGTYPE_ABS) &&
-                Parse_Pass == PASS_2 &&
-                initwarn == FALSE) {
-                AsmWarn( 2,
-                        INITIALIZED_DATA_NOT_SUPPORTED_IN_SEGMENT,
-                        (CurrSeg->e.seginfo->segtype == SEGTYPE_BSS) ? "BSS" : "AT" );
-                initwarn = TRUE;
-            };
 
             /* a string returned by the evaluator (enclosed in quotes!)? */
 
@@ -836,8 +861,8 @@ next_item:
 
                 /* anything bigger than a byte must be stored in little-endian
                  * format -- LSB first */
-                if ( string_len > 1 )
-                    little_endian( (char *)char_ptr, no_of_bytes );
+                if ( string_len > 1 && no_of_bytes > 1 )
+                    little_endian( (char *)char_ptr, string_len );
 
                 if( sym && Parse_Pass == PASS_1 ) {
                     update_sizes( sym, first, no_of_bytes );
@@ -848,7 +873,7 @@ next_item:
                     }
                 }
 
-                
+
                 if( !struct_field ) {
                     OutputDataBytes( char_ptr, string_len );
 
@@ -875,7 +900,7 @@ next_item:
                     /* the evaluator cannot handle types > 16 bytes */
                     /* so if a simple type is larger, clear anything
                      which is above */
-                    if (no_of_bytes > 16) {
+                    if ( no_of_bytes > 16 ) {
                         OutputDataBytes( char_ptr, 16 );
                         tmp = 0;
                         if (opndx.value6479 < 0)
@@ -884,10 +909,13 @@ next_item:
                     } else {
                         OutputDataBytes( char_ptr, no_of_bytes );
                     }
-                    if (Parse_Pass > PASS_1) {
+                    /* check that there's no significant data left
+                     * which hasn't been emitted.
+                     */
+                    if ( Parse_Pass > PASS_1 ) {
                         count = no_of_bytes;
                         char_ptr += no_of_bytes;
-                        while (count < 4) {
+                        while ( count < 4 ) {
                             if ( *(char_ptr) != 0 && *(char_ptr) != 0xFF ) {
                                 DebugMsg(("data_item.CONST: error, CONST is %X\n", opndx.value));
                                 AsmError( INITIALIZER_MAGNITUDE_TOO_LARGE );
@@ -907,7 +935,7 @@ next_item:
                 //int              i;
                 char             *ptr;
                 enum fixup_types fixup_type;
-                struct asmfixup  *fixup;
+                struct genfixup  *fixup;
 
                 /* since a fixup will be created, 8 bytes is max */
                 if ( no_of_bytes > sizeof(uint_64) ) {
@@ -943,17 +971,6 @@ next_item:
                     UpdateStructSize( no_of_bytes );
                     break;
                 }
-
-                if ( CurrSeg != NULL &&
-                    (CurrSeg->e.seginfo->segtype == SEGTYPE_BSS ||
-                     CurrSeg->e.seginfo->segtype == SEGTYPE_ABS) &&
-                    Parse_Pass == PASS_2 &&
-                    initwarn == FALSE ) {
-                    AsmWarn( 2,
-                            INITIALIZED_DATA_NOT_SUPPORTED_IN_SEGMENT,
-                            (CurrSeg->e.seginfo->segtype == SEGTYPE_BSS) ? "BSS" : "AT" );
-                    initwarn = TRUE;
-                };
 
                 /* determine what type of fixup is to be created */
 
@@ -1062,8 +1079,8 @@ next_item:
 
                     switch (no_of_bytes) {
                     case 2:
-                        // accept "near16" override, else complain
-                        // if symbol's offset is 32bit
+                        /* accept "near16" override, else complain
+                         * if symbol's offset is 32bit */
                         if (opndx.explicit == TRUE && opndx.mem_type == MT_NEAR && opndx.Ofssize == USE16 )
                             ;
                         else if ( opndx.sym &&
@@ -1137,11 +1154,11 @@ next_item:
                         //CodeInfo->opnd_type[OPND1] = OP_J48;
                         break;
                     default:
-                        // Masm generates
-                        // off32 if curr segment is 32bit
-                        // ptr16 if curr segment is 16bit
-                        // JWasm additionally accepts a FAR32 PTR override
-                        // and generates a ptr32 fixup then
+                        /* Masm generates
+                         * off32 if curr segment is 32bit
+                         * ptr16 if curr segment is 16bit
+                         * JWasm additionally accepts a FAR32 PTR override
+                         * and generates a ptr32 fixup then */
                         if ( opndx.explicit == TRUE && opndx.mem_type == MT_FAR && opndx.Ofssize == USE32 )
                             fixup_type = FIX_PTR32;
                         else if( CodeInfo->Ofssize == USE32 )
@@ -1179,14 +1196,14 @@ next_item:
                     //    CodeInfo->data[OPND2] = opndx.hvalue;
 #endif
                     //store_fixup( fixup, &opndx.value ); /* may fail, but ignore error! */
-                    OutputBytesAndFixup( fixup, (unsigned char *)&opndx.value, no_of_bytes );
+                    OutputBytes( (unsigned char *)&opndx.value, no_of_bytes, fixup );
                 } else {
                     /* now actually output the data */
                     //ptr = (char *)&CodeInfo->data[OPND1];
                     ptr = (char *)&opndx.value;
 
                     /* emit offset (segment is on fixup), max is sizeof(uint_64) */
-                    OutputBytes( ptr, no_of_bytes );
+                    OutputBytes( ptr, no_of_bytes, NULL );
                 }
             }
             break;
@@ -1266,7 +1283,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
 
     DebugMsg(("data_init enter, sym_loc=%d, init_loc=%d\n", sym_loc, initializer_loc));
 
-    if( (sym_loc >= 0) && ( CurrStruct == NULL ) ) {
+    if( ( sym_loc >= 0 ) && ( CurrStruct == NULL ) ) {
         /* get/create the label.
          * it might be a code label if Masm v5.1 compatibility is enabled.
          */
@@ -1397,7 +1414,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
             if( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
                 //if ( checktypes( sym, mem_type, struct_sym ) == ERROR )
                 //    return( ERROR );
-                //v2.0: display error and continue!
+                /* v2.0: display error and continue! */
                 checktypes( sym, mem_type, struct_sym );
                 dir_internal( (dir_node *)sym );
                 sym->total_size = 0;
@@ -1436,14 +1453,16 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
         SetSymSegOfs( sym );
         if( Parse_Pass != PASS_1 && sym->offset != old_offset ) {
 #ifdef DEBUG_OUT
-            if (!PhaseError)
+            if ( !ModuleInfo.PhaseError )
                 DebugMsg(("data_init: Phase error, pass %u, sym >%s< first time, %X != %X\n", Parse_Pass+1, sym->name, sym->offset, old_offset));
 #endif
-            PhaseError = TRUE;
+            ModuleInfo.PhaseError = TRUE;
         }
         sym->defined = TRUE;
         sym->mem_type = mem_type;
-        /* fixme: backpatch for data items is probably nonsense */
+        /* backpatch for data items? Yes, if the item is defined
+         * in a code segment then its offset may change!
+         */
         BackPatch( sym );
     }
 
@@ -1480,7 +1499,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
             LstWriteSrcLine();
     }
 
-    DebugMsg(("data_init: exit without error\n"));
+    DebugMsg(("data_init(ofs=%X): exit without error\n", CurrSeg->sym.offset ));
     return( NOT_ERROR );
 }
 

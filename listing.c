@@ -46,11 +46,13 @@
 #include "listing.h"
 #include "input.h"
 #include "msgtext.h"
+#include "parser.h"
+#include "types.h"
 
-#define CODEBYTES 8
+#define CODEBYTES 10
 #define OFSSIZE 8
 #define PREFFMT OFSSIZE + 2 + 2 * CODEBYTES + 1
-#define PREFFMTSTR "23"  /* OFSSIZE + 2 * CODEBYTES - 3 */
+#define PREFFMTSTR "27"  /* OFSSIZE + 2 * CODEBYTES - 3 */
 
 #ifdef __UNIX__
 #define NLSIZ 1
@@ -62,7 +64,8 @@
 
 extern uint_32  LastCodeBufSize;
 extern bool     line_listed;
-extern int      StructInit;     // see data.c
+extern int      StructInit;     /* see data.c */
+extern char     CurrComment[];
 
 uint_32 list_pos; /* current pos in LST file */
 uint_32 list_pos_start;
@@ -71,7 +74,9 @@ static unsigned         SymCount;
 
 #define DOTSMAX 32
 static const char  dots[] = " . . . . . . . . . . . . . . . .";
-static const char  stdprefix[] = "%08X                  ";
+
+/* spaces behind %08X must be 2 + CODEBYTES*2 */
+static const char  stdprefix[] = "%08X                      ";
 
 enum typestring {
     TS_BYTE,   TS_WORD,   TS_DWORD,   TS_FWORD,
@@ -108,12 +113,13 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
     unsigned int newofs;
     asm_sym * sym = value;
     int len;
+    int len2;
     int idx;
     char * p;
     char * p2;
     char buffer[128];
 
-    if (ModuleInfo.list == FALSE || FileInfo.file[LST] == NULL)
+    if ( ModuleInfo.list == FALSE || FileInfo.file[LST] == NULL )
         return;
     if ( GeneratedCode && ( ModuleInfo.list_generated_code == FALSE ) )
         return;
@@ -129,12 +135,12 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
 
     line_listed = TRUE;
 
-    DebugMsg(("LstWrite: enter, lineno=%u, pos=%u\n", LineNumber, list_pos ));
+    DebugMsg(("%lu. LstWrite: enter, pos=%u\n", LineNumber, list_pos ));
 #if FASTPASS
     if ( ( Parse_Pass > PASS_1 ) && UseSavedState ) {
         if ( GeneratedCode == 0 ) {
             list_pos = LineStoreCurr->list_pos;
-            DebugMsg(("LstWrite: Pass=%u, pos=%u\n", Parse_Pass+1, list_pos ));
+            DebugMsg(("%lu. LstWrite: Pass=%u, stored pos=%u\n", LineNumber, Parse_Pass+1, list_pos ));
         }
         fseek( FileInfo.file[LST], list_pos, SEEK_SET );
     }
@@ -149,22 +155,22 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
         len = sprintf( buffer, stdprefix, oldofs );
         p = buffer + len;
 
-        if (CurrSeg == NULL)
+        if ( CurrSeg == NULL )
             break;
         //if ( write_to_file == FALSE )
 #ifdef DEBUG_OUT
         if ( Options.max_passes == 1 )
-            ; // write a listing in pass 1
+            ; /* write a listing in pass 1 */
         else
 #endif
         if ( Parse_Pass == PASS_1 )  /* changed v1.96 */
             break;
 
         len = CODEBYTES;
-        p2 = buffer + 8 + 2;
+        p2 = buffer + OFSSIZE + 2;
 
         if ( CurrSeg->e.seginfo->CodeBuffer == NULL ) {
-            while (oldofs < newofs && len) {
+            while ( oldofs < newofs && len ) {
                 *p2++ = '0';
                 *p2++ = '0';
                 oldofs++;
@@ -177,8 +183,8 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
         /* if it has been flushed, use LastCodeBufSize */
         idx = (CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc)
             - (newofs - oldofs);
-        if (Options.output_format == OFORMAT_OMF) {
-            while (idx < 0 && len) {
+        if ( Options.output_format == OFORMAT_OMF ) {
+            while ( idx < 0 && len ) {
                 sprintf( p2, "%02X", CurrSeg->e.seginfo->CodeBuffer[idx+LastCodeBufSize] );
                 p2 += 2;
                 idx++;
@@ -199,7 +205,12 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
         break;
     case LSTTYPE_EQUATE:
         if ( sym->state == SYM_INTERNAL ) {
-            sprintf( buffer, " = %-" PREFFMTSTR "X", sym->value );
+#if AMD64_SUPPORT
+            if ( sym->value3264 != 0 && ( sym->value3264 != -1 || sym->value >= 0 ) )
+                sprintf( buffer, " = %-" PREFFMTSTR "I64X", sym->value, sym->value3264 );
+            else
+#endif
+                sprintf( buffer, " = %-" PREFFMTSTR "X", sym->value );
             p = buffer + strlen(buffer);
         } else if ( sym->state == SYM_TMACRO ) {
             char buffer2[MAX_LINE_LEN];
@@ -218,7 +229,7 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
         oldofs = GetCurrOffset();
     default:
         if ( type != LSTTYPE_MACRO && (CurrSeg || value) )
-            len = sprintf(buffer, stdprefix, oldofs);
+            len = sprintf( buffer, stdprefix, oldofs );
     }
 
     *p = ' ';
@@ -226,7 +237,7 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
     fwrite( buffer, 1, p - buffer, FileInfo.file[LST] );
 #ifdef DEBUG_OUT
     *p = NULLC;
-    DebugMsg(("LstWrite: writing >%s<\n", buffer ));
+    DebugMsg(("%lu. LstWrite: writing >%s<\n", LineNumber, buffer ));
 #endif
 
     list_pos += p - buffer;
@@ -236,6 +247,10 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
         p = "";
     //while( isspace( *p ) ) p++;
     len = strlen( p );
+    if ( *CurrComment )
+        len2 = strlen( CurrComment );
+    else
+        len2 = 0;
 
     /* calc new list position */
     if ( MacroLevel ) {
@@ -244,11 +259,11 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
     if ( GeneratedCode || StructInit )
         list_pos++;
 
-    list_pos += len + NLSIZ;
+    list_pos += len + len2 + NLSIZ;
 
 #if FASTPASS
     if ( (Parse_Pass > PASS_1) && UseSavedState ) {
-        DebugMsg(("LstWrite: new pos=%u\n", list_pos ));
+        DebugMsg(("%lu. LstWrite: new pos=%u\n", LineNumber, list_pos ));
         return;
     }
 #endif
@@ -261,9 +276,13 @@ void LstWrite( enum lsttype type, unsigned int oldofs, void * value )
         fwrite( "*", 1, 1, FileInfo.file[LST] );
 
     fwrite( p, 1, len, FileInfo.file[LST] );
+    if ( len2 ) {
+        fwrite( CurrComment, 1, len2, FileInfo.file[LST] );
+//        *CurrComment = NULLC;
+    }
     fwrite( NLSTR, 1, NLSIZ, FileInfo.file[LST] );
 
-    DebugMsg(("LstWrite: writing >%s<, new pos=%u\n", p, list_pos ));
+    DebugMsg(("%lu. LstWrite: writing >%s<, new pos=%u\n", LineNumber, p, list_pos ));
     return;
 }
 
@@ -339,8 +358,9 @@ static void log_macro( struct asm_sym *sym )
     return;
 }
 
-// called by log_struct and log_typedef
-// that is, the symbol is ensured to be a TYPE!
+/* called by log_struct and log_typedef
+ * that is, the symbol is ensured to be a TYPE!
+ */
 
 static const char * GetMemtypeString(asm_sym * sym, char * buffer)
 /****************************************************************/
@@ -418,7 +438,7 @@ static const char *GetLanguage( struct asm_sym *sym )
     return( "?" );
 }
 
-// display STRUCTs and UNIONs
+/* display STRUCTs and UNIONs */
 
 static void log_struct( char * name, struct asm_sym *sym, int ofs )
 /*****************************************************************/
@@ -510,7 +530,7 @@ static void log_record( struct asm_sym **syms, struct asm_sym *sym )
     }
 }
 
-// a typedef is a simple struct with no fields. Size might be 0.
+/* a typedef is a simple struct with no fields. Size might be 0. */
 
 static void log_typedef( struct asm_sym **syms, struct asm_sym *sym )
 /*******************************************************************/
@@ -644,8 +664,13 @@ static void log_symbol( struct asm_sym *sym )
         } else
             LstPrintf( "%-10s ", GetMemtypeString( sym, NULL ) );
 
-        if ( ( sym->mem_type == MT_ABS ) && sym->sign )
-            LstPrintf( "-%08Xh ", 0 - sym->uvalue );
+        if ( sym->mem_type == MT_ABS )
+            if ( sym->value3264 != 0 && sym->value3264 != -1 )
+                LstPrintf( " %I64Xh ", sym->uvalue, sym->value3264 );
+            else if ( sym->value3264 < 0 )
+                LstPrintf( "-%08Xh ", 0 - sym->uvalue );
+            else
+                LstPrintf( " %8Xh ", sym->offset );
         else
             LstPrintf( " %8Xh ", sym->offset );
 
@@ -818,8 +843,9 @@ void LstWriteCRef( void )
     qdesc           Segs     = { NULL, NULL };
     qdesc           Grps     = { NULL, NULL };
 
+    /* no point going through the motions if lst file isn't open */
     if( FileInfo.file[LST] == NULL || Options.no_symbol_listing == TRUE) {
-        return; // no point going through the motions if lst file isn't open
+        return;
     }
 
     /* go to EOF */
@@ -941,6 +967,106 @@ void LstWriteCRef( void )
     /* free the sorted symbols */
     DebugMsg(("LstWriteCRef: free sorted symbols\n"));
     MemFree( syms );
+}
+
+/* .[NO|X]LIST, .[NO|X]CREF, .[NO]LISTIF, .[NO]LISTMACRO
+ * .LISTALL, .LISTMACROALL, .[LF|SF|TF]COND, .[X|L|S]ALL
+ * PAGE, TITLE, SUBTITLE, SUBTTL directives
+ */
+ret_code ListingDirective( int i )
+/********************************/
+{
+    int directive = AsmBuffer[i]->value;
+    i++;
+
+    switch ( directive ) {
+    case T_DOT_LIST:
+        if ( FileInfo.file[LST] )
+            ModuleInfo.list = TRUE;
+        break;
+    case T_DOT_CREF:
+        ModuleInfo.cref = TRUE;
+        break;
+    case T_DOT_NOLIST:
+    case T_DOT_XLIST:
+        ModuleInfo.list = FALSE;
+        break;
+    case T_DOT_NOCREF:
+    case T_DOT_XCREF:
+        if ( AsmBuffer[i]->token == T_FINAL ) {
+            ModuleInfo.cref = FALSE;
+        } else {
+            asm_sym *sym;
+            while ( AsmBuffer[i]->token != T_FINAL ) {
+                if ( AsmBuffer[i]->token != T_ID ) {
+                    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+                    return( ERROR );
+                }
+                if ( sym = SymLookup( AsmBuffer[i]->string_ptr )) {
+                    sym->list = FALSE;
+                }
+                i++;
+                if ( AsmBuffer[i]->token != T_FINAL ) {
+                    if ( AsmBuffer[i]->token == T_COMMA ) {
+                        if ( (i + 1) < Token_Count )
+                            i++;
+                    } else {
+                        AsmError( EXPECTING_COMMA );
+                        return( ERROR );
+                    }
+                }
+            }
+        }
+        break;
+    case T_DOT_LISTALL: /* list false conditionals and generated code */
+        if ( FileInfo.file[LST] )
+            ModuleInfo.list = TRUE;
+        ModuleInfo.list_generated_code = TRUE;
+        /* fall through */
+    case T_DOT_LISTIF:
+    case T_DOT_LFCOND: /* .LFCOND is synonym for .LISTIF */
+        ModuleInfo.listif = TRUE;
+        break;
+    case T_DOT_NOLISTIF:
+    case T_DOT_SFCOND: /* .SFCOND is synonym for .NOLISTIF */
+        ModuleInfo.listif = FALSE;
+        break;
+    case T_DOT_TFCOND: /* .TFCOND toggles .LFCOND, .SFCOND */
+        ModuleInfo.listif = !ModuleInfo.listif;
+        break;
+    case T_DOT_LISTMACRO:
+    case T_DOT_XALL:   /* .XALL is synonym for .LISTMACRO */
+        ModuleInfo.list_macro = LM_LISTMACRO;
+        break;
+    case T_DOT_LISTMACROALL:
+    case T_DOT_LALL:   /* .LALL is synonym for .LISTMACROALL */
+        ModuleInfo.list_macro = LM_LISTMACROALL;
+        break;
+    case T_DOT_NOLISTMACRO:
+    case T_DOT_SALL:   /* .SALL is synonym for .NOLISTMACRO */
+        ModuleInfo.list_macro = LM_NOLISTMACRO;
+        break;
+    case T_PAGE:
+    default: /* TITLE, SUBTITLE, SUBTTL */
+        /* tiny checks to ensure that these directives
+         aren't used as code labels or struct fields */
+        if ( AsmBuffer[i]->token == T_COLON )
+            break;
+        if( CurrStruct ) {
+            AsmError( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION );
+            return( ERROR );
+        }
+        if ( Parse_Pass == PASS_1 )
+            AsmWarn( 4, DIRECTIVE_IGNORED, AsmBuffer[i-1]->string_ptr );
+        while (AsmBuffer[i]->token != T_FINAL) i++;
+    }
+
+    if ( AsmBuffer[i]->token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+
+    return( NOT_ERROR );
 }
 
 void LstOpenFile( void )

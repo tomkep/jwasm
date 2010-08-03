@@ -70,35 +70,35 @@ typedef struct {
 #define MAX_EXP_INDEX 13
 
 static const ELD tab_plus_exp[MAX_EXP_INDEX] = {
-    { { 0x00000000UL, 0x00000000UL, 0xA0000000UL }, 0x4002 }, // 1e1L
-    { { 0x00000000UL, 0x00000000UL, 0xC8000000UL }, 0x4005 }, // 1e2L
-    { { 0x00000000UL, 0x00000000UL, 0x9C400000UL }, 0x400C }, // 1e4L
-    { { 0x00000000UL, 0x00000000UL, 0xBEBC2000UL }, 0x4019 }, // 1e8L
-    { { 0x00000000UL, 0x04000000UL, 0x8E1BC9BFUL }, 0x4034 }, // 1e16L
-    { { 0xF0200000UL, 0x2B70B59DUL, 0x9DC5ADA8UL }, 0x4069 }, // 1e32L
-    { { 0x3CBF6B71UL, 0xFFCFA6D5UL, 0xC2781F49UL }, 0x40D3 }, // 1e64L
-    { { 0xC66F336BUL, 0x80E98CDFUL, 0x93BA47C9UL }, 0x41A8 }, // 1e128L
-    { { 0xDDBB9018UL, 0x9DF9DE8DUL, 0xAA7EEBFBUL }, 0x4351 }, // 1e256L
-    { { 0xCC655C4BUL, 0xA60E91C6UL, 0xE319A0AEUL }, 0x46A3 }, // 1e512L
-    { { 0x650D3D17UL, 0x81750C17UL, 0xC9767586UL }, 0x4D48 }, // 1e1024L
-    { { 0xA74D28B1UL, 0xC53D5DE4UL, 0x9E8b3B5DUL }, 0x5A92 }, // 1e2048L
-    { { 0xC94C14F7UL, 0x8A20979AUL, 0xC4605202UL }, 0x7525 }  // 1e4096L
+    { { 0x00000000UL, 0x00000000UL, 0xA0000000UL }, 0x4002 }, /* 1e1L   */
+    { { 0x00000000UL, 0x00000000UL, 0xC8000000UL }, 0x4005 }, /* 1e2L   */
+    { { 0x00000000UL, 0x00000000UL, 0x9C400000UL }, 0x400C }, /* 1e4L   */
+    { { 0x00000000UL, 0x00000000UL, 0xBEBC2000UL }, 0x4019 }, /* 1e8L   */
+    { { 0x00000000UL, 0x04000000UL, 0x8E1BC9BFUL }, 0x4034 }, /* 1e16L  */
+    { { 0xF0200000UL, 0x2B70B59DUL, 0x9DC5ADA8UL }, 0x4069 }, /* 1e32L  */
+    { { 0x3CBF6B71UL, 0xFFCFA6D5UL, 0xC2781F49UL }, 0x40D3 }, /* 1e64L  */
+    { { 0xC66F336BUL, 0x80E98CDFUL, 0x93BA47C9UL }, 0x41A8 }, /* 1e128L */
+    { { 0xDDBB9018UL, 0x9DF9DE8DUL, 0xAA7EEBFBUL }, 0x4351 }, /* 1e256L */
+    { { 0xCC655C4BUL, 0xA60E91C6UL, 0xE319A0AEUL }, 0x46A3 }, /* 1e512L */
+    { { 0x650D3D17UL, 0x81750C17UL, 0xC9767586UL }, 0x4D48 }, /* 1e1024L*/
+    { { 0xA74D28B1UL, 0xC53D5DE4UL, 0x9E8b3B5DUL }, 0x5A92 }, /* 1e2048L*/
+    { { 0xC94C14F7UL, 0x8A20979AUL, 0xC4605202UL }, 0x7525 }  /* 1e4096L*/
 };
 
 static const ELD tab_minus_exp[MAX_EXP_INDEX] = {
-    { { 0xCCCCCCCDUL, 0xCCCCCCCCUL, 0xCCCCCCCCUL }, 0x3FFB }, // 1e-1L
-    { { 0x3D70A3D7UL, 0x70A3D70AUL, 0xA3D70A3DUL }, 0x3FF8 }, // 1e-2L
-    { { 0xD3C36113UL, 0xE219652BUL, 0xD1B71758UL }, 0x3FF1 }, // 1e-4L
-    { { 0xFDC20D2AUL, 0x8461CEFCUL, 0xABCC7711UL }, 0x3FE4 }, // 1e-8L
-    { { 0x4C2EBE65UL, 0xC44DE15BUL, 0xE69594BEUL }, 0x3FC9 }, // 1e-16L
-    { { 0x67DE18E7UL, 0x453994BAUL, 0xCFB11EADUL }, 0x3F94 }, // 1e-32L
-    { { 0x3F2398CCUL, 0xA539E9A5UL, 0xA87FEA27UL }, 0x3F2A }, // 1e-64L
-    { { 0xAC7CB3D9UL, 0x64BCE4A0UL, 0xDDD0467CUL }, 0x3E55 }, // 1e-128L
-    { { 0xFA911122UL, 0x637A1939UL, 0xC0314325UL }, 0x3CAC }, // 1e-256L
-    { { 0x7132D2E4UL, 0xDB23D21CUL, 0x9049EE32UL }, 0x395A }, // 1e-512L
-    { { 0x87A600A6UL, 0xDA57C0BDUL, 0xA2A682A5UL }, 0x32B5 }, // 1e-1024L
-    { { 0x4925110FUL, 0x34362DE4UL, 0xCEAE534FUL }, 0x256B }, // 1e-2048L
-    { { 0x2DE37E46UL, 0xD2CE9FDEUL, 0xA6DD04C8UL }, 0x0AD8 }  // 1e-4096L
+    { { 0xCCCCCCCDUL, 0xCCCCCCCCUL, 0xCCCCCCCCUL }, 0x3FFB }, /* 1e-1L   */
+    { { 0x3D70A3D7UL, 0x70A3D70AUL, 0xA3D70A3DUL }, 0x3FF8 }, /* 1e-2L   */
+    { { 0xD3C36113UL, 0xE219652BUL, 0xD1B71758UL }, 0x3FF1 }, /* 1e-4L   */
+    { { 0xFDC20D2AUL, 0x8461CEFCUL, 0xABCC7711UL }, 0x3FE4 }, /* 1e-8L   */
+    { { 0x4C2EBE65UL, 0xC44DE15BUL, 0xE69594BEUL }, 0x3FC9 }, /* 1e-16L  */
+    { { 0x67DE18E7UL, 0x453994BAUL, 0xCFB11EADUL }, 0x3F94 }, /* 1e-32L  */
+    { { 0x3F2398CCUL, 0xA539E9A5UL, 0xA87FEA27UL }, 0x3F2A }, /* 1e-64L  */
+    { { 0xAC7CB3D9UL, 0x64BCE4A0UL, 0xDDD0467CUL }, 0x3E55 }, /* 1e-128L */
+    { { 0xFA911122UL, 0x637A1939UL, 0xC0314325UL }, 0x3CAC }, /* 1e-256L */
+    { { 0x7132D2E4UL, 0xDB23D21CUL, 0x9049EE32UL }, 0x395A }, /* 1e-512L */
+    { { 0x87A600A6UL, 0xDA57C0BDUL, 0xA2A682A5UL }, 0x32B5 }, /* 1e-1024L*/
+    { { 0x4925110FUL, 0x34362DE4UL, 0xCEAE534FUL }, 0x256B }, /* 1e-2048L*/
+    { { 0x2DE37E46UL, 0xD2CE9FDEUL, 0xA6DD04C8UL }, 0x0AD8 }  /* 1e-4096L*/
 };
 
 static int cmp_u96_max( const u96 *x )
@@ -301,7 +301,7 @@ static int multiply( const ELD *op1, const ELD *op2, ELD *res )
     x1 = (uint_64)(op1->m32[2]) * (uint_64)(op2->m32[1]);
     add192(&r1, x1, 3);
     exp += normalize(&r1);
-    // round result
+    /* round result */
     if( r1.m32[2] & 0x80000000U ) {
         if( r1.m32[5] == 0xffffffffU && r1.m32[4] == 0xffffffffU && r1.m32[3] == 0xffffffffU ) {
             r1.m32[3] = 0;
@@ -345,11 +345,11 @@ static int TB_create(u96 *value, long exponent, TB_LD *ld)
         if( exponent == 0 ) break;
     }
     if( exponent != 0 ) {
-        // exponent overflow
+        /* exponent overflow */
     }
     ld->e = res.e;
     ld->m = res.m32[1] + ((uint_64)res.m32[2] << 32) ;
-    // round result
+    /* round result */
     if(res.m32[0] & 0x80000000U) {
         if( ld->m == MAXUI64 ) {
             ld->m = MAXUI64BIT;

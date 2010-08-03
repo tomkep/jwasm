@@ -108,7 +108,7 @@ ret_code LoopDirective( int i, int directive )
          * be a simple T_ID, but also an instruction or something else.
          * v2.02: And it can begin with a '.'!
          */
-        if( AsmBuffer[i]->token == T_FINAL) {
+        if( AsmBuffer[i]->token == T_FINAL ) {
             AsmError( OPERAND_EXPECTED );
             return( ERROR );
         }
@@ -174,11 +174,15 @@ ret_code LoopDirective( int i, int directive )
                 AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
                 return( ERROR );
             }
-            parmstring = AsmTmpAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1 );
-            //v2.0: use GetLiteralValue() instead of strcpy!!!
-            //strcpy( parmstring, AsmBuffer[i]->string_ptr );
-            GetLiteralValue( parmstring, AsmBuffer[i]->string_ptr );
-            DebugMsg(("LoopDirective(FOR): param string >%s<\n", parmstring));
+            /* v2.03: also ensure that the literal is the last item */
+            if( AsmBuffer[i+1]->token != T_FINAL ) {
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i+1]->string_ptr );
+                return( ERROR );
+            }
+            /* v2.0: use GetLiteralValue() instead of strcpy!!! */
+            //strcpy( line, AsmBuffer[i]->string_ptr );
+            GetLiteralValue( line, AsmBuffer[i]->string_ptr );
+            DebugMsg(("LoopDirective(FOR): param string >%s<\n", line));
         }
         /* to run StoreMacro(), AsmBuffer must be setup correctly. */
         /* clear contents beginning with the comma! */
@@ -205,7 +209,7 @@ ret_code LoopDirective( int i, int directive )
 #if USELOCALMAC
         ReleaseMacroData( macro );
 #else
-        dir_free(macro, FALSE);
+        dir_free( macro, FALSE );
 #endif
         return( ERROR );
     }
@@ -232,7 +236,7 @@ ret_code LoopDirective( int i, int directive )
         for ( ; macro->sym.value < opndx.value; macro->sym.value++ ) {
             //RunMacro( macro, "", NULL, len == 1, first, FALSE );
             RunMacro( macro, "", NULL, TRUE, TRUE, FALSE );
-            if ( AsmBuffer[0]->value == T_EXITM )
+            if ( AsmBuffer[0]->value == T_EXITM || ModuleInfo.EndDirFound == TRUE )
                 break;
             DebugMsg(("LoopDirective REPT: iteration=%u\n", macro->sym.total_length ));
             //first = FALSE;
@@ -243,7 +247,7 @@ ret_code LoopDirective( int i, int directive )
         while ( opndx.kind == EXPR_CONST && opndx.value != 0 ) {
             DebugMsg(("LoopDirective WHILE: cnt=%u\n", count++ ));
             RunMacro( macro, "", NULL, TRUE, TRUE, FALSE );
-            if ( AsmBuffer[0]->value == T_EXITM )
+            if ( AsmBuffer[0]->value == T_EXITM || ModuleInfo.EndDirFound == TRUE )
                 break;
             /* Don't use the first item in AsmBuffer! This ensures
              that the line buffer isn't set to our local buffer.
@@ -284,9 +288,9 @@ ret_code LoopDirective( int i, int directive )
     default: /* T_FOR, T_IRP */
         /* a FOR/IRP parameter can be a macro function call */
         /* that's why the macro calls must be run synchronously */
-        for( ptr = parmstring; *ptr; macro->sym.value++ ) {
+        for( ptr = line; *ptr; macro->sym.value++ ) {
             DebugMsg(("LoopDirective FOR: cnt=%u, calling RunMacro( param=>%s<, prefix=NULL, runit=1, insert=1, addbrackets=0 )\n", count++, ptr ));
-            len = RunMacro( macro, ptr, NULL, TRUE, TRUE, FALSE);
+            len = RunMacro( macro, ptr, NULL, TRUE, TRUE, FALSE );
             if ( len < 1 || AsmBuffer[0]->value == T_EXITM )
                 break;
             ptr += len;

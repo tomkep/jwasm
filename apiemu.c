@@ -330,23 +330,23 @@ char *strupr( char *str )
 
 #endif
 
-// emulations for Open Watcom
+/* emulations for Open Watcom */
 
 #if defined(__WATCOMC__) && !defined(__UNIX__)
 
 #ifdef __FLAT__
 
-#ifndef DEBUG_OUT  // OW v1.8 WDW has a problem with locally defined imports
+#ifndef DEBUG_OUT /* OW v1.8 WDW has a problem with locally defined imports */
 
 typedef union cu {
     int c;
     char * p;
 } cu;
 
-// this is an emulation of the Win32 function which is called
-// by the OW runtime. It's the only USER32 function used.
-// By defining it here the binary will just need KERNEL32 to load.
-
+/* this is an emulation of the Win32 function which is called
+ * by the OW runtime. It's the only USER32 function used.
+ * By defining it here the binary will just need KERNEL32 to load.
+ */
 char * _stdcall CharUpperA(char * lpsz)
 /*************************************/
 {
@@ -368,7 +368,7 @@ char * _stdcall CharUpperA(char * lpsz)
 #endif
 #endif
 
-// emulations for Pelles C
+/* emulations for Pelles C */
 
 #ifdef __POCC__
 

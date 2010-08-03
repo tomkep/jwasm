@@ -56,7 +56,7 @@ typedef union {
     physref phys;
 } logphys;
 
-typedef struct fixup fixup;
+typedef struct omffixup omffixup;
 typedef struct fixinfo fixinfo;
 
 #include "omfpc.h"
@@ -76,8 +76,8 @@ enum {                      /* method of fixing up location:            */
     /* don't define more than 8 values without changing bit field */
 };
 
-struct fixup {
-    fixup   *next;          /* useful for placing in linked list        */
+struct omffixup {
+    omffixup *next;          /* useful for placing in linked list        */
     uint_8  loc_method      :3;
     uint_8  self_relative   :1; /* self or seg relative                 */
     uint_8  loader_resolved :1; /* loader resolved relocation           */
@@ -118,18 +118,18 @@ extern void OmfFixFini( void );
     outstanding fixups.
 */
 
-extern fixup *OmfFixNew( void );
+extern omffixup *OmfFixNew( void );
 /* Allocate memory for a new fixup. */
 
-extern fixup *OmfFixDup( const fixup *fix );
+extern omffixup *OmfFixDup( const omffixup *fix );
 /* Allocate a new fixup, and copy fix into it. */
 
-extern void OmfFixKill( fixup *fix );
+extern void OmfFixKill( omffixup *fix );
 /* Free the memory used by fix. */
 
 /********** the following are used for generating fixups *************/
 
-extern size_t OmfFixGenFix( fixup *fix, uint_8 *buf, int type );
+extern size_t OmfFixGenFix( omffixup *fix, uint_8 *buf, int type );
 /*
     Create the binary representation of fix, for the OMF described by
     fixgen_type type, into buf.  Returns the number of bytes written.

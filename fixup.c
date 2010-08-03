@@ -36,25 +36,25 @@
 #include "segment.h"
 #include "omf.h"
 
-extern int_8           Frame;          // Frame of current fixup
-extern uint_16         Frame_Datum;    // Frame datum of current fixup
+extern int_8           Frame;          /* Frame of current fixup */
+extern uint_16         Frame_Datum;    /* Frame datum of current fixup */
 extern struct format_options formatoptions[];
 
 const char szNull[] = {"<NULL>"};
 
-struct asmfixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixup_options option )
+struct genfixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixup_options option )
 /************************************************************************************************/
 /*
  * called when an instruction operand or a data item is relocatable.
- * creates a new asmfixup item and initializes it using symbol <sym>.
+ * creates a new genfixup item and initializes it using symbol <sym>.
  * put the correct target offset into the link list when forward reference of
  * relocatable is resolved;
  * Global vars Frame and Frame_Datum must be set.
  */
 {
-    struct asmfixup     *fixup;
+    struct genfixup     *fixup;
 
-    fixup = AsmAlloc( sizeof( struct asmfixup ) );
+    fixup = AsmAlloc( sizeof( struct genfixup ) );
 //    fixup->external = 0;
     fixup->sym = sym;
     fixup->offset = 0;
@@ -63,7 +63,7 @@ struct asmfixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixu
      * but sufficiently exact for this purpose.
      */
     fixup->fixup_loc = GetCurrOffset();
-    fixup->def_seg = CurrSeg;           /* may be NULL */
+    fixup->def_seg = CurrSeg;           /* may be NULL (END directive) */
     fixup->frame = Frame;               /* this is just a guess */
     fixup->frame_datum = Frame_Datum;
 
@@ -71,27 +71,39 @@ struct asmfixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixu
      * this is done for pass 1 only.
      */
     //if ( sym ) {
-    if ( sym && Parse_Pass == PASS_1 ) { // changed v1.96
-        fixup->nextbp = sym->fixup;
-        sym->fixup = fixup;
+    if ( Parse_Pass == PASS_1 ) {
+        if ( sym ) { /* changed v1.96 */
+            fixup->nextbp = sym->fixup;
+            sym->fixup = fixup;
+        }
+        /* v2.03: in pass one, create a linked list of
+         * fixup locations for a segment. This is to improve
+         * backpatching, because it allows to adjust fixup locations
+         * after a distance has changed from short to near
+         */
+        if ( CurrSeg ) {
+            fixup->nextrlc = CurrSeg->e.seginfo->FixupListHeadGen;
+            CurrSeg->e.seginfo->FixupListHeadGen = fixup;
+        }
     }
 
     fixup->type = type;
     fixup->loader_resolved = FALSE;
     fixup->option = option;
-    //CodeInfo->InsFixup[Opnd_Count] = fixup; // changed in v1.96
+    DebugMsg(("AddFixup(type=%X, opt=%X): loc=%Xh, target=%s\n", type, option, fixup->fixup_loc, fixup->sym ? fixup->sym->name : "NULL" ));
+    //CodeInfo->InsFixup[Opnd_Count] = fixup; /* changed in v1.96 */
     return( fixup );
 }
 
 /*
- * Store asmfixup information in current segment's fixup linked list.
- * please note: forward references - which must be written in PASS 1 -
- * aren't handled here!
+ * Store genfixup information in current segment's fixup linked list.
+ * please note: forward references for backpatching are written in PASS 1 -
+ * they no longer exist when store_fixup() is called.
  */
-ret_code store_fixup( struct asmfixup *fixup, int_32 * pdata )
+ret_code store_fixup( struct genfixup *fixup, int_32 * pdata )
 /************************************************************/
 {
-    //struct asmfixup     *fixup;
+    //struct genfixup     *fixup;
 
     //fixup = CodeInfo->InsFixup[index];
 
@@ -100,7 +112,7 @@ ret_code store_fixup( struct asmfixup *fixup, int_32 * pdata )
     fixup->offset = *pdata;
 
 #ifdef DEBUG_OUT
-    if (fixup->sym)
+    if ( fixup->sym )
         DebugMsg(("store_fixup: type=%u, loc=%s.%X, target=%s(%X+%X)\n",
                   fixup->type, CurrSeg->sym.name, fixup->fixup_loc, fixup->sym->name, fixup->sym->offset, fixup->offset ));
     else
@@ -108,8 +120,8 @@ ret_code store_fixup( struct asmfixup *fixup, int_32 * pdata )
                   fixup->type, CurrSeg->sym.name, fixup->fixup_loc, fixup->offset));
 #endif
 
-    if (Options.output_format == OFORMAT_OMF) {
-        struct fixup *fixomf;
+    if ( Options.output_format == OFORMAT_OMF ) {
+        struct omffixup *fixomf;
 
         /* for OMF, the target's offset is stored at the fixup's location.
         */
@@ -117,9 +129,9 @@ ret_code store_fixup( struct asmfixup *fixup, int_32 * pdata )
             *pdata += fixup->sym->offset;
         }
 
-        /* convert asmfixup to OMF fixup.
+        /* convert genfixup to OMF fixup.
          * This probably should be done later, when the record is written;
-         * then the segment's fixup list will always contain asmfixup entries.
+         * then the segment's fixup list will always contain genfixup entries.
          */
         fixomf = omf_create_fixup( fixup );
         if( fixomf == NULL )
@@ -176,7 +188,7 @@ ret_code store_fixup( struct asmfixup *fixup, int_32 * pdata )
          symbol offset is stored an the fixup location!
         */
 
-        /* for COFF/ELF/BIN, store the asmfixup records directly.
+        /* for COFF/ELF/BIN, store the genfixup records directly.
          * (this should be done for OMF as well!)
          */
 

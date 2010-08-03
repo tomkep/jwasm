@@ -50,6 +50,7 @@
 "-mz\0"             "Generate binary in DOS MZ format\0"
 #endif
 #endif
+"-nc=<name>\0"       "Set class name of code segment\0"
 "-n<d|m|t>=<name>\0" "Set name of data segment, module or text segment\0"
 #if COCTALS
 "-o\0"              "Allow C form of octal constants\0"

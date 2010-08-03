@@ -47,6 +47,11 @@ m5  macro prefix, suffix
 prefix&&suffix equ 1
     endm
 
+;--- empty macro
+
+m6 macro
+	endm
+
     .CODE
 
     m1 1
@@ -57,6 +62,9 @@ prefix&&suffix equ 1
     m4 5
     m5 pfx,sfx
     db pfxsfx
+    m6
+    purge m6
+    m6
 
     END
 

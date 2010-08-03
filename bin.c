@@ -25,8 +25,8 @@
 
 #define SECTORMAP 1 /* 1=print sector map in listing file */
 
-extern symbol_queue     Tables[];       // tables of definitions
-extern asm_sym          *start_label;   // symbol for Modend (COFF)
+extern symbol_queue     Tables[];       /* tables of definitions */
+extern asm_sym          *start_label;   /* start label */
 extern struct asm_sym   symPC; /* '$' symbol */
 
 #if MZ_SUPPORT
@@ -203,7 +203,7 @@ static int GetSegRelocs( uint_16 *pDst )
     uint_16 valueofs;
     uint_16 valueseg;
     uint_32 size;
-    struct asmfixup *fixup;
+    struct genfixup *fixup;
 
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
         if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
@@ -293,7 +293,7 @@ static ret_code DoFixup( dir_node *curr )
     uint_8 *codeptr;
     dir_node *seg;
     uint_32 value;
-    struct asmfixup *fixup;
+    struct genfixup *fixup;
 
     if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
         return( NOT_ERROR );
@@ -359,14 +359,14 @@ static ret_code DoFixup( dir_node *curr )
         switch (fixup->type) {
         case FIX_RELOFF8:
             //*codeptr += (value - fixup->fixup_loc + 1) & 0xff;
-            // changed in v1.95
+            /* changed in v1.95 */
             *codeptr += (value - (fixup->fixup_loc + curr->e.seginfo->start_offset) - 1) & 0xff;
             DebugMsg(("DoFixup(%s, %lXh): FIX_RELOFF8, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr ));
             break;
         case FIX_RELOFF16:
             codeptr16 = (uint_16 *)codeptr;
             //*codeptr16 += (value - fixup->fixup_loc + 2) & 0xffff;
-            // changed in v1.95
+            /* changed in v1.95 */
             *codeptr16 += (value - (fixup->fixup_loc + curr->e.seginfo->start_offset) - 2) & 0xffff;
             DebugMsg(("DoFixup(%s, %lXh): FIX_RELOFF16, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr16 ));
             break;
@@ -379,7 +379,7 @@ static ret_code DoFixup( dir_node *curr )
 #endif
             codeptr32 = (uint_32 *)codeptr;
             //*codeptr32 += (value - fixup->fixup_loc + 4);
-            // changed in v1.95
+            /* changed in v1.95 */
             *codeptr32 += (value - (fixup->fixup_loc + curr->e.seginfo->start_offset) - 4);
             DebugMsg(("DoFixup(%s, %lXh): FIX_RELOFF32, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
             break;

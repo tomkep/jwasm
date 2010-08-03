@@ -7,6 +7,14 @@
 
 	.code
 
+;--- empty loop
+	for x,<>
+	endm
+
+;--- formal parameter is a reserved word
+	for eax,<>
+	endm
+
 TE1 CatStr <>
 	for x:req, <a,b,c>
 TE1 CatStr TE1,<x>

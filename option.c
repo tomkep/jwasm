@@ -29,7 +29,7 @@ typedef struct _option {
     int (*func)(int *);
 } option;
 
-// OPTION directive helper functions
+/* OPTION directive helper functions */
 
 /* OPTION DOTNAME */
 
@@ -259,7 +259,7 @@ static int SetNoKeyword( int *pi )
     return( NOT_ERROR );
 }
 
-/* OPTION LANGUAGE */
+/* OPTION LANGUAGE:{C|PASCAL|BASIC|FORTRAN|SYSCALL|STDCALL|FASTCALL} */
 
 static int SetLanguage( int *pi )
 /*******************************/
@@ -268,15 +268,15 @@ static int SetLanguage( int *pi )
     //lang_type langtype;
     //int language = ERROR;
 
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token == T_RES_ID) {
+    if ( AsmBuffer[i]->token == T_RES_ID ) {
         if ( GetLangType( &i, &ModuleInfo.langtype ) == NOT_ERROR ) {
             /* update @Interface assembly time variable */
-            if (sym_Interface)
+            if ( ModuleInfo.model != MOD_NONE && sym_Interface )
                 sym_Interface->value = ModuleInfo.langtype;
             *pi = i;
             return( NOT_ERROR );
@@ -771,9 +771,9 @@ static int Unsupported( int *pi )
     return( ERROR );
 }
 
-// the table must be here after the option helper functions
-// to avoid having to define prototypes.
-
+/* the table must be here after the option helper functions
+ * to avoid having to define prototypes.
+ */
 static const option optiontab[] = {
     { "CASEMAP",      SetCaseMap     },
     { "PROC",         SetProc        },
@@ -824,10 +824,10 @@ static const option optiontab[] = {
     { NULL                           }
 };
 
-// handle OPTION directive
-// syntax:
-// OPTION option[:value][,option[:value,...]]
-
+/* handle OPTION directive
+ * syntax:
+ * OPTION option[:value][,option[:value,...]]
+ */
 ret_code OptionDirective( int i )
 /*******************************/
 {
@@ -835,6 +835,7 @@ ret_code OptionDirective( int i )
 
     DebugMsg(( "option directive enter\n" ));
 
+    i++; /* skip OPTION directive */
     for ( ; ; ) {
         switch (AsmBuffer[i]->token) {
         case T_DIRECTIVE:      /* PROC, SEGMENT are of this type */

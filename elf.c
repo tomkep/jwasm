@@ -25,18 +25,23 @@
 
 #if ELF_SUPPORT
 
-// start label is always public for COFF/ELF, no need to add it
+/* v2.03: support for ... */
+#define ELFALIAS 0
+
+/* start label is always public for COFF/ELF, no need to add it */
 #define ADDSTARTLABEL 0
 
-// there's no STT_IMPORT type for ELF, it's OW specific
+/* there's no STT_IMPORT type for ELF, it's OW specific */
 #define OWELFIMPORT 0
 
-// use GNU extensions for LD ( 16bit and 8bit relocations )
+/* use GNU extensions for LD ( 16bit and 8bit relocations ) */
 #define GNURELOCS 1
 
-extern symbol_queue     Tables[];       // tables of definitions
-extern asm_sym          *start_label;   // symbol for Modend (COFF)
-//extern uint             segdefidx;      // Number of Segment definition
+#define MANGLE_BYTES 8 /* extra size required for name decoration */
+
+extern symbol_queue     Tables[];       /* tables of definitions */
+extern asm_sym          *start_label;   /* start label */
+//extern uint             segdefidx;      /* Number of Segment definition */
 
 //static uint_32 size_drectve;   /* size of .drectve section */
 static uint_32 symindex;       /* entries in symbol table */
@@ -72,12 +77,12 @@ static intseg internal_segs[] = {
 #define SYMTAB_IDX   1
 #define STRTAB_IDX   2
 
-/* translate section names: */
-// _TEXT -> .text
-// _DATA -> .data
-// _BSS  -> .bss
-// CONST -> .rdata
-
+/* translate section names:
+ * _TEXT -> .text
+ * _DATA -> .data
+ * _BSS  -> .bss
+ * CONST -> .rdata
+ */
 static char * ElfConvertSectionName( const asm_sym * sym )
 /********************************************************/
 {
@@ -135,7 +140,7 @@ typedef struct localname {
    set content of these sections
 */
 static void set_symtab_values( void *hdr )
-/***********************************************/
+/****************************************/
 {
     uint_32 entries;
     uint_32 strsize = 1;
@@ -152,7 +157,7 @@ static void set_symtab_values( void *hdr )
     localname *localshead = NULL;
     localname *localstail = NULL;
     localname *localscurr;
-    char buffer[MAX_ID_LEN+1];
+    char buffer[MAX_ID_LEN + MANGLE_BYTES + 1];
 
     /* symbol table. there is
      - 1 NULL entry,
@@ -172,7 +177,7 @@ static void set_symtab_values( void *hdr )
 
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
         if (curr->e.seginfo->num_relocs) {
-            struct asmfixup * fix = curr->e.seginfo->FixupListHeadGen;
+            struct genfixup * fix = curr->e.seginfo->FixupListHeadGen;
             for ( ; fix; fix = fix->nextrlc ) {
                 /* if it's not EXTERNAL/PUBLIC, add symbol. */
                 /* however, if it's an assembly time variable */
@@ -206,6 +211,14 @@ static void set_symtab_values( void *hdr )
         curr->sym.idx = symindex++;
     }
     DebugMsg(("set_symtab_values: index after EXTERNALs: %u\n", symindex));
+
+#if ELFALIAS
+    /* count aliases */
+    for( curr = Tables[TAB_ALIAS].head ; curr != NULL ;curr = curr->next ) {
+        curr->sym.idx = symindex++;
+    }
+    DebugMsg(("set_symtab_values: index after ALIASES: %u\n", symindex));
+#endif
 
 #if 0 /* v2.01: PROTOs are now in TAB_EXT */
     /* count PROTOs which are used and external */
@@ -319,9 +332,32 @@ static void set_symtab_values( void *hdr )
         p64++;
     }
 
+#if ELFALIAS
+    /* 5. aliases */
+
+    for( curr = Tables[TAB_ALIAS].head ; curr != NULL ;curr = curr->next ) {
+        Mangle( &curr->sym, buffer );
+        len = strlen( buffer );
+
+        p64->st_name = strsize;
+
+#if OWELFIMPORT
+        p64->st_info = ELF64_ST_INFO(STB_WEAK, STT_IMPORT);
+#else
+        p64->st_info = ELF64_ST_INFO(STB_WEAK, STT_NOTYPE);
+#endif
+        p64->st_value = 0; /* is always 0 */
+        p64->st_shndx = SHN_UNDEF;
+
+        strsize += len + 1;
+        DebugMsg(("set_symtab_values, ALIASES: symbol %s, ofs=%X\n", buffer, p64->st_value));
+        p64++;
+    }
+#endif
+
 #if 0 /* v2.01: PROTOS are now in TAB_EXT */
-    // 5. PROTOs which have been "used" and have no matching PROC are also
-    // externals.
+    /* 5. PROTOs which have been "used" and have no matching PROC are also
+     * externals. */
 
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         if( curr->sym.used == FALSE || curr->sym.isproc == TRUE )
@@ -445,7 +481,7 @@ static void set_symtab_values( void *hdr )
         p32->st_name = strsize;
 
         /* for COMMUNALs, store their size in the Value field */
-        if (curr->sym.comm == TRUE) {
+        if ( curr->sym.comm == TRUE ) {
             p32->st_info = ELF32_ST_INFO(STB_GLOBAL, STT_COMMON);
             p32->st_value = curr->sym.total_size;
             p32->st_shndx = SHN_COMMON;
@@ -464,9 +500,31 @@ static void set_symtab_values( void *hdr )
         p32++;
     }
 
+#if ELFALIAS
+    /* 5. aliases */
+    for( curr = Tables[TAB_ALIAS].head ; curr != NULL ;curr = curr->next ) {
+        Mangle( &curr->sym, buffer );
+        len = strlen( buffer );
+
+        p32->st_name = strsize;
+
+#if OWELFIMPORT
+        p32->st_info = ELF32_ST_INFO(STB_WEAK, STT_IMPORT);
+#else
+        p32->st_info = ELF32_ST_INFO(STB_WEAK, STT_NOTYPE);
+#endif
+        p32->st_value = 0; /* is always 0 */
+        p32->st_shndx = SHN_UNDEF;
+
+        strsize += len + 1;
+        DebugMsg(("set_symtab_values, ALIAS: symbol %s, ofs=%X\n", buffer, p32->st_value));
+        p32++;
+    }
+#endif
+
 #if 0 /* v2.01: PROTOs are now in TAB_EXT */
-    // 5. PROTOs which have been "used" and have no matching PROC are also
-    // externals.
+    /* 5. PROTOs which have been "used" and have no matching PROC are also
+     * externals. */
 
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         if( curr->sym.used == FALSE || curr->sym.isproc == TRUE )
@@ -555,6 +613,14 @@ static void set_symtab_values( void *hdr )
         Mangle( &curr->sym, p2 );
         p2 += strlen(p2) + 1;
     }
+
+#if ELFALIAS
+    for( curr = Tables[TAB_ALIAS].head ; curr != NULL ;curr = curr->next ) {
+        Mangle( &curr->sym, p2 );
+        p2 += strlen(p2) + 1;
+    }
+#endif
+
 #if 0 /* v2.01: PROTOs are now in TAB_EXT */
     for( curr = Tables[TAB_PROC].head ; curr != NULL ;curr = curr->next ) {
         if( curr->sym.used == FALSE || curr->sym.isproc == TRUE )
@@ -576,11 +642,11 @@ static void set_symtab_values( void *hdr )
     return;
 }
 
-// set content + size of .shstrtab section
-// alloc .shstrtab
-
-void set_shstrtab_values( void )
-/******************************/
+/* set content + size of .shstrtab section
+ * alloc .shstrtab
+ */
+static void set_shstrtab_values( void )
+/*************************************/
 {
     intseg      *seg;
     dir_node    *curr;
@@ -628,7 +694,7 @@ static unsigned int Get_Num_Relocs( dir_node *curr )
 /**************************************************/
 {
     unsigned relocs;
-    struct asmfixup *fix;
+    struct genfixup *fix;
 
     for (relocs = 0, fix = curr->e.seginfo->FixupListHeadGen; fix ; fix = fix->nextrlc, relocs++);
 
@@ -893,9 +959,9 @@ static int elf_write_section_table( module_info *ModuleInfo, void *hdr, uint off
     return( NOT_ERROR );
 }
 
-// write ELF header
-// ModuleInfo.total_segs has been set by the caller
-
+/* write ELF header
+ * ModuleInfo.total_segs has been set by the caller
+ */
 ret_code elf_write_header( module_info *ModuleInfo )
 /**************************************************/
 {
@@ -993,8 +1059,9 @@ ret_code elf_write_header( module_info *ModuleInfo )
     return( NOT_ERROR );
 }
 
-// write ELF symbol table
-// contents of the table:
+/* write ELF symbol table
+ * contents of the table:
+ */
 #if 0
 ret_code elf_write_symbols( module_info *ModuleInfo )
 /***************************************************/
@@ -1012,9 +1079,9 @@ ret_code elf_write_symbols( module_info *ModuleInfo )
 }
 #endif
 
-// write section contents and fixups
-// this is done after the last step only!
-
+/* write section contents and fixups
+ * this is done after the last step only!
+ */
 ret_code elf_write_data( module_info *ModuleInfo )
 /*************************************************/
 {
@@ -1051,7 +1118,7 @@ ret_code elf_write_data( module_info *ModuleInfo )
     /* write reloc sections content */
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
         if (curr->e.seginfo->num_relocs) {
-            struct asmfixup *fixup;
+            struct genfixup *fixup;
             Elf32_Rel reloc32;
             Elf64_Rel reloc64;
             DebugMsg(("elf_write_data: relocs at ofs=%X, size=%X\n", curr->e.seginfo->reloc_offset, curr->e.seginfo->num_relocs * sizeof(Elf32_Rel)));

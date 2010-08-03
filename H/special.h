@@ -144,7 +144,7 @@ res(R8D, r8d, 3, RWT_REGISTER,      OP_R32,     8, RWF_X64,    P_64,   SFR_IREG|
 res(R9D, r9d, 3, RWT_REGISTER,      OP_R32,     9, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
 res(R10D,r10d,4, RWT_REGISTER,      OP_R32,    10, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
 res(R11D,r11d,4, RWT_REGISTER,      OP_R32,    11, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
-res(R12D,r12d,4, RWT_REGISTER,      OP_R32,    12, RWF_X64,    P_64,   0)
+res(R12D,r12d,4, RWT_REGISTER,      OP_R32,    12, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
 res(R13D,r13d,4, RWT_REGISTER,      OP_R32,    13, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
 res(R14D,r14d,4, RWT_REGISTER,      OP_R32,    14, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
 res(R15D,r15d,4, RWT_REGISTER,      OP_R32,    15, RWF_X64,    P_64,   SFR_IREG|SFR_SIZ4)
@@ -196,6 +196,7 @@ res(REAL8,  real8,  5,  RWT_TYPE,   MT_REAL8,  ST_REAL8,   0, P_86,    0)
 res(TBYTE,  tbyte,  5,  RWT_TYPE,   MT_TBYTE,  ST_TBYTE,   0, P_86,    0)
 res(REAL10, real10, 6,  RWT_TYPE,   MT_REAL10, ST_REAL10,  0, P_86,    0)
 res(OWORD,  oword,  5,  RWT_TYPE,   MT_OWORD,  ST_OWORD,   0, P_86,    0)
+/* NEAR must be first, FAR32 must be last, all contiguous */
 res(NEAR,   near,   4,  RWT_TYPE,   MT_NEAR,   ST_NEAR,    0, P_86,    0)
 res(FAR,    far,    3,  RWT_TYPE,   MT_FAR,    ST_FAR,     0, P_86,    0)
 res(NEAR16, near16, 6,  RWT_TYPE,   MT_NEAR,   ST_NEAR16,  0, P_386,   0)
@@ -260,20 +261,32 @@ res(ADDR,   addr,  4, RWT_RES_ID,  0,   0, 0,   P_86,        0)
 res(FLAT,   flat,  4, RWT_RES_ID,  0,   0, 0,   P_86,        0)
 res(VARARG, vararg,6, RWT_RES_ID,  0,   0, 0,   P_86,        0)
 
-res(BASIC,    basic,       5, RWT_RES_ID, 0,   LANG_BASIC,       0,      P_86,  0)
+/* languages, must be in this order! */
+/* token      str        len  rm_byte     op2  opcode        flags       cpu   op1 */
 res(C,        c,           1, RWT_RES_ID, 0,   LANG_C,           0,      P_86,  0)
-res(FORTRAN,  fortran,     7, RWT_RES_ID, 0,   LANG_FORTRAN,     0,      P_86,  0)
-res(PASCAL,   pascal,      6, RWT_RES_ID, 0,   LANG_PASCAL,      0,      P_86,  0)
-res(STDCALL,  stdcall,     7, RWT_RES_ID, 0,   LANG_STDCALL,     0,      P_86,  0)
 res(SYSCALL,  syscall,     7, RWT_RES_ID, 0,   LANG_SYSCALL,     0,      P_86,  0)
+res(STDCALL,  stdcall,     7, RWT_RES_ID, 0,   LANG_STDCALL,     0,      P_86,  0)
+res(PASCAL,   pascal,      6, RWT_RES_ID, 0,   LANG_PASCAL,      0,      P_86,  0)
+res(FORTRAN,  fortran,     7, RWT_RES_ID, 0,   LANG_FORTRAN,     0,      P_86,  0)
+res(BASIC,    basic,       5, RWT_RES_ID, 0,   LANG_BASIC,       0,      P_86,  0)
 res(FASTCALL, fastcall,    8, RWT_RES_ID, 0,   LANG_FASTCALL,    0,      P_86,  0)
 
-/* directives */
-/* some directives are ordered in groups with start and end point */
-/* if those points change, adjust directive.c! */
+/* directives
+ * some directives are ordered in groups with start and end point
+ * if those points change, adjust directive.c!
+ * field usage:
+ * opnd_type[0] = value for directive
+ * opnd_type[1] = DF_ flags
+ * bitfields: unused
+ * cpu = cpu flags
+ * opcode = DRT_ flags
+ * rm_byte = RWT_DIRECTIVE
+ * flags = RWF_ flags
+ */
 
 /* cpu directives (start: .8086, end: .NO87 */
 
+/* token      str        len   rm_byte          op2  opc flags  cpu    op1 */
 res(DOT_8086, .8086,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_86  )
 res(DOT_186,  .186,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_186 )
 res(DOT_286,  .286,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_286 )

@@ -38,6 +38,9 @@
 #include "segment.h"
 #include "input.h"
 
+/* v2.03: OutputCodeByte no longer needed */
+#define OutputCodeByte( x ) OutputByte( x )
+
 enum prefix_reg {
     PREFIX_ES = 0x26,
     PREFIX_CS = 0x2E,
@@ -62,12 +65,11 @@ static ret_code output_3DNow( struct code_info *CodeInfo )
 static ret_code output_opc( struct code_info *CodeInfo )
 /******************************************************/
 /*
-- determine what code should be output and their order;
-- output prefix bytes ( ADRSIZ, OPSIZ, LOCK, REPxx, segment override prefix, etc )
-  , opcode, "mod r/m" byte and "s-i-b" byte;
-- i: index into AsmOpTable
-- possible return codes: ERROR, NOT_ERROR
-*/
+ * - determine what code should be output and their order;
+ * - output prefix bytes ( ADRSIZ, OPSIZ, LOCK, REPxx, segment override prefix, etc )
+ * - output opcode, "mod r/m" byte and "s-i-b" byte;
+ * - possible return codes: ERROR, NOT_ERROR
+ */
 {
     const struct asm_ins *ins = CodeInfo->pcurr;
     uint_8           tmp;
@@ -188,7 +190,7 @@ static ret_code output_opc( struct code_info *CodeInfo )
         && (( ins->allowed_prefix == AP_FWAIT ) || ( ins->cpu & P_FPU_MASK ))) {
         OutputCodeByte( OP_WAIT );
     } else if( ins->allowed_prefix != AP_NO_FWAIT ) {
-        // implicit FWAIT synchronization for 8087 (CPU 8086/80186)
+        /* implicit FWAIT synchronization for 8087 (CPU 8086/80186) */
         if((( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_286 )
             && (( ins->cpu & P_FPU_MASK ) == P_87 )) {
             OutputCodeByte( OP_WAIT );
@@ -311,9 +313,9 @@ static ret_code output_opc( struct code_info *CodeInfo )
         goto output_sib;
     case no_WDS:
         CodeInfo->opcode = 0;
-        // no break
+        /* no break */
     default:
-        // don't output opcode for 3DNow! instructions
+        /* don't output opcode for 3DNow! instructions */
         if( ins->byte1_info != F_0F0F ) {
             OutputCodeByte( ins->opcode | CodeInfo->opcode );
         }
@@ -325,14 +327,14 @@ static ret_code output_opc( struct code_info *CodeInfo )
             break; /* not for 16bit */
         switch ( tmp & NOT_BIT_345 ) {
         case 0x04:
-            // mod = 00, r/m = 100
-            // s-i-b is present
+            /* mod = 00, r/m = 100 */
+            /* s-i-b is present */
         case 0x44:
-            // mod = 01, r/m = 100
-            // s-i-b is present
+            /* mod = 01, r/m = 100 */
+            /* s-i-b is present */
         case 0x84:
-            // mod = 10, r/m = 100
-            // s-i-b is present
+            /* mod = 10, r/m = 100 */
+            /* s-i-b is present */
             OutputCodeByte( CodeInfo->sib );
         }
         break;
@@ -340,7 +342,7 @@ static ret_code output_opc( struct code_info *CodeInfo )
     return( NOT_ERROR );
 }
 
-static void mark_fixupp( struct code_info *CodeInfo, struct asmfixup *fixup, OPNDTYPE determinant )
+static void mark_fixupp( struct code_info *CodeInfo, struct genfixup *fixup, OPNDTYPE determinant )
 /*************************************************************************************************/
 /*
  * called by codegen:output_data()
@@ -378,9 +380,8 @@ static void mark_fixupp( struct code_info *CodeInfo, struct asmfixup *fixup, OPN
 static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int index )
 /************************************************************************************/
 /*
- output address displacement and immediate data;
- possible return codes: NOT_ERROR
-*/
+ * output address displacement and immediate data;
+ */
 {
     int       size = 0;
 
@@ -408,7 +409,7 @@ static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int i
         size = 8;
 #endif
     } else if( determinant & OP_M_ANY ) {
-        // switch on the mode ( the leftmost 2 bits )
+        /* switch on the mode ( the leftmost 2 bits ) */
         switch( CodeInfo->rm_byte & BIT_67 ) {
         case MOD_01:  /* displacement size is 1 */
             size = 1;
@@ -423,9 +424,9 @@ static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int i
                 switch( CodeInfo->rm_byte & BIT_012 ) {
                 case S_I_B: /* 0x04 (equals register # for ESP) */
                     if( ( CodeInfo->sib & BIT_012 ) != D32 ) {
-                        break;  // size = 0
+                        break;  /* size = 0 */
                     }
-                    // no break
+                    /* no break */
                 case D32: /* 0x05 (equals register # for EBP) */
                     size = 4; /* = size of displacement */
                 }
@@ -447,10 +448,10 @@ static void output_data( struct code_info *CodeInfo, OPNDTYPE determinant, int i
             CodeInfo->InsFixup[index]->fixup_loc = GetCurrOffset();
             mark_fixupp( CodeInfo, CodeInfo->InsFixup[index], determinant );
             //store_fixup( CodeInfo->InsFixup[index], &CodeInfo->data[index] );
-            OutputBytesAndFixup( CodeInfo->InsFixup[index],
-                                (unsigned char *)&CodeInfo->data[index], size );
+            OutputBytes( (unsigned char *)&CodeInfo->data[index],
+                                size, CodeInfo->InsFixup[index] );
         } else {
-            OutputBytes( (unsigned char *)&CodeInfo->data[index], size );
+            OutputBytes( (unsigned char *)&CodeInfo->data[index], size, NULL );
         }
     }
     return;
@@ -508,7 +509,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
 
     do  {
         asm_op2 = CodeInfo->pcurr->opnd_type[OPND2];
-        DebugMsg(("match_phase_3: op2=%X\n", asm_op2 ));
+        DebugMsg(("match_phase_3: instr table op2=%X\n", asm_op2 ));
         switch( asm_op2 ) {
         case OP_CR:
         case OP_DR:
@@ -552,8 +553,8 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
             //if( cur_opnd & asm_op2 ) { /* v2.01: accept CL only */
             if( cur_opnd == asm_op2 ) { 
                 DebugMsg(("match_phase_3: OP_CL\n"));
-                // CL is encoded in bit 345 of rm_byte, but we don't need it
-                // so clear it here
+                /* CL is encoded in bit 345 of rm_byte, but we don't need it
+                 * so clear it here */
                 CodeInfo->rm_byte &= NOT_BIT_345;
                 if( output_opc( CodeInfo ) == ERROR )
                     return( ERROR );
@@ -579,7 +580,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                 long operand = CodeInfo->data[OPND2];
                 DebugMsg(("match_phase_3: OP_I\n"));
                 if( last_opnd & OP_R8 ) {
-                    // 8-bit register, so output 8-bit data
+                    /* 8-bit register, so output 8-bit data */
                     if( Parse_Pass == PASS_1 && !InRange( operand, 1 ) ) {
                         DebugMsg(("imm const too large (08): %X\n", operand));
                         AsmWarn( 1, IMMEDIATE_CONSTANT_TOO_LARGE );
@@ -592,7 +593,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                             CodeInfo->InsFixup[OPND2]->type = FIX_LOBYTE;
                     }
                 } else if( last_opnd & OP_R16 ) {
-                    // 16-bit register, so output 16-bit data
+                    /* 16-bit register, so output 16-bit data */
                     if( Parse_Pass == PASS_1 && !InRange( operand, 2 ) ) {
                         DebugMsg(("imm const too large (16): %X\n", operand));
                         AsmWarn( 1, IMMEDIATE_CONSTANT_TOO_LARGE );
@@ -603,7 +604,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
 #else
                 } else if( last_opnd & OP_R32 ) {
 #endif
-                    // 32- or 64-bit register, so output 32-bit data
+                    /* 32- or 64-bit register, so output 32-bit data */
                     CodeInfo->prefix.opsiz = CodeInfo->Ofssize ? 0 : 1;/* 12-feb-92 */
                     cur_opnd = OP_I32;
                 } else if( last_opnd & OP_M_ANY ) {
@@ -651,15 +652,17 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
             }
             break;
 #endif
-        case OP_I8_U:
+        case OP_I8_U: /* shift+rotate, ENTER, IN, PSxx[D|Q|W] */
             DebugMsg(("match_phase_3: OP_I8_U\n"));
             if( ( cur_opnd != OP_I8 )
                 && ( cur_opnd != OP_I8_U )
                 && ( cur_opnd != OP_I16 ) ) {
                 break;
             }
-            // range of unsigned 8-bit is 0 - 255
-            if( CodeInfo->data[OPND2] > UCHAR_MAX ) {
+            /* range of unsigned 8-bit is 0 - 255 */
+            /* v2.03: lower bound wasn't checked */
+            //if( CodeInfo->data[OPND2] > UCHAR_MAX ) {
+            if( CodeInfo->data[OPND2] > UCHAR_MAX || CodeInfo->data[OPND2] < -128 ) {
                 break;
             }
             if( output_opc( CodeInfo ) == ERROR )
@@ -784,7 +787,7 @@ static ret_code match_phase_2( struct code_info *CodeInfo )
  */
 {
     if( CodeInfo->opnd_type[OPND2] != OP_NONE ) {
-        // 2 opnds instruction
+        /* 2 opnds instruction */
         ret_code rc = match_phase_3( CodeInfo, CodeInfo->pcurr->opnd_type[OPND1] );
         if ( rc == NOT_ERROR ) {
 #if AMD64_SUPPORT
@@ -800,13 +803,13 @@ static ret_code match_phase_2( struct code_info *CodeInfo )
         return( rc );
     } else {
         DebugMsg(("match_phase_2() enter\n" ));
-        // 1 opnd instruction
-        // make sure the second opnd also match, i.e. has to be OP_NONE
+        /* 1 opnd instruction */
+        /* make sure the second opnd also match, i.e. has to be OP_NONE */
         if( CodeInfo->pcurr->opnd_type[OPND2] == OP_NONE ) {
             if( output_opc( CodeInfo ) == ERROR ) {
                 return( ERROR );
             }
-            // output idata or disp ( if first opnd is OP_M / OP_I )
+            /* output idata or disp ( if first opnd is OP_M / OP_I ) */
             output_data( CodeInfo, CodeInfo->opnd_type[OPND1], OPND1 );
 #if AMD64_SUPPORT
             if ( CodeInfo->Ofssize == USE64 && CodeInfo->InsFixup[OPND1] && CodeInfo->InsFixup[OPND1]->type == FIX_RELOFF32 )
@@ -814,7 +817,7 @@ static ret_code match_phase_2( struct code_info *CodeInfo )
 #endif
             return( NOT_ERROR );
         } else {
-            // still cannot find match
+            /* still cannot find match */
             return( EMPTY );
         }
     }
@@ -849,8 +852,8 @@ ret_code match_phase_1( struct code_info *CodeInfo )
     }
 
 #if AMD64_SUPPORT
-    DebugMsg(("match_phase_1: cur_opnd=%X, codeinfo: ofssize=%u mem_type=%Xh rex=%Xh rm=%X sib=%X\n",
-              cur_opnd, CodeInfo->Ofssize, CodeInfo->mem_type, CodeInfo->prefix.rex, CodeInfo->rm_byte, CodeInfo->sib ));
+    DebugMsg(("match_phase_1(ofs=%X): cur_opnd=%X, codeinfo: ofssize=%u mem_type=%Xh rex=%Xh rm=%X sib=%X\n",
+              CurrSeg->sym.offset, cur_opnd, CodeInfo->Ofssize, CodeInfo->mem_type, CodeInfo->prefix.rex, CodeInfo->rm_byte, CodeInfo->sib ));
 #endif
     /* scan the instruction table for a matching first operand */
     do  {

@@ -357,7 +357,7 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
     int        ofs;
     short      rectype;
     uint_8     Ofssize;
-    struct asmfixup *fixup;
+    struct genfixup *fixup;
 
     Ofssize = GetSymOfssize( sym );
     len = GetCVStructLen( sym, Ofssize );
@@ -612,7 +612,7 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
 
     /* CurrSeg and Modend must be set for store_fixup() */
     CurrSeg = symbols;
-    Modend = FALSE;
+    //Modend = FALSE;
 
     /* scan symbol table for SYM_TYPE, SYM_INTERNAL */
 
@@ -633,7 +633,7 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
     symbols->e.seginfo->start_loc = 0; /* required for COFF */
 
     CurrSeg = NULL;
-    Modend = TRUE;
+    //Modend = TRUE;
 
     DebugMsg(("cv_write_debug_tables exit, max type=%Xh\n", currtype - 1 ));
     return;

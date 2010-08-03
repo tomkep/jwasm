@@ -192,10 +192,10 @@ static struct asm_sym **SymFind( const char *name )
     int len;
     struct asm_sym  **gsym;
 
-    len = strlen(name);
+    len = strlen( name );
     i = hashpjw( name );
 
-    if (CurrProc) {
+    if ( CurrProc ) {
         for( lsym = &lsym_table[ i % LHASH_TABLE_SIZE ]; *lsym; lsym = &((*lsym)->next) ) {
             if ( len == (*lsym)->name_size && STRCMP( name, (*lsym)->name, len ) == 0 ) {
                 DebugMsg(("SymFind: '%s' found in local table, state=%u, local=%u\n", name, (*lsym)->state, (*lsym)->scoped ));
@@ -227,6 +227,8 @@ static void SymSetCurrPC( void )
     }
 }
 
+/* SymLookup() creates a global label if it isn't defined yet,
+ */
 struct asm_sym *SymLookup( const char *name )
 /*******************************************/
 {
@@ -237,7 +239,7 @@ struct asm_sym *SymLookup( const char *name )
     sym = *sym_ptr;
     if( sym == NULL ) {
         if( strlen( name ) > MAX_ID_LEN ) {
-            AsmError( LABEL_TOO_LONG );
+            AsmError( IDENTIFIER_TOO_LONG );
             return( NULL );
         }
         sym = SymAlloc( name );
@@ -247,6 +249,7 @@ struct asm_sym *SymLookup( const char *name )
         ++SymCount;
     }
 
+    /* if the label is '$', update its value - which is the current offset */
     if( sym == &symPC )
         SymSetCurrPC();
 
@@ -255,10 +258,11 @@ struct asm_sym *SymLookup( const char *name )
     return( sym );
 }
 
-// this function also creates a label if it isn't defined yet,
-// but the label is preferably created in the local namespace
-// of the current procedure if bLocal==TRUE.
-
+/* this function also creates a label if it isn't defined yet,
+ * but the label is preferably created in the local namespace
+ * of the current procedure if bLocal==TRUE.
+ * called by LabelCreate() [see labels.c]
+ */
 struct asm_sym *SymLookupLabel( const char *name, int bLocal )
 /************************************************************/
 {
@@ -267,9 +271,9 @@ struct asm_sym *SymLookupLabel( const char *name, int bLocal )
 
     sym_ptr = SymFind( name );
     sym = *sym_ptr;
-    if (sym == NULL) {
+    if ( sym == NULL ) {
         if( strlen( name ) > MAX_ID_LEN ) {
-            AsmError( LABEL_TOO_LONG );
+            AsmError( IDENTIFIER_TOO_LONG );
             return( NULL );
         }
         sym = SymAlloc( name );
@@ -286,7 +290,10 @@ struct asm_sym *SymLookupLabel( const char *name, int bLocal )
             *sym_ptr = sym;
         }
     } else if( sym->state == SYM_UNDEFINED &&
-               sym->scoped == FALSE && CurrProc && bLocal && ModuleInfo.scoped) {
+               sym->scoped == FALSE && CurrProc && bLocal && ModuleInfo.scoped ) {
+        /* the label was defined due to a FORWARD reference.
+         * Its scope is to be changed from global to local.
+         */
         sym->scoped = TRUE;
         /* remove the label from the global hash table */
         *sym_ptr = sym->next;
@@ -306,10 +313,10 @@ struct asm_sym *SymLookupLabel( const char *name, int bLocal )
 static void FreeASym( struct asm_sym *sym )
 /*****************************************/
 {
-    struct asmfixup     *curr;
-    struct asmfixup     *next;
+    struct genfixup     *curr;
+    struct genfixup     *next;
 
-//    DebugMsg(("FreeASym: delete %s, state=%X\n", sym->name, sym->state));
+    //DebugMsg(("FreeASym: delete %s, state=%X\n", sym->name, sym->state));
     for( curr = sym->fixup ; curr; ) {
         next = curr->nextbp;
         AsmFree( curr );
@@ -319,23 +326,23 @@ static void FreeASym( struct asm_sym *sym )
     AsmFree( sym );
 }
 
-// free a symbol directly without a try to find it first
-// (it's not in global namespace)
-
+/* free a symbol directly without a try to find it first
+ * (it's not in global namespace)
+ */
 void SymFree( struct asm_sym *sym)
 /*********************************/
 {
-//    DebugMsg(("SymFree: free %X, name=%s, state=%X\n", sym, sym->name, sym->state));
+    //DebugMsg(("SymFree: free %X, name=%s, state=%X\n", sym, sym->name, sym->state));
     dir_free( (dir_node *)sym, FALSE );
     FreeASym( sym );
     return;
 }
 
-// set a symbol's name
-// the previous name was "", the symbol wasn't in a symbol table.
-// this function is called for symbols which are to be moved
-// to the local namespace ( PROC parameters ).
-
+/* set a symbol's name
+ * the previous name was "", the symbol wasn't in a symbol table.
+ * this function is called for symbols which are to be moved
+ * to the local namespace ( PROC parameters ).
+ */
 void SymSetName( struct asm_sym *sym, const char * name )
 /*******************************************************/
 {
@@ -677,7 +684,7 @@ struct asm_sym **SymSort( unsigned int *count )
     return( syms );
 }
 
-// enum all symbols in global hash table
+/* enum all symbols in global hash table */
 
 int SymEnum( struct asm_sym * *psym, int *pi )
 /********************************************/

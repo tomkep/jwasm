@@ -48,16 +48,18 @@
 #include "proc.h"
 #include "extern.h"
 
-// the "mangler" has been inherited from Wasm.
-// it allows some fine tuning of the external's name in the object module,
-// but is relevant for mixing with OW code only.
-// syntax:
-// EXTERN|EXTERNDEF [ [ mangle_type, ] lang_type ] name : type
-// PUBLIC [ [ mangle_type, ] lang_type ] name
-// COMM [ [ mangle_type, ] langtype] [NEAR|FAR] name: ...
-// mangle_type must be a string.
-
 #if MANGLERSUPP
+
+/* The "mangler" has been inherited from Wasm.
+ * By default it's not active in JWasm (see MANGLERSUPP in globals.h)
+ * It allows some fine tuning of the external's name in the object module,
+ * but is relevant for mixing with OW code only.
+ * Syntax:
+ * EXTERN|EXTERNDEF [ [ mangle_type, ] lang_type ] name : type
+ * PUBLIC [ [ mangle_type, ] lang_type ] name
+ * COMM [ [ mangle_type, ] langtype] [NEAR|FAR] name: ...
+ * mangle_type must be a 'string'.
+ */
 static char *Check4Mangler( int *i )
 /**********************************/
 {
@@ -85,7 +87,7 @@ static asm_sym *CreateGlobal( asm_sym *sym, const char * name )
         sym->Ofssize = ModuleInfo.Ofssize;
         sym->comm = 0;
         sym->weak = 1;
-        dir_add_table( (dir_node *)sym );
+        dir_add_table( (dir_node *)sym ); /* add EXTERNAL */
     }
     return( sym );
 }
@@ -100,7 +102,7 @@ static asm_sym *CreateExternal( asm_sym *sym, const char *name )
         sym->Ofssize = ModuleInfo.Ofssize;
         sym->comm = 0;
         sym->weak = 0;
-        dir_add_table( (dir_node *)sym );
+        dir_add_table( (dir_node *)sym ); /* add EXTERNAL */
     }
     return( sym );
 }
@@ -116,14 +118,14 @@ static asm_sym *CreateComm( asm_sym *sym, const char *name)
         sym->comm = 1;
         sym->weak = 0;
         sym->isfar = 0;
-        dir_add_table( (dir_node *)sym );
+        dir_add_table( (dir_node *)sym ); /* add EXTERNAL */
     }
     return( sym );
 }
 
-// externdef [ attr ] symbol:type
-// called during Pass 1 only
-
+/* externdef [ attr ] symbol:type
+ * called during Pass 1 only
+ */
 ret_code ExterndefDirective( int i )
 /**********************************/
 {
@@ -139,6 +141,7 @@ ret_code ExterndefDirective( int i )
 
     DebugMsg(("ExterndefDirective entry\n"));
 
+    i++; /* skip EXTERNDEF token */
 #if MANGLERSUPP
     mangle_type = Check4Mangler( &i );
 #endif
@@ -231,8 +234,8 @@ ret_code ExterndefDirective( int i )
         /* ensure that the type of the symbol won't change */
 
         if ( sym->state == SYM_EXTERNAL && sym->mem_type == MT_EMPTY ) {
-            DebugMsg(("ExterndefDirective: type set for >%s<\n", sym->name));
-            if (mem_type != MT_ABS)
+            DebugMsg(("ExterndefDirective: type set for >%s<, memtype=%X, ofssize=%X\n", sym->name, mem_type, Ofssize ));
+            if ( mem_type != MT_ABS )
                 SetSymSegOfs(sym);
             else if (sym->weak == TRUE)
                 sym->equate = TRUE; /* allow redefinition by EQU, = */
@@ -271,12 +274,12 @@ ret_code ExterndefDirective( int i )
             }
         }
 
-        // FIXME !! symbol can have different language type
+        /* FIXME !! symbol can have different language type */
         SetMangler( sym, mangle_type, langtype );
 
         /* write a global entry if none has been written yet */
         if ( sym->state == SYM_EXTERNAL && sym->weak == FALSE )
-            ;// skip EXTERNDEF if a real EXTERN/COMM was done
+            ;/* skip EXTERNDEF if a real EXTERN/COMM was done */
         else if ( sym->global == FALSE ) {
             sym->global = TRUE;
             DebugMsg(("writing a global entry for %s\n", sym->name));
@@ -297,7 +300,7 @@ ret_code ExterndefDirective( int i )
     return( NOT_ERROR );
 }
 
-// helper for EXTERN directive
+/* helper for EXTERN directive */
 
 asm_sym *MakeExtern( const char *name, memtype mem_type, struct asm_sym * vartype, asm_sym * sym, uint_8 Ofssize )
 /********************************************************************/
@@ -323,7 +326,7 @@ asm_sym *MakeExtern( const char *name, memtype mem_type, struct asm_sym * vartyp
     return( sym );
 }
 
-// syntax: EXTERN [lang_type] name (altname) :type [, ...]
+/* syntax: EXT[E]RN [lang_type] name (altname) :type [, ...] */
 
 ret_code ExternDirective( int i )
 /*******************************/
@@ -338,6 +341,7 @@ ret_code ExternDirective( int i )
     struct asm_sym      *symtype;
     lang_type           langtype;
 
+    i++; /* skip EXT[E]RN token */
 #if MANGLERSUPP
     mangle_type = Check4Mangler( &i );
 #endif
@@ -383,7 +387,7 @@ ret_code ExternDirective( int i )
         i++;
 
         typetoken = AsmBuffer[i]->string_ptr;
-        if (AsmBuffer[i]->token == T_ID) {
+        if ( AsmBuffer[i]->token == T_ID ) {
             if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "ABS" ) ) {
                 mem_type = MT_ABS;
             } else if ( symtype = SymIsType( typetoken ) ) {
@@ -454,7 +458,21 @@ ret_code ExternDirective( int i )
                         return( ERROR );
                     }
                 } else {
-                    sym->altname = CreateGlobal( NULL, altname );
+                    /* v2.03: change type from EXTERN to ALIAS */
+                    if ( Options.output_format == OFORMAT_COFF
+#if ELF_SUPPORT
+                        || Options.output_format == OFORMAT_ELF
+#endif
+                       ) {
+                        dir_remove_table((dir_node *)sym );
+                        sym->state = SYM_ALIAS;
+                        sym->string_ptr = AsmAlloc( strlen( altname ) + 1 );
+                        strcpy( sym->string_ptr, altname );
+                        dir_add_table( (dir_node *)sym ); /* add ALIAS */
+                    } else {
+                        sym->altname = CreateGlobal( NULL, altname );
+                        DebugMsg(("ExternDirective: global %s created\n", altname ));
+                    }
                 }
             }
         }
@@ -484,6 +502,7 @@ ret_code ExternDirective2( int i )
     struct asm_sym      *sym;
     struct asm_sym      *symalt;
 
+    i++; /* skip EXT[E]RN token */
 #if MANGLERSUPP
     //mangle_type = Check4Mangler( &i );
     Check4Mangler( &i );
@@ -514,7 +533,7 @@ ret_code ExternDirective2( int i )
     return( NOT_ERROR );
 }
 
-// syntax: PUBLIC [lang_type] name [, ...]
+/* syntax: PUBLIC [lang_type] name [, ...] */
 
 ret_code PublicDirective( int i )
 /*******************************/
@@ -525,6 +544,7 @@ ret_code PublicDirective( int i )
     //dir_node            *dir;
     lang_type           langtype;
 
+    i++; /* skip PUBLIC directive */
 #if MANGLERSUPP
     mangle_type = Check4Mangler( &i );
 #endif
@@ -545,7 +565,7 @@ ret_code PublicDirective( int i )
 
         /* Add the public name */
         sym = SymSearch( token );
-        if (Parse_Pass != PASS_1 && (sym == NULL || sym->state == SYM_UNDEFINED)) {
+        if ( Parse_Pass != PASS_1 && (sym == NULL || sym->state == SYM_UNDEFINED) ) {
             AsmErr( SYMBOL_NOT_DEFINED, token );
             return( ERROR );
         }
@@ -570,14 +590,14 @@ ret_code PublicDirective( int i )
                 sym->public = TRUE;
                 AddPublicData( sym );
             }
-        } else if (Parse_Pass == PASS_1) {
+        } else if ( Parse_Pass == PASS_1 ) {
             sym = SymCreate( token, TRUE );
-            dir_add_table( (dir_node *)sym );
+            dir_add_table( (dir_node *)sym ); /* add UNDEFINED */
             sym->public = TRUE;
             AddPublicData( sym );
             DebugMsg(("PublicDirective: new symbol, state=%u\n", sym->state ));
         }
-        if (Parse_Pass == PASS_1)
+        if ( Parse_Pass == PASS_1 )
             SetMangler( sym, mangle_type, langtype );
 
         if ( AsmBuffer[i]->token != T_FINAL )
@@ -594,7 +614,7 @@ ret_code PublicDirective( int i )
     return( NOT_ERROR );
 }
 
-// helper for COMM directive
+/* helper for COMM directive */
 
 static asm_sym *MakeComm( char *name, asm_sym *sym, int size, int count, bool isfar )
 /***********************************************************************************/
@@ -617,8 +637,8 @@ static asm_sym *MakeComm( char *name, asm_sym *sym, int size, int count, bool is
 }
 
 /* define "communal" items
- syntax:
- COMM [langtype] [NEAR|FAR] label:type[:count] [, ... ]
+ * syntax:
+ * COMM [langtype] [NEAR|FAR] label:type[:count] [, ... ]
  */
 
 ret_code CommDirective( int i )
@@ -635,6 +655,7 @@ ret_code CommDirective( int i )
     expr_list       opndx;
     lang_type       langtype;
 
+    i++; /* skip COMM token */
     for( ; i < Token_Count; i++ ) {
         count = 1;
 #if MANGLERSUPP
@@ -646,14 +667,14 @@ ret_code CommDirective( int i )
 
         /* get the distance ( near or far ) */
         isfar = FALSE;
-        if (AsmBuffer[i]->token == T_RES_ID)
-            switch (AsmBuffer[i]->value) {
+        if ( AsmBuffer[i]->token == T_RES_ID )
+            switch ( AsmBuffer[i]->value ) {
             case T_FAR:
             case T_FAR16:
             case T_FAR32:
                 isfar = TRUE;
-                if (ModuleInfo.model == MOD_FLAT) {
-                    AsmError(FAR_NOT_ALLOWED_IN_FLAT_MODEL_COMM_VARIABLES);
+                if ( ModuleInfo.model == MOD_FLAT ) {
+                    AsmError( FAR_NOT_ALLOWED_IN_FLAT_MODEL_COMM_VARIABLES );
                     return( ERROR );
                 }
             case T_NEAR:
@@ -672,16 +693,18 @@ ret_code CommDirective( int i )
         }
         i++;
         /* the evaluator cannot handle a ':' so scan for one first */
-        for (tmp = i; tmp < Token_Count;tmp++)
-            if (AsmBuffer[tmp]->token == T_COLON)
+        for ( tmp = i; tmp < Token_Count;tmp++ )
+            if ( AsmBuffer[tmp]->token == T_COLON )
                 break;
         if ( EvalOperand( &i, tmp, &opndx, TRUE ) == ERROR )
             return( ERROR );
-        if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
+        /* v2.03: syntax COMM varname:<string>:<string> is accepted by Masm */
+        //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+        if ( opndx.kind != EXPR_CONST ) {
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
-        if (opndx.value == 0) {
+        if ( opndx.value == 0 ) {
             AsmError( POSITIVE_VALUE_EXPECTED );
             return( ERROR );
         }
@@ -689,14 +712,16 @@ ret_code CommDirective( int i )
 
         if( AsmBuffer[i]->token == T_COLON ) {
             i++;
-            /* count */
+            /* get optional count argument */
             if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
                 return( ERROR );
-            if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
+            /* v2.03: a string constant is acceptable! */
+            //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+            if ( opndx.kind != EXPR_CONST ) {
                 AsmError( CONSTANT_EXPECTED );
                 return( ERROR );
             }
-            if (opndx.value == 0) {
+            if ( opndx.value == 0 ) {
                 AsmError( POSITIVE_VALUE_EXPECTED );
                 return( ERROR );
             }
@@ -707,18 +732,18 @@ ret_code CommDirective( int i )
         if( sym != NULL ) {
             if( sym->state == SYM_UNDEFINED ) {
                 if ( sym->public ) {
-                    AsmErr(CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name);
+                    AsmErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
                     return( ERROR );
                 }
                 dir_remove_table( (dir_node *)sym );
                 if( MakeComm( token, sym, size, count, isfar) == NULL )
                     return( ERROR );
             } else {
-                if (sym->total_length == 0)
+                if ( sym->total_length == 0 )
                     tmp = sym->total_size;
                 else
                     tmp = sym->total_size / sym->total_length;
-                if( size != tmp) {
+                if( size != tmp ) {
                     AsmError( EXT_DEF_DIFF );
                     return( ERROR );
                 }

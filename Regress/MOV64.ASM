@@ -27,6 +27,10 @@ l1:
 	mov rax,1
 	mov rbx,123456789ABCDEF0h
 	mov r9,1
+	mov rbx,7FFFFFFFh	;short format ok
+	mov rbx,80000000h	;needs long format
+	mov rbx,0FFFFFFFFh
+	mov rbx,qword ptr 0FFFFFFFFh
 
 ;--- mov reg, reg
 
@@ -245,6 +249,15 @@ l1:
 	mov [rdx+vd], eax
 	mov [rdx+vq], rax
 	mov [rdx+vq], r9
+
+;--- mov segreg, reg - mov reg, segreg
+
+	mov ds, rax
+	mov ds, eax
+	mov ds, ax
+	mov rax, ds
+	mov eax, ds
+	mov ax, ds
 
 	ret
 

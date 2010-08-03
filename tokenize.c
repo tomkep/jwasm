@@ -26,11 +26,8 @@
 *
 * Description:  tokenizer.
 *
-*  Currently the tokenizer is called "too early", with the result that it
-*  has to be called multiple times if macro expansion occurs. Furthermore,
-*  the tokenizer is not fully compatible with macro parameter formats. The
-*  correct thing to do is to run the tokenizer AFTER the macro expansion step.
-*  However, this will require some work and intensive tests.
+*  The tokenizer is called rather early, with the result that it has to be
+*  called multiple times for a line if macro expansion occurs.
 ****************************************************************************/
 
 #include <ctype.h>
@@ -42,51 +39,52 @@
 #include "directiv.h"
 #include "input.h"
 
-char                    *CurrSource;      // Current Input Line
-char                    *StringBufferEnd; // start free space in string buffer
+typedef struct {
+    char *input;
+    char *output;
+} ioptrs;
+
+#if 0
+typedef union {
+        float   f;
+        long    l;
+} NUMBERFL;
+#endif
 
 #ifdef DEBUG_OUT
 extern int cnttok0;
 extern int cnttok1;
 #endif
 
-// string buffer - token strings and other stuff are stored here.
-// must be a multiple of MAX_LINE_LEN since it is used for string expansion.
+char   *CurrSource;      /* Current Input Line */
+char   *StringBufferEnd; /* start free space in string buffer */
 
-static char             token_stringbuf[MAX_LINE_LEN*MAX_SYNC_MACRO_NESTING];
+/* string buffer - token strings and other stuff are stored here.
+ * must be a multiple of MAX_LINE_LEN since it is used for string expansion.
+ */
+static char token_stringbuf[MAX_LINE_LEN*MAX_SYNC_MACRO_NESTING];
 
+static struct asm_tok   tokens[MAX_TOKEN];      /* token buffer */
+struct asm_tok          *AsmBuffer[MAX_TOKEN];  /* token array */
 
 static uint_8 g_flags; /* directive flags for current line */
 
 bool expansion; /* TRUE if a % has been found as first line character */
 
-static struct asm_tok   tokens[MAX_TOKEN];      /* token buffer */
-struct asm_tok          *AsmBuffer[MAX_TOKEN];  /* token array */
-
-typedef struct {
-    char *input;
-    char *output;
-} ioptrs;
-
 #if !defined(__GNUC__) && !defined(__POCC__)
 #define tolower(c) ((c >= 'A' && c <= 'Z') ? c | 0x20 : c )
 #endif
 
-// initialize the token buffer array
+/* initialize the token buffer array */
 
 void InitTokenBuffer( void )
 /**************************/
 {
-    int         count;
+    int  count;
     for( count = 0; count < MAX_TOKEN; count ++ ) {
         AsmBuffer[count] = &tokens[count];
     }
 }
-
-typedef union {
-        float   f;
-        long    l;
-} NUMBERFL;
 
 static ret_code get_float( struct asm_tok *buf, ioptrs *p )
 /*********************************************************/
@@ -126,7 +124,7 @@ static ret_code get_float( struct asm_tok *buf, ioptrs *p )
             /* fall through */
         default:
             goto done_scanning_float;
-//            return( get_string( buf, p ) );
+            //return( get_string( buf, p ) );
         }
     }
 
@@ -141,7 +139,7 @@ done_scanning_float:
     p->output++;
     p->input = ptr;
 
-    *((float *)(&buf->value)) = atof(buf->string_ptr);
+    *((float *)(&buf->value)) = atof( buf->string_ptr );
     return( NOT_ERROR );
 }
 
@@ -170,7 +168,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
     case '"':
     case '\'':
         symbol_c = 0;
-        break;  // end of string marker is the same
+        break;  /* end of string marker is the same */
     case '<':
         symbol_c = '>';
         break;
@@ -178,7 +176,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
         symbol_c = '}';
         break;
     default:
-        if (g_flags & DF_CEXPR) {
+        if ( g_flags & DF_CEXPR ) {
             /* a C expression is likely to occur. check for &&,||,... */
             char c = *iptr;
             *optr++ = *iptr++;
@@ -277,7 +275,7 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
              */
         } else if( ( *iptr == '"' || *iptr == '\'' ) &&
                   symbol_c != 0 &&
-                  (g_flags & DF_STRPARM) == 0) {
+                  ( g_flags & DF_STRPARM ) == 0 ) {
             char delim = *iptr;
             char *toptr;
             char *tiptr;
@@ -322,20 +320,18 @@ static ret_code get_string( struct asm_tok *buf, ioptrs *p )
                 if (*tmp == ',') {
                     /* use optr as temp buffer */
                     tmp = optr;
-                    if( GetTextLine( tmp, MAX_LINE_LEN ) == NULL ) {
-                        AsmError( UNEXPECTED_END_OF_FILE );
-                        return( ERROR );
-                    }
-                    /* skip leading spaces */
-                    while (isspace(*tmp)) tmp++;
+                    if( GetTextLine( tmp, MAX_LINE_LEN ) ) {
+                        /* skip leading spaces */
+                        while (isspace(*tmp)) tmp++;
 
-                    /* this size check isn't fool-proved yet */
-                    if ( strlen(tmp) + count >= MAX_LINE_LEN ) {
-                        AsmError( LINE_TOO_LONG );
-                        return( ERROR );
+                        /* this size check isn't fool-proved yet */
+                        if ( strlen(tmp) + count >= MAX_LINE_LEN ) {
+                            AsmError( LINE_TOO_LONG );
+                            return( ERROR );
+                        }
+                        strcpy( iptr, tmp );
+                        continue;
                     }
-                    strcpy( iptr, tmp );
-                    continue;
                 }
                 /* the end delimiter ( '>' or '}') is missing, but don't
                  flag this as an error! */
@@ -380,13 +376,13 @@ static void array_mul_add( unsigned char *buf, unsigned base, unsigned num, unsi
 }
 #endif
 
-// read in a number
-// check the number suffix:
-// b or y: base 2
-// d or t: base 10
-// h: base 16
-// o or q: base 8
-
+/* read in a number
+ * check the number suffix:
+ * b or y: base 2
+ * d or t: base 10
+ * h: base 16
+ * o or q: base 8
+ */
 static ret_code get_number( struct asm_tok *buf, ioptrs *p )
 /**********************************************************/
 {
@@ -506,7 +502,7 @@ static ret_code get_number( struct asm_tok *buf, ioptrs *p )
             } else {
                 val = tolower( *dig_start ) - 'a' + 10;
             }
-            //v2: do the calculation inline and with 2 bytes at once
+            /* v2: do the calculation inline and with 2 bytes at once */
             //array_mul_add( buf->bytes, base, val, sizeof( buf->bytes ) );
             px = (uint_16 *)buf->bytes;
             for (len = sizeof( buf->bytes ) >> 1; len; len-- ) {
@@ -562,7 +558,7 @@ static ret_code get_id_in_backquotes( struct asm_tok *buf, ioptrs *p )
 }
 #endif
 
-// get an ID. will always return NOT_ERROR.
+/* get an ID. will always return NOT_ERROR. */
 
 static ret_code get_id( struct asm_tok *buf, ioptrs *p )
 /******************************************************/
@@ -649,7 +645,7 @@ static ret_code get_id( struct asm_tok *buf, ioptrs *p )
      */
     buf->opcode = AsmOpTable[index].opcode;
 
-    switch (AsmOpTable[index].specialtype) {
+    switch ( AsmOpTable[index].specialtype ) {
     case RWT_REGISTER:
         buf->token = T_REG;
         break;
@@ -685,7 +681,7 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
 /******************************************************************/
 {
     char    symbol;
-//    int     i;
+    //int     i;
 
     //buf->string_ptr = p->output;
     //buf->pos = p->input;
@@ -726,7 +722,7 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
         /* no_str_delim is TRUE if .IF, .WHILE, .ELSEIF or .UNTIL */
         /* has been detected in the current line */
         /* it will also store "<=" as a string, not as 2 tokens */
-        if (g_flags & DF_CEXPR) {
+        if ( g_flags & DF_CEXPR ) {
             *(p->output)++ = *(p->input)++;
             buf->value = 1;
             if (*p->input == '=') {
@@ -746,8 +742,8 @@ static ret_code get_special_symbol( struct asm_tok *buf, ioptrs *p )
     default:
         /* a '<' in the source will prevent comments to be removed */
         /* so they might appear here. Remove! */
-        if ((g_flags & DF_CEXPR) && symbol == ';') {
-            //while (*p->input) *(p->input)++;// v1.96: replaced by next line
+        if ( (g_flags & DF_CEXPR) && symbol == ';' ) {
+            //while (*p->input) *(p->input)++;/* v1.96: replaced by next line */
             while (*p->input) p->input++;
             return( EMPTY );
         }
@@ -811,7 +807,7 @@ int Tokenize( char *string, int index )
     ioptrs                      p;
     unsigned int                buf_index;
 
-    if (index == 0) {
+    if ( index == 0 ) {
 #ifdef DEBUG_OUT
         cnttok0++;
 #endif
@@ -821,7 +817,11 @@ int Tokenize( char *string, int index )
         expansion = FALSE;
         p.input = string;
         while( isspace( *p.input )) p.input++;
-        conditional_assembly_prepare( p.input );
+        if ( conditional_assembly_prepare( p.input ) == EMPTY ) {
+            buf_index = 0;
+            goto skipline;
+        }
+
         if (*p.input == '%') {
             *p.input++ = ' ';
             expansion = TRUE;
@@ -862,7 +862,7 @@ int Tokenize( char *string, int index )
             break;
         }
     }
-
+skipline:
     AsmBuffer[buf_index]->token = T_FINAL;
     *p.output++ = NULLC;
     StringBufferEnd = p.output;

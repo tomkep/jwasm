@@ -1,6 +1,113 @@
 
    Changelog
 
+   08/03/2010, v2.03:
+
+   Bugfixes:
+   -  invalid cmdline option behind source filename caused a GPF.
+   -  expressions in a data field initializer were evaluated when the
+      structure was instanced. This gave incorrect results or assembly 
+      errors if the expression contained an assembly time variable
+      ( including $ ).
+   -  INVOKE directive: if register EAX|RAX was used for indirect addressing
+      of a parameter, there was no check if the content of the register has 
+      been overwritten previously due to an ADDR operator.
+   -  INVOKE directive, 64-bit: if a parameter beyond the first four was an
+      address which had to be loaded into register RAX to store it onto the
+      stack, the generated source was either invalid or a GPF occured.
+   -  TYPEDEF directive: pointer definitions did use the default size for
+      data pointers, which isn't correct if the pointer is defined as a
+      function pointer and memory model is COMPACT or MEDIUM.
+   -  64-bit: assembly time variables or immediate operands with a value
+      magnitude > 32 bits were rejected.
+   -  macro expansion: expansion operator at the start of a line and more
+      than one macro function call within this line might have resulted
+      in garbage.
+   -  DUP operator: count (first operand) was rejected if it was a string.
+   -  float initializer in BSS segments wasn't rejected.
+   -  OMF format: when a listing was to be written (-Fl) and a large array
+      was defined, a GPF might have occured.
+   -  error 'Symbol redefinition' occured if an equate's expression contained
+      another equate which was the result of a subtraction of 2 labels AND
+      a phase error caused this difference to change.
+   -  comments weren't displayed in listing.
+   -  in v1.96-2.02, if cmdline option -mf was set, the cpu wasn't
+      automatically set to a 386 as it was done before.
+   -  format COFF: symbols defined as weak externals were created as normal
+      externals if the EXTERN directive was used for the definition.
+   -  64-bit: opcodes MOVSXD and CQO (both 64-bit) were missing.
+   -  64-bit: opcode CDQE was encoded without the REX prefix, thus it was
+      a CWDE in fact.
+   -  64-bit: QWORD type coercion for an immediate operand didn't force the
+      operand's size to 64-bit.
+   -  64-bit: MOVs with a segment register as operand didn't accept 64-bit
+      registers as the other operand ("mov ds, rax").
+   -  64-bit: SLDT, SMSW and STR didn't accept 32- and 64-bit registers as
+      operand.
+   -  a displacement which didn't fit into 32-bits caused error 'Constant
+      value too large' in versions 2.00 - 2.02. This has been changed to a
+      warning (level 3) in 16- and 32-bit. In 64-bit code, it is still an 
+      error.
+   -  In expressions, types combined with the open (square) bracket operator
+      ( "mov eax, DWORD [ebx] ) weren't rejected.
+   -  comparisons of TYPE expressions did compare the type's size only.
+   -  Name of a macro proc used as a macro argument caused a syntax error.
+   -  for indirect calls/jumps, a struct field used as displacement didn't
+      qualify the type of the call/jump, resulting in an error msg.
+   -  A .MODEL directive which occured AFTER code definition lines may
+      have confused JWasm.
+   -  in JWasm v2.00-2.02, when a RECORD variable had to be initialized,
+      there was a risk that an erroneous padding byte was added.
+   -  initialization of DWORD/QWORD items with constants in string format
+      may have been incorrect due to wrong little-endian conversion.
+   -  empty lines - or lines containing just a comment - in macros weren't
+      counted, thus a wrong line number might have been displayed if an
+      error occured inside a macro.
+   -  name arguments for .DATA? and .CONST were always accepted, but 
+      ignored. Now they are accepted only if -Zne isn't set and the name
+      is NOT ignored then.
+   -  64-bit: for -win64, default for GS register assumption was "ERROR".
+      Assumption changed to NOTHING.
+   -  64-bit: JWasm always used RIP-relative direct addressing mode, even
+      if there was a segment override with a segment register which wasn't
+      assumed to be FLAT.
+   -  64-bit: encoding of indirect addressing with base registers R12/R13
+      and no index registers wasn't correct.
+   -  64-bit: encoding of indirect addressing with base registers 
+      RBP/R13/R13D + index register and no displacement wasn't correct.
+   -  64-bit: register R12D was rejected as base for indirect addressing.
+   -  PURGE made macros "invalid" (it should just delete the macro content).
+   -  listing of macro invokations started with a "non-existing" empty line.
+   -  TEXTEQU: if the % operator was to evaluate a numeric argument which
+      contained other text equates, the equates were expanded incorrectly.
+   -  TEXTEQU: the % operator returned a signed value for numeric arguments.
+      For strict Masm compatibility, it has to be an unsigned value.
+   -  OPTION DOTNAME: in v2.0-v2.02, this option may have caused macro
+      parameters not being recognized in macro source lines if the parameter
+      was preceded by a dot.
+   -  in v2.0-v2.02, the % operator didn't work reliably for VARARG macro 
+      arguments.
+   -  a text macro which contained a macro function call and extra chars
+      might not have been expanded correctly if it was used as an argument
+      in one of the string directives.
+   -  a GOTO to an undefined macro label didn't display an error.
+   -  macro locals used as macro labels didn't work.
+   -  in v2.00-2.02, there was a risk that JWasm generated a near jump
+      ( or an "extended" conditional jump if cpu is < 80386 ) when a short
+      (conditional) jump would have been ok.
+   -  ALIGN directive without argument inside struct definitions created
+      bad offsets.
+   -  left part of equates in listing sometimes got copied to the next line.
+   -  no warnings were emitted on warning level 3+ if procedure arguments
+      or locals weren't referenced.
+
+   Other changes:
+   -  OW v1.9 used to create the JWasm binaries.
+   -  opcode RDTSCP supported.
+   -  option -nc wasn't documented.
+   -  the (average) number of passes needed to assemble a source has been
+      reduced. This should also have a positive impact on assembly time.
+
    01/19/2010, v2.02:
 
    Bugfixes:
@@ -23,9 +130,9 @@
    -  for formats other than OMF, the buffer which hold the contents of a
       segment might have been allocated too small if the segment was a
       code segment and contained forward references but no labels.
-   -  there was a risk that WLink refused the object module generated by
-      JWasm because size of code sections did shrink in assembly passes > 2
-      but file size wasn't adjusted accordingly.
+   -  OMF format: there was a risk that WLink refused the object module 
+      generated by JWasm because size of code sections did shrink in
+      assembly passes > 2 but file size wasn't adjusted accordingly.
    -  CMPSx string instruction: if first operand had a DS prefix, it was
       generated, although it's superfluous.
    -  XCHG with 2 register operands: encoding of registers differed from
@@ -209,6 +316,8 @@
    -  macro loop iteration displayed in error msgs.
    -  expansion of macro parameters improved.
    -  regression tests added to source package.
+   -  -Zi switch for COFF output format may have caused an exception when
+      code was written without using PROC/ENDP.
 
    07/29/2009, v1.96a:
 

@@ -37,19 +37,19 @@
 #define MAX_LNAME       255
 #define LNAME_NULL      0
 
-typedef int     direct_idx;     // directive index, such as segment index,
-                                // group index or lname index, etc.
+typedef int     direct_idx;     /* directive index, such as segment index, */
+                                /* group index or lname index, etc.        */
 
 typedef enum {
     //STACK_NONE,
     STACK_NEAR,
     STACK_FAR,
-} dist_type;            // Stack distance
+} dist_type;            /* Stack distance */
 
 typedef enum {
     OPSYS_DOS,
     OPSYS_OS2
-} os_type;              // Type of operating system
+} os_type;              /* Type of operating system */
 
 enum {
     TAB_UNDEF = 0,
@@ -89,9 +89,9 @@ typedef struct {
 extern simpletype SimpleType[];
 
 typedef struct {
-      char      *string;        // the token string
-      uint_16   value;          // value assigned to the token
-      uint_16   init;           // kind of token
+      char      *string;        /* the token string */
+      uint_16   value;          /* value assigned to the token */
+      uint_16   init;           /* kind of token */
 } typeinfo;
 
 /*---------------------------------------------------------------------------*/
@@ -105,10 +105,10 @@ typedef struct seg_item {
 } seg_item;
 
 typedef struct {
-    seg_item            *seglist;       // list of segments in the group
-    direct_idx          idx;            // its group index
-    direct_idx          lname_idx;      // LNAME index (OMF only)
-    uint                numseg;         // number of segments in the group
+    seg_item            *seglist;       /* list of segments in the group */
+    direct_idx          grp_idx;        /* its group index */
+    direct_idx          lname_idx;      /* LNAME index (OMF only) */
+    uint                numseg;         /* number of segments in the group */
 } grp_info;
 
 /* todo: remove field segrec, which is OMF specific, and store the info directly
@@ -116,41 +116,42 @@ typedef struct {
 
 typedef struct {
     obj_rec             *segrec;        /* OMF segment record */
-    struct asm_sym      *group;         // segment's group or NULL
-    uint_32             start_loc;      // starting offset of current ledata or lidata
+    struct asm_sym      *group;         /* segment's group or NULL */
+    uint_32             start_loc;      /* starting offset of current ledata or lidata */
     union {
-        uint_32         current_loc;    // current offset in current ledata or lidata
-        uint_32         reloc_offset;   // ELF: reloc file offset
-        uint_32         start_offset;   // BIN: start offset in group
+        uint_32         current_loc;    /* current offset in current ledata or lidata */
+        uint_32         reloc_offset;   /* ELF: reloc file offset */
+        uint_32         start_offset;   /* BIN: start offset in group */
     };
 #ifdef __I86__
     uint_8 huge         *CodeBuffer;
 #else
     uint_8              *CodeBuffer;
 #endif
-    uint_32             bytes_written;  // initialized bytes in segment
-    asm_sym             *labels;        // linked list of labels in this seg
+    uint_32             bytes_written;  /* initialized bytes in segment */
+    asm_sym             *labels;        /* linked list of labels in this seg */
     union {
-        struct fixup        *FixupListHead; /* for OMF */
-        struct asmfixup     *FixupListHeadGen; /* for other formats */
+        struct omffixup     *FixupListHead; /* for OMF */
+        struct genfixup     *FixupListHeadGen; /* for other formats */
     };
     union {
-        struct fixup        *FixupListTail;    /* for OMF */
-        struct asmfixup     *FixupListTailGen; /* for other formats */
+        struct omffixup     *FixupListTail;    /* for OMF */
+        struct genfixup     *FixupListTailGen; /* for other formats */
     };
     union {
-        void            *LinnumQueue;   // for COFF line numbers
-        uint_32         fileoffset;     // used by BIN + ELF
-        uint_32         num_linnums;    // used by COFF (after LinnumQueue has been read)
+        void            *LinnumQueue;   /* for COFF line numbers */
+        uint_32         fileoffset;     /* used by BIN + ELF */
+        uint_32         num_linnums;    /* used by COFF (after LinnumQueue has been read) */
     };
-    uint_32             num_relocs;     // used by COFF/ELF
-    seg_type            segtype;        // segment's type (code, data, ...)
-    direct_idx          lname_idx;      // LNAME index (OMF only)
-    unsigned char       Ofssize;        // segment's offset size
-    unsigned char       characteristics;// used by COFF
-    unsigned char       alignment:4;    // is value 2^x
-    unsigned char       readonly:1;     // if the segment is readonly
-    unsigned char       force32:1;      // force 32bit segdef (OMF only)
+    uint_32             num_relocs;     /* used by COFF/ELF */
+    seg_type            segtype;        /* segment's type (code, data, ...) */
+    direct_idx          lname_idx;      /* LNAME index (OMF only) */
+    unsigned char       Ofssize;        /* segment's offset size */
+    unsigned char       characteristics;/* used by COFF */
+    unsigned char       alignment:4;    /* is value 2^x */
+    unsigned char       readonly:1;     /* if the segment is readonly */
+    unsigned char       force32:1;      /* force 32bit segdef (OMF only) */
+    unsigned char       data_in_code:1; /* data items in code segm (OMF only) */
 } seg_info;
 
 #define MAX_SEGALIGNMENT 0x0F
@@ -161,46 +162,46 @@ typedef struct regs_list {
     char                reg[1];
 } regs_list;
 
-// PROC item
+/* PROC item */
 
 typedef struct {
-    regs_list           *regslist;      // PROC: list of registers to be saved
-    struct dir_node     *paralist;      // list of parameters
-    struct dir_node     *locallist;     // PROC: list of local variables
-    struct dir_node     *labellist;     // PROC: list of local labels
-    int                 parasize;       // total no. of bytes used by parameters
-    int                 localsize;      // PROC: total no. of bytes used by local variables
-    char                *prologuearg;   // PROC: prologuearg attribute
+    regs_list           *regslist;      /* PROC: list of registers to be saved */
+    struct dir_node     *paralist;      /* list of parameters */
+    struct dir_node     *locallist;     /* PROC: list of local variables */
+    struct dir_node     *labellist;     /* PROC: list of local labels */
+    int                 parasize;       /* total no. of bytes used by parameters */
+    int                 localsize;      /* PROC: total no. of bytes used by local variables */
+    char                *prologuearg;   /* PROC: prologuearg attribute */
 #if AMD64_SUPPORT
-    struct asm_sym      *exc_handler;   // PROC: exc handler set by FRAME
+    struct asm_sym      *exc_handler;   /* PROC: exc handler set by FRAME */
 #endif
-    uint_32             list_pos;       // PROC: prologue list pos
+    uint_32             list_pos;       /* PROC: prologue list pos */
     union {
         unsigned char   flags;
         struct {
-            unsigned char       is_vararg:1;    // if it has a vararg
-            unsigned char       pe_type:1;      // epilog code, 1=use LEAVE
-            unsigned char       export:1;       // EXPORT procedure
-            unsigned char       init:1;         // has ExamineProc() been called?
-            unsigned char       forceframe:1;   // FORCEFRAME prologuearg?
-            unsigned char       loadds:1;       // LOADDS prologuearg?
-            unsigned char       stackparam:1;   // for FASTCALL: 1=a stack param exists
+            unsigned char       is_vararg:1;    /* if it has a vararg */
+            unsigned char       pe_type:1;      /* epilog code, 1=use LEAVE */
+            unsigned char       export:1;       /* EXPORT procedure */
+            unsigned char       init:1;         /* has ExamineProc() been called? */
+            unsigned char       forceframe:1;   /* FORCEFRAME prologuearg? */
+            unsigned char       loadds:1;       /* LOADDS prologuearg? */
+            unsigned char       stackparam:1;   /* for FASTCALL: 1=a stack param exists */
 #if AMD64_SUPPORT
-            unsigned char       isframe:1;      // FRAME set?
+            unsigned char       isframe:1;      /* FRAME set? */
 #endif
         };
     };
 } proc_info;
 
-// macro parameter
+/* macro parameter */
 
 typedef struct mparm_list {
-    const char          *label;         // name of parameter
-    char                *def;           // optional default parm
-    unsigned char       required:1;     // is parm required (REQ)
+    const char          *label;         /* name of parameter */
+    char                *deflt;         /* optional default parm */
+    unsigned char       required:1;     /* is parm required (REQ) */
 } mparm_list;
 
-// macro line
+/* macro line */
 
 typedef struct asmlines {
     struct asmlines     *next;
@@ -208,7 +209,7 @@ typedef struct asmlines {
     char                line[];
 } asmlines;
 
-// macro item
+/* macro item */
 
 typedef struct {
     uint_16             parmcnt;    /* no of params */
@@ -221,7 +222,7 @@ typedef struct {
     uint                srcfile;    /* sourcefile index */
 } macro_info;
 
-// STRUCT field item
+/* STRUCT field item */
 
 typedef struct field_list {
     struct field_list   *next;
@@ -260,11 +261,11 @@ typedef struct {
 } struct_info;
 
 union entry {
-    seg_info            *seginfo;       // SEGMENT definition
-    grp_info            *grpinfo;       // GROUP definition
-    proc_info           *procinfo;      // PROC definition
-    struct_info         *structinfo;    // STRUCT, UNION, TYPEDEF, RECORD def
-    macro_info          *macroinfo;     // MACRO definition
+    seg_info            *seginfo;       /* SEGMENT */
+    grp_info            *grpinfo;       /* GROUP   */
+    proc_info           *procinfo;      /* PROC    */
+    struct_info         *structinfo;    /* STRUCT, UNION, TYPEDEF, RECORD */
+    macro_info          *macroinfo;     /* MACRO   */
 };
 
 /* dir_node originally was a "directive_node"
@@ -291,10 +292,10 @@ typedef struct dir_node {
         struct dir_node *next;
         /* used by PROC params ( SYM_STACK ) */
         struct {
-            unsigned char       is_vararg:1;  // if it is a VARARG param
-            unsigned char       is_ptr:1;     // if it is a PTR type
-            unsigned char       is_far:1;     // if ptr is FAR
-            unsigned char       is32:2;       // offset size (0|1|2, ptr only)
+            unsigned char       is_vararg:1;  /* if it is a VARARG param */
+            unsigned char       is_ptr:1;     /* if it is a PTR type */
+            unsigned char       is_far:1;     /* if ptr is FAR */
+            unsigned char       is32:2;       /* offset size (0|1|2, ptr only) */
         };
     };
     union {
@@ -314,62 +315,66 @@ typedef struct dir_node {
 typedef struct {
     dir_node            *head;
     dir_node            *tail;
-} symbol_queue;     // tables array - queues of symbols of 1 type ie: segments
-                    // the data are actually part of the symbol table
+} symbol_queue;     /* tables array - queues of symbols of 1 type ie: segments */
+                    /* the data are actually part of the symbol table */
 
 /*---------------------------------------------------------------------------*/
 
+/* Information about the module */
+
 typedef struct {
-    unsigned            error_count;     // total of errors so far
-    unsigned            warning_count;   // total of warnings so far
-    char                *proc_prologue;  // current OPTION PROLOGUE value
-    char                *proc_epilogue;  // current OPTION EPILOGUE value
-    char                *code_class;     // either "CODE" or value of -nc
-    unsigned            anonymous_label; // "anonymous label" counter
-    unsigned            hll_label;       // hll directive label counter
-    unsigned            total_segs;      // number of segments in module
-    dist_type           distance;        // stack distance;
-    mod_type            model;           // memory model;
-    lang_type           langtype;        // language;
-    os_type             ostype;          // operating system;
-    seg_order           segorder;        // .alpha, .seq, .dosseg
-    offset_type         offsettype;      // OFFSET:GROUP|FLAT|SEGMENT
-    short               cpu;             // cpu setting (value @cpu symbol);
-    enum asm_cpu        curr_cpu;        // cpu setting (OW stylex);
-    unsigned char       radix;           // current .RADIX setting
-    unsigned char       fieldalign;      // -Zp, OPTION:FIELDALIGN setting
+    unsigned            error_count;     /* total of errors so far */
+    unsigned            warning_count;   /* total of warnings so far */
+    char                *proc_prologue;  /* current OPTION PROLOGUE value */
+    char                *proc_epilogue;  /* current OPTION EPILOGUE value */
+    unsigned            anonymous_label; /* "anonymous label" counter */
+    unsigned            hll_label;       /* hll directive label counter */
+    unsigned            total_segs;      /* number of segments in module */
+    dist_type           distance;        /* stack distance; */
+    mod_type            model;           /* memory model; */
+    lang_type           langtype;        /* language; */
+    os_type             ostype;          /* operating system; */
+    seg_order           segorder;        /* .alpha, .seq, .dosseg */
+    offset_type         offsettype;      /* OFFSET:GROUP|FLAT|SEGMENT */
+    short               cpu;             /* cpu setting (value @cpu symbol); */
+    enum asm_cpu        curr_cpu;        /* cpu setting (OW stylex); */
+    unsigned char       radix;           /* current .RADIX setting */
+    unsigned char       fieldalign;      /* -Zp, OPTION:FIELDALIGN setting */
 #if PROCALIGN
-    unsigned char       procalign;       // current OPTION:PROCALIGN setting
+    unsigned char       procalign;       /* current OPTION:PROCALIGN setting */
 #endif
-    enum listmacro      list_macro;      // current .LISTMACRO setting
-    unsigned char       Ofssize;         // current offset size (16,32,64)
-    unsigned char       defOfssize;      // default segment offset size (16,32 [,64]-bit)
-    unsigned            case_sensitive:1;     // option casemap
-    unsigned            convert_uppercase:1;  // option casemap
-    unsigned            procs_private:1; // option proc:private
-    unsigned            procs_export:1;  // option proc:export
-    unsigned            dotname:1;       // option dotname
-    unsigned            ljmp:1;          // option ljmp
-    unsigned            m510:1;          // option m510
-    unsigned            scoped:1;        // option scoped
-    unsigned            oldstructs:1;    // option oldstructs
-    unsigned            emulator:1;      // option emulator
-    unsigned            setif2:1;        // option setif2
-    unsigned            list:1;          // .list/.nolist
-    unsigned            cref:1;          // .cref/.nocref
-    unsigned            listif:1;        // .listif/.nolistif
-    unsigned            list_generated_code:1; // .listall, -Sa, -Sg
+    enum listmacro      list_macro;      /* current .LISTMACRO setting */
+    unsigned char       Ofssize;         /* current offset size (16,32,64) */
+    unsigned char       defOfssize;      /* default segment offset size (16,32 [,64]-bit) */
+    unsigned            case_sensitive:1;     /* option casemap */
+    unsigned            convert_uppercase:1;  /* option casemap */
+    unsigned            procs_private:1; /* option proc:private */
+    unsigned            procs_export:1;  /* option proc:export */
+    unsigned            dotname:1;       /* option dotname */
+    unsigned            ljmp:1;          /* option ljmp */
+    unsigned            m510:1;          /* option m510 */
+    unsigned            scoped:1;        /* option scoped */
+    unsigned            oldstructs:1;    /* option oldstructs */
+    unsigned            emulator:1;      /* option emulator */
+    unsigned            setif2:1;        /* option setif2 */
+    unsigned            list:1;          /* .list/.nolist */
+    unsigned            cref:1;          /* .cref/.nocref */
+    unsigned            listif:1;        /* .listif/.nolistif */
+    unsigned            list_generated_code:1; /* .listall, -Sa, -Sg */
     unsigned            StartupDirectiveFound:1;
-    unsigned            EndDirectiveFound:1;
+    unsigned            EndDirFound:1;
     unsigned            frame_auto:1;
 
-    unsigned            flatgrp_idx;     // index of FLAT group
+    //unsigned            flatgrp_idx;     /* index of FLAT group */
     union {
-        uint_8          osabi;           // for ELF
+        uint_8          osabi;           /* for ELF */
     };
-    uint                srcfile;         // is a file stack index
-    char                name[_MAX_FNAME];// name of module
-} module_info;    // Information about the module
+    unsigned char       simseg_init;     /* simplified segm dir flags */
+    unsigned char       PhaseError;      /* phase error flag */
+    uint                srcfile;         /* is a file stack index */
+    dir_node            *flat_grp;       /* magic FLAT group */
+    char                name[_MAX_FNAME];/* name of module */
+} module_info;
 
 extern module_info      ModuleInfo;
 
@@ -380,8 +385,10 @@ struct format_options {
 
 /*---------------------------------------------------------------------------*/
 
-extern dir_node         *dir_insert( const char *, int );
-extern dir_node         *dir_insert_ex( const char *, int );
+struct code_info;
+
+extern dir_node         *dir_create( const char *, int );
+extern dir_node         *dir_create_ex( const char *, int );
 extern void             dir_settype( dir_node *, int );
 extern void             dir_internal( dir_node * );
 extern void             dir_free( dir_node *, bool );
@@ -395,17 +402,21 @@ extern ret_code         GetLangType( int *, lang_type * );
 //extern uint             GetExtIdx( struct asm_sym * ); /* Get the index of an extrn defn */
 
 extern const typeinfo   *FindToken( const char *token, const typeinfo *, int );
-extern int              FindStdType( int );  // find a predefined type
+extern int              FindStdType( int );  /* find a predefined type */
 //extern int              RegisterValueToIndex( int, bool *);
 extern int              SizeFromRegister( int );
-extern ret_code         EchoDef( int );         // handle ECHO directive
-extern ret_code         OptionDirective( int ); // handle OPTION directive
+extern ret_code         EchoDef( int );         /* handle ECHO directive */
+extern ret_code         OptionDirective( int ); /* handle OPTION directive */
 
 extern void             pushitem( void *stack, void *elt );
 extern void             *popitem( void *stack );
 //extern void             *peekitem( void *stack, int );
 //extern ret_code         cpu_directive( int i );
 extern ret_code         SetCPU( enum asm_cpu );
+extern ret_code         StartupExitDirective( int );
+extern ret_code         EndDirective( int i, struct code_info *CodeInfo );
+extern ret_code         ModelDirective( int i );
+extern ret_code         cpu_directive( int i );
 
 /* make a forward declaration for struct code_info. */
 struct code_info;

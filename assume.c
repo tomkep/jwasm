@@ -45,16 +45,14 @@
 
 /* prototypes */
 
-extern dir_node         *flat_grp;
-
-// table SegAssume is for the segment registers:
+/* table SegAssume is for the segment registers: */
 
 assume_info      SegAssumeTable[NUM_SEGREGS];
 
-// table StdAssume is for the standard registers:
-// (E)AX=0, (E)CX=1, (E)DX=2, (E)BX=3
-// (E)SP=4, (E)BP=5, (E)SI=6, (E)DI=7
-
+/* table StdAssume is for the standard registers:
+ * (E)AX=0, (E)CX=1, (E)DX=2, (E)BX=3
+ * (E)SP=4, (E)BP=5, (E)SI=6, (E)DI=7
+ */
 #if AMD64_SUPPORT
 #define NUM_STDREGS 16
 #else
@@ -76,21 +74,25 @@ static const enum assume_segreg searchtab[] = {
 void SetSegAssumeTable( void *savedstate )
 /****************************************/
 {
+    DebugMsg(("SetSegAssumeTable\n" ));
     memcpy( &SegAssumeTable, savedstate, sizeof(SegAssumeTable) );
 }
 void GetSegAssumeTable( void *savedstate )
 /****************************************/
 {
+    DebugMsg(("GetSegAssumeTable\n" ));
     memcpy( savedstate, &SegAssumeTable, sizeof(SegAssumeTable) );
 }
 void SetStdAssumeTable( void *savedstate )
 /****************************************/
 {
+    DebugMsg(("SetStdAssumeTable\n" ));
     memcpy( &StdAssumeTable, savedstate, sizeof(StdAssumeTable) );
 }
 void GetStdAssumeTable( void *savedstate )
 /****************************************/
 {
+    DebugMsg(("GetStdAssumeTable\n" ));
     memcpy( savedstate, &StdAssumeTable, sizeof(StdAssumeTable) );
 }
 
@@ -118,16 +120,16 @@ void AssumeInit( )
         StdAssumeTable[reg].error = FALSE;
     }
 #if FASTPASS
-    if (Parse_Pass != PASS_1) {
+    if ( Parse_Pass != PASS_1 ) {
         SetSegAssumeTable( &saved_SegAssumeTable );
         SetStdAssumeTable( &saved_StdAssumeTable );
     }
 #endif
 }
 
-// generate assume lines after .MODEL directive
-// PushLineQueue() has already been called
-
+/* generate assume lines after .MODEL directive
+ * PushLineQueue() has already been called
+ */
 void ModelAssumeInit( void )
 /**************************/
 {
@@ -137,6 +139,12 @@ void ModelAssumeInit( void )
     /* Generates codes for assume */
     switch( ModuleInfo.model ) {
     case MOD_FLAT:
+#if AMD64_SUPPORT
+        if ( Options.header_format == HFORMAT_WIN64 ) {
+            AddLineQueue( "ASSUME CS:FLAT,DS:FLAT,SS:FLAT,ES:FLAT,FS:ERROR,GS:NOTHING");
+            break;
+        }
+#endif
         AddLineQueue( "ASSUME CS:FLAT,DS:FLAT,SS:FLAT,ES:FLAT,FS:ERROR,GS:ERROR");
         break;
     case MOD_TINY:
@@ -145,6 +153,14 @@ void ModelAssumeInit( void )
     case MOD_MEDIUM:
     case MOD_LARGE:
     case MOD_HUGE:
+        /* v2.03: no DGROUP for COFF/ELF */
+        if( Options.output_format == OFORMAT_COFF
+#if ELF_SUPPORT
+           || Options.output_format == OFORMAT_ELF
+#endif
+          )
+            break;
+
         if (ModuleInfo.model == MOD_TINY)
             pCS = "DGROUP";
         else
@@ -153,7 +169,7 @@ void ModelAssumeInit( void )
         strcpy( buffer, "ASSUME CS:" );
         strcat( buffer, pCS);
         strcat( buffer, ", DS:DGROUP" );
-        if (ModuleInfo.distance != STACK_FAR)
+        if ( ModuleInfo.distance != STACK_FAR )
             strcat( buffer, ", SS:DGROUP" );
         AddLineQueue( buffer );
         break;
@@ -176,7 +192,7 @@ ret_code AssumeDirective( int i )
  * assume NOTHING
  */
 {
-    int             segloc; /* lcoation of segment/type info */
+    int             segloc; /* location of segment/type info */
     int             reg;
     int             j;
     int             type;
@@ -196,28 +212,26 @@ ret_code AssumeDirective( int i )
             continue;
         }
 
-        if (AsmBuffer[i]->token != T_REG) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-            return( ERROR );
-        }
-        reg = AsmBuffer[i]->value;
-
         /*---- get the info ptr for the register ----*/
 
         info = NULL;
-        j = GetRegNo( reg );
-        flags = GetOpndType( reg, 1 );
-        if ( flags & OP_SR ) {
-            info = &SegAssumeTable[j];
-            segtable = TRUE;
-        } else if ( flags & OP_RGT8 ) {
-            info = &StdAssumeTable[j];
-            segtable = FALSE;
+        if ( AsmBuffer[i]->token == T_REG ) {
+            reg = AsmBuffer[i]->value;
+            j = GetRegNo( reg );
+            flags = GetOpndType( reg, 1 );
+            if ( flags & OP_SR ) {
+                info = &SegAssumeTable[j];
+                segtable = TRUE;
+            } else if ( flags & OP_RGT8 ) {
+                info = &StdAssumeTable[j];
+                segtable = FALSE;
+            }
         }
-        if (info == NULL) {
+        if ( info == NULL ) {
             AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
+
         if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < GetRegCpu( reg ) ) {
             AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
             return( ERROR );
@@ -260,7 +274,7 @@ ret_code AssumeDirective( int i )
             if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
                 AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                 return( ERROR );
-            } else if (segtable == FALSE) {
+            } else if ( segtable == FALSE ) {
                 AsmErr( SYNTAX_ERROR_EX, AsmBuffer[segloc]->string_ptr );
                 return( ERROR );
             };
@@ -273,10 +287,10 @@ ret_code AssumeDirective( int i )
             info->error = FALSE;
             info->symbol = NULL;
         } else {
-            if (segtable == FALSE) {
+            if ( segtable == FALSE ) {
                 type = -1;
                 sym = NULL;
-                if (AsmBuffer[segloc]->token == T_RES_ID) {
+                if ( AsmBuffer[segloc]->token == T_RES_ID ) {
                     type = FindStdType( AsmBuffer[segloc]->value );
                 }
                 if ( type == -1 ) {
@@ -357,7 +371,7 @@ enum assume_segreg search_assume( struct asm_sym *sym,
     if( sym == NULL )
         return( ASSUME_NOTHING );
 
-    grp = GetGrp( sym );
+    grp = GetGroup( sym );
 
     /* first check the default segment register */
 
@@ -365,7 +379,7 @@ enum assume_segreg search_assume( struct asm_sym *sym,
         if( SegAssumeTable[def].symbol == sym )
             return( def );
         if( search_grps && grp ) {
-            if( SegAssumeTable[def].flat && grp == &flat_grp->sym )
+            if( SegAssumeTable[def].flat && grp == &ModuleInfo.flat_grp->sym )
                 return( def );
             if( SegAssumeTable[def].symbol == grp )
                 return( def );
@@ -383,7 +397,7 @@ enum assume_segreg search_assume( struct asm_sym *sym,
     /* now check the groups */
     if( search_grps && grp )
         for( def = 0; def < NUM_SEGREGS; def++ ) {
-            if( SegAssumeTable[searchtab[def]].flat && grp == &flat_grp->sym )
+            if( SegAssumeTable[searchtab[def]].flat && grp == &ModuleInfo.flat_grp->sym )
                 return( searchtab[def] );
             if( SegAssumeTable[searchtab[def]].symbol == grp ) {
                 return( searchtab[def] );
@@ -403,7 +417,7 @@ asm_sym *GetOverrideAssume( enum assume_segreg override )
 /*******************************************************/
 {
     if( SegAssumeTable[override].flat ) {
-        return( (asm_sym *)flat_grp );
+        return( (asm_sym *)ModuleInfo.flat_grp );
     }
     return( SegAssumeTable[override].symbol);
 
@@ -422,7 +436,7 @@ enum assume_segreg GetAssume( struct asm_sym *override, struct asm_sym *sym, enu
     enum assume_segreg  reg;
 
     if( ( def != ASSUME_NOTHING ) && SegAssumeTable[def].flat ) {
-        *passume = (asm_sym *)flat_grp;
+        *passume = (asm_sym *)ModuleInfo.flat_grp;
         return( def );
     }
     if( override != NULL ) {

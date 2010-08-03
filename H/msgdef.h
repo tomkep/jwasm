@@ -1,7 +1,7 @@
 
-// message texts
-// if a new id is inserted, rebuild everything!
-
+/* message texts
+ * if a new id is inserted, rebuild everything!
+ */
 pick( MSG_USAGE,
       "usage: JWasm [ options ] filelist [@env_var]\n"
       "Run \"JWasm -?\" or \"JWasm -h\" for more info\n" ,
@@ -175,8 +175,8 @@ pick( ONLY_MOV_CAN_USE_SPECIAL_REGISTER,
 pick( CANNOT_USE_SHORT_WITH_CALL,
       "Cannot use SHORT with CALL" ,
       "CALL命令と共に SHORT を使うことはできません" )
-pick( ONLY_SHORT_DISPLACEMENT_IS_ALLOWED,
-      "Only SHORT displacement is allowed" ,
+pick( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED,
+      "Only SHORT jump distance is allowed" ,
       "SHORTディスプレースメントのみ可能です" )
 pick( SYNTAX_ERROR,
       "Syntax error" ,
@@ -215,8 +215,8 @@ pick( JUMP_OUT_OF_RANGE,
       "Jump out of range by %d byte(s)" ,
       "Jump out of range by %d byte(s)" )
 pick( DISPLACEMENT_OUT_OF_RANGE,
-      "Displacement cannot be larger than 32k" ,
-      "ディスプレースメントが32Kを越えています" )
+      "Displacement out of range: 0x%I64X" ,
+      "Displacement out of range: 0x%I64X" )
 pick( INITIALIZER_OUT_OF_RANGE,
       "Initializer value too large" ,
       "設定されている初期値が大きすぎます" )
@@ -281,12 +281,14 @@ pick( MULTIPLE_OVERRIDES,
 pick( SEGMENT_GROUP_OR_SEGREG_EXPECTED,
       "Segment, group or segment register expected" ,
       "Segment, group or segment register expected" )
+#if 0
 pick( UNEXPECTED_END_OF_FILE,
       "Unexpected end of file" ,
       "途中でファイルが終わりました" )
-pick( LABEL_TOO_LONG,
-      "Label is too long" ,
-      "ラベルが長すぎます" )
+#endif
+pick( IDENTIFIER_TOO_LONG,
+      "Identifier too long" ,
+      "Identifier too long" )
 #if 0
 pick( INCONSISTENT_INTERNAL_TABLES,
       "Inconsistent internal tables: '%.*s' not found" ,
@@ -309,7 +311,7 @@ pick( NOT_SUPPORTED,
 pick( SIZE_NOT_SPECIFIED_ASSUMING,
       "Size not specified, assuming: %s" ,
       "Size not specified, assuming: %s" )
-pick( FLOAT_OPERAND,
+pick( FP_INITIALIZER_IGNORED,
       "Floating-point initializer ignored" ,
       "Floating-point initializer ignored" )
 pick( ONLY_SHORT_AND_NEAR_DISPLACEMENT_IS_ALLOWED,
@@ -342,18 +344,22 @@ pick( UNKNOWN_SEGMENT_ATTRIBUTE,
 pick( MUST_BE_IN_SEGMENT_BLOCK,
       "Must be in segment block" ,
       "現在オープンされているセグメントはありません" )
+#if 0
 pick( LNAME_USED_ALREADY,
       "Lname is used already" ,
       "Lnameは既に使用されています" )
+#endif
 pick( SEG_NOT_DEFINED,
-      "Segment %s is not defined" ,
-      "Segment %s is not defined" )
+      "Segment not defined: %s" ,
+      "Segment not defined: %s" )
 pick( COLON_EXPECTED,
       "Colon is expected" ,
       "コロン(:)が必要です" )
+#if 0
 pick( TOKEN_EXPECTED_AFTER_COLON,
       "A token is expected after colon" ,
       "コロン(:)の後にはトークンが必要です" )
+#endif
 pick( INVALID_QUALIFIED_TYPE,
       "Invalid qualified type" ,
       "無効な修飾タイプです" )
@@ -417,9 +423,11 @@ pick( MACRO_NESTING_LEVEL_TOO_DEEP,
 pick( SYMBOL_NOT_DEFINED,
       "Symbol not defined : %s" ,
       "Symbol not defined : %s" )
+#if 0
 pick( SPACES_NOT_ALLOWED_IN_COMMAND_LINE_OPTIONS,
       "Spaces not allowed in command line options" ,
       "コマンドラインオプションで空白は使用できません" )
+#endif
 pick( MSG_FATAL_ERROR,
       "Fatal error" ,
       "エラー" )
@@ -949,10 +957,19 @@ pick( SAFESEH_ARGUMENT_MUST_BE_A_PROC,
       ".SAFESEH argument must be a PROC",
       ".SAFESEH argument must be a PROC" )
 pick( DIRECTIVE_IGNORED_WITHOUT_X,
-      "directive ignored without -%s switch",
-      "directive ignored without -%s switch" )
+      "Directive ignored without -%s switch",
+      "Directive ignored without -%s switch" )
 #if ELF_SUPPORT
 pick( ELF_GNU_EXTENSIONS_USED,
       "ELF GNU extensions (8/16-bit relocations) used",
       "ELF GNU extensions (8/16-bit relocations) used" )
 #endif
+pick( SYNTAX_ERROR_IN_EXPRESSION,
+      "Syntax error in expression",
+      "Syntax error in expression" )
+pick( MACRO_LABEL_NOT_DEFINED,
+      "Macro label not defined: %s",
+      "Macro label not defined: %s" )
+pick( PROCEDURE_ARGUMENT_OR_LOCAL_NOT_REFERENCED,
+      "Procedure argument or local not referenced: %s",
+      "Procedure argument or local not referenced: %s" )

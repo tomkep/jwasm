@@ -24,4 +24,12 @@ insn(JMP, 5,                    OP_M48,     0,       OP_NONE,       OP3_NONE,0, 
 insn(JMP, 6,                    OP_M80,     F_48,    OP_NONE,       OP3_NONE,0,  no_WDS, 0xFF,     0x28,       P_64,        0)
 ins (LGDT, lgdt, 4,             OP_M80,     F_0F,    OP_NONE,       OP3_NONE,0,  no_WDS, 0x01,     0x10,       P_64,        0)
 ins (LIDT, lidt, 4,             OP_M80,     F_0F,    OP_NONE,       OP3_NONE,0,  no_WDS, 0x01,     0x18,       P_64,        0)
+#if 1
+ins (SLDT, sldt, 4,             OP_RGT8,    F_0F,    OP_NONE,       OP3_NONE,0,  no_WDS, 0x00,     0x00,       P_64,        0)
+insn(SLDT, 1,                   OP_M16,     F_0FNO66,OP_NONE,       OP3_NONE,0,  no_WDS, 0x00,     0x00,       P_286,       0)
+ins (SMSW, smsw, 4,             OP_RGT8,    F_0F,    OP_NONE,       OP3_NONE,0,  no_WDS, 0x01,     0x20,       P_64,        0)
+insn(SMSW, 1,                   OP_M16,     F_0FNO66,OP_NONE,       OP3_NONE,0,  no_WDS, 0x01,     0x20,       P_286,       0)
+ins (STR,  str,  3,             OP_RGT8,    F_0F,    OP_NONE,       OP3_NONE,0,  no_WDS, 0x00,     0x08,       P_64,        0)
+insn(STR,  1,                   OP_M16,     F_0FNO66,OP_NONE,       OP3_NONE,0,  no_WDS, 0x00,     0x08,       P_286,       0)
+#endif
 #endif

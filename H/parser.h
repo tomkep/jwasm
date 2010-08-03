@@ -157,24 +157,24 @@ struct asm_ins {
         opnd_type_3rd   : 4,    /* info on 3rd operand */
         opnd_dir        : 1;    /* operand direction */
 #ifdef __WATCOMC__
-    enum asm_cpu        cpu;                /* CPU type */
+    enum asm_cpu        cpu;            /* CPU type */
 #else
-    unsigned short      cpu;                /* CPU type */
+    unsigned short      cpu;            /* CPU type */
 #endif
-    unsigned char   opcode;                 /* opcode byte */
+    unsigned char   opcode;             /* opcode byte */
     union {
-        unsigned char   rm_byte;            /* mod_rm_byte */
+        unsigned char   rm_byte;        /* mod_rm_byte */
 #ifdef __WATCOMC__
-        enum special_type specialtype;      /* for OP_SPECIAL */
+        enum special_type specialtype;  /* for OP_SPECIAL */
 #else
         unsigned char   specialtype;
 #endif
     };
 };
 
-// code_info describes the current instruction. It's the communication
-// structure between parser and code generator.
-
+/* code_info describes the current instruction. It's the communication
+ * structure between parser and code generator.
+ */
 struct code_info {
     struct {
         enum asm_token  ins;           // prefix before instruction, e.g. lock, rep, repnz
@@ -189,14 +189,14 @@ struct code_info {
     enum asm_token  token;
     memtype         mem_type;          // byte / word / etc. NOT near/far
     OPNDTYPE        opnd_type[3];
-    long            data[3];
-    struct asmfixup *InsFixup[3];
+    int_32          data[3];
+    struct genfixup *InsFixup[3];
     unsigned char   opcode;
     unsigned char   rm_byte;
     unsigned char   sib;
     unsigned char   Ofssize;
     union {
-        unsigned char       flags;
+        unsigned char flags;
         struct {
             unsigned char   isdirect:1;     /* 1=direct addressing mode */
             unsigned char   isfar:1;        /* CALL/JMP far */

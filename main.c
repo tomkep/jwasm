@@ -74,7 +74,7 @@
 
 extern char     banner_printed;
 
-File_Info       FileInfo;       // files information
+File_Info       FileInfo;       /* files information */
 static int      numArgs = 0;
 static int      numFiles = 0;
 
@@ -190,10 +190,10 @@ static void StripQuotes( char *fname )
     char *d;
 
     if( *fname == '"' ) {
-        // string will shrink so we can reduce in place
+        /* string will shrink so we can reduce in place */
         d = fname;
         for( s = d + 1; *s && *s != '"'; ++s ) {
-            // collapse double backslashes, only then look for escaped quotes
+            /* collapse double backslashes, only then look for escaped quotes */
             if( s[0] == '\\' && s[1] == '\\' ) {
                 ++s;
             } else if( s[0] == '\\' && s[1] == '"' ) {
@@ -248,9 +248,9 @@ static void SetCpuCmdline( unsigned value, const char *parm )
 #endif
     for( ; *parm ; parm++ ) {
         if( *parm == 'p' && Options.cpu >= P_286 ) {
-            Options.cpu |= P_PM;      // set privileged mode
+            Options.cpu |= P_PM;      /* set privileged mode */
 #if MANGLERSUPP
-        } else if( *parm == '"' ) {       // set default mangler
+        } else if( *parm == '"' ) {       /* set default mangler */
             char *dest;
             parm++;
             dest = strchr( parm, '"' );
@@ -294,7 +294,7 @@ static void queue_item( struct qitem * *start, const char *string )
     return;
 }
 
-// get default file extension for error, object and listing files
+/* get default file extension for error, object and listing files */
 
 static char *GetExt( int type )
 /*****************************/
@@ -835,7 +835,7 @@ static const char *GetToken( char *dst, const char *str, int max, bool isequate 
 {
     bool equatefound = FALSE;
 
-    //while( isspace( *str ) ) ++str;  // no spaces allowed!
+    //while( isspace( *str ) ) ++str;  /* no spaces allowed! */
 is_quote:
     if( *str == '"' ) {
         ++str;
@@ -906,7 +906,7 @@ static char *ReadParamFile( const char *name )
     fclose( file );
     if ( len == 0)
         return( NULL );
-    // zip through characters changing \r, \n etc into ' '
+    /* zip through characters changing \r, \n etc into ' ' */
     str = env;
     while( *str ) {
         ch = *str;
@@ -914,8 +914,8 @@ static char *ReadParamFile( const char *name )
             *str = ' ';
         }
 #if HANDLECTRLZ
-        if( ch == 0x1A ) {      // if end of file
-            *str = '\0';        // - mark end of str
+        if( ch == 0x1A ) {      /* if end of file */
+            *str = '\0';        /* - mark end of str */
             break;
         }
 #endif
@@ -985,7 +985,7 @@ static void ProcessOption( const char **cmdline, char *buffer )
         //DebugMsg(("ProcessOption(%s): %s\n", p, opt ));
         if( *p == *opt ) {
             for ( opt++, j = 1 ; isalnum(*opt) && *opt == p[j]; opt++, j++ );
-            // make sure end of option is reached
+            /* make sure end of option is reached */
             if ( isalnum(*opt) )
                 continue;
             p += j;
@@ -1001,12 +1001,12 @@ static void ProcessOption( const char **cmdline, char *buffer )
                     cmdl_options[i].function();
                     return; /* option processed successfully */
                     break;
-                case '#':             // collect a number
+                case '#':             /* collect a number */
                     if( *p >= '0' && *p <= '9' )
                         p = GetNumber( p );
                     break;
-                case '$':      // collect an identifer+value
-                case '@':      // collect a filename
+                case '$':      /* collect an identifer+value */
+                case '@':      /* collect a filename */
                     OptParm = buffer;
                     if ( rspidx )
                         p = GetToken( buffer, p, _MAX_PATH - 1, *opt == '$' );
@@ -1016,11 +1016,11 @@ static void ProcessOption( const char **cmdline, char *buffer )
                         p += j;
                     }
                     break;
-                case '=':    // collect an optional '='
+                case '=':    /* collect an optional '=' */
                     if ( *p == '=' || *p == '#' )
                         p++;
                     break;
-                case '^':    // skip spaces before argument
+                case '^':    /* skip spaces before argument */
                     while ( isspace(*p) ) p++;
                     if ( *p == NULLC ) {
                         p = getnextcmdstring( cmdline );
@@ -1167,7 +1167,7 @@ int main( int argc, char **argv )
     static char dir[_MAX_DIR];
 #endif
 
-#if 0 //def DEBUG_OUT    // DebugMsg() cannot be used that early
+#if 0 //def DEBUG_OUT    /* DebugMsg() cannot be used that early */
     int i;
     for (i = 1; i < argc; i++ ) {
         printf("argv[%u]=>%s<\n", i, argv[i] );
@@ -1220,7 +1220,7 @@ int main( int argc, char **argv )
             _makepath( FileInfo.fname[ASM], drv, dir, finfo.name, NULL );
 #endif
             GetDefaultFilenames( FileInfo.fname[ASM] );
-            AssembleModule();     // assemble source module
+            AssembleModule();     /* assemble source module */
             main_fini();
 #if WILDCARDS
             if ( _findnext( fh, &finfo ) == -1 ) {

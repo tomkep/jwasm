@@ -42,7 +42,7 @@ static carve_t  myCarver;
 void OmfFixInit( void )
 /*********************/
 {
-    myCarver = CarveCreate( sizeof( fixup ), 64 );
+    myCarver = CarveCreate( sizeof( omffixup ), 64 );
 }
 
 void OmfFixFini( void )
@@ -51,17 +51,17 @@ void OmfFixFini( void )
     CarveDestroy( myCarver );
 }
 
-fixup *OmfFixNew( void )
-/**********************/
+omffixup *OmfFixNew( void )
+/*************************/
 {
     return( CarveAlloc( myCarver ) );
 }
 
 #if 0
-fixup *OmfFixDup( const fixup *fix )
-/**********************************/
+omffixup *OmfFixDup( const fixup *fix )
+/*************************************/
 {
-    fixup *new;
+    omffixup *new;
 
     if( fix == NULL ) {
         return( NULL );
@@ -72,8 +72,8 @@ fixup *OmfFixDup( const fixup *fix )
 }
 #endif
 
-void OmfFixKill( fixup *fix )
-/***************************/
+void OmfFixKill( omffixup *fix )
+/******************************/
 {
     CarveFree( myCarver, fix );
 }
@@ -195,8 +195,8 @@ size_t OmfFixGenRef( logphys *ref, int is_logical, uint_8 *buf, int type )
  * the location within the LEDATA record (10 bits).
  */
 
-size_t OmfFixGenFix( fixup *fix, uint_8 *buf, int type )
-/******************************************************/
+size_t OmfFixGenFix( omffixup *fix, uint_8 *buf, int type )
+/*********************************************************/
 {
     uint_8  *p;
     uint_8  byte;

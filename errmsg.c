@@ -48,7 +48,7 @@ extern char             *MsgGet( int resourceid, char *buffer );
 extern void             print_source_nesting_structure( void );
 extern char             banner_printed;
 
-//    WngLvls[level] // warning levels associated with warning messages
+//    WngLvls[level] /* warning levels associated with warning messages */
 //    CompFlags.errout_redirected
 
 /* globals to this module */
@@ -183,7 +183,7 @@ void AsmErr( int msgnum, ... )
         /* Just simulate the END directive, don't do a fatal exit!
          This allows to continue to assemble further modules.
          */
-        ModuleInfo.EndDirectiveFound = TRUE;
+        ModuleInfo.EndDirFound = TRUE;
     }
 }
 
@@ -221,7 +221,7 @@ void InitErrFile( void )
 
 int InternalError( const char *file, unsigned line )
 /**************************************************/
-// it's used by myassert() function in debug version
+/* it's used by myassert() function in debug version */
 {
     char buffer[MAX_LINE_LEN];
     DebugMsg(("InternalError enter\n"));

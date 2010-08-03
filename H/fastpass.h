@@ -21,8 +21,9 @@ typedef struct equ_item {
 } equ_item;
 
 /* line_item: used for a linked list of preprocessed lines. After SaveState()
- has been called, all preprocessed lines are written in pass one and read
- in further passes */
+ * has been called, all preprocessed lines are written in pass one and read
+ * in further passes
+ */
 
 typedef struct line_item {
     struct line_item *next;

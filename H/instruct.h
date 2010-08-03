@@ -461,6 +461,7 @@ ins (PUSHF,  pushf,  5,         OP_NONE,     F_16,   OP_NONE,       OP3_NONE,0, 
 ins (RDMSR, rdmsr, 5,           OP_NONE,     F_0F,   OP_NONE,       OP3_NONE,0,  no_RM,  0x32,     0x00,       P_586,       0)
 ins (RDPMC, rdpmc, 5,           OP_NONE,     F_0F,   OP_NONE,       OP3_NONE,0,  no_RM,  0x33,     0x00,       P_686,       0)
 ins (RDTSC, rdtsc, 5,           OP_NONE,     F_0F,   OP_NONE,       OP3_NONE,0,  no_RM,  0x31,     0x00,       P_586,       0)
+ins (RDTSCP, rdtscp, 6,         OP_NONE,     F_0F,   OP_NONE,       OP3_NONE,0,  no_WDS, 0x01,     0xF9,       P_686,       0)
 ins (RET,  ret,  3,             OP_I16,      0,      OP_NONE,       OP3_NONE,0,  no_RM,  0xC2,     0x00,       P_86,        0)
 insn(RET,  1,                   OP_NONE,     0,      OP_NONE,       OP3_NONE,0,  no_RM,  0xC3,     0x00,       P_86,        0)
 ins (RETN, retn, 4,             OP_I16,      0,      OP_NONE,       OP3_NONE,0,  no_RM,  0xC2,     0x00,       P_86,        0)
@@ -1152,11 +1153,13 @@ ins (PSIGNW, psignw, 6,         OP_MMX,      F_0F,   OP_MMX|OP_M64, OP3_NONE,1, 
 insn(PSIGNW, 1,                 OP_XMM,      F_660F, OP_XMM|OP_M128,OP3_NONE,1,  no_WDSx,0x38,     0x09,       P_686|P_SSSE3, 0)
 #endif
 #if AMD64_SUPPORT
-insx(CDQE, cdqe, 4,             OP_NONE,     0,      OP_NONE,       OP3_NONE,0,  no_RM,  0x98,     0x00,       P_64,       0,        RWF_X64)
+insx(CDQE, cdqe, 4,             OP_NONE,     F_48,   OP_NONE,       OP3_NONE,0,  no_RM,  0x98,     0x00,       P_64,       0,        RWF_X64)
+insx(CQO, cqo, 3,               OP_NONE,     F_48,   OP_NONE,       OP3_NONE,0,  no_RM,  0x99,     0x00,       P_64,       0,        RWF_X64)
 insx(PUSHFQ,pushfq, 6,          OP_NONE,     0,      OP_NONE,       OP3_NONE,0,  no_RM,  0x9C,     0x00,       P_64,       0,        RWF_X64)
 insx(POPFQ, popfq, 5,           OP_NONE,     0,      OP_NONE,       OP3_NONE,0,  no_RM,  0x9D,     0x00,       P_64,       0,        RWF_X64)
 insx(IRETQ, iretq, 5,           OP_NONE,     F_48,   OP_NONE,       OP3_NONE,0,  no_RM,  0xCF,     0x00,       P_64,       0,        RWF_X64)
 insx(CMPXCHG16B, cmpxchg16b, 10,OP_M128,     F_480F, OP_NONE,       OP3_NONE,0,  0,      0xC7,     0x08,       P_64,       AP_LOCK,  RWF_X64)
+insx(MOVSXD,movsxd, 6,          OP_R64,      0,      OP_R32|OP_M32, OP3_NONE,1,  0,      0x63,     0x00,       P_64,       0,        RWF_X64)
 
 insx(CMPSQ, cmpsq, 5,           OP_M64,      F_48,   OP_M,          OP3_NONE,0,  no_RM,  0xA7,     0x00,       P_64,       AP_REPxx, RWF_X64)
 insn(CMPSQ, 1,                  OP_NONE,     F_48,   OP_NONE,       OP3_NONE,0,  no_RM,  0xA7,     0x00,       P_64,       AP_REPxx )

@@ -145,10 +145,13 @@ static int writeSegdef( OBJ_WFILE *out, obj_rec *objr )
     case SEGDEF_ALIGN_PARA:     acbp |= ALIGN_PARA << 5;    break;
     case SEGDEF_ALIGN_PAGE:     acbp |= ALIGN_PAGE << 5;    break;
     case SEGDEF_ALIGN_DWORD:    acbp |= ALIGN_DWORD << 5;   break;
+#if PAGE4K
     case SEGDEF_ALIGN_4KPAGE:
-        acbp |= ALIGN_PAGE;
-        AsmError( NO_4KPAGE_ALIGNED_SEGMENTS );
+        acbp |= ALIGN_4KPAGE << 5;
+        if ( Parse_Pass == PASS_1 )
+            AsmWarn( 2, NO_4KPAGE_ALIGNED_SEGMENTS );
         break;
+#endif
     default:
         /**/never_reach();
     }
@@ -157,9 +160,10 @@ static int writeSegdef( OBJ_WFILE *out, obj_rec *objr )
     }
     OmfWrite8( out, acbp );
     if( align == SEGDEF_ALIGN_ABS ) {
-        // absolut segment has frame=word and offset=byte
-        // it isn't fixupp physical reference
-        // and don't depend on segment size (16/32bit)
+        /* absolut segment has frame=word and offset=byte
+         * it isn't fixupp physical reference
+         * and don't depend on segment size (16/32bit)
+         */
         OmfWrite16( out, objr->d.segdef.abs.frame );
         OmfWrite8( out, objr->d.segdef.abs.offset );
     }
@@ -172,11 +176,9 @@ static int writeSegdef( OBJ_WFILE *out, obj_rec *objr )
     OmfWriteIndex( out, objr->d.segdef.seg_name_idx );
     OmfWriteIndex( out, objr->d.segdef.class_name_idx );
     OmfWriteIndex( out, objr->d.segdef.ovl_name_idx );
-#if 0
-    if( objr->d.segdef.access_valid ) {
-        AsmError( ACCESS_CLASSES_NOT_SUPPORTED );
-    }
-#endif
+    //if( objr->d.segdef.access_valid ) {
+    //    AsmError( ACCESS_CLASSES_NOT_SUPPORTED );
+    //}
     OmfWEndRec( out );
     return( 0 );
 }
@@ -185,7 +187,7 @@ static int writeFixup( OBJ_WFILE *out, obj_rec *objr )
 /****************************************************/
 {
     int         is32;
-    fixup       *walk;
+    omffixup    *walk;
     size_t      len;
     size_t      len_written;
     uint_8      buf[ FIX_GEN_MAX ];
@@ -522,7 +524,7 @@ static const pobj_list myFuncs[] = {
 
 static pobj_filter      jumpTable[ CMD_MAX_CMD - CMD_MIN_CMD + 1 ];
 
-// call a function
+/* call a function */
 
 void omf_write_record( obj_rec *objr, char kill )
 /***********************************************/

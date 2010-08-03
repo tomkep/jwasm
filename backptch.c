@@ -50,7 +50,7 @@
 #else
 #define SkipFixup()
 #endif
-static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
+static ret_code DoPatch( struct asm_sym *sym, struct genfixup *fixup )
 /********************************************************************/
 {
     long                disp;
@@ -58,13 +58,15 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
     unsigned            size;
     asm_sym             *sym2;
     dir_node            *seg;
+    struct genfixup     *fixup2;
 
     /* all relative fixups should occure only at first pass and they signal forward references
      * they must be removed after patching or skiped ( next processed as normal fixup )
      */
 
-    DebugMsg(("DoPatch(%u, %s): sym=%s fixup->ofs=%Xh loc=%Xh opt=%u def_seg=%s\n",
-              Parse_Pass + 1, sym->name, fixup->sym ? fixup->sym->name : "",
+    DebugMsg(("DoPatch(%u, %s): fixup sym=%s type=%X ofs=%Xh loc=%Xh opt=%u def_seg=%s\n",
+              Parse_Pass + 1, sym->name,
+              fixup->sym ? fixup->sym->name : "NULL", fixup->type,
               fixup->offset, fixup->fixup_loc, fixup->option,
               fixup->def_seg ? fixup->def_seg->sym.name : "NULL" ));
     seg = GetSeg( sym );
@@ -84,7 +86,7 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
             /* convert near call to push cs + near call,
              * (only at first pass) */
             DebugMsg(("DoPatch: Phase error! caused by far call optimization\n"));
-            PhaseError = TRUE;
+            ModuleInfo.PhaseError = TRUE;
             sym->offset++;  /* a PUSH CS will be added */
             /* todo: insert LABELOPT block here */
             OutputByte( 0 ); /* it's pass one, nothing is written */
@@ -97,9 +99,11 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
             case FIX_RELOFF32:
             case FIX_RELOFF16:
                 AsmFree( fixup );
+                DebugMsg(("DoPatch: FIX_RELOFF32/FIX_RELOFF16, return\n"));
                 return( NOT_ERROR );
             case FIX_LOBYTE:  /* push <forward reference> */
                 size = 1;    /* size increases from 2 to 3/5 */
+                DebugMsg(("DoPatch: FIX_LOBYTE\n"));
                 goto patch;
             }
         }
@@ -114,14 +118,14 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
         /* fall through */
     case FIX_RELOFF8:
         size++;
-        // calculate the displacement
+        /* calculate the displacement */
         // disp = fixup->offset + GetCurrOffset() - fixup->fixup_loc - size;
         disp = fixup->offset + fixup->sym->offset - fixup->fixup_loc - size - 1;
         max_disp = (1UL << ((size * 8)-1)) - 1;
         if( disp > max_disp || disp < (-max_disp-1) ) {
         patch:
             DebugMsg(("DoPatch(%u): Phase error, disp=%X, fixup=%s(%X), loc=%X!\n", Parse_Pass + 1, disp, fixup->sym->name, fixup->sym->offset, fixup->fixup_loc ));
-            PhaseError = TRUE;
+            ModuleInfo.PhaseError = TRUE;
             /* ok, the standard case is: there's a forward jump which
              * was assumed to be SHORT, but it must be NEAR instead.
              */
@@ -145,7 +149,7 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
                     size++;
                     /* fall through */
                 default: /* normal JMP (and PUSH) */
-                    // if( CodeInfo->Ofssize ) v1.96: don't use CodeInfo here!
+                    // if( CodeInfo->Ofssize ) /* v1.96: don't use CodeInfo here! */
                     if( seg->e.seginfo->Ofssize )
                         size += 2; /* NEAR32 instead of NEAR16 */
                     size++;
@@ -169,9 +173,21 @@ static ret_code DoPatch( struct asm_sym *sym, struct asmfixup *fixup )
                         sym2->offset += size;
                         DebugMsg(("sym %s, offset changed %X -> %X\n", sym2->name, sym2->offset - size, sym2->offset));
                     }
+                    /* v2.03: also adjust fixup locations located between the
+                     * label reference and the label. This should reduce the
+                     * number of passes to 2 for not too complex sources.
+                     */
+                    for ( fixup2 = seg->e.seginfo->FixupListHeadGen; fixup2; fixup2 = fixup2->nextrlc ) {
+                        if ( fixup2->sym == sym )
+                            continue;
+                        if ( fixup2->fixup_loc <= fixup->fixup_loc )
+                            break;
+                        fixup2->fixup_loc += size;
+                        DebugMsg(("for sym=%s fixup loc %X changed to %X\n", fixup2->sym->name, fixup2->fixup_loc - size, fixup2->fixup_loc ));
+                    }
 #endif
                     /*  it doesn't matter what's actually "written" */
-                    for (;size;size--)
+                    for ( ; size; size-- )
                         OutputByte( 0xCC );
                     break;
                 }
@@ -209,10 +225,10 @@ ret_code BackPatch( struct asm_sym *sym )
  * to this symbol. These fixups are only generated during pass 1.
  */
 {
-    struct asmfixup     *fixup;
-    struct asmfixup     *next;
+    struct genfixup     *fixup;
+    struct genfixup     *next;
 
-    DebugMsg(("BackPatch(%s) enter, seg.ofs=%s.%X\n", sym->name, CurrSeg->sym.name, sym->offset ));
+    DebugMsg(("BackPatch(%s) enter, seg.ofs=%s.%X\n", sym->name, sym->segment ? sym->segment->name : "NULL (!?)", sym->offset ));
     fixup = sym->fixup;
     sym->fixup = NULL;
     for( ; fixup != NULL; fixup = next ) {
@@ -221,7 +237,7 @@ ret_code BackPatch( struct asm_sym *sym )
             return( ERROR );
         }
     }
-    DebugMsg(("BackPatch(%s) exit, offset=%X\n", sym->name, sym->offset ));
+    DebugMsg(("BackPatch(%s) exit, ofs=%X\n", sym->name, sym->offset ));
     return( NOT_ERROR );
 }
 

@@ -45,11 +45,11 @@ typedef struct queuenode {
     void *data;
 } queuenode;
 
-static qdesc   LnameQueue;  // LNAME items (segments, groups and classes)
-static qdesc   PubQueue;    // PUBLIC items
-static qdesc   GlobalQueue; // GLOBAL items ( externdefs )
+static qdesc   LnameQueue;  /* LNAME items (segments, groups and classes) */
+static qdesc   PubQueue;    /* PUBLIC items */
+static qdesc   GlobalQueue; /* GLOBAL items ( externdefs ) */
 
-// add a new node to a queue
+/* add a new node to a queue */
 
 static void QAddItem( qdesc *queue, void *data )
 /***********************************************/
@@ -68,7 +68,7 @@ void AddPublicData( asm_sym *sym )
     QAddItem( &PubQueue, sym );
 }
 
-// get (next) PUBLIC item
+/* get (next) PUBLIC item */
 
 asm_sym * GetPublicData( void * *vp )
 /******************************************/
@@ -96,7 +96,7 @@ asm_sym * GetPublicData( void * *vp )
                 continue;
         }
         if( sym->state != SYM_INTERNAL && sym->state != SYM_EXTERNAL ) {
-            // v1.95: make a full second pass and emit error on PUBLIC
+            /* v1.95: make a full second pass and emit error on PUBLIC */
             //AsmErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
 #if FASTPASS
             SkipSavedState();
@@ -133,9 +133,9 @@ void AddLnameData( asm_sym *sym )
     QAddItem( &LnameQueue, sym );
 }
 
-// find a class index.
-// the classes aren't in the symbol table!
-
+/* find a class index.
+ * the classes aren't in the symbol table!
+ */
 direct_idx FindLnameIdx( const char *name )
 /*****************************************/
 {
@@ -153,6 +153,9 @@ direct_idx FindLnameIdx( const char *name )
     return( LNAME_NULL );
 }
 
+/* find a class name.
+ * the classes aren't in the symbol table!
+ */
 char *GetLname( direct_idx idx )
 /******************************/
 {
@@ -170,7 +173,7 @@ char *GetLname( direct_idx idx )
     return( NULL );
 }
 
-// called by OMF output format
+/* called by OMF output format */
 
 void GetLnameData( void **data, asm_sym **psym )
 /*********************************************/
@@ -206,7 +209,7 @@ static void FreeLnameQueue( void )
     LnameQueue.head = NULL;
 }
 
-// Global Queue is used to store EXTERNDEFs
+/* Global Queue is used to store EXTERNDEFs */
 
 void AddGlobalData( dir_node *dir )
 /*********************************/
@@ -217,22 +220,23 @@ void AddGlobalData( dir_node *dir )
 /* EXTERNDEFs which have been defined in the module must be made
  * PUBLIC. This code runs after pass 1.
  */
-void GetGlobalData( void )
-/************************/
+void GlobalToPublic( void )
+/*************************/
 {
     queuenode           *curr;
     struct asm_sym      *sym;
 
-    DebugMsg(("GetGlobalData enter, GlobalQueue=%X\n", GlobalQueue));
+    DebugMsg(("GlobalToPublic enter, GlobalQueue=%X\n", GlobalQueue));
     while ( curr = (queuenode *)QDequeue( &GlobalQueue )) {
         sym = (asm_sym *)curr->data;
-        DebugMsg(("GetGlobalData: %s state=%u used=%u public=%u\n", sym->name, sym->state, sym->used, sym->public ));
+        DebugMsg(("GlobalToPublic: %s state=%u used=%u public=%u\n", sym->name, sym->state, sym->used, sym->public ));
         if( sym->state == SYM_INTERNAL &&
            sym->isproc == FALSE && /* ignore PROCs! Masm does also */
            sym->public == FALSE ) {
             /* add it to the public queue */
             sym->public = TRUE;
             QEnqueue( &PubQueue, curr );
+            DebugMsg(("GlobalToPublic: %s added to public queue\n", sym->name ));
             continue; /* don't free this item! */
         }
         AsmFree( curr );

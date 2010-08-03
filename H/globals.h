@@ -57,9 +57,9 @@
 #define _memicmp  memicmp
 #endif
 
-#define MAX_LINE_LEN            600     // no restriction for this number
-#define MAX_TOKEN               MAX_LINE_LEN / 4  // max tokens in one line
-#define MAX_STRING_LEN          MAX_LINE_LEN - 32 // must be < MAX_LINE_LEN
+#define MAX_LINE_LEN            600     /* no restriction for this number */
+#define MAX_TOKEN               MAX_LINE_LEN / 4  /* max tokens in one line */
+#define MAX_STRING_LEN          MAX_LINE_LEN - 32 /* must be < MAX_LINE_LEN */
 #define MAX_ID_LEN              247
 #define MAX_STRUCT_ALIGN        32
 #define MAX_RESW_LEN            20 /* max size of reserved words */
@@ -104,6 +104,8 @@
 #define MACROLABEL   1 /* support LABEL qualifier for macro arg  */
 #define BUILD_TARGET 0 /* support "build target" (obsolete)      */
 #define INVOKE_WC    0 /* support watcom_c for INVOKE (not impl) */
+#define REMOVECOMENT 0 /* 1=remove comments from source          */
+#define PAGE4K       0 /* support 4kB-page OMF segment alignment */
 
 #ifndef FASTPASS
 #define FASTPASS     1 /* don't scan full source if pass > 1     */
@@ -124,8 +126,8 @@
 /* JWasm version info */
 
 #define _BETA_
-#define _JWASM_VERSION_ "2.02" _BETA_
-#define _JWASM_VERSION_INT_ 201
+#define _JWASM_VERSION_ "2.03" _BETA_
+#define _JWASM_VERSION_INT_ 203
 
 #include "errmsg.h"
 
@@ -168,11 +170,11 @@ enum {
 #define NUM_FILE_TYPES 4
 
 typedef struct {
-    FILE        *file[NUM_FILE_TYPES];      // ASM, ERR, OBJ and LST
+    FILE        *file[NUM_FILE_TYPES];      /* ASM, ERR, OBJ and LST */
     char        *fname[NUM_FILE_TYPES];
 } File_Info;
 
-// Information about source, object, listing and error files
+/* Information about source, object, listing and error files */
 extern File_Info        FileInfo;
 
 #define ASM_EXT "asm"
@@ -185,7 +187,7 @@ extern File_Info        FileInfo;
 #define OBJ_EXT "obj"
 #endif
 
-// enumerations
+/* enumerations */
 
 enum oformat {
     OFORMAT_OMF,
@@ -385,16 +387,20 @@ enum segofssize {
     USE_EMPTY = 0xFE,
     USE16 = 0,
     USE32 = 1,
+#if AMD64_SUPPORT
     USE64 = 2
+#endif
 };
 
 /* fastcall types. if order is to be changed or entries
  * added, also adjust tables in proc.c, mangle.c and probably invoke.c!
  */
 enum fastcall_type {
-    FCT_MS32,       // MS 32bit fastcall (ecx,edx)
-    FCT_WATCOMC,    // OW register calling convention (eax, ebx, ecx, edx)
-    FCT_WIN64       // Win64 fastcall convention (rcx, rdx, r8, r9)
+    FCT_MS32,       /* MS 32bit fastcall (ecx,edx) */
+    FCT_WATCOMC,    /* OW register calling convention (eax, ebx, ecx, edx) */
+#if AMD64_SUPPORT
+    FCT_WIN64       /* Win64 fastcall convention (rcx, rdx, r8, r9) */
+#endif
 };
 enum stdcall_decoration {
     STDCALL_FULL,
@@ -475,15 +481,6 @@ typedef struct global_options {
 
 extern global_options Options;
 
-typedef struct global_vars{
-    uint    sel_idx;              /* used for OMF comment record */
-    uint_32 sel_start;            /* used for OMF comment record */
-    unsigned int code_seg:1;      /* is current segment CODE? */
-    unsigned int data_in_code:1;  /* have we just written data to a code seg */
-} global_vars;
-
-extern global_vars GlobalVars;
-
 typedef struct asm_tok ASM_TOK;
 
 typedef struct  fname_list {
@@ -503,26 +500,25 @@ struct MZDATA {
 #endif
 
 /* global variables */
-extern struct asm_tok   *AsmBuffer[];   // token buffer
-extern unsigned int     Parse_Pass;     // assembly pass
+extern struct asm_tok   *AsmBuffer[];   /* token buffer */
+extern unsigned int     Parse_Pass;     /* assembly pass */
 // v1.96: Opnd_Count removed
-//extern unsigned int     Opnd_Count;     // operand count of current instr
-extern int              Token_Count;    // number of tokens in current line
-extern bool             Modend;         // end of module is reached
-extern unsigned int     GeneratedCode;  // nesting level generated code
-extern uint_8           MacroLevel;     // macro nesting level
+//extern unsigned int     Opnd_Count;     /* operand count of current instr */
+extern int              Token_Count;    /* number of tokens in current line */
+extern unsigned int     GeneratedCode;  /* nesting level generated code */
+extern uint_8           MacroLevel;     /* macro nesting level */
 
-extern bool             PhaseError;     // phase error occured during pass
-extern bool             write_to_file;  // 1=write the object module
+//extern bool             PhaseError;     /* phase error occured during pass */
+extern bool             write_to_file;  /* 1=write the object module */
 
-// functions in assemble.c
+/* functions in assemble.c */
+
+struct genfixup;
 
 extern void             OutputByte( unsigned char );
-extern void             OutputBytes( unsigned char *, int len );
-extern void             OutputBytesAndFixup( struct asmfixup *, unsigned char *, int len );
+//extern void             OutputCodeByte( unsigned char );
 extern void             FillDataBytes( unsigned char, int len );
-extern void             OutputCodeByte( unsigned char );
-extern void             OutSelect( bool );
+extern void             OutputBytes( const unsigned char *, int len, struct genfixup * );
 extern void             AssembleModule( void );
 extern void             AddLinnumDataRef( unsigned );
 extern void             RunLineQueue( void );

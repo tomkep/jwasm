@@ -74,9 +74,9 @@ enum fixup_options {
         OPTJ_CALL
 };
 
-struct asmfixup {
-    struct asmfixup         *nextbp;       /* PASS 1: linked list backpatch */
-    struct asmfixup         *nextrlc;      /* PASS >1: linked list relocs */
+struct genfixup {
+    struct genfixup         *nextbp;       /* PASS 1: linked list backpatch */
+    struct genfixup         *nextrlc;      /* PASS >1: linked list relocs */
     uint_32                 offset;        /* symbol's offset */
     uint_32                 fixup_loc;     /* location of fixup */
     enum fixup_types        type;
@@ -100,8 +100,8 @@ struct asmfixup {
     struct asm_sym          *sym;
 };
 
-extern struct asmfixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
-extern ret_code         store_fixup( struct asmfixup *, int_32 * );
+extern struct genfixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
+extern ret_code         store_fixup( struct genfixup *, int_32 * );
 
 extern ret_code         BackPatch( struct asm_sym *sym );
 

@@ -128,63 +128,60 @@ static int get_precedence( int i, int bracket_precedence )
 {
     /* The following table is taken verbatim from MASM 6.1 Programmer's Guide,
      * page 14, Table 1.3.
-     */
 
-//    1             (), []
-//    2             LENGTH, SIZE, WIDTH, MASK, LENGTHOF, SIZEOF
-//    3             . (structure-field-name operator)
-//    4             : (segment override operator), PTR
-//    5             LROFFSET, OFFSET, SEG, THIS, TYPE
-//    6             HIGH, HIGHWORD, LOW, LOWWORD
-//    7             +, - (unary)
-//    8             *, /, MOD, SHL, SHR
-//    9             +, - (binary)
-//    10            EQ, NE, LT, LE, GT, GE
-//    11            NOT
-//    12            AND
-//    13            OR, XOR
-//    14            OPATTR, SHORT, .TYPE
+     * 1            (), []
+     * 2            LENGTH, SIZE, WIDTH, MASK, LENGTHOF, SIZEOF
+     * 3            . (structure-field-name operator)
+     * 4            : (segment override operator), PTR
+     * 5            LROFFSET, OFFSET, SEG, THIS, TYPE
+     * 6            HIGH, HIGHWORD, LOW, LOWWORD
+     * 7            +, - (unary)
+     * 8            *, /, MOD, SHL, SHR
+     * 9            +, - (binary)
+     * 10           EQ, NE, LT, LE, GT, GE
+     * 11           NOT
+     * 12           AND
+     * 13           OR, XOR
+     * 14           OPATTR, SHORT, .TYPE
 
-    /* The following table appears in QuickHelp online documentation for
+     * The following table appears in QuickHelp online documentation for
      * both MASM 6.0 and 6.1. It's slightly different!
-     */
 
-//    1             LENGTH, SIZE, WIDTH, MASK
-//    2             (), []
-//    3             . (structure-field-name operator)
-//    4             : (segment override operator), PTR
-//    5             THIS, OFFSET, SEG, TYPE
-//    6             HIGH, LOW
-//    7             +, - (unary)
-//    8             *, /, MOD, SHL, SHR
-//    9             +, - (binary)
-//    10            EQ, NE, LT, LE, GT, GE
-//    11            NOT
-//    12            AND
-//    13            OR, XOR
-//    14            SHORT, OPATTR, .TYPE, ADDR
+     * 1            LENGTH, SIZE, WIDTH, MASK
+     * 2            (), []
+     * 3            . (structure-field-name operator)
+     * 4            : (segment override operator), PTR
+     * 5            THIS, OFFSET, SEG, TYPE
+     * 6            HIGH, LOW
+     * 7            +, - (unary)
+     * 8            *, /, MOD, SHL, SHR
+     * 9            +, - (binary)
+     * 10           EQ, NE, LT, LE, GT, GE
+     * 11           NOT
+     * 12           AND
+     * 13           OR, XOR
+     * 14           SHORT, OPATTR, .TYPE, ADDR
 
-    /* japheth: the first table is the prefered one. Reasons:
-     - () and [] must be first.
-     - it contains operators SIZEOF, LENGTHOF, HIGHWORD, LOWWORD, LROFFSET
-     - ADDR is no operator for expressions. It's exclusively used inside
-       INVOKE directive.
+     * japheth: the first table is the prefered one. Reasons:
+     * - () and [] must be first.
+     * - it contains operators SIZEOF, LENGTHOF, HIGHWORD, LOWWORD, LROFFSET
+     * - ADDR is no operator for expressions. It's exclusively used inside
+     *   INVOKE directive.
 
-     However, what's wrong in both tables is the precedence of
-     the dot operator: Actually for both JWasm and Wasm the dot precedence
-     is 2 and LENGTH, SIZE, ... have precedence 3 instead.
+     * However, what's wrong in both tables is the precedence of
+     * the dot operator: Actually for both JWasm and Wasm the dot precedence
+     * is 2 and LENGTH, SIZE, ... have precedence 3 instead.
 
-     Precedence of operator TYPE was 5 in original Wasm source. It has
-     been changed to 4, as described in the Masm docs. This allows syntax
-     "TYPE DWORD ptr xxx"
+     * Precedence of operator TYPE was 5 in original Wasm source. It has
+     * been changed to 4, as described in the Masm docs. This allows syntax
+     * "TYPE DWORD ptr xxx"
 
-     v2.02: another case which is problematic:
-         mov al,BYTE PTR CS:[]
-     Since PTR and ':' have the very same priority, the evaluator will
-     first calculate 'BYTE PTR CS'. This is invalid, but didn't matter
-     prior to v2.02 because register coercion was never checked for
-     plausibility. Solution: priority of ':' is changed from 4 to 3.
-
+     * v2.02: another case which is problematic:
+     *     mov al,BYTE PTR CS:[]
+     * Since PTR and ':' have the very same priority, the evaluator will
+     * first calculate 'BYTE PTR CS'. This is invalid, but didn't matter
+     * prior to v2.02 because register coercion was never checked for
+     * plausibility. Solution: priority of ':' is changed from 4 to 3.
      */
 
     switch( AsmBuffer[i]->token ) {
@@ -216,10 +213,10 @@ static int get_precedence( int i, int bracket_precedence )
     return( ERROR );
 }
 
-// get value for types
-// NEAR, FAR and PROC are handled slightly differently:
-// the HIBYTE is set to 0xFF, and PROC depends on the memory model
-
+/* get value for types
+ * NEAR, FAR and PROC are handled slightly differently:
+ * the HIBYTE is set to 0xFF, and PROC depends on the memory model
+ */
 static unsigned int GetTypeSize( int i )
 /**************************************/
 {
@@ -366,7 +363,7 @@ static ret_code get_operand( expr_list *new, int *start, int end )
 
             expr_list   sti;
 
-            // read st(i), put i into idx_reg
+            /* read st(i), put i into idx_reg */
             i++;
             switch( AsmBuffer[i]->token ) {
             case T_OP_BRACKET:
@@ -385,7 +382,7 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                 DebugMsg(("get_operand exit, ok\n"));
                 return( NOT_ERROR );
             default:
-                new->idx_reg = 0; // st = st(0)
+                new->idx_reg = 0; /* st = st(0) */
                 break;
             }
         }
@@ -454,7 +451,7 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                     if ( new->type == NULL ) { /* added v1.95 */
                         new->sym = SymLookup( AsmBuffer[i]->string_ptr );
                         new->sym->state = SYM_UNDEFINED;
-                        dir_add_table( (dir_node *)new->sym );
+                        dir_add_table( (dir_node *)new->sym ); /* add UNDEFINED */
                         DebugMsg(("get_operand: %s not (yet) defined, CurrProc=%s\n", AsmBuffer[i]->string_ptr, CurrProc ? CurrProc->sym.name : "NULL" ));
                     } else if ( new->type != (asm_sym *)nullstruct ) {
                         /* the struct is known, it isn't the dummy struct */
@@ -504,9 +501,9 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                 //new->mem_type = MT_ABS;
                 new->mem_type = new->sym->mem_type;
                 new->is_type = TRUE;
-                DebugMsg(("get_operand(%s): symbol is STRUCT/UNION/TYPEDEF/RECORD\n", new->sym->name ));
+                DebugMsg(("get_operand(%s): symbol.kind=%u (STRUCT/UNION/TYPEDEF/RECORD)\n", new->sym->name, dir->e.structinfo->typekind ));
 #if 1
-                if (AsmBuffer[i-1]->token != T_DOT && AsmBuffer[i+1]->token != T_DOT)
+                if ( AsmBuffer[i-1]->token != T_DOT && AsmBuffer[i+1]->token != T_DOT )
                     new->value = new->sym->total_size;
 #endif
             } else {
@@ -563,11 +560,13 @@ static ret_code get_operand( expr_list *new, int *start, int end )
                 if( new->sym->state == SYM_INTERNAL ) {
                     new->kind = EXPR_CONST;
                     new->uvalue = new->sym->uvalue;
-                    new->hvalue = new->sym->sign ? -1 : 0;
+                    new->hvalue = new->sym->value3264;
                     DebugMsg(("get_operand(%s): equate hval=%Xh, lval=%Xh\n", new->sym->name, new->hvalue, new->uvalue ));
                     /* call internal function (@Line, ... ) */
                     if ( new->sym->predefined && new->sym->sfunc_ptr )
                         new->llvalue = new->sym->sfunc_ptr( new->sym );
+                    /* v2.03 added */
+                    new->labelinexpr = new->sym->labelinexpr;
                     /* remove the symbol reference, it isn't a label */
                     new->sym = NULL;
                 } else { /* ABS external? */
@@ -600,6 +599,7 @@ static ret_code get_operand( expr_list *new, int *start, int end )
         if ( AsmBuffer[i]->rm_byte == RWT_TYPE ) {
             /* <opcode> contains index into SimpleType table */
             new->value = GetTypeSize( AsmBuffer[i]->opcode );
+            /* fixme: mem_type should be set only when used as first arg of PTR op! */
             new->mem_type = SimpleType[AsmBuffer[i]->opcode].mem_type;
             new->Ofssize = SimpleType[AsmBuffer[i]->opcode].Ofssize;
             new->kind = EXPR_CONST;
@@ -637,8 +637,8 @@ static ret_code get_operand( expr_list *new, int *start, int end )
         return( ERROR );
     }
     (*start)++;
-    DebugMsg(("get_operand exit, ok, value=%I64X, mem_type=%Xh, abs=%u, string=%s, type=>%s<\n",
-              new->llvalue, new->mem_type, new->abs, new->string ? new->string : "NULL", new->type ? new->type->name : "NULL" ));
+    DebugMsg(("get_operand exit, ok, value=%I64X hvalue=%I64X mem_type=%Xh abs=%u string=%s type=>%s<\n",
+              new->llvalue, new->hlvalue, new->mem_type, new->abs, new->string ? new->string : "NULL", new->type ? new->type->name : "NULL" ));
     return( NOT_ERROR );
 }
 
@@ -901,6 +901,22 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
         break;
     case T_OP_BRACKET:
     case T_OP_SQ_BRACKET:
+#if 1
+        /* v2.03: make JWasm reject syntax variants
+         * "mov eax, DWORD [EBX]"
+         * "mov eax, DWORD [var_name]"
+         * variants still valid:
+         * "mov eax, DWORD [WORD]"
+         * "mov eax, DWORD [4]"
+         * "mov eax, [DWORD][EBX]"
+         */
+        if ( token_1->is_type == TRUE &&
+            (token_2->kind == EXPR_ADDR || token_2->kind == EXPR_REG ) ) {
+            CAsmError( SYNTAX_ERROR_IN_EXPRESSION );
+            DebugMsg(("calculate '[' '(': incompatible usage of (simple) type\n"));
+            return( ERROR );
+        }
+#endif
     case '+':
         DebugMsg(("calculate %s, token1.memtype=%Xh type=%s; token2.memtype=%Xh type=%s\n",
                   AsmBuffer[oper]->string_ptr,
@@ -924,7 +940,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
         if( check_same( token_1, token_2, EXPR_CONST ) ) {
 
             token_1->llvalue += token_2->llvalue;
-            token_1->labeldiff |= token_2->labeldiff;
+            token_1->labelinexpr |= token_2->labelinexpr;
 
         } else if( check_same( token_1, token_2, EXPR_ADDR ) ) {
 
@@ -1005,7 +1021,9 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
              */
             /* v2.01: use it for SYM_STRUCT_FIELDs ONLY! */
             //if ( ModuleInfo.oldstructs && token_1->mem_type == MT_EMPTY )
-            if ( ModuleInfo.oldstructs && token_1->mem_type == MT_EMPTY && token_2->mbr )
+            /* v2.03: call [bx+struct.mbr] should also work */
+            //if ( ModuleInfo.oldstructs && token_1->mem_type == MT_EMPTY && token_2->mbr )
+            if ( token_1->mem_type == MT_EMPTY && token_2->mbr )
                 token_1->mem_type = token_2->mem_type;
 
             token_1->llvalue += token_2->llvalue;
@@ -1299,12 +1317,11 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                         token_1->instr = EMPTY;
 
                     token_1->kind = EXPR_CONST;
-#if FLAG_LABELDIFF
-                    /* this flag tells EQU that it should tolerate a changed
-                     value since it may be due to a phase error.
+                    /* the type changes from address to constant.
+                     * flag labelinexpr tells EQU that it is to tolerate a
+                     * changed value so long as phase errors occur.
                      */
-                    token_1->labeldiff = TRUE;
-#endif
+                    token_1->labelinexpr = TRUE;
                     token_1->indirect = FALSE;
                 } else {
                     DebugMsg(("calculate '-', exit, ADDR, base=%u, idx=%u\n", token_1->base_reg, token_1->idx_reg ));
@@ -1574,9 +1591,27 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
 
         switch( AsmBuffer[oper]->value ) {
         case T_EQ:
+#if 1 /* v2.03: added */
+            DebugMsg(("calculate EQ: values=%I64u/%I64u, types=%u/%u\n",
+                      token_1->value64, token_2->value64, token_1->is_type, token_2->is_type ));
+            /* if both operands are types, do a more strict comparison! */
+            if ( token_1->is_type && token_2->is_type ) {
+                token_1->value64 = ( ((token_1->value64 == token_2->value64) &&
+                ( token_1->mem_type == token_2->mem_type )) ? -1:0 );
+            } else
+#endif
             token_1->value64 = ( token_1->value64 == token_2->value64 ? -1:0 );
             break;
         case T_NE:
+#if 1 /* v2.03: added */
+            DebugMsg(("calculate NE: values=%I64u/%I64u, types=%u/%u\n",
+                      token_1->value64, token_2->value64, token_1->is_type, token_2->is_type ));
+            /* if both operands are types, do a more strict comparison! */
+            if ( token_1->is_type && token_2->is_type ) {
+                token_1->value64 = ( ((token_1->value64 != token_2->value64) ||
+                ( token_1->mem_type != token_2->mem_type )) ? -1:0 );
+            } else
+#endif
             token_1->value64 = ( token_1->value64 != token_2->value64 ? -1:0 );
             break;
         case T_LT:
@@ -1601,7 +1636,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
         case T_SHL:
             token_1->llvalue = token_1->llvalue << token_2->value;
             /* v2.01: result is 64-bit only if mode is USE64 */
-            if ( ModuleInfo.Ofssize < USE64 ) {
+            if ( ModuleInfo.Ofssize <= USE32 ) {
                 token_1->hvalue = 0;
                 token_1->hlvalue = 0;
             }
@@ -1892,8 +1927,10 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
 #if IMAGERELSUPP
                 case T_IMAGEREL: /* masm returns 0 for TYPE IMAGEREL <label>! */
 #endif
-                    if ( token_2->sym)
+                    if ( token_2->sym ) {
                         token_1->value = 2 << GetSymOfssize( token_2->sym );
+                        token_1->is_type = TRUE; /* v2.03: added */
+                    }
                     break;
                 }
             } else if ( sym == NULL ) {
@@ -1904,12 +1941,17 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                     TokenAssign( token_1, token_2 );
                 } else if (token_2->kind == EXPR_REG && token_2->indirect == FALSE ) {
                     token_1->value = SizeFromRegister(AsmBuffer[token_2->base_reg]->value);
+#if 1 /* v2.03: added */
+                    token_1->is_type = TRUE;
+                    if ( token_1->mem_type == MT_EMPTY )
+                        MemtypeFromSize( token_1->value, &token_1->mem_type );
+#endif
 #if 0 /* Masm returns 0 for TYPE <segment_register> */
                     /* if it is a segment register, use default word size */
                     if (token_1->value == 0)
                         token_1->value = Use32 ? 4 : 2;
 #endif
-                } else if ( token_2->explicit) {
+                } else if ( token_2->explicit ) {
                     token_1->value = SizeFromMemtype( token_2->mem_type, ModuleInfo.Ofssize );
                 } else /* it is a number or EXPR_REG + indirect */
                     token_1->value = 0;
@@ -1920,16 +1962,22 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
                 token_1->type = sym;
 #endif
             } else if( sym->mem_type == MT_TYPE ) {
-                DebugMsg(("calculate, TYPE, operand >%s< is structured variable\n", sym->name ));
-                if ( token_2->explicit == FALSE )
-                    token_1->value = sym->type->total_size;
-                else { /* this is to be fixed. the type of the override isn't saved in exprlist */
-                    token_1->value = sym->type->total_size;
-                }
+                DebugMsg(("calculate, TYPE, operand >%s< is arbitrary TYPE (STRUCT/TYPEDEF)\n", sym->name ));
+                token_1->value = sym->type->total_size;
+#if 1 /* v2.03: added */
+                token_1->is_type = TRUE;
+                if ( token_1->mem_type == MT_EMPTY )
+                    token_1->mem_type = token_2->mem_type;
+#endif
             } else {
                 DebugMsg(("calculate, TYPE, operand >%s< is simple variable, sym.memtype=%X, op.memtype=%X\n", sym->name, sym->mem_type, token_2->mem_type ));
                 //if ( token_2->explicit )
-                    token_1->value = SizeFromMemtype( token_2->mem_type, GetSymOfssize( sym ));
+                token_1->value = SizeFromMemtype( token_2->mem_type, GetSymOfssize( sym ));
+#if 1 /* v2.03: added */
+                token_1->is_type = TRUE;
+                if ( token_1->mem_type == MT_EMPTY )
+                    token_1->mem_type = token_2->mem_type;
+#endif
                 //else
                 //    token_1->value = SizeFromMemtype( sym->mem_type, GetSymOfssize( sym ));
                     if ( token_2->instr == EMPTY )
@@ -2227,7 +2275,7 @@ static ret_code calculate( expr_list *token_1, expr_list *token_2, int oper )
     return( NOT_ERROR );
 }
 
-// this code runs BEFORE the - right - operand of an operator is read
+/* this code runs BEFORE the - right - operand of an operator is read */
 
 static void PrepareOp( int oper, expr_list *new, const expr_list *old )
 /*********************************************************************/
@@ -2243,7 +2291,7 @@ static void PrepareOp( int oper, expr_list *new, const expr_list *old )
             for (new->type = old->sym->type; new->type->type; new->type = new->type->type);
         } else {
             if ( !nullstruct ) {
-                nullstruct = dir_insert_ex( "", SYM_TYPE );
+                nullstruct = dir_create_ex( "", SYM_TYPE );
                 nullstruct->e.structinfo->typekind = TYPE_STRUCT;
             }
             new->type = (asm_sym *)nullstruct;
@@ -2338,6 +2386,9 @@ static ret_code evaluate( expr_list *operand1, int *i, int end, enum process_fla
                 DebugMsg(("evaluate exit 6, error, i=%d\n", *i ));
                 return( ERROR );
             }
+#if 1  /* v2.03: allow [DWORD][4] */
+            operand1->is_type = FALSE;
+#endif
             op_sq_bracket_level--;
             (*i)++;
         } else if( is_unary( *i, TRUE ) ) {
@@ -2553,8 +2604,8 @@ static bool is_expr_item( int i )
             AsmBuffer[i]->precedence = PTR_PRECEDENCE;
             break;
         } else if ( AsmBuffer[i]->value == T_FLAT ) {
-            //v2.0: this happens too early. If FLAT is used in an
-            //EQU expression, it should NOT be defined!
+            /* v2.0: this happens too early. If FLAT is used in an
+             * EQU expression, it should NOT be defined! */
             //DefineFlatGroup();
             break;
         } else if ( AsmBuffer[i]->value == T_DUP ) /* DUP must terminate the expression */
@@ -2607,10 +2658,10 @@ static bool is_expr_item( int i )
     return( TRUE );
 }
 
-// evaluate an operand
-// start_tok: index of first token of expression
-// end_tok:   index of last  token of expression
-
+/* evaluate an operand
+ * start_tok: index of first token of expression
+ * end_tok:   index of last  token of expression
+ */
 extern ret_code EvalOperand( int *start_tok, int end_tok, expr_list *result, bool flag_msg )
 /******************************************************************************************/
 {
@@ -2633,7 +2684,7 @@ extern ret_code EvalOperand( int *start_tok, int end_tok, expr_list *result, boo
     return ( evaluate( result, start_tok, i-1, PROC_BRACKET ) );
 }
 
-// global init (called once for each module)
+/* global init (called once for each module) */
 
 void ExprEvalInit()
 /*****************/

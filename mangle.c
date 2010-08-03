@@ -249,9 +249,9 @@ char *Mangle( struct asm_sym *sym, char *buffer )
     return( mangler( sym, buffer ) );
 }
 
-// the "mangle_type" is an extension inherited from OW Wasm
-// accepted are "C" and "N". It's NULL if MANGLESUPP == 0 (standard)
-
+/* the "mangle_type" is an extension inherited from OW Wasm
+ * accepted are "C" and "N". It's NULL if MANGLESUPP == 0 (standard)
+ */
 void SetMangler( struct asm_sym *sym, char *mangle_type, int langtype )
 /*********************************************************************/
 {
