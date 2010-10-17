@@ -31,13 +31,25 @@
 #include "globals.h"
 #include "parser.h"
 #include "insthash.h"
+#ifdef __I86__
+#include "i86.h"
+#endif
 
 //#define HASH_TABLE_SIZE 211
 #define HASH_TABLE_SIZE 599
 //#define HASH_TABLE_SIZE 701
 //#define HASH_TABLE_SIZE 2003
 
-//static struct ReservedWord *inst_table[ HASH_TABLE_SIZE ] = { NULL };
+#if 0 // def __I86__
+/* optionally, for JWASMR, use a void based pointer for the name field.
+ * However, this requires to deactivate the RENAMEKEYWORD option!
+ */
+extern const char resw_strings[];
+#define GetPtr( x, y ) seg:>x->y
+#define BASEPTR
+#else
+#define GetPtr( x, y ) x->y
+#endif
 static short inst_table[ HASH_TABLE_SIZE ];
 
 static unsigned int hashpjw( const char *s )
@@ -62,21 +74,25 @@ struct ReservedWord *FindResWord( const char *name )
 {
     struct ReservedWord *inst;
     int i;
+#ifdef BASEPTR
+    __segment seg = FP_SEG( resw_strings );
+#endif
 
     for( i = inst_table[ hashpjw( name ) ]; i != EMPTY; i = inst->next ) {
         inst = &AsmResWord[i];
         /* check if the name matches the entry for this inst in AsmChars */
         //if( name[ inst->len ] == NULLC && _strnicmp( name, inst->name, inst->len ) == 0) {
-        if( name[ inst->len ] == NULLC && _memicmp( name, inst->name, inst->len ) == 0) {
+        if( name[ inst->len ] == NULLC && _memicmp( name, GetPtr( inst, name ), inst->len ) == 0 ) {
             return( inst );
         }
     }
     return( NULL );
 }
 
-/* returns index of instruction in AsmOpTable */
-
 #if 0
+
+/* returns token index of instruction */
+
 int get_instruction_position( const char *string )
 /************************************************/
 {
@@ -104,6 +120,9 @@ struct ReservedWord *AddResWord( struct ReservedWord *inst )
     int i;
     int old;
     int curr;
+#ifdef BASEPTR
+    __segment seg = FP_SEG( resw_strings );
+#endif
     char buffer[MAX_RESW_LEN];
 
 #ifdef DEBUG_OUT
@@ -112,7 +131,7 @@ struct ReservedWord *AddResWord( struct ReservedWord *inst )
         exit(-1);
     }
 #endif
-    memcpy( buffer, inst->name, inst->len );
+    memcpy( buffer, GetPtr( inst, name ), inst->len );
     buffer[ inst->len ] = NULLC;
     i = hashpjw( buffer );
 
@@ -139,9 +158,12 @@ int RemoveResWord( struct ReservedWord *inst )
     int i;
     int old;
     int curr;
+#ifdef BASEPTR
+    __segment seg = FP_SEG( resw_strings );
+#endif
     char buffer[MAX_RESW_LEN];
 
-    memcpy( buffer, inst->name, inst->len );
+    memcpy( buffer, GetPtr( inst, name ), inst->len );
     buffer[ inst->len ] = NULLC;
     i = hashpjw( buffer );
 

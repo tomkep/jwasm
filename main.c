@@ -39,6 +39,7 @@
 #include "fatal.h"
 #include "errmsg.h"
 #include "msgtext.h"
+#include "dbgcv.h"
 
 //#ifdef __OSI__
 //  #include "ostype.h"
@@ -78,10 +79,16 @@ File_Info       FileInfo;       /* files information */
 static int      numArgs = 0;
 static int      numFiles = 0;
 
+#ifdef __I86__
+#define OPTQUAL __near
+#else
+#define OPTQUAL
+#endif
+
 struct  cmdloption {
-    char        *name;
+    const char  *name;
     unsigned    value;
-    void        (*function)( void );
+    void OPTQUAL (*function)( void );
 };
 
 #define MAX_RSP_NESTING 15  /* nesting of response files */
@@ -98,10 +105,10 @@ static int              rspidx = 0; /* response file level */
 static unsigned char    SwitchChar = '/';
 #endif
 
-global_options Options = {
+struct global_options Options = {
     /* quiet            */          FALSE,
     /* line_numbers     */          FALSE,
-    /* debug_symbols    */          FALSE,
+    /* debug_symbols    */          0,
     /* floating_point   */          FPO_NO_EMULATION,
 
     /* error_limit      */          50,
@@ -109,6 +116,8 @@ global_options Options = {
     /* warning_error    */          FALSE,
 #ifdef DEBUG_OUT
     /* debug            */          FALSE,
+    /* nofastpass       */          FALSE,
+    /* nobackpatch      */          FALSE,
     /* print_linestore  */          FALSE,
     /* max_passes       */          0,
 #endif
@@ -140,6 +149,7 @@ global_options Options = {
     /* masm51_compat         */     FALSE,
     /* strict_masm_compat    */     FALSE,
     /* masm_compat_gencode   */     FALSE,
+    /* masm8_proc_visibility */     FALSE,
 
     /* listif                */     FALSE,
     /* list_generated_code   */     FALSE,
@@ -282,12 +292,12 @@ static void queue_item( struct qitem * *start, const char *string )
     struct qitem *q;
 
     DebugMsg(("queue_item(%s) enter\n", string));
-    p = MemAlloc( sizeof(struct qitem) + strlen( string) + 1 );
+    p = MemAlloc( sizeof(struct qitem) + strlen( string ) + 1 );
     p->next = NULL;
     strcpy( p->value, string );
     q = *start;
-    if (q) {
-        for (;q->next;q = q->next);
+    if ( q ) {
+        for ( ; q->next; q = q->next );
         q->next = p;
     } else
         *start = p;
@@ -299,7 +309,7 @@ static void queue_item( struct qitem * *start, const char *string )
 static char *GetExt( int type )
 /*****************************/
 {
-    switch (type) {
+    switch ( type ) {
     case ERR:
         return( ERR_EXT );
     case OBJ:
@@ -332,7 +342,7 @@ static void GetDefaultFilenames( const char *name )
 
     DebugMsg(("GetDefaultFilenames(%s) enter\n", name ));
     _splitpath( name, NULL, NULL, fnamesrc, NULL );
-    for (i = ERR; i < NUM_FILE_TYPES; i++ ) {
+    for ( i = ERR; i < NUM_FILE_TYPES; i++ ) {
         if( FileInfo.fname[i] == NULL ) {
             drive[0] = NULLC;
             dir[0] = NULLC;
@@ -415,8 +425,8 @@ static void get_fname( const char *token, int type )
     }
 }
 
-static void set_some_kinda_name( char token, const char *name )
-/*************************************************************/
+static void set_option_n_name( char token, const char *name )
+/***********************************************************/
 /* option -n: set name of
  * - nd: data seg
  * - nm: module name
@@ -462,25 +472,31 @@ static void usagex_msg( void )
     exit(1);
 }
 
-//static void Ignore( void ) {};
+//static void OPTQUAL Ignore( void ) {};
 
 #if BUILD_TARGET
-static void Set_bt( void ) { SetTargName( OptParm,  strlen(OptParm) ); }
+static void OPTQUAL Set_bt( void ) { SetTargName( OptParm,  strlen(OptParm) ); }
 #endif
 
-static void Set_c( void ) { }
+static void OPTQUAL Set_c( void ) { }
 
 #if COFF_SUPPORT
-static void Set_coff( void ) {
+static void OPTQUAL Set_coff( void ) {
     Options.output_format = OFORMAT_COFF;
 }
+#if DJGPP_SUPPORT
+static void OPTQUAL Set_djgpp( void ) {
+    Set_coff();
+    Options.header_format = HFORMAT_DJGPP;
+}
+#endif
 #endif
 #if ELF_SUPPORT
-static void Set_elf( void ) {
+static void OPTQUAL Set_elf( void ) {
     Options.output_format = OFORMAT_ELF;
 }
 #if AMD64_SUPPORT
-static void Set_elf64( void ) {
+static void OPTQUAL Set_elf64( void ) {
     Options.output_format = OFORMAT_ELF;
     Options.header_format = HFORMAT_ELF64;
     if ( Options.model == MOD_NONE )  /* default to model FLAT */
@@ -496,33 +512,33 @@ static void Set_elf64( void ) {
 #endif
 #endif
 #if BIN_SUPPORT
-static void Set_bin( void ) {
+static void OPTQUAL Set_bin( void ) {
     Options.output_format = OFORMAT_BIN;
     Options.header_format = HFORMAT_NONE;
 }
 #if MZ_SUPPORT
-static void Set_mz( void ) {
+static void OPTQUAL Set_mz( void ) {
     Options.output_format = OFORMAT_BIN;
     Options.header_format = HFORMAT_MZ;
 }
 #endif
 #endif
-static void Set_Cp( void ) { Options.case_sensitive = TRUE;   Options.convert_uppercase = FALSE; }
-static void Set_Cu( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = TRUE;  }
-static void Set_Cx( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = FALSE; }
+static void OPTQUAL Set_Cp( void ) { Options.case_sensitive = TRUE;   Options.convert_uppercase = FALSE; }
+static void OPTQUAL Set_Cu( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = TRUE;  }
+static void OPTQUAL Set_Cx( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = FALSE; }
 
-static void Set_Zd( void ) { Options.line_numbers = TRUE; }
-static void Set_Zi( void ) { Set_Zd(); Options.debug_symbols = TRUE; }
+static void OPTQUAL Set_Zd( void ) { Options.line_numbers = TRUE; }
+static void OPTQUAL Set_Zi( void ) { Set_Zd(); Options.debug_symbols = CV4_SIGNATURE; }
 
-static void Set_Zm( void ) { Options.masm51_compat = TRUE; }
+static void OPTQUAL Set_Zm( void ) { Options.masm51_compat = TRUE; }
 
-static void Set_Zne( void ) { Options.strict_masm_compat = TRUE; }
+static void OPTQUAL Set_Zne( void ) { Options.strict_masm_compat = TRUE; }
 
-static void Set_Zg( void ) { Options.masm_compat_gencode = TRUE; }
+static void OPTQUAL Set_Zg( void ) { Options.masm_compat_gencode = TRUE; }
 
-static void Set_Zf( void ) { Options.all_symbols_public = TRUE; }
+static void OPTQUAL Set_Zf( void ) { Options.all_symbols_public = TRUE; }
 
-static void Set_Zp( void ) {
+static void OPTQUAL Set_Zp( void ) {
     uint_8 power;
     for ( power = 0; (1 << power) <= MAX_STRUCT_ALIGN; power++ )
         if ( ( 1 << power ) == OptValue ) {
@@ -533,59 +549,60 @@ static void Set_Zp( void ) {
     return;
 }
 
-//static void DefineMacro( void ) { queue_item( &Options.SymQueue, CopyOfParm() ); }
-static void DefineMacro( void ) { queue_item( &Options.SymQueue, GetAFileName() ); }
+//static void OPTQUAL DefineMacro( void ) { queue_item( &Options.SymQueue, CopyOfParm() ); }
+static void OPTQUAL DefineMacro( void ) { queue_item( &Options.SymQueue, GetAFileName() ); }
 
-static void SetErrorLimit( void ) { Options.error_limit = OptValue; }
+static void OPTQUAL SetErrorLimit( void ) { Options.error_limit = OptValue; }
 
-static void Set_nologo( void ) { banner_printed = TRUE; }
-static void Set_q( void )      { Set_nologo(); Options.quiet = TRUE; }
-static void Set_EP( void ) { Options.preprocessor_stdout = TRUE; Set_q(); }
+static void OPTQUAL Set_nologo( void ) { banner_printed = TRUE; }
+static void OPTQUAL Set_q( void )      { Set_nologo(); Options.quiet = TRUE; }
+static void OPTQUAL Set_EP( void ) { Options.preprocessor_stdout = TRUE; Set_q(); }
 
-static void Set_Fr( void ) { get_fname( GetAFileName(), ERR ); }
+static void OPTQUAL Set_Fr( void ) { get_fname( GetAFileName(), ERR ); }
 
-static void Set_Fi( void ) { Options.ForceInclude = GetAFileName(); }
+static void OPTQUAL Set_Fi( void ) { Options.ForceInclude = GetAFileName(); }
 
-static void Set_Fl( void ) { get_fname( GetAFileName(), LST ); Options.write_listing = TRUE;}
+static void OPTQUAL Set_Fl( void ) { get_fname( GetAFileName(), LST ); Options.write_listing = TRUE;}
 
-static void Set_Fo( void ) { get_fname( GetAFileName(), OBJ ); }
-static void Set_fp( void ) { Options.cpu &= ~P_FPU_MASK; Options.cpu = OptValue; }
-static void Set_FPx( void ) { Options.floating_point = OptValue; }
-static void Set_G( void ) { Options.langtype = OptValue; }
+static void OPTQUAL Set_Fo( void ) { get_fname( GetAFileName(), OBJ ); }
+static void OPTQUAL Set_fp( void ) { Options.cpu &= ~P_FPU_MASK; Options.cpu = OptValue; }
+static void OPTQUAL Set_FPx( void ) { Options.floating_point = OptValue; }
+static void OPTQUAL Set_G( void ) { Options.langtype = OptValue; }
 
-static void SetInclude( void ) { queue_item( &Options.IncQueue, GetAFileName() ); }
+static void OPTQUAL SetInclude( void ) { queue_item( &Options.IncQueue, GetAFileName() ); }
 
 #ifdef DEBUG_OUT
-static void Set_ls( void ) { Options.print_linestore = TRUE; };
+static void OPTQUAL Set_ls( void ) { Options.print_linestore = TRUE; };
 #endif
 
-static void Set_Sa( void )
+static void OPTQUAL Set_Sa( void )
 {
     Options.listif = TRUE;
     Options.list_generated_code = TRUE;
     Options.list_macro = LM_LISTMACROALL;
 }
-static void Set_Sg( void ) { Options.list_generated_code = TRUE; }
-static void Set_Sn( void ) { Options.no_symbol_listing = TRUE; }
-static void Set_Sx( void ) { Options.listif = TRUE; }
-static void Set_safeseh( void ) { Options.safeseh = TRUE; }
-
-static void Set_m( void ) { Options.model = OptValue; }
-static void Set_n( void ) { set_some_kinda_name( OptValue, CopyOfParm() ); }
+static void OPTQUAL Set_Sg( void ) { Options.list_generated_code = TRUE; }
+static void OPTQUAL Set_Sn( void ) { Options.no_symbol_listing = TRUE; }
+static void OPTQUAL Set_Sx( void ) { Options.listif = TRUE; }
+#if COFF_SUPPORT
+static void OPTQUAL Set_safeseh( void ) { Options.safeseh = TRUE; }
+#endif
+static void OPTQUAL Set_m( void ) { Options.model = OptValue; }
+static void OPTQUAL Set_n( void ) { set_option_n_name( OptValue, CopyOfParm() ); }
 
 #if COCTALS
-static void Set_o( void ) { Options.allow_c_octals = TRUE; }
+static void OPTQUAL Set_o( void ) { Options.allow_c_octals = TRUE; }
 #endif
 #ifdef DEBUG_OUT
-static void Set_pm( void ) { Options.max_passes = OptValue; };
+static void OPTQUAL Set_pm( void ) { Options.max_passes = OptValue; };
 #endif
-static void Set_omf( void ) { Options.output_format = OFORMAT_OMF;}
+static void OPTQUAL Set_omf( void ) { Options.output_format = OFORMAT_OMF;}
 
-static void Set_WX( void ) { Options.warning_error = TRUE; }
+static void OPTQUAL Set_WX( void ) { Options.warning_error = TRUE; }
 
-static void Set_w( void ) { Set_WX(); Options.warning_level = 0; }
+static void OPTQUAL Set_w( void ) { Set_WX(); Options.warning_level = 0; }
 
-static void SetWarningLevel( void )
+static void OPTQUAL SetWarningLevel( void )
 {
     if ( OptValue <= 4 )
         Options.warning_level = OptValue;
@@ -593,9 +610,8 @@ static void SetWarningLevel( void )
         AsmWarn( 1, INVALID_CMDLINE_VALUE, "/W" );
 }
 
-static void Set_X( void ) { Options.ignore_include = TRUE; }
 #if AMD64_SUPPORT
-static void Set_win64( void )
+static void OPTQUAL Set_win64( void )
 {
     Options.output_format = OFORMAT_COFF;
     Options.header_format = HFORMAT_WIN64;
@@ -610,32 +626,44 @@ static void Set_win64( void )
     }
 }
 #endif
-static void Set_zcm( void ) { Options.no_cdecl_decoration = FALSE; }
-static void Set_zcw( void ) { Options.no_cdecl_decoration = TRUE; }
-static void Set_zf( void ) { Options.fastcall = OptValue; }
+static void OPTQUAL Set_X( void )   { Options.ignore_include = TRUE; }
+static void OPTQUAL Set_zcm( void ) { Options.no_cdecl_decoration = FALSE; }
+static void OPTQUAL Set_zcw( void ) { Options.no_cdecl_decoration = TRUE; }
+static void OPTQUAL Set_zf( void )  { Options.fastcall = OptValue; }
 
 
-static void Set_zlc( void ) { Options.no_comment_data_in_code_records = TRUE; }
-//static void Set_zld( void ) { Options.no_dependencies       = TRUE; }
+static void OPTQUAL Set_zlc( void ) { Options.no_comment_data_in_code_records = TRUE; }
+//static void OPTQUAL Set_zld( void ) { Options.no_dependencies = TRUE; }
 #if COFF_SUPPORT
-static void Set_zlf( void ) { Options.no_file_entry         = TRUE; }
-static void Set_zls( void ) { Options.no_section_aux_entry  = TRUE; }
+static void OPTQUAL Set_zlf( void ) { Options.no_file_entry = TRUE; }
+static void OPTQUAL Set_zls( void ) { Options.no_section_aux_entry = TRUE; }
 #endif
 
-static void Set_Zs( void ) { Options.syntax_check_only    = TRUE; }
-static void Set_zt( void ) { Options.stdcall_decoration    = OptValue; }
-static void Set_zze( void ) { Options.no_export_decoration  = TRUE; }
+static void OPTQUAL Set_Zs( void ) { Options.syntax_check_only = TRUE; }
+static void OPTQUAL Set_Zv8( void ) { Options.masm8_proc_visibility = TRUE; }
+static void OPTQUAL Set_zt( void ) { Options.stdcall_decoration = OptValue; }
+static void OPTQUAL Set_zze( void ) { Options.no_export_decoration = TRUE; }
 #if COFF_SUPPORT
-static void Set_zzs( void ) { Options.entry_decorated       = TRUE; }
+static void OPTQUAL Set_zzs( void ) { Options.entry_decorated = TRUE; }
 #endif
 
-static void HelpUsage( void ) { usagex_msg();}
+static void OPTQUAL HelpUsage( void ) { usagex_msg();}
 
 #ifdef DEBUG_OUT
-static void Set_d6( void )
+static void OPTQUAL Set_d6( void )
 {
     Options.debug = TRUE;
     DebugMsg(( "debugging output on\n" ));
+}
+static void OPTQUAL Set_d7( void )
+{
+    Options.nofastpass = TRUE;
+    DebugMsg(( "FASTPASS disabled\n" ));
+}
+static void OPTQUAL Set_d8( void )
+{
+    Options.nobackpatch = TRUE;
+    DebugMsg(( "backpatching disabled\n" ));
 }
 #endif
 
@@ -656,6 +684,11 @@ static struct cmdloption const cmdl_options[] = {
     { "c",      0,        Set_c },
 #ifdef DEBUG_OUT
     { "d6",     6,        Set_d6 },
+    { "d7",     7,        Set_d7 },
+    { "d8",     7,        Set_d8 },
+#endif
+#if COFF_SUPPORT && DJGPP_SUPPORT
+    { "djgpp",  0,        Set_djgpp },
 #endif
     { "D^$",    0,        DefineMacro },
 #if ELF_SUPPORT
@@ -717,7 +750,9 @@ static struct cmdloption const cmdl_options[] = {
     { "Sg",     0,        Set_Sg },
     { "Sn",     0,        Set_Sn },
     { "Sx",     0,        Set_Sx },
+#if COFF_SUPPORT
     { "safeseh",0,        Set_safeseh },
+#endif
     { "WX",     0,        Set_WX },
     { "W=#",    0,        SetWarningLevel },
 #if AMD64_SUPPORT
@@ -746,6 +781,7 @@ static struct cmdloption const cmdl_options[] = {
     { "zt0",    STDCALL_NONE, Set_zt },
     { "zt1",    STDCALL_HALF, Set_zt },
     { "zt2",    STDCALL_FULL, Set_zt },
+    { "Zv8",    0,        Set_Zv8 },
     { "zze",    0,        Set_zze },
 #if COFF_SUPPORT
     { "zzs",    0,        Set_zzs },
@@ -962,7 +998,7 @@ static void ProcessOption( const char **cmdline, char *buffer )
     int   i;
     int   j;
     const char *p = *cmdline;
-    char  *opt;
+    const char *opt;
     //char  c;
 
     numArgs++;
@@ -1134,15 +1170,16 @@ static void genfailure(int signo)
 static void main_init( void )
 /***************************/
 {
-    int i;
+    //int i;
 
     MemInit();
     /* v2.01: ModuleInfo now initialized in AssembleModule() */
     //memset( &ModuleInfo, 0, sizeof(ModuleInfo));
-    for( i = 0; i < NUM_FILE_TYPES; i++ ) {
-        FileInfo.file[i] = NULL;
-        FileInfo.fname[i] = NULL;
-    }
+    memset( &FileInfo, 0, sizeof( FileInfo ) );
+    //for( i = 0; i < NUM_FILE_TYPES; i++ ) {
+    //    FileInfo.file[i] = NULL;
+    //    FileInfo.fname[i] = NULL;
+    //}
 }
 
 static void main_fini( void )
@@ -1238,6 +1275,6 @@ int main( int argc, char **argv )
         AsmError( NO_FILENAME_SPECIFIED );
 
     MsgFini();
-    return( ModuleInfo.error_count != 0 ); /* zero if no errors */
+    return( ModuleInfo.g.error_count != 0 ); /* zero if no errors */
 }
 

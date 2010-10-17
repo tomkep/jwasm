@@ -38,6 +38,7 @@ extern uint_32 GetLineNumber( asm_sym * );
 extern void     PushLineQueue( void );
 //extern void     PopLineQueue( void );
 extern void     AddLineQueue( const char *line );
+extern void     AddLineQueueX( const char *fmt, ... );
 extern ret_code InputQueueFile( const char *path, FILE * *pfile );
 extern char     *GetTextLine( char *buffer, int max );
 extern void     PushMacro( struct asm_sym *sym );
@@ -53,11 +54,14 @@ extern uint     get_curr_srcfile( void );
 extern void     set_curr_srcfile( uint, uint_32 );
 extern const FNAME  *GetFName( uint );
 #ifdef DEBUG_OUT
-extern uint_32  GetTopLine( void );
+extern char     *GetTopLine( char * );
 #endif
 
 typedef struct line_list {
     struct line_list    *next;
+#ifdef DEBUG_OUT
+    char lineno;
+#endif
     char line[];
 } line_list;
 

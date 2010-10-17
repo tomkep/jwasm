@@ -8,15 +8,17 @@
 *
 ****************************************************************************/
 
+#include <stddef.h>
+
 #include "globals.h"
 #include "memalloc.h"
 #include "symbols.h"
+#include "parser.h"
 #include "directiv.h"
 #include "segment.h"
 #include "fixup.h"
 #include "omf.h"
 #include "tokenize.h"
-#include "queues.h"
 #include "coff.h"
 #include "dbgcv.h"
 
@@ -32,14 +34,9 @@ typedef union {
     uint_16 uvalue;
 } cv_typeref_u;
 
-#ifdef DEBUG_OUT
-static const char szCVCompiler[] = { "Microsoft (R) Macro Assembler Version 6.15.8803" };
-#else
-static const char szCVCompiler[] = { "JWasm v" _JWASM_VERSION_ };
-#endif
+extern const char szCVCompiler[];
 
 #define SetPrefixName( p, name, len ) { *p++ = len; memcpy( p, name, len ); p += len; }
-
 
 /* translate symbol's mem_type to a codeview typeref */
 
@@ -47,7 +44,7 @@ static uint_16 GetTyperef( struct asm_sym *sym, uint_8 Ofssize )
 /**************************************************************/
 {
     cv_typeref_u value = { CV_PDS_SPECIAL_NO_TYPE, 0, CV_PDT_SPECIAL, CV_PDM_DIRECT, 0 };
-    int size = SizeFromMemtype( sym->mem_type, Ofssize );
+    int size = SizeFromMemtype( sym->mem_type, Ofssize, sym->type );
 
     if ( ( sym->mem_type & MT_SPECIAL ) == 0 && sym->mem_type != MT_FWORD ) {
         if ( sym->mem_type & MT_FLOAT ) {
@@ -207,8 +204,8 @@ static unsigned GetFieldListSize( dir_node *type )
 
 /* write a bitfield to $$TYPES */
 
-static uint_8 * WriteBitfield( dir_node *types, dir_node *type, struct asm_sym *sym, uint_8 *pt )
-/***********************************************************************************************/
+static uint_8 * cv_write_bitfield( dir_node *types, dir_node *type, struct asm_sym *sym, uint_8 *pt )
+/***************************************************************************************************/
 {
     pt = checkflush( types, (uint_8 *)CurrSource, pt, sizeof( struct cv_typerec_bitfield ) );
     sym->cv_typeref = currtype++;
@@ -222,13 +219,13 @@ static uint_8 * WriteBitfield( dir_node *types, dir_node *type, struct asm_sym *
 }
 
 #ifdef DEBUG_OUT
-#define GetTPos() (types->e.seginfo->current_loc + (pt - CurrSource))
+#define GetTPos() (types->e.seginfo->current_loc + (pt - (uint_8 *)CurrSource))
 #endif
 
 /* write a type to $$TYPES. Items are dword-aligned */
 
-static uint_8 * WriteType( dir_node *types, struct asm_sym *sym, uint_8 *pt )
-/***************************************************************************/
+static uint_8 * cv_write_type( dir_node *types, struct asm_sym *sym, uint_8 *pt )
+/*******************************************************************************/
 {
     dir_node    *type = (dir_node *)sym;
     uint_8      *tmp;
@@ -249,16 +246,16 @@ static uint_8 * WriteType( dir_node *types, struct asm_sym *sym, uint_8 *pt )
     /* Count the member fields. If a member's type is unknown, create it! */
     for ( curr = type->e.structinfo->head; curr; curr = curr->next, cnt++ ) {
         if ( curr->sym->mem_type == MT_TYPE && curr->sym->type->cv_typeref == 0 ) {
-            pt = WriteType( types, curr->sym->type, pt );
+            pt = cv_write_type( types, curr->sym->type, pt );
         } else if ( curr->sym->mem_type == MT_BITS && curr->sym->cv_typeref == 0 ) {
-            pt = WriteBitfield( types, type, curr->sym, pt );
+            pt = cv_write_bitfield( types, type, curr->sym, pt );
         }
     }
 
     sym->cv_typeref = currtype++;
     switch ( type->e.structinfo->typekind ) {
     case TYPE_UNION:
-        DebugMsg(("WriteType(%Xh, ref=%X): UNION=%s\n", GetTPos(), sym->cv_typeref, sym->name ));
+        DebugMsg(( "cv_write_type(%Xh, ref=%X): UNION=%s\n", GetTPos(), sym->cv_typeref, sym->name ));
         size = ( sizeof( struct cv_typerec_union ) + typelen + 1 + sym->name_size + 3 ) & ~3;
         pt = checkflush( types, (uint_8 *)CurrSource, pt, size );
         ((struct cv_typerec_union *)pt)->tr.size = size - sizeof(uint_16);
@@ -278,7 +275,7 @@ static uint_8 * WriteType( dir_node *types, struct asm_sym *sym, uint_8 *pt )
         break;
     case TYPE_RECORD:
     case TYPE_STRUCT:
-        DebugMsg(("WriteType(%Xh, ref=%X): STRUCT=%s\n", GetTPos(), sym->cv_typeref, sym->name ));
+        DebugMsg(( "cv_write_type(%Xh, ref=%X): STRUCT=%s\n", GetTPos(), sym->cv_typeref, sym->name ));
         size = ( sizeof( struct cv_typerec_structure ) + typelen + 1 + sym->name_size + 3 ) & ~3;
         pt = checkflush( types, (uint_8 *)CurrSource, pt, size );
         ((struct cv_typerec_structure *)pt)->tr.size = size - sizeof(uint_16);
@@ -309,7 +306,7 @@ static uint_8 * WriteType( dir_node *types, struct asm_sym *sym, uint_8 *pt )
     size = sizeof( struct cv_typerec_fieldlist) + GetFieldListSize( type );
     ((struct cv_typerec_fieldlist *)pt)->tr.size = size - sizeof(uint_16);
     ((struct cv_typerec_fieldlist *)pt)->tr.leaf = LF_FIELDLIST;
-    DebugMsg(("WriteType(%Xh, ref=%X): FIELDLIST, size=%u\n", GetTPos(), currtype-1, size ));
+    DebugMsg(( "cv_write_type(%Xh, ref=%X): FIELDLIST, size=%u\n", GetTPos(), currtype-1, size ));
     pt += sizeof( struct cv_typerec_fieldlist );
 
     /* add the struct's members to the fieldlist */
@@ -339,7 +336,7 @@ static uint_8 * WriteType( dir_node *types, struct asm_sym *sym, uint_8 *pt )
             *(uint_32 *)tmp = curr->sym->offset;
             tmp += sizeof( uint_32 );
         }
-        DebugMsg(("WriteType(%Xh): MEMBER=%s, typeref=%X\n", GetTPos(), curr->sym->name, ((struct cv_typerec_member *)pt)->type ));
+        DebugMsg(( "cv_write_type(%Xh): MEMBER=%s, typeref=%X\n", GetTPos(), curr->sym->name, ((struct cv_typerec_member *)pt)->type ));
         SetPrefixName( tmp, curr->sym->name, curr->sym->name_size );
         PadBytes( tmp, (uint_8 *)CurrSource );
         pt += size;
@@ -350,14 +347,14 @@ static uint_8 * WriteType( dir_node *types, struct asm_sym *sym, uint_8 *pt )
 
 /* write a symbol to $$SYMBOLS */
 
-static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps, uint_8 *sbuffer )
-/************************************************************************************************/
+static uint_8 * cv_write_symbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps, uint_8 *sbuffer )
+/****************************************************************************************************/
 {
     int        len;
     int        ofs;
     short      rectype;
     uint_8     Ofssize;
-    struct genfixup *fixup;
+    struct fixup *fixup;
 
     Ofssize = GetSymOfssize( sym );
     len = GetCVStructLen( sym, Ofssize );
@@ -378,12 +375,12 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
         if ( ((struct cv_symrec_udt *)ps)->typeref == 0 )
             return( ps );
 
-        DebugMsg(( "WriteSymbol: TYPE=%s typeref=%Xh\n", sym->name, ((struct cv_symrec_udt *)ps)->typeref ));
+        DebugMsg(( "cv_write_symbol: TYPE=%s typeref=%Xh\n", sym->name, ((struct cv_symrec_udt *)ps)->typeref ));
         rectype = FIX_VOID; /* types have no fixup */
         break;
     default: /* is SYM_INTERNAL */
         if ( sym->isproc ) {
-            DebugMsg(( "WriteSymbol: PROC=%s\n", sym->name ));
+            DebugMsg(( "cv_write_symbol: PROC=%s\n", sym->name ));
             if ( Ofssize == USE16 ) {
                 ((struct cv_symrec_lproc16 *)ps)->sr.size = sizeof( struct cv_symrec_lproc16 ) - sizeof(uint_16) + 1 + sym->name_size;
                 ((struct cv_symrec_lproc16 *)ps)->sr.type = (sym->public ? S_GPROC16 : S_LPROC16);
@@ -431,7 +428,7 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
                 ((struct cv_symrec_label16 *)ps)->flags = ((sym->mem_type == MT_FAR) ? CV_TYPE_LABEL_FAR : CV_TYPE_LABEL_NEAR);
                 rectype = FIX_PTR16;
                 ofs = offsetof( struct cv_symrec_label16, offset );
-                DebugMsg(( "WriteSymbol: LABEL16=%s\n", sym->name ));
+                DebugMsg(( "cv_write_symbol: LABEL16=%s\n", sym->name ));
             } else {
                 ((struct cv_symrec_label32 *)ps)->sr.size = sizeof( struct cv_symrec_label32 ) - sizeof(uint_16) + 1 + sym->name_size;
                 ((struct cv_symrec_label32 *)ps)->sr.type = S_LABEL32;
@@ -440,7 +437,7 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
                 ((struct cv_symrec_label32 *)ps)->flags = ((sym->mem_type == MT_FAR) ? CV_TYPE_LABEL_FAR : CV_TYPE_LABEL_NEAR);
                 rectype = FIX_PTR32;
                 ofs = offsetof( struct cv_symrec_label32, offset );
-                DebugMsg(( "WriteSymbol: LABEL32=%s\n", sym->name ));
+                DebugMsg(( "cv_write_symbol: LABEL32=%s\n", sym->name ));
             }
         } else {
             if ( Ofssize == USE16 ) {
@@ -451,7 +448,7 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
                 ((struct cv_symrec_ldata16 *)ps)->typeref = GetTyperef( sym, USE16 );
                 rectype = FIX_PTR16;
                 ofs = offsetof( struct cv_symrec_ldata16, offset );
-                DebugMsg(( "WriteSymbol: INTERN16=%s typeref=%Xh\n", sym->name, ((struct cv_symrec_ldata16 *)ps)->typeref ));
+                DebugMsg(( "cv_write_symbol: INTERN16=%s typeref=%Xh\n", sym->name, ((struct cv_symrec_ldata16 *)ps)->typeref ));
             } else {
                 ((struct cv_symrec_ldata32 *)ps)->sr.size = sizeof( struct cv_symrec_ldata32 ) - sizeof(uint_16) + 1 + sym->name_size;
                 ((struct cv_symrec_ldata32 *)ps)->sr.type = S_LDATA32;
@@ -460,7 +457,7 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
                 ((struct cv_symrec_ldata32 *)ps)->typeref = GetTyperef( sym, USE32 );
                 rectype = FIX_PTR32;
                 ofs = offsetof( struct cv_symrec_ldata32, offset );
-                DebugMsg(( "WriteSymbol: INTERN32=%s typeref=%Xh\n", sym->name, ((struct cv_symrec_ldata32 *)ps)->typeref ));
+                DebugMsg(( "cv_write_symbol: INTERN32=%s typeref=%Xh\n", sym->name, ((struct cv_symrec_ldata32 *)ps)->typeref ));
             }
         }
     }
@@ -474,7 +471,7 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
             fixup = AddFixup( sym, FIX_OFF32_SECREL, OPTJ_NONE );
             store_fixup( fixup, (int_32 *)ps );
             fixup = AddFixup( sym, FIX_SEG, OPTJ_NONE );
-            fixup->fixup_loc += sizeof (int_32 );
+            fixup->location += sizeof (int_32 );
             store_fixup( fixup, (int_32 *)ps );
         } else {
             fixup = AddFixup( sym, rectype, OPTJ_NONE );
@@ -534,6 +531,8 @@ static uint_8 * WriteSymbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps,
 /* option -Zi: write debug symbols and types
  * - symbols: segment $$SYMBOLS (OMF) or .debug$S (COFF)
  * - types:   segment $$TYPES (OMF) or .debug$T (COFF)
+ * field Options.debug_symbols contains the format version
+ * which is to be generated (CV4_SIGNATURE, CV8_SIGNATURE)
  */
 
 void cv_write_debug_tables( dir_node *symbols, dir_node *types )
@@ -547,7 +546,7 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
     char       *objname;
     uint_8     sbuffer[1024];
 
-    DebugMsg(("cv_write_debug_tables enter\n"));
+    DebugMsg(( "cv_write_debug_tables enter\n"));
 
     currtype = 0x1000; /* user-defined types start at 0x1000 */
 
@@ -555,14 +554,15 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
         symbols == NULL ||
         types->sym.state != SYM_SEG ||
         symbols->sym.state != SYM_SEG ) {
-        DebugMsg(("cv_write_debug_tables: unexpected exit\n"));
+        DebugMsg(( "cv_write_debug_tables: unexpected exit, types=%s, symbols%s\n",
+                  types ? types->sym.name : "NULL", symbols ? symbols->sym.name : "NULL" ));
         return;
     }
     /* write types */
     pt = (uint_8 *)CurrSource; /* use the source line buffer for types */
     types->e.seginfo->CodeBuffer = pt;
     memset( pt, 0, 1024 );
-    *(uint_32 *)pt = 1; /* "signature" */
+    *(uint_32 *)pt = Options.debug_symbols; /* "signature" */
     pt += sizeof( uint_32 );
 
     /* scan symbol table for types */
@@ -570,7 +570,7 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
     sym = NULL;
     while ( SymEnum( &sym, &i ) ) {
         if ( sym->state == SYM_TYPE && sym->cv_typeref == 0 ) {
-            pt = WriteType( types, sym, pt );
+            pt = cv_write_type( types, sym, pt );
         }
     }
     checkflush( types, (uint_8 *)CurrSource, pt, 1024 ); /* final flush */
@@ -581,7 +581,7 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
     ps = sbuffer;
     symbols->e.seginfo->CodeBuffer = sbuffer;
     memset( ps, 0, sizeof( sbuffer) );
-    *(uint_32 *)ps = 1; /* "signature" */
+    *(uint_32 *)ps = Options.debug_symbols; /* "signature" */
     ps += sizeof(uint_32);
 
     /* 1. record: object name */
@@ -610,7 +610,7 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
     ps += sizeof( struct cv_symrec_compile );
     SetPrefixName( ps, szCVCompiler, len );
 
-    /* CurrSeg and Modend must be set for store_fixup() */
+    /* CurrSeg must be set for store_fixup() */
     CurrSeg = symbols;
     //Modend = FALSE;
 
@@ -624,7 +624,7 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
         case SYM_INTERNAL:
             if ( sym->mem_type == MT_ABS || sym->predefined ) /* skip EQUates */
                 break;
-            ps = WriteSymbol( symbols, sym, ps, sbuffer );
+            ps = cv_write_symbol( symbols, sym, ps, sbuffer );
             break;
         }
     }
@@ -635,6 +635,6 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
     CurrSeg = NULL;
     //Modend = TRUE;
 
-    DebugMsg(("cv_write_debug_tables exit, max type=%Xh\n", currtype - 1 ));
+    DebugMsg(( "cv_write_debug_tables exit, max type=%Xh\n", currtype - 1 ));
     return;
 }

@@ -24,9 +24,9 @@
 *
 *  ========================================================================
 *
-* Description:  FP fixups for 16-bit code. These fixups allow the program
-* loader to replace FP instructions by calls to an FP emulation library.
-* Used by Win16 and OS/2 16bit.
+* Description:  FP fixups for 16-bit code. These fixups allow the linker
+* or program loader to replace FP instructions by calls to an FP emulation
+* library.
 *
 ****************************************************************************/
 
@@ -39,92 +39,85 @@
 #include "myassert.h"
 #include "segment.h"
 #include "omf.h"
+#include "omfspec.h"
 
-typedef enum {
+enum fp_patches {
     FPP_WAIT,
     FPP_NORMAL,
-    FPP_ES,
+    FPP_ES, /* last 6 entries match order of ASSUME_ES, ... */
     FPP_CS,
     FPP_SS,
     FPP_DS,
     FPP_FS,
     FPP_GS
-} fp_patches;
-
-static const char * const FPPatchName[] = {
-    "FIWRQQ",
-    "FIDRQQ",
-    "FIERQQ",
-    "FICRQQ",
-    "FISRQQ",
-    "FIARQQ",
-    "FIFRQQ",
-    "FIGRQQ"
 };
 
-static const char * const FPPatchAltName[] = {
-    NULL,
-    NULL,
-    NULL,
-    "FJCRQQ",
-    "FJSRQQ",
-    "FJARQQ",
-    "FJFRQQ",
-    "FJGRQQ"
+/* FP 16-bit fixup names.
+ * Known by MS VC, Open Watcom, Borland and Digital Mars:
+ *  FIWRQQ, FIDRQQ, FIERQQ, FICRQQ, FISRQQ, FIARQQ, FIFRQQ, FIGRQQ,
+ *                          FJCRQQ, FJSRQQ, FJARQQ, FJFRQQ, FJGRQQ
+ */
+
+static const uint_16 patchmask = 0xF8FF;
+
+static const char patchchr2[] = {
+    'W', 'D', 'E', 'C', 'S', 'A', 'F', 'G'
 };
 
-ret_code AddFloatingPointEmulationFixup( struct code_info *CodeInfo, bool secondary )
-/************************************************************************************/
+void AddFloatingPointEmulationFixup( struct code_info *CodeInfo )
+/***************************************************************/
 {
-    fp_patches patch;
-    struct asm_sym *sym;
-    const char * const *patch_name_array;
-    struct genfixup *fixup;
+    int i;
+    enum fp_patches patch;
+    struct asm_sym *sym[2];
+    struct fixup *fixup;
     int_32 data;
+    char name[8] = "F__RQQ";
 
-    patch_name_array = ( secondary ? FPPatchAltName : FPPatchName );
+    DebugMsg(("AddFloatingPointEmulationFixup enter, token=%u, regoverride=%d\n", CodeInfo->token, CodeInfo->prefix.RegOverride ));
 
     if( CodeInfo->token == T_FWAIT ) {
         patch = FPP_WAIT;
+    } else if ( CodeInfo->prefix.RegOverride == EMPTY ) {
+        patch = FPP_NORMAL;
     } else {
-        switch( CodeInfo->prefix.RegOverride ) {
-        case EMPTY:      patch = FPP_NORMAL;        break;
-        case ASSUME_ES:  patch = FPP_ES;            break;
-        case ASSUME_CS:  patch = FPP_CS;            break;
-        case ASSUME_SS:  patch = FPP_SS;            break;
-        case ASSUME_DS:  patch = FPP_DS;            break;
-        case ASSUME_FS:  patch = FPP_FS;            break;
-        case ASSUME_GS:  patch = FPP_GS;            break;
-        default:
-            never_reach();
+        patch = CodeInfo->prefix.RegOverride + 2;
+    }
+
+    /* emit 1-2 externals for the patch if not done already */
+    for ( i = 0; i < 2; i++ ) {
+        sym[i] = NULL;
+        if ( patchmask & ( 1 << ( i*8+patch ) ) ) {
+            name[1] = 'I' + i;
+            name[2] = patchchr2[patch];
+            sym[i] = SymSearch( name );
+            if( sym[i] == NULL || sym[i]->state == SYM_UNDEFINED ) {
+                sym[i] = MakeExtern( name, MT_FAR, NULL, sym[i], USE16 );
+                sym[i]->langtype = LANG_NONE;
+            }
         }
     }
 
-    if( patch_name_array[patch] == NULL )
-        return( NOT_ERROR ); /* no fixup needed */
-
-    DebugMsg(("AddFloatingPointEmulationFixup( %X, %u )\n", CodeInfo, secondary ));
-    /* put out an extern def for the patch if not done already */
-    sym = SymSearch( patch_name_array[patch] );
-    if( sym == NULL ) {
-        sym = MakeExtern( patch_name_array[patch], MT_FAR, NULL, NULL, USE16 );
-        SetMangler( sym, NULL, LANG_NONE );
-    }
     /* no need for fixups if no object file is written */
     if ( write_to_file == FALSE )
-        return( NOT_ERROR );
+        return;
 
-    /* make sure the next 2 bytes in code stream aren't separated */
+    /* make sure the next 3 bytes in code stream aren't separated.
+     * The first fixup covers bytes $+0 and $+1, the (possible) second
+     * fixup covers bytes $+1 and $+2.
+     */
     if( Options.output_format == OFORMAT_OMF &&
-       (CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc + 2) >= MAX_LEDATA )
+       ( CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc + 3 ) > MAX_LEDATA_THRESHOLD )
         omf_FlushCurrSeg();
 
-    fixup = AddFixup( sym, FIX_OFF16, OPTJ_NONE );
-    /* v2.02: use TARGET, as Masm does! */
-    //fixup->frame = FRAME_LOC;
-    fixup->frame = FRAME_TARG;
-    /* v2.02: this has been done in AddFixup() already */
-    //fixup->fixup_loc = GetCurrOffset();
-    data = 0;
-    return ( store_fixup( fixup, &data ) );
+    for ( i = 0; i < 2 ; i++ ) {
+        if ( sym[i] ) {
+            fixup = AddFixup( sym[i], FIX_OFF16, OPTJ_NONE );
+            fixup->frame = FRAME_TARG;
+            fixup->location += i;
+            data = 0;
+            store_fixup( fixup, &data );
+        }
+    }
+    return;
 }

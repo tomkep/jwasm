@@ -9,18 +9,19 @@
 #define _LISTING_H_INCLUDED
 
 enum lsttype {
- LSTTYPE_LIDATA    = 0,
- LSTTYPE_EQUATE    = 1,
- LSTTYPE_DIRECTIVE = 2,
- LSTTYPE_MACRO     = 3,
- LSTTYPE_STRUCT    = 4,
- LSTTYPE_LABEL     = 5,
- LSTTYPE_MACROLINE = 6
+ LSTTYPE_DATA      = 0,
+ LSTTYPE_CODE      = 1,
+ LSTTYPE_EQUATE    = 2,
+ LSTTYPE_DIRECTIVE = 3,
+ LSTTYPE_MACRO     = 4,
+ LSTTYPE_STRUCT    = 5,
+ LSTTYPE_LABEL     = 6,
+ LSTTYPE_MACROLINE = 7
 };
 
 extern void LstOpenFile( void );
 extern void LstCloseFile( void );
-extern void LstWrite( enum lsttype, unsigned int ofs, void * sym );
+extern void LstWrite( enum lsttype, uint_32 ofs, void * sym );
 extern void LstWriteSrcLine( void );
 extern void LstWriteCRef( void );
 extern void LstPrintf( const char *format, ... );

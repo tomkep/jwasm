@@ -29,12 +29,13 @@
 ****************************************************************************/
 
 #include <ctype.h>
+#include <stdarg.h>
 #include <sys/stat.h>
 
 #include "globals.h"
+#include "memalloc.h"
 #include "parser.h"
 #include "directiv.h"
-#include "memalloc.h"
 #include "condasm.h"
 #include "equate.h"
 #include "macro.h"
@@ -45,7 +46,6 @@
 #include "fastpass.h"
 #include "listing.h"
 #include "fatal.h"
-#include "queue.h"
 
 extern bool expansion;
 extern bool DefineProc;
@@ -71,7 +71,7 @@ int queue_level;    /* number of open (macro) queues */
 uint_8 MacroLevel;  /* current macro nesting level   */
 
 #if DETECTEOC
-extern bool inside_comment;
+extern char inside_comment;
 #endif
 
 /* MemAlloc() uses the normal C heap functions.
@@ -102,7 +102,7 @@ FNAME                   *FNames;    /* array of input files */
  and pushed onto the file stack.
  */
 input_queue             *line_queue;    /* line queue */
-file_list               *file_stack;    /* source item (file/macro) stack */
+static file_list        *file_stack;    /* source item (file/macro) stack */
 static char             *IncludePath;
 uint                    cnt_fnames;     /* items in FNames array */
 #if FILESEQ
@@ -112,9 +112,11 @@ qdesc                   FileSeq;
 char CurrComment[MAX_LINE_LEN];
 
 #ifdef DEBUG_OUT
+static char currlqline;
 static int cntppl0;
 static int cntppl1;
 static int cntppl2;
+int lq_line;
 int cnttok0;
 int cnttok1;
 #endif
@@ -172,9 +174,8 @@ static time_t GetFileTimeStamp( const char *filename )
 
     if( stat( filename, &statbuf ) != 0 ) {
         return( 0 );
-    } else {
-        return( statbuf.st_mtime );
     }
+    return( statbuf.st_mtime );
 }
 
 /* check if a file is in the array of known files.
@@ -207,13 +208,24 @@ static uint AddFile( char const *fname )
 
     _splitpath( fname, NULL, NULL, name, ext );
 
+#if 0
     (FNames+index)->mtime = GetFileTimeStamp( fname );
     (FNames+index)->name = (char *)AsmAlloc( strlen( name ) + strlen( ext ) + 1 );
     strcpy( (FNames+index)->name, name );
     strcat( (FNames+index)->name, ext );
     (FNames+index)->fullname = (char *)AsmAlloc( strlen( fname ) + 1 );
     strcpy( (FNames+index)->fullname, fname );
-
+#else
+    newfn = FNames + index;
+    /* timestamp needed for autodependancy records only */
+    if( Options.line_numbers )
+        newfn->mtime = GetFileTimeStamp( fname );
+    newfn->name = (char *)AsmAlloc( strlen( name ) + strlen( ext ) + 1 );
+    strcpy( newfn->name, name );
+    strcat( newfn->name, ext );
+    newfn->fullname = (char *)AsmAlloc( strlen( fname ) + 1 );
+    strcpy( newfn->fullname, fname );
+#endif
     return( index );
 }
 
@@ -230,7 +242,7 @@ static void FreeFiles( void )
 {
 #if FASTMEM==0
     int i;
-    for (i = 0; i < cnt_fnames; i++ ) {
+    for ( i = 0; i < cnt_fnames; i++ ) {
         AsmFree( (FNames+i)->name );
         AsmFree( (FNames+i)->fullname );
     }
@@ -239,6 +251,8 @@ static void FreeFiles( void )
     FNames = NULL;
     return;
 }
+
+/* free a line queue */
 
 static void FreeLineQueue( input_queue *queue )
 /*********************************************/
@@ -295,46 +309,49 @@ uint_32 GetLineNumber( asm_sym *sym )
 }
 
 #ifdef DEBUG_OUT
-uint_32 GetTopLine( void )
-/************************/
+char *GetTopLine( char *buffer )
+/******************************/
 {
-    return( file_stack->line_num );
+    *buffer = NULLC;
+    if ( lq_line )
+        sprintf( buffer, "(%u)", lq_line );
+    else if( file_stack->islinesrc == TRUE )
+        sprintf( buffer, "[%lu]", file_stack->line_num );
+    return( buffer );
 }
 #endif
 
 /* read one line from current source file */
 /* returns FALSE if EOF has been detected */
 
-static bool GetLineFromFile( char *ptr, unsigned max, FILE *fp )
-/**************************************************************/
+static bool GetLineFromFile( char *ptr, int max, FILE *fp )
+/*********************************************************/
 {
     char        quote = 0;
+    char        *last = ptr + max - 1;
     char        *lastbs = NULL;
     int         c;
     int         got_something;
     char        *dst;
 
-    got_something = FALSE;
 #if DETECTEOC
     /* don't skip comments inside a COMMENT */
     if ( inside_comment ) {
-#ifdef DEBUG_OUT
-        char *p2 = ptr;
-#endif
+        dst = ptr;
         c = getc( fp);
-        while (c != EOF && c != '\n') {
-            if (c != '\r' && max > 1) {
+        while ( c != EOF && c != '\n' ) {
+            if ( c != '\r' && ptr < last ) {
                 *ptr++ = c;
-                max--;
             }
             c = getc( fp );
         }
         *ptr = NULLC;
-        DebugMsg(("GetLineFromFile: COMMENT >%s<\n", p2 ));
-        return( c != EOF );
+        DebugMsg(("GetLineFromFile: COMMENT >%s<\n", dst ));
+        return( !(c == EOF && ptr == dst ) );
     }
 #endif
-    for( ;; ) {
+    got_something = FALSE;
+    while( ptr < last ) {
         c = getc( fp );
         /* copy the line until we hit a NULL, newline, or ; not in a quote */
         if (quote) {
@@ -352,11 +369,10 @@ static bool GetLineFromFile( char *ptr, unsigned max, FILE *fp )
                 break;
             case ';':
                 dst = CurrComment;
+                last = CurrComment + sizeof( CurrComment ) - 1;
                 while ( c != EOF && c != '\n' ) {
-                    if ( c != '\r' && max > 1 ) {
+                    if ( c != '\r' && dst < last )
                         *dst++ = c;
-                        max--;
-                    }
                     c = getc( fp );
                 }
                 *dst = NULLC;
@@ -378,15 +394,21 @@ static bool GetLineFromFile( char *ptr, unsigned max, FILE *fp )
             if ( lastbs ) {
                 char * p;
                 for ( p = lastbs+1; p < ptr; p++ )
-                    if (!isspace(*p))
+                    if ( !isspace( *p ) )
                         break;
                 if ( p == ptr || (*p == ';' && quote == '>' )) {
                     max += p - lastbs;
                     ptr = lastbs;
+                    /* v2.04: there's a problem with this blank insertion.
+                     * it's ok for most lines, but not for EQU lines without
+                     * angle brackets.
+                     * To be fixed.
+                     */
                     if ( !quote )
                         *ptr++ = ' ';
                     file_stack->line_num++;
                     lastbs = NULL;
+                    /* skip white spaces of next line */
                     do {
                         c = getc( fp );
                     } while (c == ' ' || c == '\t');
@@ -405,10 +427,12 @@ static bool GetLineFromFile( char *ptr, unsigned max, FILE *fp )
             lastbs = ptr;
             break;
         }
-        if( max > 1 )
-            *ptr++ = c;
+        *ptr++ = c;
         got_something = TRUE;
     }
+    AsmErr( LINE_TOO_LONG );
+    *ptr = NULLC;
+    return( TRUE );
 }
 
 #if FILESEQ
@@ -444,6 +468,9 @@ static file_list *PushLineSource( bool is_linesrc, asm_sym *sym )
     new->line_num = 0;
     new->macro = sym;
     file_stack = new;
+#ifdef DEBUG_OUT
+    currlqline = 0;
+#endif
     return( new );
 }
 
@@ -455,7 +482,7 @@ static file_list *PushLineSource( bool is_linesrc, asm_sym *sym )
 void PushLineQueue( void )
 /************************/
 {
-    DebugMsg(( "PushLineQueue() enter [line_queue=%X]\n", line_queue ));
+    DebugMsg1(( "PushLineQueue() enter [line_queue=%X]\n", line_queue ));
 
     /* if the line queue is in use, push it onto the file stack */
     if ( line_queue ) {
@@ -491,7 +518,7 @@ void AddLineQueue( const char *line )
     unsigned i = strlen(line) + 1;
     line_list   *new;
 
-    DebugMsg(( "AddLineQueue(#=%lu): >%s<\n", GetTopLine(), line ));
+    DebugMsg1(( "AddLineQueue(%u): >%s<\n", ++currlqline, line ));
 
     if ( line_queue == NULL ) {
         line_queue = SrcAlloc( sizeof( input_queue ) );
@@ -500,6 +527,9 @@ void AddLineQueue( const char *line )
     }
     new = SrcAlloc( sizeof( line_list ) + i );
     new->next = NULL;
+#ifdef DEBUG_OUT
+    new->lineno = currlqline;
+#endif
     memcpy( new->line, line, i );
 
     if( line_queue->tail == NULL ) {
@@ -512,6 +542,53 @@ void AddLineQueue( const char *line )
     return;
 }
 
+void AddLineQueueX( const char *fmt, ... )
+/****************************************/
+{
+    va_list args;
+    char *d;
+    int i;
+    long l;
+    const char *s;
+    char buffer[MAX_LINE_LEN];
+
+    va_start( args, fmt );
+    for ( s = fmt, d = buffer; *s; s++ ) {
+        if ( *s == '%' ) {
+            s++;
+            switch ( *s ) {
+            case 'r':
+                i = va_arg( args, int );
+                GetResWName( i , d );
+                memcpy( d, AsmResWord[i].name, AsmResWord[i].len );
+                d += AsmResWord[i].len;
+                break;
+            case 's':
+                strcpy( d, va_arg( args, char * ) );
+                d += strlen( d );
+                break;
+            case 'd':
+            case 'u':
+            case 'x':
+                l = va_arg( args, long );
+                if ( *s == 'x' )
+                    myltoa( l, d, 16, FALSE, FALSE );
+                else
+                    myltoa( l, d, 10, l < 0, FALSE );
+                d += strlen( d );
+                break;
+            default:
+                *d++ = *s;
+            }
+        } else
+            *d++ = *s;
+    }
+    *d = NULLC;
+    va_end( args );
+    AddLineQueue( buffer );
+    return;
+}
+
 /* push the current line queue onto the file stack and
  * associate a macro name to it so it can be displayed
  * in case of errors.
@@ -521,7 +598,7 @@ void PushMacro( asm_sym *sym )
 {
     file_list *fl;
 
-    DebugMsg(( "%lu. PushMacro(%s), queue level=%u, old macro level=%u\n", GetTopLine(), sym->name, queue_level, MacroLevel ));
+    DebugMsg1(( "PushMacro(%s), queue level=%u, old macro level=%u\n", sym->name, queue_level, MacroLevel ));
     if ( queue_level >= MAX_QUEUE_NESTING )
         Fatal( FATAL_NESTING_LEVEL_TOO_DEEP );
     fl = PushLineSource( TRUE, sym );
@@ -540,7 +617,7 @@ void PushMacroGoto( asm_sym *macro, int line )
 {
     file_list *fl;
 
-    DebugMsg(( "%lu. PushMacroGoto(%s), queue level=%u, old macro level=%u\n", GetTopLine(), macro->name, queue_level, MacroLevel ));
+    DebugMsg1(( "PushMacroGoto(%s), queue level=%u, old macro level=%u\n", macro->name, queue_level, MacroLevel ));
     fl = PushLineSource( TRUE, macro );
     fl->lines = line_queue;
     fl->hidden = *macro->name ? FALSE : TRUE;
@@ -566,7 +643,8 @@ uint get_curr_srcfile( void )
 void set_curr_srcfile( uint file, uint_32 line_num )
 /**************************************************/
 {
-    file_stack->srcfile = file;
+    if ( file != 0xFFF ) /* 0xFFF is the special value for macro lines */
+        file_stack->srcfile = file;
     file_stack->line_num = line_num;
     return;
 }
@@ -767,9 +845,14 @@ char *GetTextLine( char *string, int max )
             line_queue = NULL;
             queue_level--;
         }
+#ifdef DEBUG_OUT
+        lq_line++;
+#endif
         return( string );
     }
-
+#ifdef DEBUG_OUT
+    lq_line = 0;
+#endif
     /* Now check the file stack!
      * The file stack may contain
      * - pushed line queues (macro == -1)
@@ -790,7 +873,7 @@ char *GetTextLine( char *string, int max )
 
             file_stack = fl->next;
             fclose( fl->file );
-            DebugMsg(("GetTextLine: ***** EOF file %s *****\n", GetFName( fl->srcfile )->name ));
+            DebugMsg1(("GetTextLine: ***** EOF file %s *****\n", GetFName( fl->srcfile )->name ));
             SrcFree( fl );
 #if FILESEQ
             if ( Options.line_numbers && Parse_Pass == PASS_1 )
@@ -804,9 +887,9 @@ char *GetTextLine( char *string, int max )
             inputline = fl->lines->head;
 #ifdef DEBUG_OUT
             if ( fl->macro )
-                DebugMsg(("%lu. GetTextLine(%d) stack=%X (macro=%s) inputline=%X\n", fl->line_num, queue_level, file_stack, fl->macro->name, inputline ));
+                DebugMsg1(("GetTextLine: qlevel=%u stack=%p (macro=%s) inputline=%p\n", queue_level, file_stack, fl->macro->name, inputline ));
             else
-                DebugMsg(("%lu. GetTextLine(%d) stack=%X inputline=%X\n", fl->line_num, queue_level, file_stack, inputline ));
+                DebugMsg1(("GetTextLine: qlevel=%u stack=%p inputline=%p\n", queue_level, file_stack, inputline ));
 #endif
             if( inputline != NULL ) {
                 fl->line_num++;
@@ -821,21 +904,7 @@ char *GetTextLine( char *string, int max )
             SrcFree( fl );
             break;
         }
-#ifdef DEBUG_OUT
-        if ( file_stack )
-            if ( file_stack->islinesrc )
-                if ( file_stack->macro )
-                    DebugMsg(("GetTextLine(%d) new queue level, stack=%X (macro=%s), inputline=%X string=>%s<, next #=%u\n",
-                              queue_level, file_stack, file_stack->macro->name, inputline, string, file_stack->line_num ));
-                else
-                    DebugMsg(("GetTextLine(%d) new queue level, stack=%X (macro=%d), inputline=%X string=>%s<\n",
-                              queue_level, file_stack, file_stack->macro, inputline, string ));
-            else
-                DebugMsg(("GetTextLine(%d) new queue level, stack=%X (%s), inputline=%X string=>%s<, next #=%u\n",
-                          queue_level, file_stack, GetFName( file_stack->srcfile )->name, inputline, string, file_stack->line_num  ));
-        else
-            DebugMsg(("GetTextLine(%d) new queue level, stack=NULL, next #=%u\n", queue_level, file_stack->line_num ));
-#endif
+        DebugMsg1(("GetTextLine, new qlevel=%u, stack=%p, string=>%s<\n", queue_level, file_stack, string ));
     }
     return( NULL ); /* end of main source file reached */
 }
@@ -907,6 +976,9 @@ void InputInit( void )
     _makepath( path, drive, dir, NULL, NULL );
     AddStringToIncludePath( path );
 
+    /* initialize the AsmBuffer[] table */
+    InitTokenBuffer();
+
 }
 
 /* init for each pass */
@@ -917,6 +989,7 @@ void InputPassInit( void )
     line_queue = NULL;
     queue_level = 0;
     file_stack->line_num = 0;
+    inside_comment = FALSE;
 
     MacroLevel = 0;
     MacroLocals = 0;
@@ -932,6 +1005,7 @@ void InputFini( void )
         DebugMsg(( "InputFini: idx=%u name=%s full=%s\n", i, FNames[i].name, FNames[i].fullname ));
     }
 #endif
+    FreeTokenBuffer();
     if ( IncludePath )
         SrcFree( IncludePath );
     FreeFiles();
@@ -946,32 +1020,6 @@ void InputFini( void )
 #ifdef DEBUG_OUT
     CurrSource = "";
 #endif
-}
-
-/* multi lines must be concatenated BEFORE the macro expansion step is done
- * dont concat EQU, MACRO, ECHO [v2.0: + FORC/IRPC ] lines!
- */
-static bool IsMultiLine(void)
-/***************************/
-{
-    asm_sym *sym;
-    int i = 0;
-
-    if ( AsmBuffer[1]->token == T_COLON )
-        i = 2;
-    if ( AsmBuffer[1]->token == T_DIRECTIVE && AsmBuffer[1]->value == T_EQU )
-        return(FALSE);
-    else if ( AsmBuffer[i]->token == T_ID ) {
-        sym = SymSearch(AsmBuffer[i]->string_ptr);
-        if (sym && (sym->state == SYM_MACRO))
-            return(FALSE);
-    } else if ( AsmBuffer[i]->token == T_DIRECTIVE &&
-               ( AsmBuffer[i]->value == T_ECHO ||
-                AsmBuffer[i]->value == T_FORC ||
-                AsmBuffer[i]->value == T_IRPC ) ) {
-        return( FALSE );
-    }
-    return( TRUE );
 }
 
 /* INCLUDE directive.
@@ -1023,6 +1071,32 @@ static void IncludeDirective( int i )
     return;
 }
 
+/* multi lines must be concatenated BEFORE the macro expansion step is done
+ * dont concat EQU, MACRO, ECHO [v2.0: + FORC/IRPC ] lines!
+ */
+static bool IsMultiLine(void)
+/***************************/
+{
+    asm_sym *sym;
+    int i = 0;
+
+    if ( AsmBuffer[1]->token == T_DIRECTIVE && AsmBuffer[1]->value == T_EQU )
+        return( FALSE );
+    if ( AsmBuffer[1]->token == T_COLON )
+        i = 2;
+    if ( AsmBuffer[i]->token == T_ID ) {
+        sym = SymSearch( AsmBuffer[i]->string_ptr );
+        if ( sym && ( sym->state == SYM_MACRO ) )
+            return( FALSE );
+    } else if ( AsmBuffer[i]->token == T_DIRECTIVE &&
+               ( AsmBuffer[i]->value == T_ECHO ||
+                AsmBuffer[i]->value == T_FORC ||
+                AsmBuffer[i]->value == T_IRPC ) ) {
+        return( FALSE );
+    }
+    return( TRUE );
+}
+
 /* GetPreprocessedLine:
  * this is the "preprocessor"
  * 1. a line is read with GetTextLine()
@@ -1036,30 +1110,30 @@ int GetPreprocessedLine( char *string )
     int i;
 
     if( GetTextLine( string, MAX_LINE_LEN ) == NULL ) {
-        DebugMsg(("%lu. GetPreprocessedLine: GetTextLine() returned NULL (end of file)\n", GetTopLine() ));
-        return -1; /* EOF */
+        DebugMsg1(("GetPreprocessedLine: GetTextLine() returned NULL (end of file/macro)\n" ));
+        return( -1 ); /* EOF */
     }
 
     /* Token_Count is the number of tokens scanned */
-    Token_Count = Tokenize( string, 0);
+    Token_Count = Tokenize( string, 0, FALSE );
 
     /* if a comma is last token, concat lines ... with some exceptions */
 
     if ( Token_Count > 1 && AsmBuffer[Token_Count-1]->token == T_COMMA ) {
-        DebugMsg(("%lu. GetPreprocessedLine: calling IsMultiLine()\n", GetTopLine() ));
+        DebugMsg1(("GetPreprocessedLine: calling IsMultiLine()\n" ));
         if ( IsMultiLine() ) {
             char * ptr = string;
-            DebugMsg(("IsMultiLine()=TRUE\n"));
+            DebugMsg1(("GetPreprocessedLine: IsMultiLine()=TRUE\n"));
             do {
                 ptr = ptr + strlen( ptr );
-                if ( GetTextLine( ptr, MAX_LINE_LEN) == NULL )
-                    return -1;
-                while (isspace(*ptr)) ptr++;
+                if ( GetTextLine( ptr, MAX_LINE_LEN ) == NULL )
+                    return( -1 );
+                while ( isspace( *ptr ) ) ptr++;
                 if ( *ptr == NULLC )
                     break;
-                if ( (Token_Count = Tokenize( ptr, Token_Count )) == 0 )
-                    //return -1; /* v2.01: too many tokens?   */
-                    break;       /* then just skip this line! */
+                if ( ( Token_Count = Tokenize( ptr, Token_Count, FALSE ) ) == 0 )
+                    //return( -1 ); /* v2.01: too many tokens?   */
+                    break;          /* then just skip this line! */
             } while ( AsmBuffer[Token_Count-1]->token == T_COMMA );
         }
     }
@@ -1068,28 +1142,28 @@ int GetPreprocessedLine( char *string )
     cntppl0++;
     if ( file_stack && file_stack->islinesrc ) {
         if ( file_stack->macro )
-            DebugMsg(("%lu. GetPreprocessedLine(mac=%s): >%s<\n", file_stack->line_num, file_stack->macro->name, string ));
+            DebugMsg1(("GetPreprocessedLine(mac=%s): >%s<\n", file_stack->macro->name, string ));
         else
-            DebugMsg(("%lu. GetPreprocessedLine: >%s<\n", file_stack->line_num, string ));
+            DebugMsg1(("GetPreprocessedLine: >%s<\n", string ));
     } else if ( file_stack && file_stack->srcfile ) {
-        DebugMsg(("%lu. GetPreprocessedLine(%s): >%s<\n", file_stack->line_num, GetFName( file_stack->srcfile )->name, string ));
+        DebugMsg1(("GetPreprocessedLine(%s): >%s<\n", GetFName( file_stack->srcfile )->name, string ));
     } else
-        DebugMsg(("%lu. GetPreprocessedLine: >%s<\n", file_stack->line_num, string));
+        DebugMsg1(("GetPreprocessedLine(cnt=%u): >%s<\n", Token_Count, string));
 #endif
 
 #if REMOVECOMENT == 0
-    if ( Token_Count == 0 )
+    if ( Token_Count == 0 && ( CurrIfState == BLOCK_ACTIVE || ModuleInfo.listif ) )
         LstWriteSrcLine();
 #endif
     /* no expansion if current macro is skipped (EXITM does this) */
     /* then all what has to run are the conditional directives */
     /* (this could possibly be improved) */
 
-    if ( SkipMacroMode == FALSE ) {
+    if ( SkipMacroMode == FALSE && CurrIfState == BLOCK_ACTIVE ) {
         /* expand (text) macros. If expansion occured, rescan the line */
         while ( Token_Count > 0 && ExpandLine( string ) == STRING_EXPANDED ) {
-            DebugMsg(("%lu. GetPreprocessedLine: expanded line is >%s<\n", file_stack->line_num, string));
-            Token_Count = Tokenize( string, 0 );
+            DebugMsg1(("GetPreprocessedLine: expanded line is >%s<\n", string));
+            Token_Count = Tokenize( string, 0, TRUE );
         }
     }
 
@@ -1101,8 +1175,9 @@ int GetPreprocessedLine( char *string )
 #endif
 
     i = 0;
-    if (Token_Count > 2 && AsmBuffer[1]->token == T_COLON)
+    if ( Token_Count > 2 && ( AsmBuffer[1]->token == T_COLON || AsmBuffer[1]->token == T_DBL_COLON ) )
         i = 2;
+
 
     /* handle "preprocessor" directives:
      * INCLUDE
@@ -1115,36 +1190,44 @@ int GetPreprocessedLine( char *string )
         AsmBuffer[i]->dirtype <= DRT_INCLUDE ) {
 
         if ( i > 1 && SkipMacroMode == FALSE ) {
-            if (AsmBuffer[i-2]->token != T_ID) {
-                AsmError( SYNTAX_ERROR );
-                return(0);
+            if ( AsmBuffer[0]->token != T_ID ) {
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
+                return( 0 );
             }
-            if ( LabelCreate( AsmBuffer[i-2]->string_ptr, MT_NEAR, NULL, TRUE ) == NULL )
-                return(0);
+#if FASTPASS
+            /* v2.04: added. store the line, without conditional directive */
+            if ( Parse_Pass == PASS_1 ) {
+                char oldend = *(AsmBuffer[i]->pos);
+                *(AsmBuffer[i]->pos) = NULLC;
+                StoreState ? StoreLine( AsmBuffer[0]->pos ) : SaveState();
+                *(AsmBuffer[i]->pos) = oldend;
+            }
+#endif
+            if ( LabelCreate( AsmBuffer[0]->string_ptr, MT_NEAR, NULL, TRUE ) == NULL )
+                return( 0 );
         }
 
-        if ( AsmBuffer[i]->value == T_INCLUDE ) {
-            if ( SkipMacroMode == FALSE )
-                IncludeDirective( i + 1 );
-        } else if ( AsmBuffer[i]->dirtype == DRT_CONDDIR ) { /* conditional directive? */
+        if ( AsmBuffer[i]->dirtype == DRT_CONDDIR ) { /* conditional directive? */
             conditional_assembly_directive( i, AsmBuffer[i]->value );
-        } else if ( AsmBuffer[i]->dirtype == DRT_ERRDIR ) { /* error directive? */
-            if (SkipMacroMode == FALSE)
+        } else if ( SkipMacroMode == FALSE ) {
+            if ( AsmBuffer[i]->value == T_INCLUDE ) {
+                IncludeDirective( i + 1 );
+            } else if ( AsmBuffer[i]->dirtype == DRT_ERRDIR ) { /* error directive? */
                 conditional_error_directive( i );
-        } else if ( AsmBuffer[i]->dirtype == DRT_LOOPDIR ) { /* loop directive? */
-            if (SkipMacroMode == FALSE)
-                LoopDirective ( i+1, AsmBuffer[i]->value );
+            } else if ( AsmBuffer[i]->dirtype == DRT_LOOPDIR ) { /* loop directive? */
+                LoopDirective ( i + 1, AsmBuffer[i]->value );
+            }
         }
         return( 0 );
     }
     if ( SkipMacroMode )
         return( Token_Count );
 
-    if (Token_Count > 1 &&  AsmBuffer[1]->token == T_DIRECTIVE ) {
+    if ( Token_Count > 1 &&  AsmBuffer[1]->token == T_DIRECTIVE ) {
         switch (AsmBuffer[1]->value) {
         case T_MACRO:
             MacroDef ( 0 );
-            return(0);
+            return( 0 );
 #if FASTPASS
         case T_EQU:
             /*
@@ -1159,7 +1242,7 @@ int GetPreprocessedLine( char *string )
             if ( AsmBuffer[1]->dirtype == 0 ) {  /* is 0 for true EQU */
                 if( AsmBuffer[0]->token == T_ID ) {
                     asm_sym *sym;
-                    if ( sym = CreateConstant( FALSE ) ) {
+                    if ( sym = CreateConstant() ) {
                         if ( sym->state != SYM_TMACRO ) {
                             if ( Options.preprocessor_stdout == TRUE )
                                 WritePreprocessedLine( string );
@@ -1178,21 +1261,21 @@ int GetPreprocessedLine( char *string )
 #else
         case T_EQU:
             DefineConstant( AsmBuffer[1]->dirtype == DRT_EQUALSGN );
-            return(0);
+            return( 0 );
         case T_SIZESTR:
             SizeStrDef( 1 );
-            return(0);
+            return( 0 );
         case T_INSTR:
             InStrDef( 1 );
-            return(0);
+            return( 0 );
 #endif
         case T_TEXTEQU:
         case T_CATSTR: /* TEXTEQU and CATSTR are synonyms! */
             CatStrDef( 1 );
-            return(0);
+            return( 0 );
         case T_SUBSTR:
             SubStrDef( 1 );
-            return(0);
+            return( 0 );
         }
     }
     /* is a user-defined prologue macro set? */

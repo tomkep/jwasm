@@ -29,10 +29,10 @@
 ****************************************************************************/
 
 #include "globals.h"
-#include "parser.h"
 #include "memalloc.h"
-#include "fixup.h"
+#include "parser.h"
 #include "directiv.h"
+#include "fixup.h"
 #include "segment.h"
 
 /*
@@ -50,24 +50,29 @@
 #else
 #define SkipFixup()
 #endif
-static ret_code DoPatch( struct asm_sym *sym, struct genfixup *fixup )
-/********************************************************************/
+static ret_code DoPatch( struct asm_sym *sym, struct fixup *fixup )
+/*****************************************************************/
 {
     long                disp;
     long                max_disp;
     unsigned            size;
-    asm_sym             *sym2;
     dir_node            *seg;
-    struct genfixup     *fixup2;
+#if LABELOPT
+    asm_sym             *sym2;
+    struct fixup        *fixup2;
+#endif
 
     /* all relative fixups should occure only at first pass and they signal forward references
      * they must be removed after patching or skiped ( next processed as normal fixup )
      */
 
-    DebugMsg(("DoPatch(%u, %s): fixup sym=%s type=%X ofs=%Xh loc=%Xh opt=%u def_seg=%s\n",
+    DebugMsg(("DoPatch(%u, %s): fixup sym=%s type=%u ofs=%" FX32 "h loc=%" FX32 "h opt=%u def_seg=%s\n",
               Parse_Pass + 1, sym->name,
-              fixup->sym ? fixup->sym->name : "NULL", fixup->type,
-              fixup->offset, fixup->fixup_loc, fixup->option,
+              fixup->sym ? fixup->sym->name : "NULL",
+              fixup->type,
+              fixup->offset,
+              fixup->location,
+              fixup->option,
               fixup->def_seg ? fixup->def_seg->sym.name : "NULL" ));
     seg = GetSeg( sym );
     if( seg == NULL || fixup->def_seg != seg ) {
@@ -90,15 +95,15 @@ static ret_code DoPatch( struct asm_sym *sym, struct genfixup *fixup )
             sym->offset++;  /* a PUSH CS will be added */
             /* todo: insert LABELOPT block here */
             OutputByte( 0 ); /* it's pass one, nothing is written */
-            AsmFree( fixup );
+            FreeFixup( fixup );
             return( NOT_ERROR );
         //} else if( sym->mem_type == MT_NEAR ) {
         } else {
-            // forward reference, only at first pass
+            /* forward reference, only at first pass */
             switch( fixup->type ) {
             case FIX_RELOFF32:
             case FIX_RELOFF16:
-                AsmFree( fixup );
+                FreeFixup( fixup );
                 DebugMsg(("DoPatch: FIX_RELOFF32/FIX_RELOFF16, return\n"));
                 return( NOT_ERROR );
             case FIX_LOBYTE:  /* push <forward reference> */
@@ -119,12 +124,12 @@ static ret_code DoPatch( struct asm_sym *sym, struct genfixup *fixup )
     case FIX_RELOFF8:
         size++;
         /* calculate the displacement */
-        // disp = fixup->offset + GetCurrOffset() - fixup->fixup_loc - size;
-        disp = fixup->offset + fixup->sym->offset - fixup->fixup_loc - size - 1;
+        // disp = fixup->offset + GetCurrOffset() - fixup->location - size;
+        disp = fixup->offset + fixup->sym->offset - fixup->location - size - 1;
         max_disp = (1UL << ((size * 8)-1)) - 1;
         if( disp > max_disp || disp < (-max_disp-1) ) {
         patch:
-            DebugMsg(("DoPatch(%u): Phase error, disp=%X, fixup=%s(%X), loc=%X!\n", Parse_Pass + 1, disp, fixup->sym->name, fixup->sym->offset, fixup->fixup_loc ));
+            DebugMsg(("DoPatch(%u): Phase error, disp=%X, fixup=%s(%X), loc=%X!\n", Parse_Pass + 1, disp, fixup->sym->name, fixup->sym->offset, fixup->location ));
             ModuleInfo.PhaseError = TRUE;
             /* ok, the standard case is: there's a forward jump which
              * was assumed to be SHORT, but it must be NEAR instead.
@@ -153,38 +158,54 @@ static ret_code DoPatch( struct asm_sym *sym, struct genfixup *fixup )
                     if( seg->e.seginfo->Ofssize )
                         size += 2; /* NEAR32 instead of NEAR16 */
                     size++;
-                    sym->offset += size;
 #if LABELOPT
+                    /* v2.04: if there's an ORG between src and dst, skip
+                     * the optimization!
+                     */
+                    if ( Parse_Pass == PASS_1 ) {
+                        for ( fixup2 = seg->e.seginfo->FixupListHead; fixup2; fixup2 = fixup2->nextrlc ) {
+                            if ( fixup2->orgoccured ) {
+                                DebugMsg(("DoPatch: ORG/ALIGN detected, optimization canceled\n" ));
+                                return( NOT_ERROR );
+                            }
+                            /* do this check after the check for ORG! */
+                            if ( fixup2->location <= fixup->location )
+                                break;
+                        }
+                    }
                     /* scan the segment's label list and adjust all labels
                      * which are between the fixup loc and the current sym.
                      * ( PROCs are NOT contained in this list because they
                      * use the <next>-field of dir_node already!)
                      */
-                    DebugMsg(("DoPatch: sym %s, offset changed %X -> %X\n", sym->name, sym->offset - size, sym->offset));
                     for ( sym2 = seg->e.seginfo->labels; sym2; sym2 = (asm_sym *)((dir_node *)sym2)->next ) {
-                        if ( sym2 == sym )
-                            continue;
-                        /* v2.0: fixup_loc is at least 1 byte too low, so
+                        //if ( sym2 == sym )
+                        //    continue;
+                        /* v2.0: location is at least 1 byte too low, so
                          * use the "<=" operator instead of "<"!
                          */
-                        //if ( sym2->offset < fixup->fixup_loc )
-                        if ( sym2->offset <= fixup->fixup_loc )
+                        //if ( sym2->offset < fixup->location )
+                        if ( sym2->offset <= fixup->location )
                             break;
                         sym2->offset += size;
-                        DebugMsg(("sym %s, offset changed %X -> %X\n", sym2->name, sym2->offset - size, sym2->offset));
+                        DebugMsg(("DoPatch(loc=%" FX32 "): sym %s, offset changed %" FX32 " -> %" FX32 "\n", fixup->location, sym2->name, sym2->offset - size, sym2->offset));
                     }
                     /* v2.03: also adjust fixup locations located between the
                      * label reference and the label. This should reduce the
                      * number of passes to 2 for not too complex sources.
                      */
-                    for ( fixup2 = seg->e.seginfo->FixupListHeadGen; fixup2; fixup2 = fixup2->nextrlc ) {
+                    if ( Parse_Pass == PASS_1 ) /* v2.04: added, just to be safe */
+                    for ( fixup2 = seg->e.seginfo->FixupListHead; fixup2; fixup2 = fixup2->nextrlc ) {
                         if ( fixup2->sym == sym )
                             continue;
-                        if ( fixup2->fixup_loc <= fixup->fixup_loc )
+                        if ( fixup2->location <= fixup->location )
                             break;
-                        fixup2->fixup_loc += size;
-                        DebugMsg(("for sym=%s fixup loc %X changed to %X\n", fixup2->sym->name, fixup2->fixup_loc - size, fixup2->fixup_loc ));
+                        fixup2->location += size;
+                        DebugMsg(("for sym=%s fixup loc %" FX32 " changed to %" FX32 "\n", fixup2->sym->name, fixup2->location - size, fixup2->location ));
                     }
+#else
+                    DebugMsg(("DoPatch: sym %s, offset changed %" FX32 " -> %" FX32 "\n", sym->name, sym->offset, sym->offset + size));
+                    sym->offset += size;
 #endif
                     /*  it doesn't matter what's actually "written" */
                     for ( ; size; size-- )
@@ -201,9 +222,12 @@ static ret_code DoPatch( struct asm_sym *sym, struct genfixup *fixup )
         }
 #ifdef DEBUG_OUT
         else
-            DebugMsg(("DoPatch: displacement still short: %Xh\n", disp ));
+            DebugMsg(("DoPatch, loc=%" FX32 ": displacement still short: %Xh\n", fixup->location, disp ));
 #endif
-        AsmFree( fixup );
+        /* v2.04: fixme: is it ok to remove the fixup?
+         * it might still be needed in a later backpatch.
+         */
+        FreeFixup( fixup );
         break;
     default:
         DebugMsg(("DoPatch: default branch, unhandled fixup type=%u\n", fixup->type ));
@@ -225,8 +249,8 @@ ret_code BackPatch( struct asm_sym *sym )
  * to this symbol. These fixups are only generated during pass 1.
  */
 {
-    struct genfixup     *fixup;
-    struct genfixup     *next;
+    struct fixup     *fixup;
+    struct fixup     *next;
 
     DebugMsg(("BackPatch(%s) enter, seg.ofs=%s.%X\n", sym->name, sym->segment ? sym->segment->name : "NULL (!?)", sym->offset ));
     fixup = sym->fixup;

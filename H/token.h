@@ -48,6 +48,7 @@ enum state {
         T_NEGATIVE,
 //        T_ID_IN_BACKQUOTES,
         T_BAD_NUM,
+        T_DBL_COLON,
 
         T_OP_BRACKET    = '(',
         T_OP_SQ_BRACKET = '[',
@@ -70,15 +71,13 @@ struct asm_tok {
 #endif
     union {
         unsigned char  dirtype;    /* T_DIRECTIVE: type */
-        unsigned char  opcode;     /* T_RES_ID */
+        unsigned char  value8;     /* T_RES_ID, RWT_TYPE: index type table */
         unsigned char  precedence; /* T_UNARY_OPERATOR/T_BINARY_OPERATOR */
         char  string_delim;        /* T_STRING: string delimiter  */
+        char  floattype;           /* T_FLOAT: 0 or 'r' */
     };
-    union {
-        uint_16     flags;  /* for T_DIRECTIVE only */
-        uint_8      rm_byte;/* for T_RES_ID only */
-    };
-    char            *string_ptr;
+    uint_8      type;              /* T_RES_ID: RWT_TYPE or RWT_RESID */
+    char        *string_ptr;
     union {
         struct {
             int_32  value;

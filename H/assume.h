@@ -31,15 +31,25 @@
 #ifndef _ASSUME_H_
 #define _ASSUME_H_
 
+/* flags for error field, used for GPR's ASSUME:ERROR|NOTHING */
+enum err_flags {
+    RL_ERROR  = 0x01,
+    RX_ERROR  = 0x02,
+    ERX_ERROR = 0x04,
+    RRX_ERROR = 0x08,
+    RH_ERROR  = 0x10
+};
+
 typedef struct {
     asm_sym             *symbol;        /* segment, group or type that is to
                                            be associated with the register */
-    unsigned            error:1;        // the register is assumed to ERROR
-    unsigned            flat:1;         // the register is assumed to FLAT
+    unsigned char       error;          /* register assumed to ERROR */
+    unsigned char       flat;           /* register assumed to FLAT  */
 } assume_info;
 
 /* segment assume table is sorted by seg reg number: ES,CS,SS,DS,FS,GS */
 extern assume_info SegAssumeTable[];
+extern assume_info StdAssumeTable[];
 
 #define NUM_SEGREGS 6
 

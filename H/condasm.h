@@ -31,10 +31,19 @@
 #ifndef _CONDASM_H_
 #define _CONDASM_H_
 
-extern ret_code conditional_assembly_prepare( char *line );
+typedef enum  {
+    BLOCK_ACTIVE,    /* current cond is true */
+    BLOCK_INACTIVE,  /* current IF cond is false, looking for elseif */
+    BLOCK_DONE       /* done TRUE section of current if, just nuke
+                        everything until we see an endif */
+} if_state;
+
+extern if_state CurrIfState;
+
+extern void conditional_assembly_prepare( int );
 extern ret_code conditional_assembly_directive( int i, int directive );
 extern ret_code conditional_error_directive( int i );
-extern ret_code CheckForOpenConditionals( void );
+extern void CondCheckOpen( void );
 extern void CondInit( void );
 
 #endif

@@ -31,8 +31,9 @@
 #include <ctype.h>
 
 #include "globals.h"
-#include "symbols.h"
 #include "memalloc.h"
+#include "symbols.h"
+#include "parser.h"
 #include "directiv.h"
 #include "mangle.h"
 
@@ -63,10 +64,10 @@ static char *ms64_decorate( struct asm_sym *sym, char *buffer );
  */
 
 static mangle_func fcmanglers[] = {
-    ms32_decorate,
-    ow_decorate,
+    ms32_decorate, /* FCT_MS32 */
+    ow_decorate,   /* FCT_WATCOMC */
 #if AMD64_SUPPORT
-    ms64_decorate
+    ms64_decorate  /* FCT_WIN64 */
 #endif
 };
 
@@ -160,7 +161,7 @@ static char * ms32_decorate( struct asm_sym *sym, char *buffer )
 /**************************************************************/
 {
     sprintf( buffer, "@%s@%u", sym->name, ((dir_node *)sym)->e.procinfo->parasize );
-    return(buffer);
+    return( buffer );
 }
 
 #if AMD64_SUPPORT

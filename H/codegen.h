@@ -52,18 +52,18 @@
 #define EXTENDED_OPCODE 0x0F
 #define OP_NOP          0x90
 
-#define S_I_B           0x04
-#define D32             0x05  /* direct 32 */
-#define D16             0x06  /* direct 16 */
+#define RM_BX_SI        0x00
+#define RM_BX_DI        0x01
+#define RM_BP_SI        0x02
+#define RM_BP_DI        0x03
+#define RM_SI           0x04
+#define RM_DI           0x05
+#define RM_BP           0x06
+#define RM_BX           0x07
 
-//#define ESP             0x04
-//#define EBP             0x05
-//#define BP              0x06
-
-#define MEM_BX_SI       0x00
-#define MEM_BX_DI       0x01
-#define MEM_BP_SI       0x02
-#define MEM_BP_DI       0x03
+#define RM_SIB          0x04
+#define RM_D32          0x05  /* direct 32 */
+#define RM_D16          0x06  /* direct 16 */
 
 #define SCALE_FACTOR_1  0x00
 #define SCALE_FACTOR_2  0x40
@@ -74,6 +74,7 @@
 #define FPE_MAX         0xDF
 
 #define IS_MEM_TYPE( op, typ ) ( (op) == MT_##typ || (op) == MT_S##typ )
+#define IS_MEMTYPE_SIZ( op, siz ) ( ( ( (op) & MT_SPECIAL_MASK ) == 0 ) && ( ( (op) & MT_SIZE_MASK ) == ( siz - 1 ) ) )
 
 extern ret_code         match_phase_1( struct code_info * );
 

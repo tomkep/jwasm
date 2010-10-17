@@ -33,7 +33,7 @@
 
 extern ret_code DefineConstant( bool redefine );
 extern void     MakeConstantUnderscored( int token );
-extern asm_sym  *CreateConstant( bool redefine );
-extern asm_sym  *CreateConstantEx( const char *, int );
+extern asm_sym  *CreateConstant( void );
+extern asm_sym  *CreateVariable( const char *, int );
 
 #endif

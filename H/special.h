@@ -34,13 +34,14 @@
 ****************************************************************************/
 
 /* v1.96: items needn't be sorted anymore!
- * The items are stored in structures of type asm_ins.
- * That's why the field names (rm_byte, op2, opcode, prefix) are a bit strange.
+ * The items are stored in structures of type asm_special.
  * If an item is inserted, moved or deleted, the project needs
  * a full rebuild.
  */
 
-/* token str len   rm_byte          op2      opcode    flags  cpu     op1 */
+/* token str len   type             value    value8    flags  cpu     sflags */
+
+/* registers AH-BH must be consecutive, start with AH and end with BH */
 
 res(AL,   al, 2, RWT_REGISTER,      OP_AL,      0,       0,   P_86,    0)
 res(CL,   cl, 2, RWT_REGISTER,      OP_CL,      1,       0,   P_86,    0)
@@ -96,21 +97,21 @@ res(XMM5, xmm5, 4, RWT_REGISTER,    OP_XMM,     5,       0,   P_SSE1,  0)
 res(XMM6, xmm6, 4, RWT_REGISTER,    OP_XMM,     6,       0,   P_SSE1,  0)
 res(XMM7, xmm7, 4, RWT_REGISTER,    OP_XMM,     7,       0,   P_SSE1,  0)
 
-res(CR0, cr0, 3, RWT_REGISTER,      OP_CR,      0,       0,   P_386,   0)
-res(CR2, cr2, 3, RWT_REGISTER,      OP_CR,      2,       0,   P_386,   0)
-res(CR3, cr3, 3, RWT_REGISTER,      OP_CR,      3,       0,   P_386,   0)
-res(CR4, cr4, 3, RWT_REGISTER,      OP_CR,      4,       0,   P_586,   0)
-res(DR0, dr0, 3, RWT_REGISTER,      OP_DR,      0,       0,   P_386,   0)
-res(DR1, dr1, 3, RWT_REGISTER,      OP_DR,      1,       0,   P_386,   0)
-res(DR2, dr2, 3, RWT_REGISTER,      OP_DR,      2,       0,   P_386,   0)
-res(DR3, dr3, 3, RWT_REGISTER,      OP_DR,      3,       0,   P_386,   0)
-res(DR6, dr6, 3, RWT_REGISTER,      OP_DR,      6,       0,   P_386,   0)
-res(DR7, dr7, 3, RWT_REGISTER,      OP_DR,      7,       0,   P_386,   0)
-res(TR3, tr3, 3, RWT_REGISTER,      OP_TR,      3,       0,   P_486,   0)
-res(TR4, tr4, 3, RWT_REGISTER,      OP_TR,      4,       0,   P_486,   0)
-res(TR5, tr5, 3, RWT_REGISTER,      OP_TR,      5,       0,   P_486,   0)
-res(TR6, tr6, 3, RWT_REGISTER,      OP_TR,      6,       0,   P_386,   0)
-res(TR7, tr7, 3, RWT_REGISTER,      OP_TR,      7,       0,   P_386,   0)
+res(CR0, cr0, 3, RWT_REGISTER,      OP_SPECREG, 0,       0,   P_386,   0)
+res(CR2, cr2, 3, RWT_REGISTER,      OP_SPECREG, 2,       0,   P_386,   0)
+res(CR3, cr3, 3, RWT_REGISTER,      OP_SPECREG, 3,       0,   P_386,   0)
+res(CR4, cr4, 3, RWT_REGISTER,      OP_SPECREG, 4,       0,   P_586,   0)
+res(DR0, dr0, 3, RWT_REGISTER,      OP_SPECREG, 0x10,    0,   P_386,   0)
+res(DR1, dr1, 3, RWT_REGISTER,      OP_SPECREG, 0x11,    0,   P_386,   0)
+res(DR2, dr2, 3, RWT_REGISTER,      OP_SPECREG, 0x12,    0,   P_386,   0)
+res(DR3, dr3, 3, RWT_REGISTER,      OP_SPECREG, 0x13,    0,   P_386,   0)
+res(DR6, dr6, 3, RWT_REGISTER,      OP_SPECREG, 0x16,    0,   P_386,   0)
+res(DR7, dr7, 3, RWT_REGISTER,      OP_SPECREG, 0x17,    0,   P_386,   0)
+res(TR3, tr3, 3, RWT_REGISTER,      OP_SPECREG, 0x23,    0,   P_486,   0)
+res(TR4, tr4, 3, RWT_REGISTER,      OP_SPECREG, 0x24,    0,   P_486,   0)
+res(TR5, tr5, 3, RWT_REGISTER,      OP_SPECREG, 0x25,    0,   P_486,   0)
+res(TR6, tr6, 3, RWT_REGISTER,      OP_SPECREG, 0x26,    0,   P_386,   0)
+res(TR7, tr7, 3, RWT_REGISTER,      OP_SPECREG, 0x27,    0,   P_386,   0)
 
 #if AMD64_SUPPORT
 
@@ -175,12 +176,12 @@ res(XMM13,xmm13,5, RWT_REGISTER,    OP_XMM,    13, RWF_X64,    P_64,   0)
 res(XMM14,xmm14,5, RWT_REGISTER,    OP_XMM,    14, RWF_X64,    P_64,   0)
 res(XMM15,xmm15,5, RWT_REGISTER,    OP_XMM,    15, RWF_X64,    P_64,   0)
 
-res(CR8, cr8, 3, RWT_REGISTER,      OP_CR,      8, RWF_X64,    P_64,   0)
+res(CR8, cr8, 3, RWT_REGISTER,      OP_SPECREG, 8, RWF_X64,    P_64,   0)
 
 #endif
 
 /* predefined types. BYTE must be first! */
-/* token    str    len  rm_byte     op2        opcode   flags cpu     op1 */
+/* token    str    len  type        value      value8   flags cpu     sflags */
 
 res(BYTE,   byte,   4,  RWT_TYPE,   MT_BYTE,   ST_BYTE,    0, P_86,    0)
 res(SBYTE,  sbyte,  5,  RWT_TYPE,   MT_SBYTE,  ST_SBYTE,   0, P_86,    0)
@@ -208,8 +209,8 @@ res(MMWORD, mmword, 6,  RWT_TYPE,   MT_QWORD,  ST_QWORD,   0, P_586|P_MMX, 0)
 res(XMMWORD,xmmword,7,  RWT_TYPE,   MT_OWORD,  ST_OWORD,   0, P_686|P_SSE1, 0)
 #endif
 
-/* unary operators. field before cpu contains priority */
-
+/* unary operators. value8 contains priority */
+/* token        str         len  type          value   value8 flags cpu  sflags */
 res(DOT_TYPE,   .type,       5,  RWT_UNARY_OP, AT_ALL,    14,  0,   P_86,  0)
 res(HIGH,       high,        4,  RWT_UNARY_OP, AT_TLN,     6,  0,   P_86,  0)
 #if LOHI32
@@ -260,9 +261,12 @@ res(PTR,    ptr,   3, RWT_RES_ID,  0,   0, 0,   P_86,        0)
 res(ADDR,   addr,  4, RWT_RES_ID,  0,   0, 0,   P_86,        0)
 res(FLAT,   flat,  4, RWT_RES_ID,  0,   0, 0,   P_86,        0)
 res(VARARG, vararg,6, RWT_RES_ID,  0,   0, 0,   P_86,        0)
+#if AMD64_SUPPORT
+res(FRAME,  frame, 5, RWT_RES_ID,  0,   0, RWF_X64, P_64,    0)
+#endif
 
 /* languages, must be in this order! */
-/* token      str        len  rm_byte     op2  opcode        flags       cpu   op1 */
+/* token      str        len  type       value value8        flags       cpu   sflags */
 res(C,        c,           1, RWT_RES_ID, 0,   LANG_C,           0,      P_86,  0)
 res(SYSCALL,  syscall,     7, RWT_RES_ID, 0,   LANG_SYSCALL,     0,      P_86,  0)
 res(STDCALL,  stdcall,     7, RWT_RES_ID, 0,   LANG_STDCALL,     0,      P_86,  0)
@@ -275,44 +279,43 @@ res(FASTCALL, fastcall,    8, RWT_RES_ID, 0,   LANG_FASTCALL,    0,      P_86,  
  * some directives are ordered in groups with start and end point
  * if those points change, adjust directive.c!
  * field usage:
- * opnd_type[0] = value for directive
- * opnd_type[1] = DF_ flags
- * bitfields: unused
- * cpu = cpu flags
- * opcode = DRT_ flags
- * rm_byte = RWT_DIRECTIVE
- * flags = RWF_ flags
+ * sflags = value for directive
+ * value  = DF_ flags
+ * cpu    = cpu flags
+ * value8 = DRT_ flags
+ * type   = RWT_DIRECTIVE
+ * flags  = RWF_ flags
  */
 
 /* cpu directives (start: .8086, end: .NO87 */
 
-/* token      str        len   rm_byte          op2  opc flags  cpu    op1 */
-res(DOT_8086, .8086,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_86  )
-res(DOT_186,  .186,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_186 )
-res(DOT_286,  .286,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_286 )
-res(DOT_286C, .286c,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_286 )
-res(DOT_286P, .286p,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_286p)
-res(DOT_386,  .386,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_386 )
-res(DOT_386C, .386c,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_386 )
-res(DOT_386P, .386p,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_386p)
-res(DOT_486,  .486,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_486 )
-res(DOT_486P, .486p,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_486p)
-res(DOT_586,  .586,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_586 )
-res(DOT_586P, .586p,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_586p)
-res(DOT_686,  .686,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_686 )
-res(DOT_686P, .686p,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_686p)
-res(DOT_K3D,  .k3d,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_586, P_K3D | P_MMX)
-res(DOT_MMX,  .mmx,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_586, P_MMX )
-res(DOT_XMM,  .xmm,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_686, P_MMX | P_SSEALL)
+/* token      str        len   type            value       val8 flags  cpu   sflags */
+res(DOT_8086, .8086,       5,  RWT_DIRECTIVE,  P_86  ,        0,  0,   P_86,  0 )
+res(DOT_186,  .186,        4,  RWT_DIRECTIVE,  P_186 ,        0,  0,   P_86,  0 )
+res(DOT_286,  .286,        4,  RWT_DIRECTIVE,  P_286 ,        0,  0,   P_86,  0 )
+res(DOT_286C, .286c,       5,  RWT_DIRECTIVE,  P_286 ,        0,  0,   P_86,  0 )
+res(DOT_286P, .286p,       5,  RWT_DIRECTIVE,  P_286p,        0,  0,   P_86,  0 )
+res(DOT_386,  .386,        4,  RWT_DIRECTIVE,  P_386 ,        0,  0,   P_86,  0 )
+res(DOT_386C, .386c,       5,  RWT_DIRECTIVE,  P_386 ,        0,  0,   P_86,  0 )
+res(DOT_386P, .386p,       5,  RWT_DIRECTIVE,  P_386p,        0,  0,   P_86,  0 )
+res(DOT_486,  .486,        4,  RWT_DIRECTIVE,  P_486 ,        0,  0,   P_86,  0 )
+res(DOT_486P, .486p,       5,  RWT_DIRECTIVE,  P_486p,        0,  0,   P_86,  0 )
+res(DOT_586,  .586,        4,  RWT_DIRECTIVE,  P_586 ,        0,  0,   P_86,  0 )
+res(DOT_586P, .586p,       5,  RWT_DIRECTIVE,  P_586p,        0,  0,   P_86,  0 )
+res(DOT_686,  .686,        4,  RWT_DIRECTIVE,  P_686 ,        0,  0,   P_86,  0 )
+res(DOT_686P, .686p,       5,  RWT_DIRECTIVE,  P_686p,        0,  0,   P_86,  0 )
+res(DOT_K3D,  .k3d,        4,  RWT_DIRECTIVE,  P_K3D|P_MMX,   0,  0,   P_586, 0 )
+res(DOT_MMX,  .mmx,        4,  RWT_DIRECTIVE,  P_MMX,         0,  0,   P_586, 0 )
+res(DOT_XMM,  .xmm,        4,  RWT_DIRECTIVE,  P_MMX|P_SSEALL,0,  0,   P_686, 0 )
 #if AMD64_SUPPORT
-res(DOT_X64,  .x64,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_64  )
-res(DOT_X64P, .x64p,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_64p )
+res(DOT_X64,  .x64,        4,  RWT_DIRECTIVE,  P_64 ,         0,  0,   P_86,  0 )
+res(DOT_X64P, .x64p,       5,  RWT_DIRECTIVE,  P_64p,         0,  0,   P_86,  0 )
 #endif
 
-res(DOT_8087, .8087,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_87  )
-res(DOT_287,  .287,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_287 )
-res(DOT_387,  .387,        4,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_387 )
-res(DOT_NO87, .no87,       5,  RWT_DIRECTIVE,     0,   0,  0,   P_86,  P_NO87)
+res(DOT_8087, .8087,       5,  RWT_DIRECTIVE,  P_87,          0,  0,   P_86,  0 )
+res(DOT_287,  .287,        4,  RWT_DIRECTIVE,  P_287,         0,  0,   P_86,  0 )
+res(DOT_387,  .387,        4,  RWT_DIRECTIVE,  P_387,         0,  0,   P_86,  0 )
+res(DOT_NO87, .no87,       5,  RWT_DIRECTIVE,  P_NO87,        0,  0,   P_86,  0 )
 
 /* listing directives (start: .CREF, end: TITLE */
 /* .LFCOND is synonym for .LISTIF
@@ -347,42 +350,44 @@ res(SUBTTL,           subttl,         6, RWT_DIRECTIVE, 0,           0, 0,  P_86
 res(TITLE,            title,          5, RWT_DIRECTIVE, 0,           0, 0,  P_86, 0)
 
 
-res(DOT_ALPHA,     .alpha,      6,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
-res(DOT_DOSSEG,    .dosseg,     7,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
-res(DOT_SEQ,       .seq,        4,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
-res(DOSSEG,        dosseg,      6,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
+res(DOT_ALPHA,     .alpha,      6,  RWT_DIRECTIVE, 0,         0, 0,  P_86, 0)
+res(DOT_DOSSEG,    .dosseg,     7,  RWT_DIRECTIVE, 0,         0, 0,  P_86, 0)
+res(DOT_SEQ,       .seq,        4,  RWT_DIRECTIVE, 0,         0, 0,  P_86, 0)
+res(DOSSEG,        dosseg,      6,  RWT_DIRECTIVE, 0,         0, 0,  P_86, 0)
 
-res(DOT_CODE,       .code,      5,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
-res(DOT_CONST,      .const,     6,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
-res(DOT_DATA,       .data,      5,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
-res(DOT_DATA_UN,    .data?,     6,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
-res(DOT_FARDATA,    .fardata,   8,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
-res(DOT_FARDATA_UN, .fardata?,  9,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
-res(DOT_STACK,      .stack,     6,  RWT_DIRECTIVE,     0,  0, 0,  P_86, 0)
+res(DOT_CODE,       .code,      5,  RWT_DIRECTIVE, DF_NOSTRUC,0, 0,  P_86, 0)
+res(DOT_CONST,      .const,     6,  RWT_DIRECTIVE, DF_NOSTRUC,0, 0,  P_86, 0)
+res(DOT_DATA,       .data,      5,  RWT_DIRECTIVE, DF_NOSTRUC,0, 0,  P_86, 0)
+res(DOT_DATA_UN,    .data?,     6,  RWT_DIRECTIVE, DF_NOSTRUC,0, 0,  P_86, 0)
+res(DOT_FARDATA,    .fardata,   8,  RWT_DIRECTIVE, DF_NOSTRUC,0, 0,  P_86, 0)
+res(DOT_FARDATA_UN, .fardata?,  9,  RWT_DIRECTIVE, DF_NOSTRUC,0, 0,  P_86, 0)
+res(DOT_STACK,      .stack,     6,  RWT_DIRECTIVE, DF_NOSTRUC,0, 0,  P_86, 0)
 
 /* hll directives */
 
-res(DOT_BREAK,      .break,     6,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
-res(DOT_CONTINUE,   .continue,  9,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
-res(DOT_ELSE,       .else,      5,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
-res(DOT_ELSEIF,     .elseif,    7,  RWT_DIRECTIVE,     DF_CEXPR,  0,  0,   P_86, 0)
-res(DOT_ENDIF,      .endif,     6,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
-res(DOT_ENDW,       .endw,      5,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
-res(DOT_IF,         .if,        3,  RWT_DIRECTIVE,     DF_CEXPR,  0,  0,   P_86, 0)
-res(DOT_REPEAT,     .repeat,    7,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
-res(DOT_UNTIL,      .until,     6,  RWT_DIRECTIVE,     DF_CEXPR,  0,  0,   P_86, 0)
-res(DOT_UNTILCXZ,   .untilcxz,  9,  RWT_DIRECTIVE,     DF_CEXPR,  0,  0,   P_86, 0)
-res(DOT_WHILE,      .while,     6,  RWT_DIRECTIVE,     DF_CEXPR,  0,  0,   P_86, 0)
+res(DOT_BREAK,      .break,     6,  RWT_DIRECTIVE, 0,         0,  0,   P_86, 0)
+res(DOT_CONTINUE,   .continue,  9,  RWT_DIRECTIVE, 0,         0,  0,   P_86, 0)
+res(DOT_ELSE,       .else,      5,  RWT_DIRECTIVE, 0,         0,  0,   P_86, 0)
+res(DOT_ELSEIF,     .elseif,    7,  RWT_DIRECTIVE, DF_CEXPR,  0,  0,   P_86, 0)
+res(DOT_ENDIF,      .endif,     6,  RWT_DIRECTIVE, 0,         0,  0,   P_86, 0)
+res(DOT_ENDW,       .endw,      5,  RWT_DIRECTIVE, 0,         0,  0,   P_86, 0)
+res(DOT_IF,         .if,        3,  RWT_DIRECTIVE, DF_CEXPR|DF_NOSTRUC,  0,  0,   P_86, 0)
+res(DOT_REPEAT,     .repeat,    7,  RWT_DIRECTIVE, DF_NOSTRUC,0,  0,   P_86, 0)
+res(DOT_UNTIL,      .until,     6,  RWT_DIRECTIVE, DF_CEXPR,  0,  0,   P_86, 0)
+res(DOT_UNTILCXZ,   .untilcxz,  9,  RWT_DIRECTIVE, DF_CEXPR,  0,  0,   P_86, 0)
+res(DOT_WHILE,      .while,     6,  RWT_DIRECTIVE, DF_CEXPR|DF_NOSTRUC,  0,  0,   P_86, 0)
 
-res(DOT_EXIT,       .exit,      5,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
-res(DOT_STARTUP,    .startup,   8,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
+res(DOT_EXIT,       .exit,      5,  RWT_DIRECTIVE, 0,         0,  0,   P_86, 0)
+res(DOT_STARTUP,    .startup,   8,  RWT_DIRECTIVE, 0,         0,  0,   P_86, 0)
 
-res(DOT_MODEL,      .model,     6,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
-res(DOT_RADIX,      .radix,     6,  RWT_DIRECTIVE,     0,         0,  0,   P_86, 0)
+res(DOT_MODEL,      .model,     6,  RWT_DIRECTIVE, 0,         0,  0,   P_86, 0)
+res(DOT_RADIX,      .radix,     6,  RWT_DIRECTIVE, 0,         0,  0,   P_86, 0)
 
 /* directives invalid for IA32+ */
 
+#if COFF_SUPPORT
 res(DOT_SAFESEH,    .safeseh,   8,  RWT_DIRECTIVE, 0,     0,  RWF_IA32,   P_386, 0)
+#endif
 
 /* error directives, handled by preprocessor */
 
@@ -402,6 +407,7 @@ res(DOT_ERRNZ,   .errnz,       6, RWT_DIRECTIVE, 0,           DRT_ERRDIR,  0, P_
 
 /* conditional assembly directives, handled by preprocessor */
 
+/* token          str        len  type           value        val8       flgs cpu  sflags */
 res(COMMENT,      comment,     7, RWT_DIRECTIVE, 0,           DRT_CONDDIR, 0, P_86, 0)
 res(ELSE,         else,        4, RWT_DIRECTIVE, 0,           DRT_CONDDIR, 0, P_86, 0)
 res(ELSEIF,       elseif,      6, RWT_DIRECTIVE, 0,           DRT_CONDDIR, 0, P_86, 0)
@@ -467,19 +473,19 @@ res(DOT_PUSHREG,    .pushreg,   8,  RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 
 res(DOT_SAVEREG,    .savereg,   8,  RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 0)
 res(DOT_SAVEXMM128, .savexmm128,11, RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 0)
 res(DOT_SETFRAME,   .setframe,  9,  RWT_DIRECTIVE, 0,        0, RWF_X64,  P_64, 0)
-res(FRAME,          frame,      5,  RWT_RES_ID,    0,        0, RWF_X64,  P_64, 0)
 #endif
 
 /* other directives */
 
+/* token         str        len  type          value               val8 flags cpu sflags */
 res(ALIAS,       alias,       5, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
 res(ALIGN,       align,       5, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
 res(ASSUME,      assume,      6, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
 res(COMM,        comm,        4, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
 res(ECHO,        echo,        4, RWT_DIRECTIVE, DF_NOEXPAND,          0, 0,  P_86, 0)
-res(END,         end,         3, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
+res(END,         end,         3, RWT_DIRECTIVE, DF_NOSTRUC,           0, 0,  P_86, 0)
 res(ENDM,        endm,        4, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
-res(ENDP,        endp,        4, RWT_DIRECTIVE, DF_LABEL,             0, 0,  P_86, 0)
+res(ENDP,        endp,        4, RWT_DIRECTIVE, DF_LABEL|DF_NOSTRUC,  0, 0,  P_86, 0)
 res(ENDS,        ends,        4, RWT_DIRECTIVE, DF_LABEL,             0, 0,  P_86, 0)
 res(EQU,         equ,         3, RWT_DIRECTIVE, DF_STRPARM | DF_LABEL,0, 0,  P_86, 0)
 res(EVEN,        even,        4, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
@@ -488,17 +494,17 @@ res(EXTERNDEF,   externdef,   9, RWT_DIRECTIVE, 0,                    0, 0,  P_8
 res(EXTRN,       extrn,       5, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
 res(GROUP,       group,       5, RWT_DIRECTIVE, DF_LABEL,             0, 0,  P_86, 0)
 #if INCLUDEBIN
-res(INCBIN,      incbin,      6, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
+res(INCBIN,      incbin,      6, RWT_DIRECTIVE, DF_NOSTRUC,           0, 0,  P_86, 0)
 #endif
 res(INCLUDELIB,  includelib, 10, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
-res(INVOKE,      invoke,      6, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
-res(LABEL,       label,       5, RWT_DIRECTIVE, DF_LABEL,             0, 0,  P_86, 0)
+res(INVOKE,      invoke,      6, RWT_DIRECTIVE, DF_NOSTRUC,           0, 0,  P_86, 0)
+res(LABEL,       label,       5, RWT_DIRECTIVE, DF_LABEL|DF_NOSTRUC,  0, 0,  P_86, 0)
 res(LOCAL,       local,       5, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
 res(NAME,        name,        4, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
 res(OPTION,      option,      6, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
 res(ORG,         org,         3, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
 res(POPCONTEXT,  popcontext, 10, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
-res(PROC,        proc,        4, RWT_DIRECTIVE, DF_LABEL,             0, 0,  P_86, 0)
+res(PROC,        proc,        4, RWT_DIRECTIVE, DF_LABEL|DF_NOSTRUC,  0, 0,  P_86, 0)
 res(PROTO,       proto,       5, RWT_DIRECTIVE, DF_LABEL,             0, 0,  P_86, 0)
 res(PUBLIC,      public,      6, RWT_DIRECTIVE, 0,                    0, 0,  P_86, 0)
 res(PURGE,       purge,       5, RWT_DIRECTIVE, DF_NOEXPAND,          0, 0,  P_86, 0)

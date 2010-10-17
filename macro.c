@@ -249,7 +249,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
     bool                locals_done;
     char                buffer[ MAX_LINE_LEN ];
 
-    DebugMsg(("StoreMacro(%s, i=%u, store_data=%u) enter\n", macro->sym.name, i, store_data ));
+    DebugMsg1(("StoreMacro(%s, i=%u, store_data=%u) enter\n", macro->sym.name, i, store_data ));
     info = macro->e.macroinfo;
 
     if( store_data ) {
@@ -340,7 +340,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                     break;
                 }
             }
-            DebugMsg(("StoreMacro(%s): param=>%s< found\n", macro->sym.name, paranode->label));
+            DebugMsg1(("StoreMacro(%s): param=>%s< found\n", macro->sym.name, paranode->label));
             if( i < Token_Count && AsmBuffer[i]->token != T_COMMA ) {
                 AsmError( EXPECTING_COMMA );
                 break; // return( ERROR );
@@ -349,7 +349,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
             i++;
 
         } /* end for() */
-        DebugMsg(("StoreMacro(%s): macro parameters done\n", macro->sym.name));
+        DebugMsg1(("StoreMacro(%s): macro parameters done\n", macro->sym.name));
     }
 
     locals_done = FALSE;
@@ -400,8 +400,8 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                 /* make sure the label is zero-terminated */
                 *ptr++ = NULLC;
                 while ( isspace(*ptr) ) ptr++;
-                if (*ptr) {
-                    AsmError( SYNTAX_ERROR );
+                if ( *ptr ) {
+                    AsmErr( SYNTAX_ERROR_EX, ptr );
                 }
             }
         } else if( locals_done == FALSE && lineis( string, "local", 5 ) ) {
@@ -430,7 +430,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                     localcurr->next = localnode;
                 }
                 info->localcnt++;
-                DebugMsg(("%lu. StoreMacro(%s, %u): local=>%s< added\n", LineNumber, macro->sym.name, nesting_depth, localnode->label ));
+                DebugMsg1(("StoreMacro(%s, %u): local=>%s< added\n", macro->sym.name, nesting_depth, localnode->label ));
                 ptr = ptr2;
                 while( isspace( *ptr ) ) ptr++;
                 if (*ptr == ',') ptr++;
@@ -451,7 +451,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
             if (nesting_depth == 0)
                 macro->sym.runsync = TRUE;
         } else if( lineis( string, "endm", 4 ) ) {
-            DebugMsg(("%lu. StoreMacro(%s, %u): endm found\n", LineNumber, macro->sym.name, nesting_depth ));
+            DebugMsg1(("StoreMacro(%s, %u): endm found\n", macro->sym.name, nesting_depth ));
             if( nesting_depth ) {
                 nesting_depth--;
             } else {
@@ -545,13 +545,13 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                         *dst = *src;
                 }
                 *dst = NULLC;
-                DebugMsg(("%lu. StoreMacro(%s, %u): cnt=%u, line >%s<\n", LineNumber, macro->sym.name, nesting_depth, phs, dbgbuff ));
+                DebugMsg1(("StoreMacro(%s, %u): cnt=%u, line >%s<\n", macro->sym.name, nesting_depth, phs, dbgbuff ));
             }
 #endif
         }
     } /* end for */
-    macro->sym.defined = TRUE;
-    DebugMsg(("StoreMacro(%s): exit, no error, isfunc=%u\n", macro->sym.name, macro->sym.isfunc));
+    macro->sym.isdefined = TRUE;
+    DebugMsg1(("StoreMacro(%s): exit, no error, isfunc=%u\n", macro->sym.name, macro->sym.isfunc));
     return( NOT_ERROR );
 }
 
@@ -561,13 +561,16 @@ dir_node *CreateMacro( const char *name )
 /***************************************/
 {
     dir_node *macro;
-    if (macro = (dir_node *)SymCreate( name, *name != NULLC )) {
+    if ( macro = (dir_node *)SymCreate( name, *name != NULLC )) {
         macro->sym.state = SYM_MACRO;
         macro->e.macroinfo = AsmAlloc( sizeof( macro_info ) );
         macro->e.macroinfo->parmcnt  = 0;
         macro->e.macroinfo->localcnt = 0;
         macro->e.macroinfo->parmlist = NULL;
         macro->e.macroinfo->data     = NULL;
+#ifdef DEBUG_OUT
+        macro->e.macroinfo->count = 0;
+#endif
         macro->e.macroinfo->srcfile  = 0;
         macro->sym.vararg = FALSE;
         macro->sym.isfunc = FALSE;
@@ -584,6 +587,7 @@ void ReleaseMacroData( dir_node *macro )
     asmlines        *datacurr;
     asmlines        *datanext;
 
+    DebugMsg(("ReleaseMacroData(%s) enter\n", macro->sym.name));
     /* free the parm list */
     for( i = 0 ; i < macro->e.macroinfo->parmcnt; i++ ) {
         /*
@@ -626,7 +630,7 @@ ret_code MacroDef( int i )
     bool                store_data;
     dir_node            *macro;
 
-    DebugMsg(("MacroDef(%u) enter, token=%s\n", i, AsmBuffer[i]->string_ptr ));
+    DebugMsg1(("MacroDef(%s) enter, i=%u\n", AsmBuffer[i]->string_ptr, i ));
 
     if ( AsmBuffer[i]->token != T_ID ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -639,6 +643,14 @@ ret_code MacroDef( int i )
     if( macro == NULL ) {
         macro = CreateMacro( name );
         macro->e.macroinfo->srcfile = get_curr_srcfile();
+#if 0 /* a macro MUST be defined before it's used! */
+    } else if( macro->sym.state == SYM_UNDEFINED ) {
+        dir_remove_table( &Tables[TAB_UNDEF], macro );
+        macro->sym.state = SYM_MACRO;
+        macro->e.macroinfo = AsmAlloc( sizeof( macro_info ) );
+        memset( macro->e.macroinfo, 0, sizeof ( macro_info ) );
+        macro->e.macroinfo->srcfile = get_curr_srcfile();
+#endif
     } else if( macro->sym.state != SYM_MACRO ) {
         AsmErr( SYMBOL_REDEFINITION, name );
         return( ERROR );
@@ -646,7 +658,7 @@ ret_code MacroDef( int i )
 
     if (( Parse_Pass == PASS_1 ) || (macro->sym.variable) ) {
         /* is the macro redefined? */
-        if ( macro->e.macroinfo->data != NULL) {
+        if ( macro->e.macroinfo->data != NULL ) {
             DebugMsg(("MacroDef(%s): macro already defined\n", name));
             ReleaseMacroData( macro );
             macro->sym.variable = TRUE;
@@ -740,8 +752,8 @@ ret_code MacroInit( int pass )
 
         /* add @Environ() macro func */
 
-        macro = CreateMacro("@Environ" );
-        macro->sym.defined = TRUE;
+        macro = CreateMacro( "@Environ" );
+        macro->sym.isdefined = TRUE;
         macro->sym.predefined = TRUE;
         macro->sym.func_ptr = EnvironFunc;
         macro->sym.isfunc = TRUE;

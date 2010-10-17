@@ -25,8 +25,8 @@
 *  ========================================================================
 *
 * Description:  Interface to the trmem memory allocation tracker and
-*               validator.
-*
+*               validator. This isn't used normally and will work for
+*               Open Watcom only.
 ****************************************************************************/
 
 

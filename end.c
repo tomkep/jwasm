@@ -32,11 +32,11 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "parser.h"
 #include "symbols.h"
+#include "parser.h"
 #include "directiv.h"
 #include "segment.h"
-#include "queues.h"
+#include "extern.h"
 #include "fixup.h"
 #include "input.h"
 #include "tokenize.h"
@@ -49,55 +49,61 @@
 #include "myassert.h"
 
 /* prototypes */
-extern ret_code         process_address( struct code_info *, expr_list * );
+extern ret_code      process_address( struct code_info *, expr_list * );
 
-extern asm_sym          *start_label;   /* start address (COFF, ELF, BIN) */
+struct code_line {
+    const char *src;
+    const short r1;
+    const short r2;
+};
 
 /* startup code for 8086 */
 
-static const char * const StartupDosNear0[] = {
-        "mov\tdx,DGROUP",
-        "mov\tds,dx",
-        "mov\tbx,ss",
-        "sub\tbx,dx",
-        "shl\tbx,1",
-        "shl\tbx,1",
-        "shl\tbx,1",
-        "shl\tbx,1",
-        "cli",
-        "mov\tss,dx",
-        "add\tsp,bx",
-        "sti"
+static const struct code_line StartupDosNear0[] = {
+    { "mov %r,DGROUP", T_DX, T_NULL },
+    { "mov %r,%r", T_DS, T_DX       },
+    { "mov %r,%r", T_BX, T_SS       },
+    { "sub %r,%r", T_BX, T_DX       },
+    { "shl %r,1",  T_BX, T_NULL     },
+    { "shl %r,1",  T_BX, T_NULL     },
+    { "shl %r,1",  T_BX, T_NULL     },
+    { "shl %r,1",  T_BX, T_NULL     },
+    { "cli",       T_NULL, T_NULL   },
+    { "mov %r,%r", T_SS, T_DX       },
+    { "add %r,%r", T_SP, T_BX       },
+    { "sti",       T_NULL, T_NULL   },
 };
 
 /* startup code for 80186+ */
 
-static const char * const StartupDosNear1[] = {
-        "mov\tax,DGROUP",
-        "mov\tds,ax",
-        "mov\tbx,ss",
-        "sub\tbx,ax",
-        "shl\tbx,4",
-        "mov\tss,ax",
-        "add\tsp,bx"
+static const struct code_line StartupDosNear1[] = {
+    { "mov %r,DGROUP", T_AX, T_NULL },
+    { "mov %r,%r",     T_DS, T_AX   },
+    { "mov %r,%r",     T_BX, T_SS   },
+    { "sub %r,%r",     T_BX, T_AX   },
+    { "shl %r,4",      T_BX, T_NULL },
+    { "mov %r,%r",     T_SS, T_AX   },
+    { "add %r,%r",     T_SP, T_BX   },
 };
 
-static const char * const StartupDosFar[] = {
-        "mov\tdx,DGROUP",
-        "mov\tds,dx"
-};
-static const char * const ExitOS2[] = { /* mov al, retval  followed by: */
-        "mov\tah,0",
-        "push\t01h",
-        "push\tax",
-        "call\tDOSEXIT"
-};
-static const char * const ExitDos[] = {
-        "mov\tah,4ch",
-        "int\t21h"
+static const struct code_line StartupDosFar[] = {
+    { "mov %r,DGROUP", T_DX, T_NULL },
+    { "mov %r,%r"    , T_DS, T_DX   },
 };
 
-static char *StartAddr = "@Startup";
+static const struct code_line ExitOS2[] = { /* mov al, retval  followed by: */
+    { "mov %r,0",     T_AH,  T_NULL  },
+    { "push 1",       T_NULL,T_NULL  },
+    { "push %r",      T_AX,  T_NULL  },
+    { "call DOSEXIT", T_NULL,T_NULL  },
+};
+
+static const struct code_line ExitDos[] = {
+    { "mov %r,4ch",  T_AH,  T_NULL  },
+    { "int 21h",     T_NULL,T_NULL  },
+};
+
+static const char StartAddr[] = {"@Startup"};
 
 /* .STARTUP and .EXIT directives */
 
@@ -106,10 +112,15 @@ ret_code StartupExitDirective( int i )
 {
     int         count;
     int         j;
-    const char  * const *p;
-    char        *buffer = StringBufferEnd;
+    const struct code_line *p;
     expr_list   opndx;
 
+#if FASTPASS
+    /* make sure the directive is stored */
+    if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
+        SaveState();
+    }
+#endif
     if ( ModuleInfo.list )
         LstWriteSrcLine();
 
@@ -127,11 +138,9 @@ ret_code StartupExitDirective( int i )
     switch( AsmBuffer[i]->value ) {
     case T_DOT_STARTUP:
         count = 0;
-        if (ModuleInfo.model == MOD_TINY)
+        if ( ModuleInfo.model == MOD_TINY )
             AddLineQueue( "org 100h" );
-        strcpy( buffer, StartAddr );
-        strcat( buffer, "::" );
-        AddLineQueue( buffer );
+        AddLineQueueX( "%s::", StartAddr );
         if( ModuleInfo.ostype == OPSYS_DOS ) {
             if (ModuleInfo.model == MOD_TINY)
                 ;
@@ -139,17 +148,17 @@ ret_code StartupExitDirective( int i )
                 if( ModuleInfo.distance == STACK_NEAR ) {
                     if ( (ModuleInfo.cpu & 0x7F) <= 1) {
                         p = StartupDosNear0;
-                        count = sizeof(StartupDosNear0) / sizeof(char *);
+                        count = sizeof(StartupDosNear0) / sizeof(StartupDosNear0[0]);
                     } else {
                         p = StartupDosNear1;
-                        count = sizeof(StartupDosNear1) / sizeof(char *);
+                        count = sizeof(StartupDosNear1) / sizeof(StartupDosNear1[0]);
                     }
                 } else {
                     p = StartupDosFar;
-                    count = sizeof(StartupDosFar) / sizeof(char *);
+                    count = sizeof(StartupDosFar) / sizeof(StartupDosFar[0]);
                 }
                 for ( ; count ; count--, p++ )
-                    AddLineQueue( (char *)*p );
+                    AddLineQueueX( (char *)p->src, p->r1, p->r2 );
             }
         }
         ModuleInfo.StartupDirectiveFound = TRUE;
@@ -157,33 +166,31 @@ ret_code StartupExitDirective( int i )
     case T_DOT_EXIT:
         if( ModuleInfo.ostype == OPSYS_DOS ) {
             p = ExitDos;
-            count = sizeof( ExitDos) / sizeof( char * );
+            count = sizeof( ExitDos ) / sizeof( ExitDos[0] );
         } else {
             p = ExitOS2;
-            count = sizeof( ExitOS2) / sizeof( char * );
+            count = sizeof( ExitOS2 ) / sizeof( ExitOS2[0] );
         }
         j = i;
         i++;
         if ( AsmBuffer[i]->token != T_FINAL ) {
             if( ModuleInfo.ostype == OPSYS_OS2 ) {
-                sprintf( buffer, "mov ax,%s", AsmBuffer[j]->pos + 5);
+                AddLineQueueX( "mov %r,%s", T_AX, AsmBuffer[j]->pos + 5 );
             } else {
                 if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
                     return( ERROR );
                 if ( opndx.kind == EXPR_CONST && opndx.value < 0x100 && AsmBuffer[i]->token == T_FINAL ) {
-                    sprintf( buffer, "mov ax,4C%02Xh", opndx.value );
+                    AddLineQueueX( "mov %r,4C00h + %u", T_AX, opndx.value );
                 } else {
-                    sprintf( buffer, "mov al,%s", AsmBuffer[j]->pos + 5);
-                    AddLineQueue( buffer );
-                    strcpy( buffer, "mov ah,4Ch" );
+                    AddLineQueueX( "mov %r,%s", T_AL, AsmBuffer[j]->pos + 5 );
+                    AddLineQueueX( "mov %r,4Ch", T_AH );
                 }
             }
-            AddLineQueue( buffer );
             p++;
             count--;
         }
         for( ; count ; count--, p++ ) {
-            AddLineQueue( (char *)*p );
+            AddLineQueueX( (char *)p->src, p->r1, p->r2 );
         }
         break;
     }
@@ -199,7 +206,7 @@ ret_code EndDirective( int i, struct code_info *CodeInfo )
 /********************************************************/
 {
     expr_list           opndx;
-    struct genfixup     *fix;
+    struct fixup        *fix;
     asm_sym             *sym;
 
     DebugMsg(("EndDirective enter\n"));
@@ -214,6 +221,7 @@ ret_code EndDirective( int i, struct code_info *CodeInfo )
             CurrStruct = CurrStruct->next;
         AsmErr( UNMATCHED_BLOCK_NESTING, CurrStruct->sym.name );
     }
+
     /* close open segments */
     SegmentModuleExit();
 
@@ -225,7 +233,7 @@ ret_code EndDirective( int i, struct code_info *CodeInfo )
             AsmWarn( 2, START_ADDRESS_IGNORED );
         }
         AsmBuffer[i]->token = T_ID;
-        AsmBuffer[i]->string_ptr = StartAddr;
+        AsmBuffer[i]->string_ptr = (char *)StartAddr;
         AsmBuffer[i+1]->token = T_FINAL;
         AsmBuffer[i+1]->string_ptr = "";
         Token_Count = i+1;
@@ -241,42 +249,42 @@ ret_code EndDirective( int i, struct code_info *CodeInfo )
         return( ERROR );
     }
 
-    if( opndx.kind == EXPR_EMPTY )
+    if( opndx.kind == EXPR_EMPTY ) {
         ;
-    else if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE ) {
-        process_address( CodeInfo, &opndx );
-        fix = CodeInfo->InsFixup[0];
-        if ( fix )
-            sym = fix->sym;
-        if ( fix == NULL || sym == NULL ) {
-            DebugMsg(("EndDirective: start address invalid, fix=%X, sym=%X\n", fix, sym ));
-            AsmError( INVALID_START_ADDRESS );
-            return( ERROR );
-        } else if ( sym->state == SYM_INTERNAL || sym->state == SYM_EXTERNAL ) {
-            if ( sym->mem_type == MT_NEAR || sym->mem_type == MT_FAR || sym->mem_type == MT_PROC )
-                ;
-            else {
-                DebugMsg(("EndDirective: start address not a code label, mem_type=%Xh\n", sym->mem_type ));
-                AsmError( MUST_BE_ASSOCIATED_WITH_CODE );
-                return( ERROR );
+    } else if ( opndx.sym && ( opndx.sym->state == SYM_UNDEFINED ) ) {
+        AsmErr( SYMBOL_NOT_DEFINED, opndx.sym->name );
+        return( ERROR );
+    } else {
+        char error = TRUE;
+        if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE ) {
+            CodeInfo->pcurr = &InstrTable[IndexFromToken( CodeInfo->token )];
+            process_address( CodeInfo, &opndx );
+            fix = CodeInfo->InsFixup[0];
+            if ( fix )
+                sym = fix->sym;
+            if ( fix == NULL || sym == NULL ) {
+                DebugMsg(("EndDirective: start address invalid, fix=%p, sym=%p\n", fix, sym ));
+            } else if ( sym->state == SYM_INTERNAL || sym->state == SYM_EXTERNAL ) {
+                if ( opndx.mem_type == MT_NEAR || opndx.mem_type == MT_FAR || opndx.mem_type == MT_PROC )
+                    error = FALSE;
+                else {
+                    DebugMsg(("EndDirective: start address not a code label, mem_type=%Xh\n", opndx.mem_type ));
+                }
+            } else {
+                DebugMsg(("EndDirective: start address invalid, sym->state=%X\n", sym->state ));
             }
         } else {
-            DebugMsg(("EndDirective: start address invalid, sym->state=%X\n", sym->state ));
-            if ( sym->state == SYM_UNDEFINED )
-                AsmErr( SYMBOL_NOT_DEFINED, sym->name );
-            else
-                AsmError( INVALID_START_ADDRESS );
+            DebugMsg(("EndDirective: start address invalid, opndx.kind=%X\n", opndx.kind ));
+        }
+        if ( error ) {
+            AsmError( CONSTANT_OR_RELOCATABLE_LABEL_EXPECTED );
             return( ERROR );
         }
-    } else {
-        DebugMsg(("EndDirective: start address invalid, opndx.kind=%X\n", opndx.kind ));
-        AsmError( INVALID_START_ADDRESS );
-        return( ERROR );
     }
 
     if ( Options.output_format == OFORMAT_OMF ) {
-        if ( write_to_file )
-            omf_create_modend( CodeInfo->InsFixup[0], opndx.value );
+        ModuleInfo.start_fixup = CodeInfo->InsFixup[0];
+        ModuleInfo.start_displ = opndx.value;
     } else {
         /* Masm silently ignores start for -coff if an offset was given */
         //if ( opndx.kind == EXPR_EMPTY || opndx.value )
@@ -287,7 +295,8 @@ ret_code EndDirective( int i, struct code_info *CodeInfo )
             sym->public = TRUE;
             AddPublicData( sym );
         }
-        start_label = sym;
+        DebugMsg(("EndDirective: start label=%p\n", sym ));
+        ModuleInfo.start_label = sym;
     }
     return( NOT_ERROR );
 }

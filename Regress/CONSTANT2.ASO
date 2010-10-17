@@ -1,0 +1,15 @@
+
+;--- test "invalid" constant values
+;--- However, Masm accepts those values!
+
+	.386
+	.model flat
+
+	.code
+
+	mov ax, 12345h
+	and ax,not 1C000h
+	and ax, 0FFFEFFFFh
+	mov ax, -65536       ;this is hex 0FFFF0000h, acceptable
+
+	end

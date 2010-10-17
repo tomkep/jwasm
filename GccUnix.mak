@@ -37,16 +37,15 @@ proj_obj = $(OUTD)/main.o     $(OUTD)/assemble.o $(OUTD)/assume.o  \
            $(OUTD)/parser.o   $(OUTD)/tokenize.o $(OUTD)/input.o   \
            $(OUTD)/expans.o   $(OUTD)/symbols.o  $(OUTD)/labels.o  \
            $(OUTD)/fixup.o    $(OUTD)/codegen.o  $(OUTD)/data.o    \
-           $(OUTD)/insthash.o $(OUTD)/branch.o   $(OUTD)/queues.o  \
+           $(OUTD)/insthash.o $(OUTD)/branch.o   $(OUTD)/queue.o   \
            $(OUTD)/hll.o      $(OUTD)/proc.o     $(OUTD)/option.o  \
-           $(OUTD)/coff.o     $(OUTD)/elf.o      $(OUTD)/omf.o     \
-           $(OUTD)/bin.o      $(OUTD)/queue.o    $(OUTD)/carve.o   \
-           $(OUTD)/omfgenms.o $(OUTD)/omfio.o    $(OUTD)/omfrec.o  \
-           $(OUTD)/omffixup.o $(OUTD)/listing.o  $(OUTD)/fatal.o   \
+           $(OUTD)/omf.o      $(OUTD)/omfint.o   $(OUTD)/omffixup.o\
+           $(OUTD)/coff.o     $(OUTD)/elf.o      $(OUTD)/bin.o     \
+           $(OUTD)/listing.o  $(OUTD)/fatal.o    \
            $(OUTD)/context.o  $(OUTD)/extern.o   $(OUTD)/simsegm.o \
            $(OUTD)/apiemu.o   $(OUTD)/dbgcv.o    $(OUTD)/end.o     \
            $(OUTD)/backptch.o $(OUTD)/msgtext.o  $(OUTD)/tbyte.o   \
-           $(OUTD)/cpumodel.obj
+           $(OUTD)/cpumodel.o $(OUTD)/safeseh.o
 ######
 
 #.c.o:

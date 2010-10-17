@@ -18,10 +18,9 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "parser.h"
 #include "symbols.h"
+#include "parser.h"
 #include "directiv.h"
-#include "queues.h"
 #include "equate.h"
 #include "labels.h"
 #include "input.h"
@@ -37,11 +36,9 @@
 #define LABELSGLOBAL 0 /* make the generated labels global */
 
 #if LABELSGLOBAL
-#define MakeLabel( buf, val ) sprintf( buf, "%s::", val )
-#define MakeLabel1( buf, val ) sprintf( buf, "%s::\n", val )
+#define LABELQUAL "::"
 #else
-#define MakeLabel( buf, val ) sprintf( buf, "%s:", val )
-#define MakeLabel1( buf, val ) sprintf( buf, "%s:\n", val )
+#define LABELQUAL ":"
 #endif
 
 #define LABELFIRST 0
@@ -369,7 +366,7 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
         DebugMsg(("GetSimpleExpression: EvalOperand 2 ok, type=%X, i=%u\n", op2.type, *i));
         if ( ( op2.kind != EXPR_CONST ) && ( op2.kind != EXPR_ADDR ) && ( op2.kind != EXPR_REG ) ) {
             DebugMsg(("GetSimpleExpression: syntax error, op2.kind=%u\n", op2.kind ));
-            AsmError( SYNTAX_ERROR );
+            AsmError( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE );
             return( ERROR );
         }
     }
@@ -413,73 +410,55 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
         else
             issigned = FALSE;
 
+        *p++ = 'j';
         switch ( op ) {
         case COP_EQ:
-            if ( is_true )
-                strcpy( p, "jz  " );
-            else
-                strcpy( p, "jnz " );
+            if ( is_true ) { *p++ = 'z'; *p++ = ' '; }
+            else           { *p++ = 'n'; *p++ = 'z'; }
             break;
         case COP_NE:
-            if ( is_true )
-                strcpy( p, "jnz " );
-            else
-                strcpy( p, "jz  " );
+            if ( is_true ) { *p++ = 'n'; *p++ = 'z'; }
+            else           { *p++ = 'z'; *p++ = ' '; }
             break;
         case COP_GT:
             if ( issigned == TRUE ) {
-                if ( is_true )
-                    strcpy( p, "jg  " );
-                else
-                    strcpy( p, "jle " );
+                if ( is_true ) { *p++ = 'g'; *p++ = ' '; }
+                else           { *p++ = 'l'; *p++ = 'e'; }
             } else {
-                if ( is_true )
-                    strcpy( p, "ja  " );
-                else
-                    strcpy( p, "jbe " );
+                if ( is_true ) { *p++ = 'a'; *p++ = ' '; }
+                else           { *p++ = 'b'; *p++ = 'e'; }
             }
             break;
         case COP_LT:
             if ( issigned == TRUE ) {
-                if ( is_true )
-                    strcpy( p, "jl  " );
-                else
-                    strcpy( p, "jge " );
+                if ( is_true ) { *p++ = 'l'; *p++ = ' '; }
+                else           { *p++ = 'g'; *p++ = 'e'; }
             } else {
-                if ( is_true )
-                    strcpy( p, "jb  " );
-                else
-                    strcpy( p, "jae " );
+                if ( is_true ) { *p++ = 'b'; *p++ = ' '; }
+                else           { *p++ = 'a'; *p++ = 'e'; }
             }
             break;
         case COP_GE:
             if ( issigned == TRUE ) {
-                if ( is_true )
-                    strcpy( p, "jge " );
-                else
-                    strcpy( p, "jl  " );
+                if ( is_true ) { *p++ = 'g'; *p++ = 'e'; }
+                else           { *p++ = 'l'; *p++ = ' '; }
             } else {
-                if ( is_true )
-                    strcpy( p, "jae " );
-                else
-                    strcpy( p, "jb  " );
+                if ( is_true ) { *p++ = 'a'; *p++ = 'e'; }
+                else           { *p++ = 'b'; *p++ = ' '; }
             }
             break;
         case COP_LE:
             if ( issigned == TRUE ) {
-                if ( is_true )
-                    strcpy( p, "jle " );
-                else
-                    strcpy( p, "jg  " );
+                if ( is_true ) { *p++ = 'l'; *p++ = 'e'; }
+                else           { *p++ = 'g'; *p++ = ' '; }
             } else {
-                if ( is_true )
-                    strcpy( p, "jbe " );
-                else
-                    strcpy( p, "ja  " );
+                if ( is_true ) { *p++ = 'b'; *p++ = 'e'; }
+                else           { *p++ = 'a'; *p++ = ' '; }
             }
             break;
         }
-        strcat( p, label );
+        *p++ = ' ';
+        strcpy( p, label );
 
     } else if ( op == COP_ANDB ) {
         char * p;
@@ -639,8 +618,7 @@ static ret_code GetAndExpression( hll_list * hll, int *i, int ilabel, bool is_tr
     };
 
     if ( truelabel ) {
-        MakeLabel( ptr+strlen(ptr), truelabel );
-        strcpy( ptr+strlen( ptr ), "\n" );
+        sprintf( ptr+strlen(ptr), "%s" LABELQUAL "\n", truelabel );
         AsmFree( truelabel );
         *lastjmp = NULL;
     }
@@ -674,7 +652,7 @@ static ret_code GetExpression( hll_list * hll, int *i, int ilabel, bool is_true,
         if ( op != COP_OR ) {
             *i = cur_pos;
             if ( truelabel ) {
-                MakeLabel1( ptr+strlen( ptr ), truelabel );
+                sprintf( ptr+strlen( ptr ), "%s" LABELQUAL "\n", truelabel );
                 AsmFree( truelabel );
             }
             break;
@@ -708,13 +686,13 @@ static ret_code GetExpression( hll_list * hll, int *i, int ilabel, bool is_true,
             olabel = GetLabel( hll, ilabel );
             if ( hll->cmd == HLL_REPEAT ) {
                 ReplaceLabel( buffer, olabel, nlabel );
-                MakeLabel1( ptr+strlen(ptr), nlabel );
+                sprintf( ptr+strlen(ptr), "%s" LABELQUAL "\n", nlabel );
             } else {
 #if 0
-                MakeLabel1( ptr+strlen(ptr), olabel );
+                sprintf( ptr+strlen(ptr), "%s" LABELQUAL "\n", olabel );
                 SetLabel(hll, ilabel, nlabel);
 #else
-                MakeLabel1( ptr+strlen(ptr), olabel );
+                sprintf( ptr+strlen(ptr), "%s" LABELQUAL "\n", olabel );
                 ReplaceLabel( buffer, olabel, nlabel );
 #endif
             }
@@ -850,6 +828,16 @@ static ret_code HllCheckTestLines( hll_list * hll )
     return( NOT_ERROR );
 }
 
+static void FreeHllItem( struct hll_list *hll )
+/*********************************************/
+{
+    AsmFree( hll->symfirst );
+    AsmFree( hll->symtest );
+    AsmFree( hll->symexit );
+    AsmFree( hll->condlines );
+    AsmFree( hll );
+}
+
 /* Start a .IF, .WHILE, .REPEAT item */
 
 ret_code HllStartDef( int i )
@@ -857,9 +845,8 @@ ret_code HllStartDef( int i )
 {
     struct hll_list      *hll;
     int                  cmd = AsmBuffer[i]->value;
-    char                 buffer[MAX_ID_LEN+1+64];
 
-    DebugMsg(("HllStartDef(%u [=%s]) enter\n", i, AsmBuffer[i]->string_ptr ));
+    DebugMsg1(("HllStartDef(%u [=%s]) enter\n", i, AsmBuffer[i]->string_ptr ));
 
 #if FASTPASS
     /* make sure the directive is stored */
@@ -868,24 +855,8 @@ ret_code HllStartDef( int i )
     }
 #endif
 
-    switch (cmd) {
-    case T_DOT_REPEAT:
-        if ( AsmBuffer[i+1]->token != T_FINAL ) {
-            DebugMsg(("HllStartDef: unexpected tokens behind .REPEAT\n" ));
-            AsmError( SYNTAX_ERROR );
-            return( ERROR );
-        }
-        break;
-    case T_DOT_IF:
-    case T_DOT_WHILE:
-#if 0 /* Masm allows a missing expression! */
-        if ( AsmBuffer[i+1]->token == T_FINAL ) {
-            AsmError( SYNTAX_ERROR );
-            return( ERROR );
-        }
-#endif
-        break;
-    }
+    i++; /* skip directive */
+
     hll = AsmAlloc( sizeof(hll_list) );
 
     hll->cmd = HLL_UNDEF;
@@ -928,11 +899,10 @@ ret_code HllStartDef( int i )
      */
     PushLineQueue();
 
-    switch (cmd) {
+    switch ( cmd ) {
     case T_DOT_IF:
         hll->cmd = HLL_IF;
         /* get the C-style expression, convert to ASM code lines */
-        i++;
         if ( ERROR == EvaluateHllExpression( hll, &i, LABELTEST, FALSE ) ) {
             return( ERROR );
         }
@@ -951,7 +921,6 @@ ret_code HllStartDef( int i )
         hll->symfirst = MakeAnonymousLabel();
         hll->symexit = MakeAnonymousLabel();
         if ( cmd == T_DOT_WHILE ) {
-            i++;
             hll->cmd = HLL_WHILE;
             if ( AsmBuffer[i]->token != T_FINAL ) {
                 if ( ERROR == EvaluateHllExpression( hll, &i, LABELFIRST, TRUE ) ) {
@@ -962,21 +931,19 @@ ret_code HllStartDef( int i )
             /* create a jump to second label */
             /* optimisation: if second label is just a jump, dont jump! */
             if ( hll->condlines && _memicmp(hll->condlines, "jmp", 3) ) {
-                sprintf( buffer, " jmp %s", hll->symtest );
-                AddLineQueue( buffer );
+                AddLineQueueX( " jmp %s", hll->symtest );
             } else {
                 AsmFree( hll->symtest );
                 hll->symtest = NULL;
             }
         } else {
-            i++;
             hll->cmd = HLL_REPEAT;
         }
-        MakeLabel( buffer, hll->symfirst );
-        AddLineQueue( buffer );
+        AddLineQueueX( "%s" LABELQUAL, hll->symfirst );
         break;
     }
     if ( AsmBuffer[i]->token != T_FINAL ) {
+        FreeHllItem( hll );
         DebugMsg(("HllStartDef: unexpected token %u [%s]\n", AsmBuffer[i]->token, AsmBuffer[i]->string_ptr ));
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
@@ -1002,9 +969,8 @@ ret_code HllEndDef( int i )
     //struct asm_sym      *sym;
     struct hll_list     *hll;
     int                 cmd = AsmBuffer[i]->value;
-    char                buffer[MAX_ID_LEN+1+64];
-    
-    DebugMsg(("HllEndDef(%s) enter\n", AsmBuffer[i]->string_ptr ));
+
+    DebugMsg1(("HllEndDef(%s) enter\n", AsmBuffer[i]->string_ptr ));
 
     if ( HllStack == NULL ) {
         DebugMsg(("HllEndDef: hll stack is empty\n"));
@@ -1027,13 +993,11 @@ ret_code HllEndDef( int i )
         }
         /* if a test label isn't created yet, create it */
         if ( hll->symtest ) {
-            MakeLabel( buffer, hll->symtest );
-            AddLineQueue( buffer );
+            AddLineQueueX( "%s" LABELQUAL, hll->symtest );
         }
         /* create the exit label if it exists */
         if ( hll->symexit ) {
-            MakeLabel( buffer, hll->symexit );
-            AddLineQueue( buffer );
+            AddLineQueueX( "%s" LABELQUAL, hll->symexit );
         }
         i++;
         break;
@@ -1045,14 +1009,12 @@ ret_code HllEndDef( int i )
         }
         /* create test label  */
         if ( hll->symtest ) {
-            MakeLabel( buffer, hll->symtest );
-            DebugMsg(("HllEndDef: created: %s\n", buffer));
-            AddLineQueue( buffer );
+            AddLineQueueX( "%s" LABELQUAL, hll->symtest );
+            DebugMsg(("HllEndDef: created: %s" LABELQUAL "\n", hll->symtest));
         }
         HllPushTestLines( hll );
 
-        MakeLabel( buffer, hll->symexit );
-        AddLineQueue( buffer );
+        AddLineQueueX( "%s" LABELQUAL, hll->symexit );
         i++;
         break;
     case T_DOT_UNTILCXZ:
@@ -1061,8 +1023,7 @@ ret_code HllEndDef( int i )
             AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
-        MakeLabel( buffer, hll->symtest );
-        AddLineQueue( buffer );
+        AddLineQueueX( "%s" LABELQUAL, hll->symtest );
 
         i++;
         /* read in optional (simple) expression */
@@ -1077,11 +1038,9 @@ ret_code HllEndDef( int i )
             /* write condition lines */
             HllPushTestLines( hll );
         } else {
-            sprintf( buffer, " loop %s", hll->symfirst );
-            AddLineQueue( buffer );
+            AddLineQueueX( " loop %s", hll->symfirst );
         }
-        MakeLabel( buffer, hll->symexit );
-        AddLineQueue( buffer );
+        AddLineQueueX( "%s" LABELQUAL, hll->symexit );
         break;
     case T_DOT_UNTIL:
         if ( hll->cmd != HLL_REPEAT ) {
@@ -1089,8 +1048,7 @@ ret_code HllEndDef( int i )
             AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
-        MakeLabel( buffer, hll->symtest );
-        AddLineQueue( buffer );
+        AddLineQueueX( "%s" LABELQUAL, hll->symtest );
 
         i++;
         /* read in (optional) expression */
@@ -1103,20 +1061,14 @@ ret_code HllEndDef( int i )
             HllPushTestLines( hll );
         }
 #if 0
-        sprintf( buffer, " jmp %s", hll->symfirst );
-        AddLineQueue( buffer );
+        AddLineQueueX( " jmp %s", hll->symfirst );
 #endif
 
-        MakeLabel( buffer, hll->symexit );
-        AddLineQueue( buffer );
+        AddLineQueueX( "%s" LABELQUAL, hll->symexit );
         break;
     }
 
-    AsmFree( hll->symfirst );
-    AsmFree( hll->symtest );
-    AsmFree( hll->symexit );
-    AsmFree( hll->condlines );
-    AsmFree( hll );
+    FreeHllItem( hll );
 
     if ( AsmBuffer[i]->token != T_FINAL ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -1144,9 +1096,8 @@ ret_code HllExitDef( int i )
     char                *savedlines;
     hll_cmd             savedcmd;
     int                 cmd = AsmBuffer[i]->value;
-    char                buffer[MAX_ID_LEN+1+64];
 
-    DebugMsg(("HllExitDef(%s) enter\n", AsmBuffer[i]->string_ptr ));
+    DebugMsg1(("HllExitDef(%s) enter\n", AsmBuffer[i]->string_ptr ));
 
     hll = HllStack;
 
@@ -1169,14 +1120,12 @@ ret_code HllExitDef( int i )
         /* the "symexit" label is only needed if an .ELSE branch exists.
          That's why it is created delayed.
          */
-        if ( hll->symexit == NULL)
+        if ( hll->symexit == NULL )
             hll->symexit = MakeAnonymousLabel();
 
-        sprintf( buffer," jmp %s", hll->symexit );
-        AddLineQueue( buffer );
+        AddLineQueueX( " jmp %s", hll->symexit );
         if ( hll->symtest ) {
-            MakeLabel( buffer, hll->symtest );
-            AddLineQueue( buffer );
+            AddLineQueueX( "%s" LABELQUAL, hll->symtest );
             AsmFree( hll->symtest );
             hll->symtest = NULL;
         }
@@ -1222,14 +1171,13 @@ ret_code HllExitDef( int i )
             }
         } else {
             if ( cmd == T_DOT_BREAK ) {
-                sprintf( buffer," jmp %s", hll->symexit );
+                AddLineQueueX( " jmp %s", hll->symexit );
             } else {
                 if ( hll->symtest )
-                    sprintf( buffer," jmp %s", hll->symtest );
+                    AddLineQueueX( " jmp %s", hll->symtest );
                 else
-                    sprintf( buffer," jmp %s", hll->symfirst );
+                    AddLineQueueX( " jmp %s", hll->symfirst );
             }
-            AddLineQueue( buffer );
         }
         break;
     }

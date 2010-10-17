@@ -1,6 +1,6 @@
-EXPR1.ASO(27) : Error A2283: Syntax error in expression
-EXPR1.ASO(28) : Error A2283: Syntax error in expression
-EXPR1.ASO(29) : Error A2283: Syntax error in expression
-EXPR1.ASO(30) : Error A2283: Syntax error in expression
-EXPR1.ASO(31) : Error A2069: Operator is expected
-EXPR1.ASO(32) : Error A2283: Syntax error in expression
+EXPR1.ASO(27) : Error A2270: Syntax error in expression
+EXPR1.ASO(28) : Error A2270: Syntax error in expression
+EXPR1.ASO(29) : Error A2270: Syntax error in expression
+EXPR1.ASO(30) : Error A2270: Syntax error in expression
+EXPR1.ASO(31) : Error A2065: Operator is expected
+EXPR1.ASO(32) : Error A2270: Syntax error in expression

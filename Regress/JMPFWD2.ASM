@@ -1,5 +1,8 @@
 
 ;--- test forward jumps and backpatching
+;--- this tests a pattern with 2 forward jumps, where
+;--- the destination of the second jump is BEHIND the
+;--- destination of the first jump.
 
 ;--- 16bit, 8086 cpu
 

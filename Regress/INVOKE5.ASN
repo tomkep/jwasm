@@ -1,5 +1,5 @@
 
-;--- invoke with function pointers
+;--- invoke with function pointers, COMPACT model
 
 	.model compact, stdcall
 	.386

@@ -56,17 +56,40 @@ WINBASEAPI void    WINAPI WideCharToMultiByte( uint_32, uint_32, uint_16 *, uint
 
 #include "errmsg.h"
 
+#ifdef __I86__
+
+#include <i86.h>
+#define FPTR( x ) MK_FP( FP_SEG( TX_MSG_USAGE ), x )
+#undef pick
+#define pick( code, string_eng, string_jap )  const char __based( __segname("_CODE") ) TX_ ## code[] = string_eng;
+#include "msgdef.h"
+#undef pick
+#define pick( code, string_eng, string_jap ) TX_ ## code,
+static const char __based ( __segname("_CODE") ) * const msgtexts[] = {
+#include "msgdef.h"
+};
+
+#else
+
+#define FPTR( x ) x
 #undef pick
 #define pick( code, string_eng, string_jap )  string_eng,
 static const char * const msgtexts[] = {
 #include "msgdef.h"
 };
+#endif
 
 #endif
 
 static const char usage[] = {
 #include "usage.h"
 };
+
+#ifdef DEBUG_OUT
+const char szCVCompiler[] = { "Microsoft (R) Macro Assembler Version 6.15.8803" };
+#else
+const char szCVCompiler[] = { "JWasm v" _JWASM_VERSION_ };
+#endif
 
 ret_code MsgInit( void )
 /**********************/
@@ -79,7 +102,7 @@ void MsgFini( void )
 {
 }
 
-char * MsgGet( int msgid, char *buffer )
+char *MsgGet( int msgid, char *buffer )
 /**************************************/
 {
 #if USERESOURCES
@@ -96,7 +119,7 @@ char * MsgGet( int msgid, char *buffer )
             for (i = msgid % 16;i;i--)
                 pId += *pId + 1;
             i = *pId++;
-            if (buffer == NULL)
+            if ( buffer == NULL )
                 buffer = StringBufferEnd;
             WideCharToMultiByte( CP_ACP, 0, pId, i, buffer, -1, 0, 0 );
             buffer[i] = NULLC;
@@ -105,11 +128,11 @@ char * MsgGet( int msgid, char *buffer )
     }
 #else
     if ( msgid < MSG_LAST ) {
-        if (buffer) {
-            strncpy( buffer, msgtexts[msgid], MAXMSGSIZE );
+        if ( buffer ) {
+            strncpy( buffer, FPTR( msgtexts[msgid] ), MAXMSGSIZE );
             return( buffer );
         } else
-            return( (char *)msgtexts[msgid] );
+            return( (char *) FPTR( msgtexts[msgid] ) );
     }
 #endif
     DebugMsg(("MsgGet(%u): Msg not found!!!\n", msgid));

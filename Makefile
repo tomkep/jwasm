@@ -6,6 +6,9 @@
 # - HXDEV (only needed if DOS=1 is set below to create JWASMD.EXE)
 #
 # to create a debug version, run "WMake debug=1".
+# to create a version with DJGPP support, run "WMake djgpp=1".
+# to create a version which supports Open Watcom's fastcall register
+# convention, run "WMake invwc=1".
 
 WIN=1
 DOS=1
@@ -24,6 +27,21 @@ name = JWasm
 DEBUG=0
 !endif
 
+!ifndef DJGPP
+DJGPP=0
+!endif
+
+!ifndef INVWC
+INVWC=0
+!endif
+
+# to track memory leaks, the Open Watcom TRMEM module can be included.
+# it's useful only if FASTMEM=0 is set, though, otherwise most allocs 
+# won't use the C heap.
+!ifndef TRMEM
+TRMEM=0
+!endif
+
 !ifndef OUTD
 !if $(DEBUG)
 OUTD=Debug
@@ -38,28 +56,26 @@ CCV=r
 
 inc_dirs  = -IH -I$(WATCOM)\H
 
-# to track memory leaks, the Open Watcom TRMEM module can be included.
-# it's useful only if FASTMEM=0 is set, though, otherwise most allocs 
-# won't use the C heap.
-!ifndef TRMEM
-TRMEM=0
-!endif
-
 LINK = $(WATCOM)\binnt\wlink.exe
 
 #cflags stuff
 #########
 extra_c_flags =
 !if $(DEBUG)
-!if $(TRMEM)
-extra_c_flags += -od -d2 -DDEBUG_OUT -DTRMEM -DFASTMEM=0
-!else
 extra_c_flags += -od -d2 -w3 -DDEBUG_OUT
-!endif
 !else
 extra_c_flags += -obmilrt -s -DNDEBUG
 !endif
 
+!if $(TRMEM)
+extra_c_flags += -DTRMEM -DFASTMEM=0
+!endif
+!if $(DJGPP)
+extra_c_flags += -DDJGPP_SUPPORT=1
+!endif
+!if $(INVWC)
+extra_c_flags += -DINVWC_SUPPORT=1
+!endif
 #########
 
 LOPT = op quiet
@@ -85,21 +101,18 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   &
            $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/labels.obj  &
            $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    &
-           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queues.obj  &
+           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   &
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/omf.obj     &
-           $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   &
-           $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
-           $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   &
+           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj&
+           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
+           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
-!if $(DEBUG)
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
 !endif
-!endif
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   &
            $(OUTD)/apiemu.obj   $(OUTD)/dbgcv.obj    $(OUTD)/end.obj     &
-           $(OUTD)/cpumodel.obj
+           $(OUTD)/cpumodel.obj $(OUTD)/safeseh.obj
 ######
 
 !if $(WIN)

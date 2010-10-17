@@ -101,15 +101,12 @@ pick( TXT_CHARACTERISTICS,
 
 /* error/warning message text constants */
 
-pick( LOCK_PREFIX_NOT_ALLOWED,
-      "LOCK prefix not allowed for this instruction" ,
-      "この命令に対して LOCK プレフィックスは使用できません" )
-pick( REP_PREFIX_NOT_ALLOWED,
-      "REP prefix not allowed for this instruction" ,
-      "この命令に対して REP プレフィックスは使用できません" )
-pick( INVALID_MEMORY_POINTER,
-      "Invalid memory pointer" ,
-      "無効なメモリポインタです" )
+pick( INSTRUCTION_PREFIX_NOT_ALLOWED,
+      "Instruction prefix not allowed" ,
+      "Instruction prefix not allowed" )
+pick( MULTIPLE_BASE_REGISTERS_NOT_ALLOWED,
+      "Multiple base registers not allowed" ,
+      "Multiple base registers not allowed" )
 pick( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE,
       "Instruction or register not accepted in current CPU mode" ,
       "Instruction or register not accepted in current CPU mode" )
@@ -119,26 +116,12 @@ pick( INVALID_ADDRESSING_MODE_WITH_CURRENT_CPU_SETTING,
 pick( CANNOT_USE_TRN_TO_TRM_WITH_CURRENT_CPU_SETTING,
       "Cannot use TR%u-TR%u with current CPU setting" ,
       "Cannot use TR%u-TR%u with current CPU setting" )
-#if 0
-pick( CANNOT_USE_386_ADDRESSING_MODE_WITH_CURRENT_CPU_SETTING,
-      "Cannot use 386 addressing mode with current CPU setting" ,
-      "現在のCPUの設定では386アドレスを使用できません" )
-pick( CANNOT_USE_386_SEGMENT_REGISTER_WITH_CURRENT_CPU_SETTING,
-      "Cannot use 386 segment register with current CPU setting" ,
-      "現在のCPUの設定では386セグメントレジスタは使用できません" )
-pick( CANNOT_USE_386_REGISTER_WITH_CURRENT_CPU_SETTING,
-      "Cannot use 386 register with current CPU setting" ,
-      "現在のCPUの設定では386レジスタは使用できません" )
-#endif
 pick( MUST_BE_INDEX_OR_BASE_REGISTER,
       "Must be index or base register" ,
       "Must be index or base register" )
 pick( MULTIPLE_INDEX_REGISTERS_NOT_ALLOWED,
       "Multiple index registers not allowed" ,
       "Multiple index registers not allowed" )
-pick( TOO_MANY_BASE_REGISTERS,
-      "Too many base registers" ,
-      "ベースレジスタが多すぎます" )
 pick( INVALID_INDEX_REGISTER,
       "Invalid index register" ,
       "インデックスレジタが無効です" )
@@ -160,12 +143,9 @@ pick( CANNOT_MIX_16_AND_32_BIT_REGISTERS,
 pick( EXPECTING_COMMA,
       "Expecting comma" ,
       "コンマが必要です" )
-pick( EXPECTING_NUMBER,
-      "Expecting number" ,
-      "数字が必要です" )
-pick( INVALID_LABEL_DEFINITION,
-      "Invalid label definition" ,
-      "無効なラベル定義です" )
+pick( ORG_NEEDS_A_CONSTANT_OR_LOCAL_OFFSET,
+      "ORG needs a constant or local offset" ,
+      "ORG needs a constant or local offset" )
 pick( POP_CS_IS_NOT_ALLOWED,
       "POP CS is not allowed" ,
       "POP CSはできません" )
@@ -184,9 +164,6 @@ pick( SYNTAX_ERROR,
 pick( PREFIX_MUST_BE_FOLLOWED_BY_AN_INSTRUCTION,
       "Prefix must be followed by an instruction" ,
       "プレフィックスの後には命令がなければなりません" )
-pick( INVALID_IMUL_FORMAT,
-      "Invalid IMUL format" ,
-      "IMUL命令の使用形式が不適切です" )
 pick( INVALID_SHLD_SHRD_FORMAT,
       "Invalid SHLD/SHRD format" ,
       "SHLD/SHRD命令の使用形式が不適切です" )
@@ -198,7 +175,7 @@ pick( SYNTAX_ERROR_UNEXPECTED_COLON,
       "構文エラー: 不適切なコロン(:)があります" )
 pick( OPERANDS_MUST_BE_THE_SAME_SIZE,
       "Operands must be the same size: %u - %u" ,
-      "オペランドは同じサイズでなければなりません" )
+      "Operands must be the same size: %u - %u" )
 pick( INVALID_INSTRUCTION_OPERANDS,
       "Invalid instruction operands" ,
       "無効な命令オペランドです" )
@@ -226,11 +203,6 @@ pick( SYMBOL_ALREADY_DEFINED,
 pick( OFFSET_MAGNITUDE_TOO_LARGE,
       "Offset magnitude too large for specified size" ,
       "オフセットはワード(2バイト)より小さくできません" )
-#if 0
-pick( CANNOT_OFFSET_AUTO,
-      "Can not take offset of stack symbol" ,
-      "スタックシンボルのオフセットを取ることはできません" )
-#endif
 pick( MAGNITUDE_OF_OFFSET_EXCEEDS_16BIT,
       "Magnitude of offset exceeds 16 bit" ,
       "オフセットは32Kより大きくできません" )
@@ -240,11 +212,6 @@ pick( OP2_TOO_BIG,
 pick( OP1_TOO_SMALL,
       "Operand 1 too small" ,
       "オペランド1が小さすぎます" )
-#if 0
-pick( INVALID_NUMBER_DIGIT,
-      "Invalid number digit" ,
-      "不適切な数値です" )
-#endif
 pick( LINE_TOO_LONG,
       "Line too long" ,
       "アセンブラコードが長すぎます" )
@@ -281,27 +248,9 @@ pick( MULTIPLE_OVERRIDES,
 pick( SEGMENT_GROUP_OR_SEGREG_EXPECTED,
       "Segment, group or segment register expected" ,
       "Segment, group or segment register expected" )
-#if 0
-pick( UNEXPECTED_END_OF_FILE,
-      "Unexpected end of file" ,
-      "途中でファイルが終わりました" )
-#endif
 pick( IDENTIFIER_TOO_LONG,
       "Identifier too long" ,
       "Identifier too long" )
-#if 0
-pick( INCONSISTENT_INTERNAL_TABLES,
-      "Inconsistent internal tables: '%.*s' not found" ,
-      "Inconsistent internal tables: '%.*s' not found" )
-#endif
-pick( CANNOT_OFFSET_GRP,
-      "Can not take offset of group" ,
-      "グループのオフセットは取れません" )
-#if 0
-pick( INVALID_CHARACTER,
-      "Invalid character found" ,
-      "使用できない文字があります" )
-#endif
 pick( INVALID_OPERAND_SIZE,
       "Invalid operand size for instruction" ,
       "命令に対してオペランドの大きさが不適切です" )
@@ -317,18 +266,12 @@ pick( FP_INITIALIZER_IGNORED,
 pick( ONLY_SHORT_AND_NEAR_DISPLACEMENT_IS_ALLOWED,
       "Only SHORT and NEAR displacement is allowed" ,
       "SHORT,NEARディスプレースメントのみ可能です" )
-pick( REPX_PREFIX_NOT_ALLOWED,
-      "REPZ, REPNZ, REPE or REPNE prefix not allowed for this instruction" ,
-      "REPZ, REPNZ, REPE or REPNE prefix not allowed for this instruction" )
 pick( SIZE_TOO_LARGE,
       "Initializer magnitude too large for specified size" ,
       "Initializer magnitude too large for specified size" )
 pick( SEGMENT_ATTRIBUTE_DEFINED_ALREADY,
       "Segment attribute is defined already: %s" ,
       "セグメントパラメータは既に定義されています" )
-//pick( SEGMENT_DEF_ERROR,
-//      "Syntax error in segment definition" ,
-//      "セグメント定義で構文エラーが起きています" )
 pick( SEGDEF_CHANGED,
       "Segment definition changed: %s, %s" ,
       "セグメント定義が変りました" )
@@ -344,31 +287,18 @@ pick( UNKNOWN_SEGMENT_ATTRIBUTE,
 pick( MUST_BE_IN_SEGMENT_BLOCK,
       "Must be in segment block" ,
       "現在オープンされているセグメントはありません" )
-#if 0
-pick( LNAME_USED_ALREADY,
-      "Lname is used already" ,
-      "Lnameは既に使用されています" )
-#endif
 pick( SEG_NOT_DEFINED,
       "Segment not defined: %s" ,
       "Segment not defined: %s" )
 pick( COLON_EXPECTED,
       "Colon is expected" ,
       "コロン(:)が必要です" )
-#if 0
-pick( TOKEN_EXPECTED_AFTER_COLON,
-      "A token is expected after colon" ,
-      "コロン(:)の後にはトークンが必要です" )
-#endif
 pick( INVALID_QUALIFIED_TYPE,
       "Invalid qualified type" ,
       "無効な修飾タイプです" )
 pick( QUALIFIED_TYPE_EXPECTED,
       "Qualified type is expected" ,
       "修飾タイプが必要です" )
-pick( EXT_DEF_DIFF,
-      "External definition different from previous one" ,
-      "外部定義が前の定義と異なります" )
 pick( CANNOT_OPEN_INCLUDE_FILE,
       "Cannot open include file '%s'" ,
       "インクルード・ファイルをオープンできません %s" )
@@ -378,15 +308,9 @@ pick( LIBRARY_NAME_MISSING,
 pick( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS,
       "Cannot access label through segment registers: %s" ,
       "Cannot access label through segment registers: %s" )
-pick( INVALID_START_ADDRESS,
-      "Invalid start address" ,
-      "無効なスタートアドレスです" )
 pick( EXPANDED_LINE_TOO_LONG,
       "Line too long after expansion: %40s" ,
       "エクスパンジョンの後の行が長すぎます" )
-pick( MUST_BE_ASSOCIATED_WITH_CODE,
-      "Must be associated with code" ,
-      "コードと関係していなければなりません" )
 pick( LANG_MUST_BE_SPECIFIED,
       "Language type must be specified" ,
       "言語タイプが定義されていなければなりません" )
@@ -405,9 +329,9 @@ pick( MODEL_DECLARED_ALREADY,
 pick( MODEL_IS_NOT_DECLARED,
       "Model is not declared" ,
       "モデルは宣言されています" )
-pick( BACKQUOTE_EXPECTED,
-      "Backquote expected" ,
-      "逆引用符(`)が必要です" )
+pick( BACKQUOTE_MISSING,
+      "Backquote missing: `%s" ,
+      "Backquote missing: `%s" )
 pick( COMMENT_DELIMITER_EXPECTED,
       "COMMENT delimiter expected" ,
       "COMMENT区切り文字が必要です" )
@@ -423,17 +347,9 @@ pick( MACRO_NESTING_LEVEL_TOO_DEEP,
 pick( SYMBOL_NOT_DEFINED,
       "Symbol not defined : %s" ,
       "Symbol not defined : %s" )
-#if 0
-pick( SPACES_NOT_ALLOWED_IN_COMMAND_LINE_OPTIONS,
-      "Spaces not allowed in command line options" ,
-      "コマンドラインオプションで空白は使用できません" )
-#endif
 pick( MSG_FATAL_ERROR,
       "Fatal error" ,
       "エラー" )
-pick( SOURCE_FILE,
-      "Source File" ,
-      "ソースファイル" )
 pick( NO_FILENAME_SPECIFIED,
       "No filename specified." ,
       "ファイル名が指定されていません" )
@@ -449,9 +365,6 @@ pick( CANNOT_CLOSE_FILE,
 pick( FILE_WRITE_ERROR,
       "File write error: %s [%u]",
       "File write error: %s [%u]" )
-pick( FILE_SEEK_ERROR,
-      "File seek error: %s [%u]" ,
-      "File seek error: %s [%u]" )
 pick( INVALID_CMDLINE_OPTION,
       "Invalid command-line option: -%s" ,
       "Invalid command-line option: -%s" )
@@ -464,21 +377,13 @@ pick( EXPECTED_CL_SQ_BRACKET,
 pick( EXPECTED_FILE_NAME,
       "Expecting file name" ,
       "ファイル名が必要です" )
-#if 0
-pick( NO_FP_WITH_FPC_SET,
-      "Floating-point instruction not allowed with -fpc" ,
-      "-fpc指定時には、浮動小数点命令は使用できません" )
-#endif
 pick( TOO_MANY_ERRORS,
       "Too many errors" ,
       "エラーが多すぎます" )
-#if INVOKE_WC
+#if INVWC_SUPPORT
 pick( TBYTE_NOT_SUPPORTED,
       "Ten byte variables not supported in register calling convention" ,
       "10バイト変数はレジスタ呼出規約では、サポートされていません" )
-pick( STRANGE_PARM_TYPE,
-      "Parameter type not recognised" ,
-      "パラメータ型が判りません" )
 #endif
 pick( FORCED_ERR,
       "forced error" ,
@@ -487,7 +392,7 @@ pick( FORCED_ARBITRARY,
       "forced error: %s" ,
       "強制エラー" )
 pick( FORCED_NOT_ZERO,
-      "forced error: Value not equal to 0 : %d " ,
+      "forced error: Value not equal to 0: %d " ,
       "強制エラー: 値が0ではありません : %d " )
 pick( FORCED_EQUAL,
       "forced error: Value equal to 0: %d " ,
@@ -524,7 +429,7 @@ pick( NOTE_MAIN_LINE_CODE,
       "%*s%s(%u): Main line code" )
 pick( EXTENDING_JUMP,
       "Extending jump" ,
-      "範囲外へのジャンプです" ) /* fixme - jump out of range */
+      "Extending jump" )
 pick( DIRECTIVE_IGNORED,
       "Directive ignored: %s" ,
       "Directive ignored: %s" )
@@ -540,14 +445,14 @@ pick( POWER_OF_2,
       "number must be a power of 2",
       "数値は2のべき乗でなければなりません" )
 pick( ALIGN_TOO_HIGH,
-      "alignment request greater than segment alignment",
-      "整列(ｱﾗｲﾝﾒﾝﾄ)の指定がセグメント整列より大きくなっています" )
-pick( SYMBOL_PREVIOUSLY_DEFINED,
-      "Symbol is already defined: %s" ,
-      "Symbol is already defined: %s" )
-pick( WRONG_CPU_FOR_32BIT_SEGMENT,
-      "Wrong CPU type for 32-bit segment" ,
-      "Wrong CPU type for 32-bit segment")
+      "Incompatible with segment alignment: %s",
+      "Incompatible with segment alignment: %s" )
+pick( SEGMENT_EXPECTED,
+      "Segment expected: %s" ,
+      "Segment expected: %s" )
+pick( INCOMPATIBLE_CPU_MODE_FOR_32BIT_SEGMENT,
+      "Incompatible CPU mode for 32-bit segment" ,
+      "Incompatible CPU mode for 32-bit segment")
 pick( CALL_FAR_TO_NEAR,
       "Far call is converted to near call." ,
       "Far call is converted to near call." )
@@ -557,12 +462,6 @@ pick( CPU_OPTION_INVALID,
 pick( SEGMENT_IN_ANOTHER_GROUP,
       "Segment '%s' is in another group already" ,
       "Segment '%s' is in another group already" )
-pick( SIZEOF_NEEDS_TYPE_OR_DATA_LABEL,
-      "SIZEOF needs type or data label as argument" ,
-      "SIZEOF needs type or data label as argument" )
-pick( INVALID_USE_OF_LENGTH_SIZE_OPERATOR,
-      "Invalid use of LENGTH/LENGTHOF/SIZE/SIZEOF operator" ,
-      "Invalid use of LENGTH/LENGTHOF/SIZE/SIZEOF operator" )
 pick( SYMBOL_TYPE_CONFLICT,
       "Symbol type conflict: %s" ,
       "Symbol type conflict: %s" )
@@ -572,9 +471,9 @@ pick( CONFLICTING_PARAMETER_DEFINITION,
 pick( PROC_AND_PROTO_CALLING_CONV_CONFLICT,
       "PROC and PROTO calling convention conflict" ,
       "PROC and PROTO calling convention conflict" )
-pick( NON_BENIGN_STRUCT_REDEFINITION,
-      "Non-benign structure redefinition" ,
-      "Non-benign structure redefinition" )
+pick( NON_BENIGN_XXX_REDEFINITION,
+      "Non-benign %s redefinition: %s" ,
+      "Non-benign %s redefinition: %s" )
 pick( TOO_MANY_BITS_IN_RECORD,
       "Too many bits in record" ,
       "Too many bits in record" )
@@ -721,11 +620,6 @@ pick( FASTCALL_VARIANT_NOT_SUPPORTED,
 pick( NO_4KPAGE_ALIGNED_SEGMENTS,
       "No 4k Page-aligned segments in MS386 OMF" ,
       "MS386 OMFには4Kページ整列セグメントがありません" )
-#if 0
-pick( ACCESS_CLASSES_NOT_SUPPORTED,
-      "Access classes (RW, EO, RO, ER) not supported in MS386 OMF" ,
-      "MS386 OMFではアクセスクラス(RW,EO,RO,ER)はサポートされていません" )
-#endif
 pick( GROUP_DIRECTIVE_INVALID_FOR_COFF,
       "GROUP directive invalid for COFF and ELF format" ,
       "GROUP directive invalid for COFF and ELF format" )
@@ -753,8 +647,8 @@ pick( LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL,
       "For -coff leading underscore required for start label: %s" )
 #endif
 pick( UNKNOWN_FIXUP_TYPE,
-      "Unknown fixup type found: %u" ,
-      "Unknown fixup type found: %u" )
+      "Unknown fixup type: %u at %lX" ,
+      "Unknown fixup type: %u at %lX" )
 pick( INVALID_CMDLINE_VALUE,
       "Invalid command-line value, default is used: %s" ,
       "Invalid command-line value, default is used: %s" )
@@ -762,8 +656,8 @@ pick( UNSUPPORTED_FIXUP_TYPE,
       "Unsupported fixup type for %s: %s" ,
       "Unsupported fixup type for %s: %s" )
 pick( INVALID_FIXUP_TYPE,
-      "Fixup invalid for %s: location %X" ,
-      "Fixup invalid for %s: location %X" )
+      "Invalid fixup type for %s: %u at location %s.%lX" ,
+      "Invalid fixup type for %s: %u at location %s.%lX" )
 pick( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE,
       "Syntax error in control-flow directive" ,
       "Syntax error in control-flow directive" )
@@ -856,8 +750,8 @@ pick( MISSING_RIGHT_PARENTHESIS_IN_EXPRESSION,
       "Missing right parenthesis in expression" ,
       "Missing right parenthesis in expression" )
 pick( INVALID_OPERAND_FOR_OPERATOR,
-      "Invalid operand for '%s' operator: %s" ,
-      "Invalid operand for '%s' operator: %s" )
+      "Invalid operand for %s operator: %s" ,
+      "Invalid operand for %s operator: %s" )
 pick( STRUCTURE_IMPROPERLY_INITIALIZED,
       "Structure improperly initialized: %s" ,
       "Structure improperly initialized: %s" )
@@ -879,9 +773,9 @@ pick( N_OPTION_NEEDS_A_NAME_PARAMETER,
 pick( CONSTANT_VALUE_TOO_LARGE,
       "Constant value too large" ,
       "Constant value too large" )
-pick( TEXT_MACRO_USED_BEFORE_DEFINITION,
-      "Text macro was used before definition: %s" ,
-      "Text macro was used before definition: %s" )
+pick( TEXT_MACRO_USED_PRIOR_TO_DEFINITION,
+      "Text macro used prior to definition: %s" ,
+      "Text macro used prior to definition: %s" )
 pick( OFFSET_SIZE_MISMATCH,
       "Offset size incompatible with current segment" ,
       "Offset size incompatible with current segment" )
@@ -973,3 +867,17 @@ pick( MACRO_LABEL_NOT_DEFINED,
 pick( PROCEDURE_ARGUMENT_OR_LOCAL_NOT_REFERENCED,
       "Procedure argument or local not referenced: %s",
       "Procedure argument or local not referenced: %s" )
+#if 0 /* temporary, to be removed! */
+pick( FIXUP_CHANGED,
+      "mark_fixupp: fixup changed, %s",
+      "mark_fixupp: fixup changed, %s" )
+#endif
+pick( GROUP_TOO_LARGE,
+      "Group too large, truncated: %s",
+      "Group too large, truncated: %s" )
+pick( COMM_VAR_EXCEEDS_64K,
+      "COMM variable exceeds 64K: %s",
+      "COMM variable exceeds 64K: %s" )
+pick( MUST_BE_PUBLIC_OR_EXTERNAL,
+      "Must be public or external: %s",
+      "Must be public or external: %s" )

@@ -5,6 +5,8 @@
 	.286
 
 RECORD1 record	RF1:2,RF2:1,RF3:1,RF4:3,RF5:1,RF6:2,RF7:2,RF8:1,RF9:1,RF10:1,RF11:1
+;--- test duplicate definition
+RECORD1 record	RF1:2,RF2:1,RF3:1,RF4:3,RF5:1,RF6:2,RF7:2,RF8:1,RF9:1,RF10:1,RF11:1
 
 BIOS segment page at 0
 

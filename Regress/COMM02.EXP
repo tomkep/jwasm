@@ -1,0 +1,4 @@
+COMM02.ASO(11) : Error A2149: Symbol redefinition: v1
+COMM02.ASO(17) : Error A2149: Symbol redefinition: v3
+COMM02.ASO(20) : Error A2145: Non-benign COMM redefinition: v4
+COMM02.ASO(23) : Error A2180: Cannot define as public or external: v5

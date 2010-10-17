@@ -21,19 +21,15 @@
 #include "listing.h"
 
 enum {
-    CONT_ASSUMES,
-    CONT_RADIX,
-    CONT_LISTING,
-    CONT_CPU,
-    CONT_ALIGNMENT, /* new for v2.0 */
-    CONT_ALL
+    CONT_ASSUMES   = 0x01,
+    CONT_RADIX     = 0x02,
+    CONT_LISTING   = 0x04,
+    CONT_CPU       = 0x08,
+    CONT_ALIGNMENT = 0x10, /* new for v2.0, specific for JWasm */
 };
 
-typedef struct _context {
-    struct _context *next;
-    uint_32 type;
-    char data[];
-} context;
+static char *contextnames[] = {
+    "ASSUMES", "RADIX", "LISTING", "CPU", "ALIGNMENT", NULL };
 
 #if AMD64_SUPPORT
 #define NUM_STDREGS 16
@@ -68,13 +64,15 @@ typedef struct _alignment_context {
     uint_8 procalign;  /* saved ModuleInfo.procalign */
 } alignment_context;
 
-typedef struct _all_context {
-    assumes_context ac;
+typedef struct _context {
+    struct _context *next;
+    uint_8 flags;
     radix_context   rc;
     alignment_context alc;
     listing_context lc;
     cpu_context     cc;
-} all_context;
+    assumes_context ac; /* must be last member */
+} context;
 
 extern asm_sym *sym_Cpu;
 
@@ -85,161 +83,129 @@ static int saved_numcontexts;
 static context *saved_contexts;
 #endif
 
+static int GetContextSize( uint_8 flags )
+/***************************************/
+{
+    if ( flags & CONT_ASSUMES )
+        return( sizeof( context ) );
+    /* spare the large assumes context space if not needed */
+    return( sizeof( context ) - sizeof ( assumes_context ) );
+}
+
 ret_code ContextDirective( int directive, int i )
 /***********************************************/
 {
     int type;
+    int start = i;
+    uint_8 flags = 0;
+    uint_8 all;
     context *pcontext;
-    assumes_context *acontext = NULL;
-    listing_context *lcontext = NULL;
-    cpu_context     *ccontext = NULL;
-    radix_context   *rcontext = NULL;
-    alignment_context *icontext = NULL;
-    all_context     *alcontext;
 
-    static char *context[] = { "ASSUMES", "RADIX", "LISTING", "CPU", "ALIGNMENT", "ALL", NULL };
+    all = CONT_ASSUMES | CONT_RADIX | CONT_LISTING | CONT_CPU;
+    if ( Options.strict_masm_compat == FALSE )
+        all |= CONT_ALIGNMENT;
 
-    DebugMsg(( "xxxCONTEXT directive enter\n"));
+    DebugMsg(( "%s directive enter\n", AsmBuffer[i]->string_ptr ));
     i++;
-    if ( AsmBuffer[i]->token == T_ID ) {
+    while ( AsmBuffer[i]->token == T_ID ) {
         char **p;
-        for ( p = context, type = CONT_ASSUMES; *p ; p++, type++ ) {
+        for ( p = contextnames, type = 0; *p ; p++, type++ ) {
             if ( _stricmp(*p, AsmBuffer[i]->string_ptr ) == 0 ) {
-                i++;
-                if ( type == CONT_ALIGNMENT && ( Options.strict_masm_compat ) )
-                    break;
-                if ( AsmBuffer[i]->token == T_FINAL ) {
-                    if ( directive == T_POPCONTEXT ) {
-                        DebugMsg(( "POPCONTEXT %s\n", AsmBuffer[i-1]->string_ptr ));
-                        /* for POPCONTEXT, check if the proper item is pushed */
-                        pcontext = ContextStack;
-                        if ( pcontext == NULL || pcontext->type != type ) {
-                            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i-2]->pos);
-                            return( ERROR );
-                        }
-                        ContextStack = pcontext->next;
-
-                        /* restore the values */
-                        switch ( type ) {
-                        case CONT_ASSUMES:
-                            acontext = (assumes_context *)&pcontext->data;
-                            break;
-                        case CONT_RADIX:
-                            rcontext = (radix_context *)&pcontext->data;
-                            break;
-                        case CONT_ALIGNMENT:
-                            icontext = (alignment_context *)&pcontext->data;
-                            break;
-                        case CONT_LISTING:
-                            lcontext = (listing_context *)&pcontext->data;
-                            break;
-                        case CONT_CPU:
-                            ccontext = (cpu_context *)&pcontext->data;
-                            break;
-                        case CONT_ALL:
-                            alcontext = (all_context *)&pcontext->data;
-                            acontext = &alcontext->ac;
-                            rcontext = &alcontext->rc;
-                            icontext = &alcontext->alc;
-                            lcontext = &alcontext->lc;
-                            ccontext = &alcontext->cc;
-                        }
-                        if ( acontext ) {
-                            SetSegAssumeTable( acontext->SegAssumeTable );
-                            SetStdAssumeTable( acontext->StdAssumeTable );
-                        }
-                        if ( rcontext ) {
-                            ModuleInfo.radix = rcontext->radix;
-                        }
-                        if ( icontext && ( Options.strict_masm_compat == FALSE ) ) {
-                            ModuleInfo.fieldalign = icontext->fieldalign;
-                            ModuleInfo.procalign = icontext->procalign;
-                        }
-                        if ( lcontext ) {
-                            ModuleInfo.list_macro = lcontext->list_macro;
-                            ModuleInfo.list = lcontext->list;
-                            ModuleInfo.cref = lcontext->cref;
-                            ModuleInfo.listif = lcontext->listif;
-                            ModuleInfo.list_generated_code = lcontext->list_generated_code;
-                        }
-                        if ( ccontext ) {
-                            ModuleInfo.cpu     = ccontext->cpu;
-                            if ( sym_Cpu )
-                                sym_Cpu->value = ccontext->cpu;
-                            ModuleInfo.curr_cpu = ccontext->curr_cpu;
-                        }
-                        /* remove the item */
-                        AsmFree(pcontext);
-                    } else {
-                        DebugMsg(( "PUSHCONTEXT %s\n", AsmBuffer[i-1]->string_ptr ));
-                        /* setup a context item */
-                        switch ( type ) {
-                        case CONT_ASSUMES:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(assumes_context));
-                            acontext = (assumes_context *)&pcontext->data;
-                            break;
-                        case CONT_RADIX:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(radix_context));
-                            rcontext = (radix_context *)&pcontext->data;
-                            break;
-                        case CONT_ALIGNMENT:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(alignment_context));
-                            icontext = (alignment_context *)&pcontext->data;
-                            break;
-                        case CONT_LISTING:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(listing_context));
-                            lcontext = (listing_context *)&pcontext->data;
-                            break;
-                        case CONT_CPU:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(cpu_context));
-                            ccontext = (cpu_context *)&pcontext->data;
-                            break;
-                        case CONT_ALL:
-                            pcontext = AsmAlloc(sizeof(context) + sizeof(all_context));
-                            alcontext = (all_context *)pcontext->data;
-                            acontext = &alcontext->ac;
-                            rcontext = &alcontext->rc;
-                            icontext = &alcontext->alc;
-                            lcontext = &alcontext->lc;
-                            ccontext = &alcontext->cc;
-                            break;
-                        }
-
-                        pcontext->type = type;
-
-                        if ( acontext ) {
-                            GetSegAssumeTable( acontext->SegAssumeTable );
-                            GetStdAssumeTable( acontext->StdAssumeTable );
-                        }
-                        if ( rcontext ) {
-                            rcontext->radix = ModuleInfo.radix;
-                        }
-                        if ( icontext ) {
-                            icontext->fieldalign = ModuleInfo.fieldalign;
-                            icontext->procalign = ModuleInfo.procalign;
-                        }
-                        if ( lcontext ) {
-                            lcontext->list_macro = ModuleInfo.list_macro;
-                            lcontext->list   = ModuleInfo.list;
-                            lcontext->cref   = ModuleInfo.cref;
-                            lcontext->listif = ModuleInfo.listif;
-                            lcontext->list_generated_code = ModuleInfo.list_generated_code;
-                        }
-                        if ( ccontext ) {
-                            ccontext->cpu      = ModuleInfo.cpu;
-                            ccontext->curr_cpu = ModuleInfo.curr_cpu;
-                        }
-                        pcontext->next = ContextStack;
-                        ContextStack = pcontext;
-                    }
-                    return( NOT_ERROR );
-                }
+                flags |= ( 1 << type );
                 break;
             }
         }
+        if ( *p == NULL )
+            if ( _stricmp( "ALL", AsmBuffer[i]->string_ptr ) == 0 ) {
+                flags |= all;
+            } else {
+                break;
+            }
+        /* reject ALIGNMENT if strict masm compat is on */
+        if ( Options.strict_masm_compat && ( flags & CONT_ALIGNMENT ) )
+            break;
+        i++;
+        if ( AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token != T_FINAL )
+            i++;
     }
-    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-    return( ERROR );
+
+    if ( AsmBuffer[i]->token != T_FINAL || flags == 0 ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
+    }
+
+    switch ( directive ) {
+    case  T_POPCONTEXT:
+        DebugMsg(( "POPCONTEXT flags=%X\n", flags ));
+        /* for POPCONTEXT, check if the items are pushed */
+        pcontext = ContextStack;
+        if ( pcontext == NULL || ( pcontext->flags & flags ) != flags ) {
+            AsmErr( UNMATCHED_BLOCK_NESTING, AsmBuffer[start]->string_ptr );
+            return( ERROR );
+        }
+        ContextStack = pcontext->next;
+
+        /* restore the values */
+        if ( flags & CONT_ASSUMES ) {
+            SetSegAssumeTable( pcontext->ac.SegAssumeTable );
+            SetStdAssumeTable( pcontext->ac.StdAssumeTable );
+        }
+        if ( flags & CONT_RADIX ) {
+            ModuleInfo.radix = pcontext->rc.radix;
+        }
+        if ( flags & CONT_ALIGNMENT ) {
+            ModuleInfo.fieldalign = pcontext->alc.fieldalign;
+            ModuleInfo.procalign  = pcontext->alc.procalign;
+        }
+        if ( flags & CONT_LISTING ) {
+            ModuleInfo.list_macro = pcontext->lc.list_macro;
+            ModuleInfo.list       = pcontext->lc.list;
+            ModuleInfo.cref       = pcontext->lc.cref;
+            ModuleInfo.listif     = pcontext->lc.listif;
+            ModuleInfo.list_generated_code = pcontext->lc.list_generated_code;
+        }
+        if ( flags & CONT_CPU ) {
+            ModuleInfo.cpu      = pcontext->cc.cpu;
+            if ( sym_Cpu )
+                sym_Cpu->value  = pcontext->cc.cpu;
+            ModuleInfo.curr_cpu = pcontext->cc.curr_cpu;
+        }
+
+        AsmFree( pcontext );
+        break;
+    case  T_PUSHCONTEXT:
+        DebugMsg(( "PUSHCONTEXT flags=%X\n", flags ));
+        /* setup a context item */
+        pcontext = AsmAlloc( GetContextSize( flags) );
+        pcontext->flags = flags;
+
+        if ( flags & CONT_ASSUMES ) {
+            GetSegAssumeTable( pcontext->ac.SegAssumeTable );
+            GetStdAssumeTable( pcontext->ac.StdAssumeTable );
+        }
+        if ( flags & CONT_RADIX ) {
+            pcontext->rc.radix = ModuleInfo.radix;
+        }
+        if ( flags & CONT_ALIGNMENT ) {
+            pcontext->alc.fieldalign = ModuleInfo.fieldalign;
+            pcontext->alc.procalign  = ModuleInfo.procalign;
+        }
+        if ( flags & CONT_LISTING ) {
+            pcontext->lc.list_macro = ModuleInfo.list_macro;
+            pcontext->lc.list       = ModuleInfo.list;
+            pcontext->lc.cref       = ModuleInfo.cref;
+            pcontext->lc.listif     = ModuleInfo.listif;
+            pcontext->lc.list_generated_code = ModuleInfo.list_generated_code;
+        }
+        if ( flags & CONT_CPU ) {
+            pcontext->cc.cpu      = ModuleInfo.cpu;
+            pcontext->cc.curr_cpu = ModuleInfo.curr_cpu;
+        }
+        pcontext->next = ContextStack;
+        ContextStack = pcontext;
+        break;
+    }
+    return( NOT_ERROR );
 }
 
 #if FASTPASS
@@ -250,15 +216,20 @@ void ContextSaveState( void )
 /***************************/
 {
     int i;
+    uint_32 size = 0;
     context *p;
+    context *p2;
 
-    for ( i = 0, p=ContextStack ; p ; i++, p = p->next );
+    for ( i = 0, p=ContextStack ; p ; i++, p = p->next )
+        size += GetContextSize( p->flags );
 
     saved_numcontexts = i;
     if ( i ) {
-        saved_contexts = AsmAlloc( i * (sizeof(context) + sizeof(all_context)) );
-        for ( i = 0, p = ContextStack ; i < saved_numcontexts ; i++, p = p->next )
-            memcpy( saved_contexts+i, p, sizeof(context) + sizeof(all_context));
+        saved_contexts = AsmAlloc( size );
+        for ( p = ContextStack, p2 = saved_contexts ; p ; p = p->next ) {
+            memcpy( p2, p, GetContextSize( p->flags ) );
+            p2 = (context *)((char *)p2 + GetContextSize ( p->flags ) );
+        }
     }
 }
 
@@ -268,12 +239,22 @@ static void ContextRestoreState( void )
 /*************************************/
 {
     int i;
+    int size;
     context *p;
+    context *p2;
+    context *p3 = NULL;
 
-    for ( i = saved_numcontexts; i ; i-- ) {
-        p = saved_contexts+i-1;
-        p->next = ContextStack;
-        ContextStack = p;
+    for ( i = saved_numcontexts, p2 = saved_contexts; i ; i-- ) {
+        size = GetContextSize( p2->flags );
+        p = AsmAlloc( size );
+        if ( p3 == NULL )
+            ContextStack = p;
+        else
+            p3->next = p;
+        p3 = p;
+        memcpy( p, p2, size );
+        p->next = NULL;
+        p2 = (context *)((char *)p2 + size );
     }
 }
 
@@ -286,7 +267,7 @@ void ContextInit( int pass )
 {
     ContextStack = NULL;
 #if FASTPASS
-    if ( pass == PASS_1)
+    if ( pass == PASS_1 )
         saved_numcontexts = 0;
     else {
         ContextRestoreState();

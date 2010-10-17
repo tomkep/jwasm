@@ -12,11 +12,12 @@
 #include <ctype.h>
 
 #include "globals.h"
-#include "symbols.h"
 #include "memalloc.h"
+#include "symbols.h"
+#include "parser.h"
 #include "directiv.h"
 #include "fixup.h"
-#include "queues.h"
+#include "omfspec.h"
 #include "bin.h"
 #include "fatal.h"
 #include "listing.h"
@@ -25,8 +26,6 @@
 
 #define SECTORMAP 1 /* 1=print sector map in listing file */
 
-extern symbol_queue     Tables[];       /* tables of definitions */
-extern asm_sym          *start_label;   /* start label */
 extern struct asm_sym   symPC; /* '$' symbol */
 
 #if MZ_SUPPORT
@@ -36,7 +35,7 @@ struct MZDATA mzdata = {0x1E, 0x10, 0, 0xFFFF };
 static uint_32 fileoffset;
 static uint_32 entryoffset;
 static asm_sym *entryseg;
-static uint_32 sizehdr;
+static uint_32 sizehdr;  /* size of MZ header, always 0 for BIN */
 static uint_32 imagestart;
 
 #if SECTORMAP
@@ -118,7 +117,7 @@ void SortSegments( void )
         }
     }
     for ( curr = Tables[TAB_SEG].head; curr ; curr = curr->next ) {
-        curr->e.seginfo->segrec->d.segdef.idx = index++;
+        curr->e.seginfo->idx = index++;
     }
 }
 
@@ -133,8 +132,8 @@ static void CalcOffset( dir_node *curr, bool firstseg )
     dir_node *grp;
 
     if ( curr->e.seginfo->segtype == SEGTYPE_ABS ) {
-        curr->e.seginfo->start_offset = curr->e.seginfo->segrec->d.segdef.abs.frame << 4;
-        DebugMsg(("CalcOffset(%s): abs seg, offset=%Xh\n",
+        curr->e.seginfo->start_offset = curr->e.seginfo->abs_frame << 4;
+        DebugMsg(("CalcOffset(%s): abs seg, offset=%" FX32 "h\n",
                   curr->sym.name, curr->e.seginfo->start_offset ));
         return;
     }
@@ -147,16 +146,20 @@ static void CalcOffset( dir_node *curr, bool firstseg )
 
     if ( grp == NULL ) {
         offset = fileoffset - sizehdr; // + alignbytes;
-        DebugMsg(("CalcOffset(%s): fileofs=%Xh, ofs=%Xh\n", curr->sym.name, fileoffset, offset ));
+        DebugMsg(("CalcOffset(%s): fileofs=%" FX32 "h, ofs=%" FX32 "h\n", curr->sym.name, fileoffset, offset ));
     } else {
         if ( grp->sym.total_size == 0 ) {
             grp->sym.offset = fileoffset - sizehdr;
             offset = 0;
         } else
             offset = grp->sym.total_size + alignbytes;
-        DebugMsg(("CalcOffset(%s): fileofs=%Xh, alignbytes=%u, ofs=%Xh, group=%s, grp.ofs=%Xh\n",
+        DebugMsg(("CalcOffset(%s): fileofs=%" FX32 "h, alignbytes=%lu, ofs=%" FX32 "h, group=%s, grp.ofs=%" FX32 "h\n",
                   curr->sym.name, fileoffset, alignbytes, offset, grp->sym.name, grp->sym.offset ));
     }
+
+    /* v2.04: added */
+    if ( firstseg == FALSE )
+        curr->e.seginfo->start_loc = 0;
 
     curr->e.seginfo->fileoffset = fileoffset;
     //if ( firstseg && Options.header_format == HFORMAT_NONE ) {
@@ -183,8 +186,9 @@ static void CalcOffset( dir_node *curr, bool firstseg )
         //grp->sym.total_size = offset + curr->e.seginfo->start_loc;
         grp->sym.total_size = offset;
     }
-    DebugMsg(("CalcOffset(%s): seg.fileofs=%Xh, seg.start_offset=%Xh, endofs=%Xh\n",
+    DebugMsg(("CalcOffset(%s): seg.fileofs=%" FX32 "h, seg.start_offset=%" FX32 "h, endofs=%" FX32 "h\n",
               curr->sym.name, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset, offset ));
+
     return;
 }
 
@@ -202,36 +206,45 @@ static int GetSegRelocs( uint_16 *pDst )
     int count = 0;
     uint_16 valueofs;
     uint_16 valueseg;
-    uint_32 size;
-    struct genfixup *fixup;
+    uint_32 loc;
+    struct fixup *fixup;
 
+    DebugMsg(("GetSegRelocs( %p ) enter\n", pDst ));
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
         if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
             continue;
-        for ( fixup = curr->e.seginfo->FixupListHeadGen; fixup; fixup = fixup->nextrlc ) {
-            switch (fixup->type) {
+        for ( fixup = curr->e.seginfo->FixupListHead; fixup; fixup = fixup->nextrlc ) {
+            switch ( fixup->type ) {
             case FIX_PTR32:
             case FIX_PTR16:
             case FIX_SEG:
                 /* ignore fixups for absolute segments */
                 if ( fixup->sym && fixup->sym->segment && ((dir_node *)fixup->sym->segment)->e.seginfo->segtype == SEGTYPE_ABS )
                     break;
+                DebugMsg(("GetSegRelocs: found seg-related fixup at %s.%" FX32 "\n", curr->sym.name, fixup->location ));
                 count++;
-                if (pDst) {
-                    size = fixup->fixup_loc + (curr->e.seginfo->fileoffset & 0xf);
+                if ( pDst ) {
+                    /* v2.04: fixed */
+                    loc = fixup->location + ( curr->e.seginfo->start_offset & 0xf );
+                    valueseg = curr->e.seginfo->start_offset >> 4;
+                    if ( curr->e.seginfo->group ) {
+                        loc += curr->e.seginfo->group->offset & 0xf;
+                        valueseg += curr->e.seginfo->group->offset >> 4;
+                    }
                     if ( fixup->type == FIX_PTR16 )
-                        size += 2;
+                        loc += 2;
                     else if ( fixup->type == FIX_PTR32 )
-                        size += 4;
-                    if ( curr->e.seginfo->group) {
-                        valueseg = curr->e.seginfo->group->offset >> 4;
-                    } else
-                        valueseg = curr->e.seginfo->start_offset >> 4;
-                    while (size > 0x10000) {
-                        size -= 16;
+                        loc += 4;
+
+                    /* offset may be > 64 kB */
+                    while ( loc >= 0x10000 ) {
+                        loc -= 16;
                         valueseg++;
                     };
-                    valueofs = size;
+
+                    valueofs = loc;
+                    DebugMsg(("GetSegRelocs: location=%" FX32 " fileofs=%" FX32 " segofs=%" FX32 " grpofs=%" FX32 ", fixup value: %X %X\n",
+                              fixup->location, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset: 0, valueofs, valueseg ));
                     *pDst++ = valueofs;
                     *pDst++ = valueseg;
                 }
@@ -270,44 +283,48 @@ static uint_32 GetImageSize( bool memimage )
                     break; /* done, skip rest of segments! */
             }
         }
-        DebugMsg(("GetImageSize(%s): fileofs=%Xh, max_offs=%Xh\n", curr->sym.name, curr->e.seginfo->fileoffset, curr->sym.max_offset ));
+        DebugMsg(("GetImageSize(%s): fileofs=%" FX32 "h, max_offs=%" FX32 "h\n", curr->sym.name, curr->e.seginfo->fileoffset, curr->sym.max_offset ));
         tmp = curr->e.seginfo->fileoffset + (curr->sym.max_offset - curr->e.seginfo->start_loc );
         if ( size < tmp )
             size = tmp;
     }
-    DebugMsg(("GetImageSize(%u)=%Xh\n", memimage, size ));
+    DebugMsg(("GetImageSize(%u)=%" FX32 "h\n", memimage, size ));
     return( size );
 }
 
 /* micro-linker. resolve internal fixups.
  */
 
+union genptr {
+    uint_8  *db;
+    uint_16 *dw;
+    uint_32 *dd;
+#if AMD64_SUPPORT
+    uint_64 *dq;
+#endif
+};
+
 static ret_code DoFixup( dir_node *curr )
 /***************************************/
 {
-    uint_16 *codeptr16;
-    uint_32 *codeptr32;
-#if AMD64_SUPPORT
-    uint_64 *codeptr64;
-#endif
-    uint_8 *codeptr;
+    union genptr codeptr;
     dir_node *seg;
     uint_32 value;
-    struct genfixup *fixup;
+    struct fixup *fixup;
 
     if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
         return( NOT_ERROR );
 
-    DebugMsg(("DoFixup(%s) enter, segment start ofs=%lXh\n", curr->sym.name, curr->e.seginfo->start_offset ));
-    for ( fixup = curr->e.seginfo->FixupListHeadGen; fixup; fixup = fixup->nextrlc ) {
-        codeptr = curr->e.seginfo->CodeBuffer +
-            (fixup->fixup_loc - curr->e.seginfo->start_loc);
+    DebugMsg(("DoFixup(%s) enter, segment start ofs=%" FX32 "h\n", curr->sym.name, curr->e.seginfo->start_offset ));
+    for ( fixup = curr->e.seginfo->FixupListHead; fixup; fixup = fixup->nextrlc ) {
+        codeptr.db = curr->e.seginfo->CodeBuffer +
+            ( fixup->location - curr->e.seginfo->start_loc );
         /* assembly time variable (also $ symbol) in reloc? */
-        if (fixup->sym && fixup->sym->variable) {
+        if ( fixup->sym && fixup->sym->variable ) {
             seg = (dir_node *)fixup->segment;
             value = seg->e.seginfo->start_offset + fixup->offset;
-            DebugMsg(("DoFixup(%s, %Xh, %s): variable, fixup->segment=%Xh fixup->offset=%lXh, fixup->sym->offset=%lXh\n",
-                      curr->sym.name, fixup->fixup_loc, fixup->sym->name, seg, fixup->offset, fixup->sym->offset ));
+            DebugMsg(("DoFixup(%s, %04" FX32 ", %s): variable, fixup->segment=%Xh fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
+                      curr->sym.name, fixup->location, fixup->sym->name, seg, fixup->offset, fixup->sym->offset ));
         } else if ( fixup->sym && fixup->sym->segment ) {
             seg = (dir_node *)fixup->sym->segment;
             /* the offset result consists of
@@ -317,9 +334,9 @@ static ret_code DoFixup( dir_node *curr )
              */
             if ( fixup->type == FIX_OFF32_IMGREL ) {
                 value = ( fixup->offset + fixup->sym->offset + seg->e.seginfo->start_offset ) - imagestart;
-                DebugMsg(("DoFixup(%s): IMGREL, loc=%lX value=%lX seg.start=%lX imagestart=%lX\n",
-                          curr->sym.name, fixup->fixup_loc, value, seg->e.seginfo->start_offset, imagestart ));
-            } else if ( fixup->type == FIX_OFF32_SECREL  ) {
+                DebugMsg(("DoFixup(%s): IMGREL, loc=%" FX32 " value=%" FX32 " seg.start=%" FX32 " imagestart=%" FX32 "\n",
+                          curr->sym.name, fixup->location, value, seg->e.seginfo->start_offset, imagestart ));
+            } else if ( fixup->type == FIX_OFF32_SECREL ) {
                 char *tmp;
                 /* check if symbol's segment name contains a '$'.
                  * If yes, search the segment without suffix.
@@ -332,13 +349,13 @@ static ret_code DoFixup( dir_node *curr )
                         if ( segfirst->sym.name_size == namlen &&
                             ( memcmp( segfirst->sym.name, seg->sym.name, namlen ) == 0 ) ) {
                             value = ( fixup->offset + fixup->sym->offset + seg->e.seginfo->start_offset ) - segfirst->e.seginfo->start_offset;
-                            DebugMsg(("DoFixup(%s): SECREL, primary seg=%s, start_offset=%X\n",
+                            DebugMsg(("DoFixup(%s): SECREL, primary seg=%s, start_offset=%" FX32 "\n",
                                       curr->sym.name, segfirst->sym.name, segfirst->e.seginfo->start_offset ));
                             break;
                         }
                     }
                 }
-                DebugMsg(("DoFixup(%s): SECREL, loc=%lX, value=%lX\n", curr->sym.name, fixup->fixup_loc, value ));
+                DebugMsg(("DoFixup(%s): SECREL, loc=%" FX32 ", value=%" FX32 "\n", curr->sym.name, fixup->location, value ));
             /* v2.01: don't use group if fixup explicitely refers the segment! */
             //} else if ( seg->e.seginfo->group ) {
             } else if ( seg->e.seginfo->group && fixup->frame != FRAME_SEG ) {
@@ -348,96 +365,98 @@ static ret_code DoFixup( dir_node *curr )
                 value = seg->e.seginfo->start_offset + fixup->offset + fixup->sym->offset;
             } else
                 value = (seg->e.seginfo->start_offset & 0xF) + fixup->offset + fixup->sym->offset;
-            DebugMsg(("DoFixup(%s, %lXh, %s): target->start_offset=%lXh, fixup->offset=%lXh, fixup->sym->offset=%lXh\n",
-                      curr->sym.name, fixup->fixup_loc, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, fixup->sym->offset ));
+            DebugMsg(("DoFixup(%s, %04" FX32 ", %s): target->start_offset=%" FX32 "h, fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
+                      curr->sym.name, fixup->location, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, fixup->sym->offset ));
         } else {
             seg = (dir_node *)fixup->segment;
-            DebugMsg(("DoFixup(%s, %lXh, %s): target segment=0, fixup->offset=%lXh, fixup->sym->offset=%lXh\n",
-                      curr->sym.name, fixup->fixup_loc, fixup->sym ? fixup->sym->name : "", fixup->offset, fixup->sym ? fixup->sym->offset : 0 ));
+            DebugMsg(("DoFixup(%s, %04" FX32 ", %s): target segment=0, fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
+                      curr->sym.name, fixup->location, fixup->sym ? fixup->sym->name : "", fixup->offset, fixup->sym ? fixup->sym->offset : 0 ));
             value = 0;
         }
         switch (fixup->type) {
         case FIX_RELOFF8:
-            //*codeptr += (value - fixup->fixup_loc + 1) & 0xff;
+            //*codeptr.db += (value - fixup->location + 1) & 0xff;
             /* changed in v1.95 */
-            *codeptr += (value - (fixup->fixup_loc + curr->e.seginfo->start_offset) - 1) & 0xff;
-            DebugMsg(("DoFixup(%s, %lXh): FIX_RELOFF8, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr ));
+            *codeptr.db += (value - (fixup->location + curr->e.seginfo->start_offset) - 1) & 0xff;
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_RELOFF8, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
             break;
         case FIX_RELOFF16:
-            codeptr16 = (uint_16 *)codeptr;
-            //*codeptr16 += (value - fixup->fixup_loc + 2) & 0xffff;
+            //*codeptr.dw += (value - fixup->location + 2) & 0xffff;
             /* changed in v1.95 */
-            *codeptr16 += (value - (fixup->fixup_loc + curr->e.seginfo->start_offset) - 2) & 0xffff;
-            DebugMsg(("DoFixup(%s, %lXh): FIX_RELOFF16, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr16 ));
+            *codeptr.dw += (value - (fixup->location + curr->e.seginfo->start_offset) - 2) & 0xffff;
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_RELOFF16, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dw ));
             break;
         case FIX_RELOFF32:
 #if AMD64_SUPPORT
             /* adjust the location for EIP-related offsets if USE64 */
             if ( curr->e.seginfo->Ofssize == USE64 ) {
-                fixup->fixup_loc += fixup->addbytes - 4;
+                fixup->location += fixup->addbytes - 4;
             }
 #endif
-            codeptr32 = (uint_32 *)codeptr;
-            //*codeptr32 += (value - fixup->fixup_loc + 4);
+            //*codeptr.dd += (value - fixup->location + 4);
             /* changed in v1.95 */
-            *codeptr32 += (value - (fixup->fixup_loc + curr->e.seginfo->start_offset) - 4);
-            DebugMsg(("DoFixup(%s, %lXh): FIX_RELOFF32, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
+            *codeptr.dd += (value - (fixup->location + curr->e.seginfo->start_offset) - 4);
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_RELOFF32, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
             break;
         case FIX_LOBYTE:
-            *codeptr = value & 0xff;
-            DebugMsg(("DoFixup(%s, %lXh): FIX_LOBYTE, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr ));
+            *codeptr.db = value & 0xff;
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_LOBYTE, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
             break;
         case FIX_HIBYTE:
-            *codeptr = (value >> 8) & 0xff;
-            DebugMsg(("DoFixup(%s, %lXh): FIX_HIBYTE, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr ));
+            *codeptr.db = (value >> 8) & 0xff;
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_HIBYTE, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
             break;
         case FIX_OFF16:
-            codeptr16 = (uint_16 *)codeptr;
-            *codeptr16 = value & 0xffff;
-            DebugMsg(("DoFixup(%s, %lXh): FIX_OFF16, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr16 ));
+            *codeptr.dw = value & 0xffff;
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF16, value=%" FX32 "h, target=%p *target=%Xh\n", curr->sym.name, fixup->location, value, codeptr, *codeptr.dw ));
             break;
         case FIX_OFF32:
-            codeptr32 = (uint_32 *)codeptr;
-            *codeptr32 = value;
-            DebugMsg(("DoFixup(%s, %lXh): FIX_OFF32, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
+            *codeptr.dd = value;
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF32, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
             break;
         case FIX_OFF32_IMGREL:
-            codeptr32 = (uint_32 *)codeptr;
-            *codeptr32 = value;
-            DebugMsg(("DoFixup(%s, %lXh): FIX_OFF32_IMGREL, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
+            *codeptr.dd = value;
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF32_IMGREL, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
+            break;
         case FIX_OFF32_SECREL:
-            codeptr32 = (uint_32 *)codeptr;
-            *codeptr32 = value;
-            DebugMsg(("DoFixup(%s, %lXh): FIX_OFF32_SECREL, value=%lXh, *target=%Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr32 ));
+            *codeptr.dd = value;
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF32_SECREL, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
             break;
 #if AMD64_SUPPORT
         case FIX_OFF64:
-            codeptr64 = (uint_64 *)codeptr;
-            *codeptr64 = value;
-            DebugMsg(("DoFixup(%s, %lXh): FIX_OFF64, value=%lXh, *target=%I64Xh\n", curr->sym.name, fixup->fixup_loc, value, *codeptr64 ));
+            *codeptr.dq = value;
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF64, value=%" FX32 "h, *target=%I64Xh\n", curr->sym.name, fixup->location, value, *codeptr.dq ));
             break;
 #endif
         case FIX_SEG:
-            codeptr16 = (uint_16 *)codeptr;
             /* absolute segments are ok */
-            if (fixup->sym &&
+            if ( fixup->sym &&
                 fixup->sym->state == SYM_SEG &&
-                ((dir_node *)fixup->sym)->e.seginfo->segtype == SEGTYPE_ABS) {
-                *codeptr16 = ((dir_node *)fixup->sym)->e.seginfo->segrec->d.segdef.abs.frame;
+                ((dir_node *)fixup->sym)->e.seginfo->segtype == SEGTYPE_ABS ) {
+                *codeptr.dw = ((dir_node *)fixup->sym)->e.seginfo->abs_frame;
                 break;
             }
 #if MZ_SUPPORT
             if ( Options.header_format == HFORMAT_MZ ) {
-                seg = (dir_node *)fixup->sym;
-                if ( seg->sym.state == SYM_GRP ) {
-                    *codeptr16 = seg->sym.offset >> 4;
-                    DebugMsg(("DoFixup(%s, %lXh): FIX_SEG, group.offset=%lXh\n", curr->sym.name, fixup->fixup_loc, seg->sym.offset ));
-                } else if (seg->e.seginfo->group ) {
-                    *codeptr16 = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
-                    DebugMsg(("DoFixup(%s, %lXh): FIX_SEG, segment.offset=%lXh, group.offset=%lXh\n", curr->sym.name, fixup->fixup_loc, seg->e.seginfo->start_offset, seg->e.seginfo->group->offset ));
+                DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_SEG frame=%u, ", curr->sym.name, fixup->location, fixup->frame ));
+                if ( fixup->sym->state == SYM_GRP ) {
+                    seg = (dir_node *)fixup->sym;
+                    *codeptr.dw = seg->sym.offset >> 4;
+                    DebugMsg(("GROUP symbol, offset=%" FX32 "h codeptr=%p\n", seg->sym.offset, codeptr ));
+                } else if ( fixup->sym->state == SYM_SEG ) {
+                    /* v2.04: added */
+                    seg = (dir_node *)fixup->sym;
+                    *codeptr.dw = ( seg->e.seginfo->start_offset + ( seg->e.seginfo->group ? seg->e.seginfo->group->offset : 0 ) ) >> 4;
+                    DebugMsg(("SEGMENT symbol, start_offset=%" FX32 "h\n", seg->e.seginfo->start_offset ));
+                //} else if ( seg->e.seginfo->group ) {
+                } else if ( fixup->frame == FRAME_GRP ) {
+                    /* v2.04: changed */
+                    //*codeptr.dw = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
+                    *codeptr.dw = seg->e.seginfo->group->offset >> 4;
+                    DebugMsg(("group.offset=%" FX32 "h\n", seg->e.seginfo->group->offset ));
                 } else {
-                    *codeptr16 = seg->e.seginfo->start_offset >> 4;
-                    DebugMsg(("DoFixup(%s, %lXh): FIX_SEG, segment.offset=%lXh\n", curr->sym.name, fixup->fixup_loc, seg->e.seginfo->start_offset ));
+                    *codeptr.dw = seg->e.seginfo->start_offset >> 4;
+                    DebugMsg(("segment.offset=%" FX32 "h\n", seg->e.seginfo->start_offset ));
                 }
                 break;
             }
@@ -445,14 +464,16 @@ static ret_code DoFixup( dir_node *curr )
         case FIX_PTR16:
 #if MZ_SUPPORT
             if ( Options.header_format == HFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %lXh): FIX_PTR16, seg->start=%Xh\n", curr->sym.name, fixup->fixup_loc, seg->e.seginfo->start_offset ));
-                codeptr16 = (uint_16 *)codeptr;
-                *codeptr16 = value & 0xffff;
-                codeptr16++;
-                if (seg->e.seginfo->group ) {
-                    *codeptr16 = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
+                DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_PTR16, seg->start=%Xh\n", curr->sym.name, fixup->location, seg->e.seginfo->start_offset ));
+                *codeptr.dw = value & 0xffff;
+                codeptr.dw++;
+                //if ( seg->e.seginfo->group ) { /* v2.04: changed */
+                if ( fixup->frame == FRAME_GRP ) {
+                    /* v2.04: changed */
+                    //*codeptr.dw = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
+                    *codeptr.dw = seg->e.seginfo->group->offset >> 4;
                 } else {
-                    *codeptr16 = seg->e.seginfo->start_offset >> 4;
+                    *codeptr.dw = seg->e.seginfo->start_offset >> 4;
                 }
                 break;
             }
@@ -460,23 +481,24 @@ static ret_code DoFixup( dir_node *curr )
         case FIX_PTR32:
 #if MZ_SUPPORT
             if ( Options.header_format == HFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %lXh): FIX_PTR32\n", curr->sym.name, fixup->fixup_loc ));
-                codeptr32 = (uint_32 *)codeptr;
-                *codeptr32 = value;
-                codeptr32++;
-                codeptr16 = (uint_16 *)codeptr32;
-                if (seg->e.seginfo->group ) {
-                    *codeptr16 = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
+                DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_PTR32\n", curr->sym.name, fixup->location ));
+                *codeptr.dd = value;
+                codeptr.dd++;
+                //if (seg->e.seginfo->group ) { /* v2.04: changed */
+                if ( fixup->frame == FRAME_GRP ) {
+                    /* v2.04: changed */
+                    //*codeptr.dw = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
+                    *codeptr.dw = seg->e.seginfo->group->offset >> 4;
                 } else {
-                    *codeptr16 = seg->e.seginfo->start_offset >> 4;
+                    *codeptr.dw = seg->e.seginfo->start_offset >> 4;
                 }
                 break;
             }
 #endif
         default:
-            DebugMsg(("DoFixup(%s, %lXh): invalid fixup %u\n", curr->sym.name, fixup->fixup_loc, fixup->type ));
-            AsmErr( INVALID_FIXUP_TYPE, "BIN", fixup->fixup_loc );
-            return( ERROR );
+            DebugMsg(("DoFixup(%s, %04" FX32 "): invalid fixup %u\n", curr->sym.name, fixup->location, fixup->type ));
+            AsmErr( INVALID_FIXUP_TYPE, "BIN", fixup->type, curr->sym.name, fixup->location );
+            //return( ERROR );
         }
     }
     return( NOT_ERROR );
@@ -503,14 +525,14 @@ ret_code bin_write_data( module_info *ModuleInfo )
     uint_8  *hdrbuf;
 #endif
 
-    DebugMsg(("bin_write_data: enter ($=%Xh)\n", symPC.offset ));
+    DebugMsg(("bin_write_data: enter\n" ));
 
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
         /* reset the offset fields of segments */
         /* it was used to store the size in there */
         curr->e.seginfo->start_offset = 0;
         /* set STACK segment type */
-        if ( curr->e.seginfo->segrec->d.segdef.combine == COMB_STACK )
+        if ( curr->e.seginfo->combine == COMB_STACK )
             curr->e.seginfo->segtype = SEGTYPE_STACK;
     }
     fileoffset = 0;
@@ -522,7 +544,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
         hdrbuf = AsmAlloc( sizehdr );
         memset( hdrbuf, 0, sizehdr );
         fileoffset = sizehdr;
-        DebugMsg(("bin_write_data: MZ format, fixups=%u, sizehdr=%X\n", reloccnt, sizehdr ));
+        DebugMsg(("bin_write_data: MZ format, fixups=%u, sizehdr=%" FX32 "\n", reloccnt, sizehdr ));
     }
 #endif
 
@@ -540,7 +562,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
                     continue;
                 CalcOffset( curr, first );
                 first = FALSE;
-                DebugMsg(("bin_write_data: section %s, start ofs=%Xh, size=%Xh, file ofs=%Xh\n",
+                DebugMsg(("bin_write_data: section %s, start ofs=%" FX32 "h, size=%" FX32 "h, file ofs=%" FX32 "h\n",
                           curr->sym.name, curr->e.seginfo->start_offset, curr->sym.max_offset - curr->e.seginfo->start_loc, curr->e.seginfo->fileoffset ));
             }
         }
@@ -556,7 +578,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
             CalcOffset( curr, first );
             if ( curr->e.seginfo->segtype != SEGTYPE_ABS )
                 first = FALSE;
-            DebugMsg(("bin_write_data(%s): start ofs=%Xh, size=%Xh, file ofs=%Xh, grp=%s\n",
+            DebugMsg(("bin_write_data(%s): start ofs=%" FX32 "h, size=%" FX32 "h, file ofs=%" FX32 "h, grp=%s\n",
                       curr->sym.name, curr->e.seginfo->start_offset, curr->sym.max_offset - curr->e.seginfo->start_loc, curr->e.seginfo->fileoffset, (curr->e.seginfo->group ? curr->e.seginfo->group->name : "NULL" )));
         }
     }
@@ -564,20 +586,25 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
     /* handle relocs */
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
-        if ( DoFixup( curr ) == ERROR )
-            return( ERROR );
+        /* v2.04: scan ALL fixups! */
+        //if ( DoFixup( curr ) == ERROR )
+        //    return( ERROR );
+        DoFixup( curr );
 #if MZ_SUPPORT
         if ( stack == NULL &&
-            curr->e.seginfo->segrec->d.segdef.combine == COMB_STACK )
+            curr->e.seginfo->combine == COMB_STACK )
             stack = curr;
 #endif
     }
+    /* v2.04: return if any errors occured during fixup handling */
+    if ( ModuleInfo->g.error_count )
+        return( ERROR );
 
     /* for plain binaries make sure the start label is at
      * the beginning of the first segment */
     if ( Options.header_format == HFORMAT_NONE ) {
-        if ( start_label ) {
-            if ( entryoffset == -1 || entryseg != start_label->segment ) {
+        if ( ModuleInfo->start_label ) {
+            if ( entryoffset == -1 || entryseg != ModuleInfo->start_label->segment ) {
                 AsmError( START_LABEL_INVALID );
                 return( ERROR );
             }
@@ -613,7 +640,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
             uint_32 addr = stack->e.seginfo->start_offset;
             if ( stack->e.seginfo->group )
                 addr += stack->e.seginfo->group->offset;
-            DebugMsg(("bin_write_data: MZ, stack=%Xh ofs=%Xh\n", addr, stack->sym.offset ));
+            DebugMsg(("bin_write_data: MZ, stack=%" FX32 "h ofs=%" FX32 "h\n", addr, stack->sym.offset ));
             *(pReloc+7) = (addr >> 4) + ((addr & 0xF) ? 1 : 0); /* SS */
             *(pReloc+8) = stack->sym.offset; /* SP */
         } else {
@@ -623,21 +650,22 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
         /* set entry CS:IP if defined */
 
-        if ( start_label ) {
+        if ( ModuleInfo->start_label ) {
             uint_32 addr;
-            curr = (dir_node *)start_label->segment;
-            DebugMsg(("bin_write_data, start_label: offs=%Xh, seg.offs=%Xh, group.offs=%Xh\n",
-                      start_label->offset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset : 0 ));
+            curr = (dir_node *)ModuleInfo->start_label->segment;
+            DebugMsg(("bin_write_data, start_label: offs=%" FX32 "h, seg.offs=%" FX32 "h, group.offs=%" FX32 "h\n",
+                      ModuleInfo->start_label->offset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset : 0 ));
             if ( curr->e.seginfo->group ) {
                 addr = curr->e.seginfo->group->offset;
-                *(pReloc+10) = (addr & 0xF ) + curr->e.seginfo->start_offset + start_label->offset; /* IP */
+                *(pReloc+10) = (addr & 0xF ) + curr->e.seginfo->start_offset + ModuleInfo->start_label->offset; /* IP */
                 *(pReloc+11) = addr >> 4; /* CS */
             } else {
                 addr = curr->e.seginfo->start_offset;
-                *(pReloc+10) = (addr & 0xF ) + start_label->offset; /* IP */
+                *(pReloc+10) = (addr & 0xF ) + ModuleInfo->start_label->offset; /* IP */
                 *(pReloc+11) = addr >> 4; /* CS */
             }
         } else {
+            DebugMsg(("bin_write_data, ModuleInfo->start_label=%p\n", ModuleInfo->start_label ));
             AsmWarn( 2, NO_START_LABEL );
         }
         *(pReloc+12) = mzdata.ofs_fixups;
@@ -648,15 +676,19 @@ ret_code bin_write_data( module_info *ModuleInfo )
 #endif
 
 #if SECTORMAP
-    LstNL();
-    LstNL();
-    LstPrintf( szCaption );
-    LstNL();
-    LstNL();
-    LstPrintf( szCaption2 );
-    LstNL();
-    LstPrintf( szLine );
-    LstNL();
+    /* go to EOF */
+    if( FileInfo.file[LST] ) {
+        fseek( FileInfo.file[LST], 0, SEEK_END );
+        LstNL();
+        LstNL();
+        LstPrintf( szCaption );
+        LstNL();
+        LstNL();
+        LstPrintf( szCaption2 );
+        LstNL();
+        LstPrintf( szLine );
+        LstNL();
+    }
 #endif
 
     if ( Options.header_format == HFORMAT_MZ ) {
@@ -668,8 +700,18 @@ ret_code bin_write_data( module_info *ModuleInfo )
 #endif
     }
 
-    /* write sections */
+#ifdef DEBUG_OUT
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+        DebugMsg(("bin_write_data(%s): type=%u written=%" FX32 " max=%" FX32 " start=%" FX32 "\n",
+                curr->sym.name, curr->e.seginfo->segtype,
+                curr->e.seginfo->bytes_written,
+                curr->sym.max_offset,
+                curr->e.seginfo->start_loc ));
+    }
+#endif
+
+    /* write sections */
+    for( curr = Tables[TAB_SEG].head, first = TRUE; curr; curr = curr->next ) {
         if ( curr->e.seginfo->segtype == SEGTYPE_ABS ) {
             DebugMsg(("bin_write_data(%s): ABS segment not written\n", curr->sym.name ));
             continue;
@@ -684,7 +726,8 @@ ret_code bin_write_data( module_info *ModuleInfo )
                 if ( dir->e.seginfo->bytes_written )
                     break;
             if ( !dir ) {
-                DebugMsg(("bin_write_data(%s): segment not written, size=%Xh\n", curr->sym.name, size ));
+                DebugMsg(("bin_write_data(%s): segment not written, size=% " FX32 "h sizemem=%" FX32 "\n",
+                          curr->sym.name, size, sizemem ));
                 size = 0;
             }
         }
@@ -692,8 +735,10 @@ ret_code bin_write_data( module_info *ModuleInfo )
         LstPrintf( szSegLine, curr->sym.name, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset + curr->e.seginfo->start_loc, size, sizemem );
         LstNL();
 #endif
+        first = FALSE;
         if (size != 0 && curr->e.seginfo->CodeBuffer ) {
-            DebugMsg(("bin_write_data(%s): write %Xh bytes at offset %Xh, initialized bytes=%lu, buffer=%Xh\n", curr->sym.name, size, curr->e.seginfo->fileoffset, curr->e.seginfo->bytes_written, curr->e.seginfo->CodeBuffer ));
+            DebugMsg(("bin_write_data(%s): write %" FX32 "h bytes at offset %" FX32 "h, initialized bytes=%lu, buffer=%p\n",
+                      curr->sym.name, size, curr->e.seginfo->fileoffset, curr->e.seginfo->bytes_written, curr->e.seginfo->CodeBuffer ));
             fseek( FileInfo.file[OBJ], curr->e.seginfo->fileoffset, SEEK_SET );
 #ifdef __I86__
             if ( hfwrite( curr->e.seginfo->CodeBuffer, 1, size, FileInfo.file[OBJ] ) != size )

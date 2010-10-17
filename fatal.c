@@ -32,9 +32,10 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "fatal.h"
 #include "symbols.h"
+#include "parser.h"
 #include "directiv.h"
+#include "fatal.h"
 #include "input.h"
 #include "msgtext.h"
 
@@ -81,7 +82,7 @@ void Fatal( unsigned msg, ... )
 
     va_end( args );
 
-    ModuleInfo.error_count++;
+    ModuleInfo.g.error_count++;
     write_to_file = FALSE;
 
     /* run exit code */
@@ -91,12 +92,14 @@ void Fatal( unsigned msg, ... )
     exit( Fatal_Msg[msg].ret );
 }
 
+#if 0
 void SeekError( void )
 /********************/
 {
     DebugMsg(("SeekError occured\n"));
     Fatal( FATAL_FILE_SEEK_ERROR, FileInfo.fname[OBJ], errno );
 };
+#endif
 
 void WriteError( void )
 /*********************/

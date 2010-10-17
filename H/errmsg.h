@@ -34,15 +34,18 @@
 
 #ifdef DEBUG_OUT
     extern void DoDebugMsg( const char *format, ... );
+    extern void DoDebugMsg1( const char *format, ... );
     #define DebugMsg( x ) DoDebugMsg x
+    #define DebugMsg1( x ) DoDebugMsg1 x
     #define DebugCurrLine() printf( "%s\n", CurrSource );
 #else
     #define DebugMsg( x )
+    #define DebugMsg1( x )
     #define DebugCurrLine()
 #endif
 // use DebugMsg((....)) to call it
 
-#define AsmWarning( errno )   AsmWarn( 0,errno )
+//#define AsmWarning( errno )   AsmWarn( 0,errno )
 //#define AsmIntErr( x )        printf( "Internal error %d\n", x )
 
 #ifdef __UNIX__
@@ -65,7 +68,5 @@ enum msgno {
 };
 
 #define MAXMSGSIZE 128 /* size of buffer for MsgGet() */
-
-extern void InitErrFile( void );
 
 #endif

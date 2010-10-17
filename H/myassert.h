@@ -45,7 +45,7 @@ extern int InternalError( const char *file, unsigned line );
 #   define myassert(expr)   ((void)0)
 #else
 #   define never_reach()    InternalError(__FNAME__,__LINE__)
-#   define myassert(expr)   ((void)((expr)?0:InternalError(__FNAME__,__LINE__)))
+#   define myassert(expr)   ((void)((expr) ? 0 : InternalError(__FNAME__,__LINE__)))
 #endif
 
 #define MYASSERT_H  1

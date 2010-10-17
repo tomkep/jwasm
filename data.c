@@ -37,10 +37,10 @@
 #include "memalloc.h"
 #include "symbols.h"
 #include "parser.h"
+#include "directiv.h"
 #include "expreval.h"
 #include "input.h"
 #include "tbyte.h"
-#include "directiv.h"
 #include "fixup.h"
 #include "listing.h"
 #include "segment.h"
@@ -56,7 +56,6 @@
 
 extern ret_code segm_override( const expr_list *opndx, struct code_info *CodeInfo );
 extern struct asm_sym *SegOverride;
-extern uint_8 CommentDataInCode;
 
 /*
  variable StructInit is necessary because structure initialization
@@ -71,18 +70,11 @@ int StructInit;
 
 /* initialize an array inside a structure
  * if there are no brackets, the next comma, '>' or '}' will terminate
- */
-/* valid initialization are:
+ *
+ * valid initialization are:
  * - an expression, might contain DUP or a string enclosed in quotes.
  * - a literal enclosed in <> or {} which then is supposed to contain
  *   single items.
- */
-/* there's a problem with array initialization inside structures:
- * Since JWasm uses "generated code" for the initialization, it
- * doesn't know the "true" size of the data item. It makes some
- * guesses, but it is unsafe. To be improved...
- * v1.95: it has been improved, at least if a literal is used as
- * initialization - the "expression branch" still needs some work.
  */
 static ret_code InitializeArray( field_list *f, int *pi )
 /*******************************************************/
@@ -94,132 +86,83 @@ static ret_code InitializeArray( field_list *f, int *pi )
     int  i = *pi;
     int  j;
     int  lvl;
-    expr_list opndx;
     char buffer[MAX_LINE_LEN];
 
-    DebugMsg(("InitializeArray( %s ) enter, items=%lu, type=%s\n", f->sym->name, f->sym->total_length, f->initializer ));
-
-    /* array initialization is done by either a literal or an expression. */
-
-    if ( AsmBuffer[i]->token != T_STRING ||
-         ( AsmBuffer[i]->string_delim != '<' &&
-           AsmBuffer[i]->string_delim != '{' )) {
-        DebugMsg(("InitializeArray( %s ): i=%u token=%s\n", f->sym->name, i, AsmBuffer[i]->string_ptr ));
-        if ( EvalOperand( pi, Token_Count, &opndx, TRUE ) == ERROR )
-            return( ERROR );
-        i = *pi;
-        /* a string enclosed in double-quotes? */
-        if ( opndx.kind == EXPR_CONST && opndx.string ) {
-            asm_sym *sym2;
-            for ( sym2 = f->sym; sym2->type; sym2 = sym2->type );
-            if ( sym2->mem_type == MT_BYTE || sym2->mem_type == MT_SBYTE ) {
-                sprintf( buffer, "%s %s ", f->initializer, opndx.string );
-                opndx.value = strlen( opndx.string ) - 2;
-                if ( opndx.value > f->sym->total_size ) {
-                    i--;
-                    AsmErr( TOO_MANY_INITIAL_VALUES_FOR_ARRAY, AsmBuffer[i]->string_ptr );
-                    return( ERROR );
-                }
-            } else {
-                AsmError( INVALID_DATA_INITIALIZER );
-                return( ERROR );
-            }
-        } else {
-            /* it must be '<expr> DUP (...)' */
-            if ( AsmBuffer[i]->token != T_RES_ID || AsmBuffer[i]->value != T_DUP ) {
-                AsmErr( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM, f->sym->name );
-                return( ERROR );
-            }
-            /* v2.03: db 'AB' dup (0) is valid syntax! */
-            //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
-            if ( opndx.kind != EXPR_CONST ) {
-                AsmError( CONSTANT_EXPECTED );
-                return( ERROR );
-            }
-            if ( opndx.value > f->sym->total_length ) {
-                AsmError( TOO_MANY_INITIAL_VALUES_FOR_STRUCTURE );
-                return( ERROR );
-            }
-            sprintf( buffer, "%s %d ", f->initializer, opndx.value );
-        }
-        lvl = 0;
-        while ( AsmBuffer[i]->token != T_FINAL) {
-            if ( AsmBuffer[i]->token == T_OP_BRACKET )
-                lvl++;
-            else if ( AsmBuffer[i]->token == T_CL_BRACKET )
-                lvl--;
-            else if ( lvl == 0 && AsmBuffer[i]->token == T_COMMA )
-                break;
-            if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<') {
-                char *src = AsmBuffer[i]->string_ptr;
-                ptr = buffer + strlen(buffer);
-                *ptr++ = '<';
-                while (*src) {
-                    if (*src == '<' || *src == '>' || *src == '!')
-                        *ptr++ = '!';
-                    *ptr++ = *src++;
-                }
-                *ptr++ = '>';
-                *ptr = NULLC;
-            } else
-                strcat( buffer, AsmBuffer[i]->string_ptr );
-            strcat( buffer, " " );
-            i++;
-        }
-
-        AddLineQueue( buffer );
-
-        if ( opndx.value < f->sym->total_length ) {
-            asm_sym *sym2;
-            for ( sym2 = f->sym; sym2->type; sym2 = sym2->type );
-            if ( f->sym->mem_type == MT_TYPE && ((dir_node *)sym2)->e.structinfo->typekind != TYPE_TYPEDEF )
-                ptr = "<>";
-            else
-                ptr = "?";
-            sprintf( buffer, "%s %lu DUP (%s)", f->initializer,
-                     f->sym->total_length - opndx.value, ptr );
-            AddLineQueue( buffer );
-        }
-
-        DebugMsg(("InitializeArray(%s) exit\n", f->sym->name ));
-        *pi = i;
-        return( NOT_ERROR );
-    }
-
-    /* initializer is a literal */
-
-    (*pi)++;
-    strcpy( buffer, f->initializer );
-    strcat( buffer, " ");
-
-    /* if the string is empty, use the default initializer */
-    if ( AsmBuffer[i]->value == 0 ) {
-        strcat( buffer, f->value );
-        AddLineQueue( buffer );
-        return( NOT_ERROR );
-    }
+    DebugMsg1(("InitializeArray( %s ) enter, items=%lu, type=%s\n", f->sym->name, f->sym->total_length, f->initializer ));
 
     /* empty the line queue to update the current offset */
-
     pSave = (unsigned char *)AsmTmpAlloc( GetTokenStateSize() );
     SaveTokenState( pSave );
     if ( line_queue ) {
         RunLineQueueEx();
         RestoreTokenState( pSave ); /* v2.0: restore token buffer state! */
     }
-
     oldofs = GetCurrOffset();
-    DebugMsg(("InitializeArray(%s): current offset=%X\n", f->sym->name, oldofs ));
+    DebugMsg1(("InitializeArray(%s): current offset=%X\n", f->sym->name, oldofs ));
 
-    if ( AsmBuffer[i]->string_delim == '{' ) {
-        ptr = AsmBuffer[i]->string_ptr + 1;
-        *( ptr + AsmBuffer[i]->value ) = NULLC;
-        strcat( buffer, ptr );
-        *( ptr + AsmBuffer[i]->value ) = '}';
-    } else
-        strcat( buffer, AsmBuffer[i]->string_ptr );
+    /* If current item is a literal enclosed in <> or {}, just use this
+     * item. Else, use all items until a comma or EOL is found.
+     * Prior to v2.04, EvalOperand() was called in the latter case. This
+     * was an error, because text macros might be found in the
+     * expression - which makes the expression evaluator complain.
+     */
 
-    AddLineQueue( buffer );
+    if ( AsmBuffer[i]->token != T_STRING ||
+         ( AsmBuffer[i]->string_delim != '<' &&
+           AsmBuffer[i]->string_delim != '{' )) {
+        DebugMsg1(("InitializeArray( %s ): i=%u token=%s\n", f->sym->name, i, AsmBuffer[i]->string_ptr ));
+        /* copy items until a comma or EOL is found */
+        for( ptr = buffer, lvl = 0; AsmBuffer[i]->token != T_FINAL; i++ ) {
+            if ( AsmBuffer[i]->token == T_OP_BRACKET )
+                lvl++;
+            else if ( AsmBuffer[i]->token == T_CL_BRACKET )
+                lvl--;
+            else if ( lvl == 0 && AsmBuffer[i]->token == T_COMMA )
+                break;
+            if ( ptr != buffer )
+                *ptr++ = ' ';
+            if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
+                char *src = AsmBuffer[i]->string_ptr;
+                *ptr++ = '<';
+                while ( *src ) {
+                    if ( *src == '<' || *src == '>' || *src == '!' )
+                        *ptr++ = '!';
+                    *ptr++ = *src++;
+                }
+                *ptr++ = '>';
+            } else {
+                strcpy( ptr, AsmBuffer[i]->string_ptr );
+                ptr += strlen( ptr );
+            }
+        }
+        *ptr = NULLC;
+        *pi = i;
+
+        AddLineQueueX( "%s %s", f->initializer, buffer );
+
+    } else {
+
+        /* initializer is a literal */
+
+        (*pi)++;
+
+        /* if the string is empty, use the default initializer */
+        if ( AsmBuffer[i]->value == 0 ) {
+            AddLineQueueX( "%s %s", f->initializer, f->value );
+        } else {
+            /* for literals enclosed in {} the brackets are part of the literal!
+             * They have to be removed temporarily.
+             */
+            if ( AsmBuffer[i]->string_delim == '{' ) {
+                ptr = AsmBuffer[i]->string_ptr + 1;
+                *( ptr + AsmBuffer[i]->value ) = NULLC;
+                AddLineQueueX("%s %s", f->initializer, ptr );
+                *( ptr + AsmBuffer[i]->value ) = '}';
+            } else
+                AddLineQueueX( "%s %s", f->initializer, AsmBuffer[i]->string_ptr );
+        }
+    }
+
     RunLineQueueEx();
 
     /* the generated line has been assembled and the true size
@@ -227,24 +170,20 @@ static ret_code InitializeArray( field_list *f, int *pi )
      */
 
     j = GetCurrOffset() - oldofs ;
-    DebugMsg(("InitializeArray(%s): new offset=%X\n", f->sym->name, j + oldofs ));
+    DebugMsg1(("InitializeArray(%s): new offset=%X\n", f->sym->name, j + oldofs ));
 
     RestoreTokenState( pSave );
 
     if ( j > f->sym->total_size ) {
         AsmErr( TOO_MANY_INITIAL_VALUES_FOR_ARRAY, AsmBuffer[i]->string_ptr );
     } else if (j < f->sym->total_size ) {
-        char c;
-        DebugMsg(("InitializeArray: remaining bytes=%lu\n", f->sym->total_size - j ));
-        if ( CurrSeg && CurrSeg->e.seginfo->segtype != SEGTYPE_BSS )
-            c = '0';
-        else
-            c = '?';
-        sprintf( buffer, "db %lu dup (%c)", f->sym->total_size - j, c );
-        AddLineQueue( buffer );
+        DebugMsg1(("InitializeArray: remaining bytes=%lu\n", f->sym->total_size - j ));
+        AddLineQueueX( "db %u dup (%s)",
+                      f->sym->total_size - j,
+                      CurrSeg && CurrSeg->e.seginfo->segtype != SEGTYPE_BSS ? "0" : "?" );
     }
 
-    DebugMsg(("InitializeArray(%s) exit, curr ofs=%X\n", f->sym->name, GetCurrOffset() ));
+    DebugMsg1(("InitializeArray(%s) exit, curr ofs=%X\n", f->sym->name, GetCurrOffset() ));
     return( NOT_ERROR );
 }
 
@@ -283,7 +222,7 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
         DebugMsg(("InitializeStructure(%s): unexpectedly called in pass %u!!!!!\n", symtype->sym.name, Parse_Pass+1 ));
     }
 #endif
-    DebugMsg(("InitializeStructure(%s) enter, total=%u/%u, init=>%s<, embedded=%s, alignm=%u\n",
+    DebugMsg1(("InitializeStructure(%s) enter, total=%u/%u, init=>%s<, embedded=%s, alignm=%u\n",
               symtype->sym.name, symtype->sym.total_size, symtype->sym.total_length, ptr, embedded ? embedded->name : "NULL", symtype->e.structinfo->alignment ));
 #endif
 
@@ -324,13 +263,13 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
         line_queue = NULL;
     }
     /*
-     The state of the token buffer has to be saved/restored in any
-     case, regardless if embedded is TRUE or FALSE.
+     * The state of the token buffer has to be saved/restored in any
+     * case, regardless if embedded is TRUE or FALSE.
      */
     pSave = (unsigned char *)AsmTmpAlloc( GetTokenStateSize() );
     SaveTokenState( pSave );
     i = Token_Count + 1;
-    Token_Count = Tokenize( ptr, i );
+    Token_Count = Tokenize( ptr, i, FALSE );
 
     if ( init )
         *init = c;
@@ -341,15 +280,15 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
     }
 
     /* var StructInit is required because structure initialization is
-     technically handled as generated code, but from the viewpoint of
-     the preprocessor it must be handled like a macro. This is because
-     the initialization string can contain macro function calls.
+     * technically handled as generated code, but from the viewpoint of
+     * the preprocessor it must be handled like a macro. This is because
+     * the initialization string can contain macro function calls.
      */
     StructInit++;
 
     for( f = symtype->e.structinfo->head; f != NULL; f = f->next ) {
 
-        DebugMsg(("InitializeStructure field=%s ofs=%u total_size=%lu total_length=%lu initializer=%s default=>%s<\n",
+        DebugMsg1(("InitializeStructure field=%s ofs=%u total_size=%lu total_length=%lu initializer=%s default=>%s<\n",
                   f->sym->name,
                   f->sym->offset,
                   f->sym->total_size,
@@ -364,7 +303,7 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
             if ( AsmBuffer[i]->token == T_COMMA || AsmBuffer[i]->token == T_FINAL ) {
                 if ( f->value ) {
                     int j = Token_Count + 1;
-                    int max_item = Tokenize(f->value, j);
+                    int max_item = Tokenize( f->value, j, FALSE );
                     EvalOperand(&j, max_item, &opndx, TRUE);
                     is_record_set = TRUE;
                 } else {
@@ -455,7 +394,7 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
                 nextofs = f->next->sym->offset;
 
             if ( f->sym->offset + f->sym->total_size < nextofs ) {
-                DebugMsg(("InitializeStructure: padding, field=%s ofs=%X total=%X nextofs=%X\n",
+                DebugMsg1(("InitializeStructure: padding, field=%s ofs=%X total=%X nextofs=%X\n",
                           f->sym->name, f->sym->offset, f->sym->total_size, nextofs ));
                 sprintf( buffer,"db %u dup (?) ;padding",
                         nextofs - (f->sym->offset + f->sym->total_size) );
@@ -513,7 +452,7 @@ static ret_code InitializeStructure( dir_node *symtype, int index, asm_sym *embe
 
     StructInit--;
 
-    DebugMsg(("InitializeStructure(%s) exit, current ofs=%X\n", symtype->sym.name, GetCurrOffset() ));
+    DebugMsg1(("InitializeStructure(%s) exit, current ofs=%X\n", symtype->sym.name, GetCurrOffset() ));
 
     return( NOT_ERROR );
 }
@@ -546,27 +485,65 @@ static void OutputDataBytes( const unsigned char *p, int len )
 #define OutputDataBytes( x, y ) OutputBytes( x, y, NULL )
 #endif
 
-static void output_float( int index, unsigned no_of_bytes, bool negative )
-/************************************************************************/
-{
-    double              double_value;
-    float               float_value;
-    unsigned char       *char_ptr;
-    TB_LD               tbyte;
+/* convert hex numbers with "real number designator" to binary.
+ * there's more or less the same function in tokenize(), but
+ * we shouldn't use the AsmBuffer <value> space for items of
+ * type <float>
+ */
 
-    if( no_of_bytes == 10 ) {
-        char_ptr = (unsigned char *)strtotb( AsmBuffer[index]->string_ptr, &tbyte, negative );
+static void hex2float( void *out, const char *inp, int size )
+/***********************************************************/
+{
+    int val;
+    int i;
+    int j;
+    char *p = out;
+    const char *char_ptr = inp;
+
+    memset( (char *)out, 0, size );
+    for ( i = 0;
+         *char_ptr != NULLC && *char_ptr != 'r';
+          char_ptr++, i++ ) {
+        if( *char_ptr <= '9' )
+            val = *char_ptr - '0';
+        else
+            val = tolower( *char_ptr ) - 'a' + 10;
+        for ( j = 0, p = out; j < size; j++ ) {
+            val += *p * 16;
+            *(p++) = val;
+            val >>= 8;
+        }
+    }
+}
+
+void atofloat( void *out, int index, unsigned size, bool negative )
+/*****************************************************************/
+{
+    const char *inp;
+    double  double_value;
+    float   float_value;
+
+    inp = AsmBuffer[index]->string_ptr;
+    /* v2.04: accept and handle 'real number designator' */
+    if ( AsmBuffer[index]->floattype == 'r' ) {
+        hex2float( out, inp, size );
     } else {
-        double_value = strtod( AsmBuffer[index]->string_ptr, NULL );
-        if( negative )
-            double_value *= -1;
-        switch( no_of_bytes ) {
+        switch ( size ) {
         case 4:
+            double_value = strtod( inp, NULL );
+            if( negative )
+                double_value *= -1;
             float_value = double_value;
-            char_ptr = (unsigned char *)&float_value;
+            *(float *)out = float_value;
             break;
         case 8:
-            char_ptr = (unsigned char *)&double_value;
+            double_value = strtod( inp, NULL );
+            if( negative )
+                double_value *= -1;
+            *(double *)out = double_value;
+            break;
+        case 10:
+            strtotb( inp, (TB_LD *)out, negative );
             break;
         default:
             /* sizes != 4,8 or 10 aren't accepted.
@@ -574,14 +551,19 @@ static void output_float( int index, unsigned no_of_bytes, bool negative )
              */
             if ( Parse_Pass == PASS_1 )
                 AsmWarn( 4, FP_INITIALIZER_IGNORED );
-            /* this is Masm-compatible: output 00 bytes */
-            FillDataBytes( 0x00, no_of_bytes );
-            return;
+            memset( (char *)out, 0, size );
         }
     }
+    return;
+}
 
-    OutputDataBytes( char_ptr, no_of_bytes );
+static void output_float( int index, unsigned size, bool negative )
+/*****************************************************************/
+{
+    char buffer[12];
 
+    atofloat( buffer, index, size, negative );
+    OutputDataBytes( buffer, size );
     return;
 }
 
@@ -590,14 +572,14 @@ static void output_float( int index, unsigned no_of_bytes, bool negative )
  * Called in Pass 1 only.
  */
 
-static void update_sizes( asm_sym *sym, bool first, unsigned no_of_bytes )
-/************************************************************************/
+static void update_sizes( asm_sym *sym, bool first, uint_32 size )
+/****************************************************************/
 {
     sym->total_length++;
-    sym->total_size += no_of_bytes;
+    sym->total_size += size;
     if( first ) {
         sym->first_length++;
-        sym->first_size += no_of_bytes;
+        sym->first_size += size;
     }
 }
 
@@ -610,8 +592,8 @@ static void update_sizes( asm_sym *sym, bool first, unsigned no_of_bytes )
  - dup: array size if called by DUP operator, otherwise 1
 */
 
-static ret_code data_item( struct code_info *CodeInfo, asm_sym *sym, dir_node *struct_sym, int *start_pos, unsigned no_of_bytes, unsigned int dup, bool struct_field, bool float_initializer, bool first )
-/********************************************************************************************************************************************************************************************************/
+static ret_code data_item( struct code_info *CodeInfo, asm_sym *sym, dir_node *struct_sym, int *start_pos, unsigned no_of_bytes, uint_32 dup, bool struct_field, bool float_initializer, bool first )
+/***************************************************************************************************************************************************************************************************/
 {
     int                 cur_pos;
     int                 string_len;
@@ -619,15 +601,15 @@ static ret_code data_item( struct code_info *CodeInfo, asm_sym *sym, dir_node *s
     bool                firstitem = TRUE;
 #endif
     bool                initwarn = FALSE;
-    unsigned int        count;
+    //unsigned int        count;
     uint_8              *char_ptr;
     bool                negative;
     char                tmp;
     expr_list           opndx;
 
-    DebugMsg(("data_item(sym=%s, type=%X, pos=%d, size=%u, dup=%u) enter\n", sym ? sym->name : "NULL", struct_sym, *start_pos, no_of_bytes, dup));
+    DebugMsg1(("data_item(sym=%s, type=%X, pos=%d, size=%u, dup=%" FX32 "h) enter\n", sym ? sym->name : "NULL", struct_sym, *start_pos, no_of_bytes, dup));
 
-    for (;dup;dup--) {
+    for ( ; dup; dup-- ) {
     cur_pos = *start_pos;
 next_item:
     /* since v1.94, the expression evaluator won't handle strings
@@ -638,7 +620,7 @@ next_item:
                 ( AsmBuffer[cur_pos]->string_delim == '<' ||
                   AsmBuffer[cur_pos]->string_delim == '{' )) {
         if( struct_sym != NULL ) {
-            DebugMsg(("data_item: string found: >%s<, struct_field=%u, no_of_bytes=%u, curr_ofs=%X\n", AsmBuffer[cur_pos]->string_ptr, struct_field, no_of_bytes, GetCurrOffset()));
+            DebugMsg1(("data_item: literal found: >%s<, struct_field=%u, no_of_bytes=%u, curr_ofs=%X\n", AsmBuffer[cur_pos]->string_ptr, struct_field, no_of_bytes, GetCurrOffset()));
             /* it's either a real data item - then struct_field is FALSE -
              or a structure FIELD of arbitrary type */
             if( struct_field == FALSE ) {
@@ -670,7 +652,7 @@ next_item:
                     }
                 }
 #endif
-                DebugMsg(("data_item: calling InitializeStructure\n"));
+                DebugMsg1(("data_item: calling InitializeStructure\n"));
                 if ( InitializeStructure( struct_sym, cur_pos, NULL ) == ERROR )
                     return( ERROR );
             } else {
@@ -706,6 +688,7 @@ next_item:
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
+        /* max dup is 0x7fffffff */
         if ( opndx.value < 0 ) {
             AsmError( COUNT_MUST_BE_POSITIVE_OR_ZERO );
             return( ERROR );
@@ -732,9 +715,9 @@ next_item:
                     break;
             }
         } else {
-            DebugMsg(("data_item(%s): op DUP, count=%u, calling data_item()\n", sym ? sym->name : "NULL", opndx.value ));
-            if ( data_item( CodeInfo, sym, struct_sym, &cur_pos, no_of_bytes, opndx.value, struct_field, float_initializer, first ) == ERROR ) {
-                DebugMsg(("data_item(%s): op DUP, count=%u, returned with error\n", sym ? sym->name : "NULL", opndx.value));
+            DebugMsg1(("data_item(%s): op DUP, count=%" FX32 "h, calling data_item()\n", sym ? sym->name : "NULL", opndx.uvalue ));
+            if ( data_item( CodeInfo, sym, struct_sym, &cur_pos, no_of_bytes, opndx.uvalue, struct_field, float_initializer, first ) == ERROR ) {
+                DebugMsg(("data_item(%s): op DUP, count=%" FX32 "h, returned with error\n", sym ? sym->name : "NULL", opndx.uvalue ));
                 return( ERROR );
             }
         }
@@ -753,28 +736,28 @@ next_item:
 
         /* handle '?' */
         if ( opndx.kind == EXPR_EMPTY && AsmBuffer[cur_pos]->token == T_QUESTION_MARK ) {
-            DebugMsg(("data_item: ? found, curr_ofs=%X\n", GetCurrOffset()));
+            DebugMsg1(("data_item: ? found, curr_ofs=%X\n", GetCurrOffset()));
+            opndx.uvalue = no_of_bytes;
             /* tiny optimization for uninitialized arrays */
-            count = no_of_bytes;
             if ( AsmBuffer[cur_pos+1]->token != T_COMMA && cur_pos == *start_pos ) {
-                count *= dup;
+                opndx.uvalue *= dup;
                 if( sym && Parse_Pass == PASS_1 ) {
                     sym->total_length += dup;
-                    sym->total_size += count;
+                    sym->total_size += opndx.uvalue;
                     if( first ) {
                         sym->first_length += dup;
-                        sym->first_size += count;
+                        sym->first_size += opndx.uvalue;
                     }
                 }
-                dup = 1;
+                dup = 1; /* force loop exit */
             } else {
                 if( sym && Parse_Pass == PASS_1 )
-                    update_sizes( sym, first, count );
+                    update_sizes( sym, first, opndx.uvalue );
             }
             if( !struct_field ) {
-                SetCurrOffset( count, TRUE, TRUE );
+                SetCurrOffset( opndx.uvalue, TRUE, TRUE );
             } else {
-                UpdateStructSize( count );
+                UpdateStructSize( opndx.uvalue );
             }
             cur_pos++;
             goto item_done;
@@ -796,13 +779,14 @@ next_item:
         case EXPR_EMPTY:
             negative = FALSE;
             /* evaluator cannot handle '?' and FLOATS! */
-            if (AsmBuffer[cur_pos]->token == '-' && AsmBuffer[cur_pos+1]->token == T_FLOAT) {
+            if ( AsmBuffer[cur_pos]->token == '-' && AsmBuffer[cur_pos+1]->token == T_FLOAT ) {
                 cur_pos++;
                 negative = TRUE;
-            } else if (AsmBuffer[cur_pos]->token == '+' && AsmBuffer[cur_pos+1]->token == T_FLOAT)
+            } else if ( AsmBuffer[cur_pos]->token == '+' && AsmBuffer[cur_pos+1]->token == T_FLOAT )
                 cur_pos++;
 
             if ( AsmBuffer[cur_pos]->token == T_FLOAT ) {
+                DebugMsg1(("data_item.FLOAT: >%s<, struct_field=%u, no_of_bytes=%u, curr_ofs=%X\n", AsmBuffer[cur_pos]->string_ptr, struct_field, no_of_bytes, GetCurrOffset()));
                 if (!struct_field)
                     output_float( cur_pos, no_of_bytes, negative );
                 else {
@@ -830,14 +814,14 @@ next_item:
             /* a string returned by the evaluator (enclosed in quotes!)? */
 
             if ( opndx.string != NULL ) {
-                DebugMsg(("data_item.CONST: string found: >%s<, struct_field=%u, no_of_bytes=%u, curr_ofs=%X\n", AsmBuffer[cur_pos]->string_ptr, struct_field, no_of_bytes, GetCurrOffset()));
+                DebugMsg1(("data_item.CONST: string found: >%s<, struct_field=%u, no_of_bytes=%u, curr_ofs=%X\n", opndx.string, struct_field, no_of_bytes, GetCurrOffset()));
                 char_ptr = (uint_8 *)opndx.string;
                 string_len = strlen( opndx.string );
 
                 /* this shouldn't happen, but just to be safe */
-                if (string_len < 2) {
+                if ( string_len < 2 ) {
                     DebugMsg(("data_item.CONST: error, string len=%d\n", string_len));
-                    AsmError( SYNTAX_ERROR );
+                    AsmErr( SYNTAX_ERROR_EX, char_ptr );
                     return( ERROR );
                 }
                 string_len -= 2;
@@ -881,22 +865,18 @@ next_item:
                         FillDataBytes( 0, no_of_bytes - string_len );
                 } else {
                     if( Parse_Pass == PASS_1 ) {
-                        if ( no_of_bytes == 1 )
-                            count = string_len;
-                        else
-                            count = no_of_bytes;
-                        UpdateStructSize( count );
+                        UpdateStructSize( no_of_bytes == 1 ? string_len : no_of_bytes );
                     }
                 }
             } else {
                 /* it's NOT a string */
                 char_ptr = (uint_8 *)&opndx.value;
-                count = 0;
-                DebugMsg(("data_item.CONST: const found, string=0, no_of_bytes=%u, curr_ofs=%X\n", no_of_bytes, GetCurrOffset()));
+                DebugMsg1(("data_item.CONST: const found, value=%" FX32 "h, no_of_bytes=%u, curr_ofs=%" FX32 "\n", opndx.value, no_of_bytes, GetCurrOffset()));
                 if( sym && Parse_Pass == PASS_1 ) {
                     update_sizes( sym, first, no_of_bytes );
                 }
                 if( !struct_field ) {
+                    int count = 0;
                     /* the evaluator cannot handle types > 16 bytes */
                     /* so if a simple type is larger, clear anything
                      which is above */
@@ -935,7 +915,7 @@ next_item:
                 //int              i;
                 char             *ptr;
                 enum fixup_types fixup_type;
-                struct genfixup  *fixup;
+                struct fixup  *fixup;
 
                 /* since a fixup will be created, 8 bytes is max */
                 if ( no_of_bytes > sizeof(uint_64) ) {
@@ -1219,19 +1199,19 @@ next_item:
 item_done:
     if( AsmBuffer[cur_pos]->token == T_COMMA ) {
         cur_pos++;
-        /* if there's nothing anymore after the comma, exit without error! */
-        if ( AsmBuffer[cur_pos]->token == T_FINAL )
-            break;
-        first = FALSE;
-        if ( sym )
-            sym->isarray = TRUE;
-        goto next_item;
+       if ( AsmBuffer[cur_pos]->token != T_FINAL &&
+           AsmBuffer[cur_pos]->token != T_CL_BRACKET ) {
+           first = FALSE;
+           if ( sym )
+               sym->isarray = TRUE;
+           goto next_item;
+       }
     }
 
     } /* end for */
 
     *start_pos = cur_pos;
-    DebugMsg(("data_item: exit without error, cur_pos=%d\n", cur_pos));
+    DebugMsg1(("data_item: exit, no error, cur_pos=%d\n", cur_pos));
     return( NOT_ERROR );
 }
 
@@ -1281,13 +1261,13 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
     bool                float_initializer = FALSE;
 
 
-    DebugMsg(("data_init enter, sym_loc=%d, init_loc=%d\n", sym_loc, initializer_loc));
+    DebugMsg1(("data_init enter, sym_loc=%d, init_loc=%d\n", sym_loc, initializer_loc));
 
     if( ( sym_loc >= 0 ) && ( CurrStruct == NULL ) ) {
         /* get/create the label.
          * it might be a code label if Masm v5.1 compatibility is enabled.
          */
-        DebugMsg(("data_init: calling SymLookup(%s)\n", AsmBuffer[sym_loc]->string_ptr));
+        DebugMsg1(("data_init: calling SymLookup(%s)\n", AsmBuffer[sym_loc]->string_ptr));
         sym = SymLookup( AsmBuffer[sym_loc]->string_ptr );
         if( sym == NULL ) {
             DebugMsg(("data_init exit, error: invalid label name\n"));
@@ -1297,7 +1277,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
 
     if ( struct_sym ) {
         /* if the parser found a TYPE id, struct_sym is != NULL */
-        DebugMsg(("data_init: arbitrary type, calling SymSearch\n"));
+        DebugMsg1(("data_init: arbitrary type %s, calling SymSearch\n", struct_sym->sym.name ));
         //struct_sym = SymSearch( AsmBuffer[initializer_loc]->string_ptr );
         mem_type = MT_TYPE;
         if (sym)
@@ -1320,16 +1300,16 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
         int i;
 
         /* it's either a type or a data directive. For types, the index
-         into the simpletype table is in <opcode>, for data directives
+         into the simpletype table is in <value8>, for data directives
          the index is found in the opnd_type[0] field.
          */
 
-        if ( AsmBuffer[ initializer_loc]->token == T_RES_ID &&
-             AsmBuffer[ initializer_loc]->rm_byte == RWT_TYPE ) {
-            i = AsmBuffer[ initializer_loc]->opcode;
-        } else if ( AsmBuffer[ initializer_loc]->token == T_DIRECTIVE &&
-                   (AsmBuffer[ initializer_loc]->dirtype == DRT_DATADIR )) {
-            i = GetOpndType( AsmBuffer[initializer_loc]->value, 0 );
+        if ( AsmBuffer[ initializer_loc ]->token == T_RES_ID &&
+             AsmBuffer[ initializer_loc ]->type == RWT_TYPE ) {
+            i = AsmBuffer[ initializer_loc]->value8;
+        } else if ( AsmBuffer[ initializer_loc ]->token == T_DIRECTIVE &&
+                   (AsmBuffer[ initializer_loc ]->dirtype == DRT_DATADIR )) {
+            i = GetSflagsSp( AsmBuffer[initializer_loc]->value );
         } else {
             AsmErr( INVALID_TYPE_FOR_DATA_DECLARATION, sym->name );
             return( ERROR );
@@ -1372,7 +1352,11 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
                 return ( ERROR );
             }
             currofs = sym->offset;
-            DebugMsg(("data_init: %s, AddFieldToStruct called, ofs=%X\n", sym->name, sym->offset ));
+            DebugMsg1(("data_init: %s, AddFieldToStruct called, ofs=%X\n", sym->name, sym->offset ));
+        } else { /* v2.04: else branch added */
+            sym = CurrStruct->e.structinfo->tail->sym;
+            currofs = sym->offset;
+            CurrStruct->e.structinfo->tail = CurrStruct->e.structinfo->tail->next;
         }
         initializer_loc++;
         if( data_item( CodeInfo, sym, struct_sym, &initializer_loc, no_of_bytes, 1, TRUE, float_initializer, TRUE ) == ERROR ) {
@@ -1380,14 +1364,15 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
             return( ERROR );
         }
 
-        if ( ModuleInfo.list && Parse_Pass == PASS_1 )
+        //if ( ModuleInfo.list && Parse_Pass == PASS_1 )
+        if ( ModuleInfo.list )
             LstWrite( LSTTYPE_STRUCT, currofs, sym->name );
 
-        if (AsmBuffer[initializer_loc]->token != T_FINAL) {
+        if ( AsmBuffer[initializer_loc]->token != T_FINAL ) {
             AsmErr( SYNTAX_ERROR_EX, AsmBuffer[initializer_loc]->string_ptr );
             return( ERROR );
         }
-        DebugMsg(("data_init: exit, inside struct declaration (%s.%u), no error\n", CurrStruct->sym.name, CurrStruct->sym.offset ));
+        DebugMsg1(("data_init: exit, inside struct declaration (%s.%u), no error\n", CurrStruct->sym.name, CurrStruct->sym.offset ));
         return( NOT_ERROR );
     }
 
@@ -1400,7 +1385,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
         SaveState();
     }
 #endif
-    if ( CommentDataInCode )
+    if ( ModuleInfo.CommentDataInCode )
         omf_OutSelect( TRUE );
 
     if ( ModuleInfo.list ) {
@@ -1416,12 +1401,12 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
                 //    return( ERROR );
                 /* v2.0: display error and continue! */
                 checktypes( sym, mem_type, struct_sym );
-                dir_internal( (dir_node *)sym );
+                dir_ext2int( (dir_node *)sym );
                 sym->total_size = 0;
                 sym->total_length = 0;
                 sym->first_length = 0;
             } else if( sym->state == SYM_UNDEFINED ) {
-                dir_remove_table( (dir_node *)sym );
+                dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
                 sym->state = SYM_INTERNAL;
 #if 1
                 /* accept a symbol "redefinition" if addresses and types
@@ -1442,10 +1427,9 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
             }
             /* add the label to the linked list attached to curr segment */
             /* this allows to reduce the number of passes (see Fixup.c) */
-            if ( CurrSeg ) {
-                ((dir_node *)sym)->next = (dir_node *)CurrSeg->e.seginfo->labels;
-                CurrSeg->e.seginfo->labels = sym;
-            }
+            ((dir_node *)sym)->next = (dir_node *)CurrSeg->e.seginfo->labels;
+            CurrSeg->e.seginfo->labels = sym;
+
         } else {
             old_offset = sym->offset;
         }
@@ -1458,7 +1442,7 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
 #endif
             ModuleInfo.PhaseError = TRUE;
         }
-        sym->defined = TRUE;
+        sym->isdefined = TRUE;
         sym->mem_type = mem_type;
         /* backpatch for data items? Yes, if the item is defined
          * in a code segment then its offset may change!
@@ -1492,14 +1476,14 @@ ret_code data_init( struct code_info *CodeInfo, int sym_loc, int initializer_loc
         return( ERROR );
     }
 
-    if ( ModuleInfo.list && line_listed == FALSE ) {
+    if ( ModuleInfo.list && ModuleInfo.line_listed == FALSE ) {
         if ( Parse_Pass != PASS_1 ) {
-            LstWrite( LSTTYPE_LIDATA, currofs, NULL );
+            LstWrite( LSTTYPE_DATA, currofs, NULL );
         } else
             LstWriteSrcLine();
     }
 
-    DebugMsg(("data_init(ofs=%X): exit without error\n", CurrSeg->sym.offset ));
+    DebugMsg1(("data_init(ofs=%X): exit without error\n", CurrSeg->sym.offset ));
     return( NOT_ERROR );
 }
 

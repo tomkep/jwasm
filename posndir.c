@@ -37,6 +37,7 @@
 #include "listing.h"
 #include "posndir.h"
 #include "fastpass.h"
+#include "fixup.h"
 
 #include "myassert.h"
 
@@ -108,12 +109,16 @@ ret_code OrgDirective( int i )
         if ( StoreState == FALSE && Parse_Pass == PASS_1 )
             SaveState();
 #endif
+        /* v2.04: added */
+        if ( Parse_Pass == PASS_1 && CurrSeg && CurrSeg->e.seginfo->FixupListHead )
+            CurrSeg->e.seginfo->FixupListHead->orgoccured = TRUE;
+
         if ( opndx.kind == EXPR_CONST )
             return( SetCurrOffset( opndx.value, FALSE, FALSE ) );
         else if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE )
             return( SetCurrOffset( opndx.sym->offset + opndx.value, FALSE, FALSE ) );
     }
-    AsmError( EXPECTING_NUMBER );
+    AsmError( ORG_NEEDS_A_CONSTANT_OR_LOCAL_OFFSET );
     return( ERROR );
 }
 
@@ -129,17 +134,14 @@ static void fill_in_objfile_space( uint size )
      - nops    ... for CODE
      */
 
-    if( CurrSeg->e.seginfo->segtype != SEGTYPE_CODE ) {
+    /* v2.04: no output if nothing has been written yet */
+    if( CurrSeg->e.seginfo->written == FALSE ) {
 
-        if (CurrSeg->e.seginfo->segtype == SEGTYPE_BSS ||
-            CurrSeg->e.seginfo->segtype == SEGTYPE_ABS ) {
+        SetCurrOffset( size, TRUE, TRUE );
 
-            SetCurrOffset( size, TRUE, TRUE );
+    } else if( CurrSeg->e.seginfo->segtype != SEGTYPE_CODE ) {
 
-        } else {
-            /* just output nulls */
-            FillDataBytes( 0x00, size );
-        }
+        FillDataBytes( 0x00, size ); /* just output nulls */
 
     } else {
         /* output appropriate NOP type instructions to fill in the gap */
@@ -186,9 +188,10 @@ ret_code AlignDirective( int directive, int i )
     int_32 align_val;
     int seg_align;
     expr_list opndx;
-    unsigned int CurrAddr;
+    uint_32 CurrAddr;
+    char buffer[32];
 
-    DebugMsg(("AlignDirective enter\n"));
+    DebugMsg1(("AlignDirective enter\n"));
 
     i++;
     switch( directive ) {
@@ -211,7 +214,7 @@ ret_code AlignDirective( int directive, int i )
             else
                 align_val = GetCurrSegAlign();
         } else {
-            AsmError( EXPECTING_NUMBER );
+            AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
         break;
@@ -240,9 +243,12 @@ ret_code AlignDirective( int directive, int i )
     }
     if( align_val > seg_align ) {
         if ( Parse_Pass == PASS_1 )
-            AsmWarn( 1, ALIGN_TOO_HIGH );
+            AsmWarn( 1, ALIGN_TOO_HIGH, myltoa( align_val, buffer, 10, FALSE, FALSE ) );
         //return( ERROR ); /* v2.0: don't exit */
     }
+    /* v2.04: added, Skip backpatching after ALIGN occured */
+    if ( Parse_Pass == PASS_1 && CurrSeg && CurrSeg->e.seginfo->FixupListHead )
+        CurrSeg->e.seginfo->FixupListHead->orgoccured = TRUE;
     /* find out how many bytes past alignment we are & add the remainder */
     /* store temp. value */
     CurrAddr = GetCurrOffset();
@@ -252,8 +258,8 @@ ret_code AlignDirective( int directive, int i )
         fill_in_objfile_space( align_val );
     }
     if ( FileInfo.file[LST] ) {
-        LstWrite( LSTTYPE_LIDATA, CurrAddr, NULL );
+        LstWrite( LSTTYPE_DATA, CurrAddr, NULL );
     }
-    DebugMsg(("AlignDirective exit\n"));
+    DebugMsg1(("AlignDirective exit\n"));
     return( NOT_ERROR );
 }

@@ -35,10 +35,11 @@
 extern char     *CurrSource;      // current source line
 extern char     *StringBufferEnd; // start free space in string buffer
 
-extern int      Tokenize( char * , int index);
+extern int      Tokenize( const char * , unsigned int, int );
 extern int      GetTokenStateSize( void );
 extern void     SaveTokenState( unsigned char * pSave );
 extern void     RestoreTokenState( unsigned char * pSave );
 extern void     InitTokenBuffer( void );
+extern void     FreeTokenBuffer( void );
 
 #endif

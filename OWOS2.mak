@@ -55,12 +55,11 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   &
            $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/labels.obj  &
            $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    &
-           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queues.obj  &
+           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   &
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/omf.obj     &
-           $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   &
-           $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
-           $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   &
+           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj& 
+           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
+           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   &
            $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj

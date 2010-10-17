@@ -41,13 +41,41 @@ enum asm_stypes {
 #include "stypes.h"
 };
 
-// structure of items in the "reserved names" table AsmResWord
+/* define tokens for SpecialTable (registers, directives, operators, ... ) */
+enum special_token {
+#define  res(token, string, len, type, value, value8, flags, cpu, sflags) T_ ## token ,
+#include "special.h"
+#undef res
+SPECIAL_LAST
+};
+
+/* define tokens for InstrTable */
+
+enum asm_token {
+INS_FIRST_1 = SPECIAL_LAST - 1, /* to ensure tokens are unique */
+#define  ins(token, string, len, op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix ) T_ ## token ,
+#define insx(token, string, len, op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs ) T_ ## token ,
+#define insn(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insm(tok,suffix,op1,byte1_info,op2,op3,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#include "instruct.h"
+#undef insm
+#undef insn
+#undef insx
+#undef ins
+    T_NULL
+};
+
+/* structure of items in the "reserved names" table AsmResWord */
 
 struct ReservedWord {
     short next;              /* index next entry (used for hash table) */
     unsigned char len;       /* length of reserved word, i.e. 'AX' = 2 */
     unsigned char flags;
+#if 0 /* __I86__ ( may be activated for JWASMR, see insthash.c) */
+    const char __based( void ) *name;
+#else
     const char *name;        /* reserved word (char[]) */
+#endif
 };
 
 
@@ -112,7 +140,7 @@ enum ALLOWED_PREFIX {
  AP_NO_FWAIT = 0x05
 };
 
-// values for field specialtype:
+// values for field type in asm_special:
 
 enum special_type {
  RWT_REGISTER,
@@ -123,7 +151,7 @@ enum special_type {
  RWT_UNARY_OP
 };
 
-// values for operand1 if register
+// values for sflags if register
 enum op1_flags {
  SFR_IREG = 1,
  SFR_SIZ2 = 2,
@@ -141,15 +169,15 @@ enum rex_bits {
 };
 #endif
 
-/* asm_ins is the structure used to store instructions, directives and
- * other reserved words in AsmOpTable (instruct.h & special.h).
+/* asm_ins is the structure used to store instructions
+ * in InstrTable (instruct.h).
  * Most compilers will use unsigned type for enums, just OW
  * allows to use the smallest size possible.
  */
 
 struct asm_ins {
-    OPNDTYPE        opnd_type[2];           /* operands 1 + 2 */
-    unsigned short /* the bitfields aren't used for non-instruction entries */
+    OPNDTYPE     opnd_type[2];  /* operands 1 + 2 */
+    unsigned short
         allowed_prefix  : 3,    /* allowed prefix */
         first           : 1,    /* first entry for opcode */
         byte1_info      : 4,    /* flags for 1st byte */
@@ -157,20 +185,60 @@ struct asm_ins {
         opnd_type_3rd   : 4,    /* info on 3rd operand */
         opnd_dir        : 1;    /* operand direction */
 #ifdef __WATCOMC__
-    enum asm_cpu        cpu;            /* CPU type */
+    enum asm_cpu        cpu;    /* CPU type */
 #else
-    unsigned short      cpu;            /* CPU type */
+    unsigned short      cpu;    /* CPU type */
 #endif
-    unsigned char   opcode;             /* opcode byte */
-    union {
-        unsigned char   rm_byte;        /* mod_rm_byte */
-#ifdef __WATCOMC__
-        enum special_type specialtype;  /* for OP_SPECIAL */
-#else
-        unsigned char   specialtype;
-#endif
-    };
+    unsigned char   opcode;     /* opcode byte */
+    unsigned char   rm_byte;    /* mod_rm_byte */
 };
+
+/* asm_special is the structure used to store directives and
+ * other reserved words in SpecialTable (special.h).
+ */
+struct asm_special {
+    uint         value;
+    uint         sflags;
+#ifdef __WATCOMC__
+    enum asm_cpu    cpu;     /* CPU type */
+#else
+    unsigned short  cpu;     /* CPU type */
+#endif
+    unsigned char   value8;
+#ifdef __WATCOMC__
+    enum special_type type;
+#else
+    unsigned char   type;
+#endif
+};
+
+#define GetRegNo( x )    SpecialTable[x].value8
+#define GetSflagsSp( x ) SpecialTable[x].sflags
+#define GetValueSp( x )  SpecialTable[x].value
+#define GetCpuSp( x )    SpecialTable[x].cpu
+
+/* values for <value> if type == RWT_DIRECTIVE */
+enum directive_flags {
+ DF_CEXPR    = 0x01, /* avoid '<' being used as string delimiter (.IF, ...) */
+ DF_STRPARM  = 0x02, /* directive expects string param(s) (IFB, IFDIF, ...) */
+                     /* enclose strings in <> in macro expansion step */
+ DF_NOEXPAND = 0x04, /* don't expand params for directive (PURGE, FOR, IFDEF, ...) */
+ DF_LABEL    = 0x08, /* directive requires a label */
+ DF_NOSTRUC  = 0x10  /* directive not allowed inside structs/unions */
+};
+
+/* values for <value8> if type == RWT_DIRECTIVE
+ * CONDDIR, ERRDIR, LOOPDIR and INCLUDE must be consecutive!
+ */
+enum directive_type {
+ DRT_CONDDIR  = 0x01, /* preprocessor conditional assembly directive (IF, ELSE, ...) */
+ DRT_ERRDIR   = 0x02, /* preprocessor error directive (.ERR, .ERRNZ, ...) */
+ DRT_LOOPDIR  = 0x03, /* preprocessor loop directive (FOR, REPEAT, WHILE, ...) */
+ DRT_INCLUDE  = 0x04, /* preprocessor include directive */
+ DRT_DATADIR  = 0x05, /* data definition directive */
+ DRT_EQUALSGN = 0x06, /* '=' directive */
+};
+
 
 /* code_info describes the current instruction. It's the communication
  * structure between parser and code generator.
@@ -185,19 +253,20 @@ struct code_info {
         unsigned char   adrsiz:1;      // address size prefix 0x67 is to be emitted
         unsigned char   opsiz:1;       // operand size prefix 0x66 is to be emitted
     } prefix;
-    const struct asm_ins  *pcurr;      /* current pointer into AsmOpTable */
+    const struct asm_ins  *pcurr;      /* current pointer into InstrTable */
     enum asm_token  token;
     memtype         mem_type;          // byte / word / etc. NOT near/far
     OPNDTYPE        opnd_type[3];
     int_32          data[3];
-    struct genfixup *InsFixup[3];
-    unsigned char   opcode;
+    struct fixup    *InsFixup[3];
     unsigned char   rm_byte;
     unsigned char   sib;
     unsigned char   Ofssize;
+    unsigned char   opc_or;
     union {
         unsigned char flags;
         struct {
+            unsigned char   iswide:1;
             unsigned char   isdirect:1;     /* 1=direct addressing mode */
             unsigned char   isfar:1;        /* CALL/JMP far */
             unsigned char   const_size_fixed:1; /* v2.01 */
@@ -232,42 +301,15 @@ struct code_info {
 
 #define IS_OPER_32( s )   ( s->Ofssize ? ( s->prefix.opsiz == FALSE ) : ( s->prefix.opsiz == TRUE ))
 
-/* for special names, the optable_idx helper table isn't needed */
-//#define GetRegNo( x ) AsmOpTable[optable_idx[x]].opcode
-//#define GetOpndType( x, i ) AsmOpTable[optable_idx[x]].opnd_type[i]
-//#define GetRegCpu( x ) AsmOpTable[optable_idx[x]].cpu
-#define GetRegNo( x ) AsmOpTable[x].opcode
-#define GetOpndType( x, i ) AsmOpTable[x].opnd_type[i]
-#define GetRegCpu( x ) AsmOpTable[x].cpu
-
-// values for <op2> flags (RWT_DIRECTIVE entries)
-enum directive_flags {
- DF_CEXPR    = 0x01, /* avoid '<' being used as string delimiter (.IF, ...) */
- DF_STRPARM  = 0x02, /* directive expects string param(s) (IFB, IFDIF, ...) */
-                     /* enclose strings in <> in macro expansion step */
- DF_NOEXPAND = 0x04, /* don't expand params for directive (PURGE, FOR, IFDEF, ...) */
- DF_LABEL    = 0x08  /* directive requires a label */
-};
-
-/* values for <dir_type> (RWT_DIRECTIVE entries)
- * CONDDIR, ERRDIR, LOOPDIR and INCLUDE must be consecutive
- */
-enum directive_type {
- DRT_CONDDIR  = 0x01, /* preprocessor conditional assembly directive (IF, ELSE, ...) */
- DRT_ERRDIR   = 0x02, /* preprocessor error directive (.ERR, .ERRNZ, ...) */
- DRT_LOOPDIR  = 0x03, /* preprocessor loop directive (FOR, REPEAT, WHILE, ...) */
- DRT_INCLUDE  = 0x04, /* preprocessor include directive */
- DRT_DATADIR  = 0x05, /* data definition directive */
- DRT_EQUALSGN = 0x06, /* '=' directive */
-};
-
-extern const struct asm_ins AsmOpTable[];
+extern const struct asm_ins InstrTable[];
+extern const struct asm_special SpecialTable[];
 extern struct ReservedWord  AsmResWord[];
 extern short  optable_idx[];
-extern bool   line_listed;
+
+#define IndexFromToken( tok )  optable_idx[ ( tok ) - SPECIAL_LAST ]
 
 extern int      OperandSize( OPNDTYPE opnd, const struct code_info * );
-extern int      InRange( long val, unsigned bytes );
+//extern int      InRange( long val, unsigned bytes );
 extern void     find_frame( struct asm_sym *sym );
 extern void     find_frame2( struct asm_sym *sym );
 extern uint     IsKeywordDisabled( const char *, int );
@@ -276,6 +318,7 @@ extern void     DisableKeyword( uint token );
 extern void     RenameKeyword( uint token, const char *name, uint_8 len );
 #endif
 extern ret_code ParseItems( void );
+extern char     *GetResWName( enum asm_token reg, char *buff );
 extern ret_code ParseInit( void );
 #if AMD64_SUPPORT
 extern void     Set64Bit( bool );

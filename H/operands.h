@@ -31,9 +31,10 @@
 #ifndef OPERANDS_H
 #define OPERANDS_H
 
-/* there are no more bits free. Best candidate for removal probably
- * is OP_J48 (used by far CALL/JMP only). OP_J32 (also for far CALL/JMP)
- * has been removed already, now used for OP_I64.
+/* v1.96: OP_J32 (for far CALL/JMP) has been removed, now used for OP_I64.
+ * v2.04: 2 bits freed ( OP_CR, OP_DR and OP_TR replaced by OP_SPECREG )
+ * Also OP_SPECREG, OP_SRxx and OP_STxx moved just behind the other
+ * register operands.
  */
 
 enum operand_type {
@@ -46,9 +47,16 @@ enum operand_type {
 #endif
     OP_MMX      = 0x00000010,  /* MMx register */
     OP_XMM      = 0x00000020,  /* XMMx register */
-    OP_A        = 0x00000040,  // AL, AX, EAX, RAX registers
-    OP_C        = 0x00000080,  // CL register
-    OP_D        = 0x00000100,  // DX register
+//  OP_YMM      = 0x00000040,  /* YMMx register */
+    OP_A        = 0x00000080,  /* AL, AX, EAX, RAX registers */
+    OP_C        = 0x00000100,  /* CL register */
+    OP_D        = 0x00000200,  /* DX register */
+    OP_SPECREG  = 0x00000400,  /* CRx, DRx, TRx registers */
+    OP_SR86     = 0x00000800,  /* CS, DS, ES, SS registers */
+    OP_SR386    = 0x00001000,  /* FS, GS registers */
+
+    OP_ST       = 0x00002000,  /* ST0 register */
+    OP_ST_REG   = 0x00004000,  /* ST1-ST7 registers */
 
     OP_AL       = ( OP_A | OP_R8 ),
     OP_AX       = ( OP_A | OP_R16 ),
@@ -68,30 +76,32 @@ enum operand_type {
     OP_R        = ( OP_R8 | OP_R16 | OP_R32 ),
 #endif
     // OP_RMX      = ( OP_MMX | OP_XMM ),
+    OP_SR       = ( OP_SR86 | OP_SR386 ),
+    OP_STI      = ( OP_ST | OP_ST_REG ),
 
-    OP_I8       = 0x00000200,
-    OP_I_1      = 0x00000400,
-    OP_I_3      = 0x00000800,
-    OP_I8_U     = 0x00001000,
-    OP_I16      = 0x00002000,
-    OP_I32      = 0x00004000,
-    //OP_J32      = 0x00008000,
+    OP_I8       = 0x00010000,
+    OP_I16      = 0x00020000,
+    OP_I32      = 0x00040000,
 #if AMD64_SUPPORT
-    OP_I64      = 0x00008000,
+    OP_I64      = 0x00080000,
 #endif
-    OP_J48      = 0x00010000,
+    OP_I_1      = 0x00100000,
+    OP_I_3      = 0x00200000,
+    OP_I8_U     = 0x00400000,
+    OP_J48      = 0x00800000,
+
     OP_I        = ( OP_I8 | OP_I_1 | OP_I_3 | OP_I8_U | OP_I16 | OP_I32 ),
     OP_IGE8     = ( OP_I8 | OP_I8_U | OP_I16 | OP_I32 ),
     OP_IGE16    = ( OP_I16 | OP_I32 ),
     //OP_GE_U8    = ( OP_I8_U | OP_I16 | OP_I32 ),
 
-    OP_M8       = 0x00020000,
-    OP_M16      = 0x00040000,
-    OP_M32      = 0x00080000,
-    OP_M64      = 0x00100000,
-    OP_M128     = 0x00200000,
-    OP_M48      = 0x00400000,
-    OP_M80      = 0x00800000,
+    OP_M8       = 0x01000000,
+    OP_M16      = 0x02000000,
+    OP_M32      = 0x04000000,
+    OP_M64      = 0x08000000,
+    OP_M128     = 0x10000000,
+    OP_M48      = 0x20000000,
+    OP_M80      = 0x40000000,
 
     OP_MGT8     = ( OP_M16 | OP_M32 | OP_M64 ),
     OP_MGT16    = ( OP_M32 | OP_M64 ),
@@ -101,18 +111,6 @@ enum operand_type {
     //OP_M        = ( OP_M8 | OP_M16 | OP_M32 | OP_M64 | OP_M128 ),
     OP_M        = ( OP_M8 | OP_M16 | OP_M32 | OP_M64 | OP_M80 | OP_M128 ),
 
-    OP_CR       = 0x02000000,
-    OP_DR       = 0x04000000,
-    OP_TR       = 0x08000000,
-    OP_SPEC_REG = ( OP_CR | OP_DR | OP_TR ),
-
-    OP_SR86     = 0x10000000,
-    OP_SR386    = 0x20000000,
-    OP_SR       = ( OP_SR86 | OP_SR386 ),
-
-    OP_ST       = 0x40000000,
-    OP_ST_REG   = 0x80000000,
-    OP_STI      = ( OP_ST | OP_ST_REG ),
 };
 
 typedef enum operand_type OPNDTYPE;

@@ -24,9 +24,9 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
+#include "directiv.h"
 #include "expreval.h"
 #include "equate.h"
-#include "directiv.h"
 #include "input.h"
 #include "tokenize.h"
 #include "fatal.h"
@@ -42,9 +42,6 @@ static uint_32 sizstrcnt;
 static uint_32 instrcnt;
 static uint_32 equcnt;
 #endif
-
-/* use this version to ensure that uppercase letters are used! */
-extern void myltoa( uint_32 value, char *buffer, uint radix, bool sign, bool addzero );
 
 /* generic parameter names. In case the parameter name is
  * displayed in an error message ("required parameter %s missing")
@@ -79,7 +76,7 @@ ret_code CatStrDef( int i )
 #ifdef DEBUG_OUT
     catstrcnt++;
 #endif
-    DebugMsg(("CatStrDef(%u) enter\n", i ));
+    DebugMsg1(("CatStrDef(%u) enter\n", i ));
 
     /* syntax must be <id> CATSTR textitem[,textitem,...] */
     if ( i != 1 ) {
@@ -93,36 +90,15 @@ ret_code CatStrDef( int i )
 
     i++; /* go past CATSTR/TEXTEQU */
 
-    sym = SymSearch( AsmBuffer[0]->string_ptr );
-
-    if( sym && sym->state != SYM_TMACRO ) {
-        if( sym->state == SYM_UNDEFINED ) {
-            /* v2.01: symbol has been used already. Using
-             * a textmacro before it has been defined is
-             * somewhat problematic!
-             */
-            dir_remove_table( (dir_node *)sym );
-#if FASTPASS
-            SkipSavedState();
-#endif
-            AsmWarn( 2, TEXT_MACRO_USED_BEFORE_DEFINITION, sym->name );
-        } else  {
-            /* it is defined as something else, get out */
-            DebugMsg(( "CatStrDef(%s) exit, error\n", sym->name));
-            AsmErr( SYMBOL_REDEFINITION, sym->name );
-            return( ERROR );
-        }
-    }
-
     buffer[0] = NULLC;
     for ( count = 0; i < Token_Count; ) {
-        DebugMsg(("CatStrDef(%s): item=%s\n", AsmBuffer[0]->string_ptr, AsmBuffer[i]->string_ptr));
+        DebugMsg1(("CatStrDef(%s): item=%s\n", AsmBuffer[0]->string_ptr, AsmBuffer[i]->string_ptr));
         if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
             DebugMsg(("CatStrDef: bad item: token=%u\n", AsmBuffer[i]->token));
             TextItemError( i );
             return( ERROR );
         }
-        if ( ( count + AsmBuffer[i]->value ) >= MAX_LINE_LEN) {
+        if ( ( count + AsmBuffer[i]->value ) >= MAX_LINE_LEN ) {
             AsmError( STRING_OR_TEXT_LITERAL_TOO_LONG );
             return( ERROR );
         }
@@ -137,19 +113,36 @@ ret_code CatStrDef( int i )
         i++;
     }
 
+    sym = SymSearch( AsmBuffer[0]->string_ptr );
     if ( sym == NULL ) {
         sym = SymCreate( AsmBuffer[0]->string_ptr, TRUE );
-        DebugMsg(( "CatStrDef: new symbol %s created\n", sym->name));
+        DebugMsg1(( "CatStrDef: new symbol %s created\n", sym->name));
+    } else if( sym->state == SYM_UNDEFINED ) {
+        /* v2.01: symbol has been used already. Using
+         * a textmacro before it has been defined is
+         * somewhat problematic.
+         */
+        dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+#if FASTPASS
+        SkipSavedState(); /* further passes must be FULL! */
+#endif
+        AsmWarn( 2, TEXT_MACRO_USED_PRIOR_TO_DEFINITION, sym->name );
+    } else if( sym->state != SYM_TMACRO ) {
+        /* it is defined as something else, get out */
+        DebugMsg(( "CatStrDef(%s) exit, symbol redefinition\n", sym->name));
+        AsmErr( SYMBOL_REDEFINITION, sym->name );
+        return( ERROR );
     }
+
 
     if ( sym->string_ptr )
         AsmFree( sym->string_ptr );
 
     sym->state = SYM_TMACRO;
-    sym->defined = TRUE;
-    sym->string_ptr = (char *)AsmAlloc( count + 1);
+    sym->isdefined = TRUE;
+    sym->string_ptr = (char *)AsmAlloc( count + 1 );
     memcpy( sym->string_ptr, buffer, count + 1 );
-    DebugMsg(("CatStrDef(%s) result: >%s<\n", sym->name, buffer));
+    DebugMsg1(("CatStrDef(%s) (new) value: >%s<\n", sym->name, buffer));
 
     if ( ModuleInfo.list )
         LstWrite( LSTTYPE_EQUATE, 0, sym );
@@ -171,20 +164,34 @@ asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
 #endif
 #if 0 /* FASTPASS */
     /* there's no need to set the value if FASTPASS is on, because
-     the input are just preprocessed lines.
-     this check is probably obsolete by now, since it won't be called
-     ever if pass > 1. Also, even with fastpass it's sometimes necessary
-     to do a full second pass, including source preprocessing.
+     * the input are just preprocessed lines.
+     * this check is probably obsolete by now, since it won't be called
+     * ever if pass > 1. Also, even with fastpass it's sometimes necessary
+     * to do a full second pass, including source preprocessing.
      */
-    if (Parse_Pass != PASS_1)
+    if ( Parse_Pass != PASS_1 )
         return( sym );
 #endif
 
-    if (sym == NULL)
+    if ( sym == NULL )
         sym = SymCreate( name, TRUE );
+    else if ( sym->state == SYM_UNDEFINED ) {
+        dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+#if FASTPASS
+        /* the text macro was referenced before being defined.
+         * this is valid usage, but it requires a full second pass.
+         * just simply deactivate the fastpass feature for this module!
+         */
+        SkipSavedState();
+#endif
+        AsmWarn( 2, TEXT_MACRO_USED_PRIOR_TO_DEFINITION, sym->name );
+    } else if ( sym->state != SYM_TMACRO ) {
+        AsmErr( SYMBOL_REDEFINITION, name );
+        return( NULL );
+    }
 
     sym->state = SYM_TMACRO;
-    sym->defined = TRUE;
+    sym->isdefined = TRUE;
 
     if ( AsmBuffer[2]->token == T_STRING && AsmBuffer[2]->string_delim == '<' && AsmBuffer[3]->token == T_FINAL ) {
         value = AsmBuffer[2]->string_ptr;
@@ -198,12 +205,12 @@ asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
          */
         while ( isspace( *value ) ) value++;
         count = strlen( value );
-        if (count) {
-            for ( ; count; count--)
+        if ( count ) {
+            for ( ; count; count-- )
                 if ( isspace( *( value + count - 1 ) ) == FALSE)
                     break;
         }
-        for ( ; count; count--) {
+        for ( ; count; count-- ) {
             if ( *value == '!' || *value == '<' || *value == '>' )
                 *p++ = '!';
             *p++ = *value++;
@@ -222,12 +229,12 @@ asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
     memcpy( sym->string_ptr, value, count );
     *(sym->string_ptr+count) = NULLC;
 
-    DebugMsg(( "SetTextMacro(%s): value is >%s<, exit\n", sym->name, sym->string_ptr ));
+    DebugMsg1(( "SetTextMacro(%s): value is >%s<, exit\n", sym->name, sym->string_ptr ));
     return( sym );
 }
 
 /* SubStr()
- * defines a text equate
+ * defines a text equate.
  * syntax: name SUBSTR <string>, pos [, size]
  */
 ret_code SubStrDef( int i )
@@ -238,12 +245,13 @@ ret_code SubStrDef( int i )
     char                *p;
     char                *newvalue;
     int                 pos;
-    int                 size = MAX_LINE_LEN;
+    int                 size;
     int                 cnt;
+    bool                chksize;
     /* char                buffer[MAX_LINE_LEN]; */
     expr_list           opndx;
 
-    DebugMsg(("SubStrDef entry\n"));
+    DebugMsg1(("SubStrDef entry\n"));
 #ifdef DEBUG_OUT
     substrcnt++;
 #endif
@@ -274,7 +282,7 @@ ret_code SubStrDef( int i )
     }
     p = AsmBuffer[i]->string_ptr;
     i++;
-    DebugMsg(("SubStrDef(%s): src=>%s<\n", name, p));
+    DebugMsg1(("SubStrDef(%s): src=>%s<\n", name, p));
 
     if ( AsmBuffer[i]->token != T_COMMA ) {
         AsmError( EXPECTING_COMMA );
@@ -289,7 +297,9 @@ ret_code SubStrDef( int i )
         return( ERROR );
     }
 
-    if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
+    /* v2.04: "string" constant allowed as second argument */
+    //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+    if ( opndx.kind != EXPR_CONST ) {
         DebugMsg(("SubStrDef(%s): pos value is not a constant\n", name));
         AsmError( CONSTANT_EXPECTED );
         return( ERROR );
@@ -297,22 +307,24 @@ ret_code SubStrDef( int i )
 
     /* pos is expected to be 1-based */
     pos = opndx.value;
-    if (pos <= 0) {
+    if ( pos <= 0 ) {
         AsmError( POSITIVE_VALUE_EXPECTED );
         return( ERROR );
     }
-    if (AsmBuffer[i]->token != T_FINAL) {
-        if (AsmBuffer[i]->token != T_COMMA) {
+    if ( AsmBuffer[i]->token != T_FINAL ) {
+        if ( AsmBuffer[i]->token != T_COMMA ) {
             AsmError( EXPECTING_COMMA );
             return( ERROR );
         }
         i++;
-        /* get size, must be a numeric value */
+        /* get size, must be a constant */
         if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR ) {
             DebugMsg(("SubStrDef(%s): invalid size value\n", name));
             return( ERROR );
         }
-        if (opndx.kind != EXPR_CONST || opndx.string != NULL) {
+        /* v2.04: string constant ok */
+        //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+        if ( opndx.kind != EXPR_CONST ) {
             DebugMsg(("SubStrDef(%s): size value is not a constant\n", name));
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
@@ -323,10 +335,38 @@ ret_code SubStrDef( int i )
             AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
-        if (size < 0) {
+        if ( size < 0 ) {
             AsmError( COUNT_MUST_BE_POSITIVE_OR_ZERO );
             return( ERROR );
         }
+        chksize = TRUE;
+    } else {
+        size = -1;
+        chksize = FALSE;
+    }
+
+    cnt = pos;
+    /* position p to start of substring */
+    for ( pos--; pos > 0 && *p ; pos--, p++ )
+        if ( *p == '!' && *(p+1) != NULLC )
+            p++;
+
+    if ( *p == NULLC ) {
+        AsmErr( INDEX_PAST_END_OF_STRING, cnt );
+        return( ERROR );
+    }
+
+    if ( *p == '!' && *(p+1) != NULLC )
+        p++;
+
+    for ( newvalue = p, cnt = size; *p && cnt; cnt--, p++ )
+        if (*p == '!' && *(p+1) != NULLC)
+            p++;
+
+    /* v2.04: check added */
+    if ( chksize && cnt ) {
+        AsmError( COUNT_VALUE_TOO_LARGE );
+        return( ERROR );
     }
 
     sym = SymSearch( name );
@@ -334,43 +374,33 @@ ret_code SubStrDef( int i )
     /* if we've never seen it before, put it in */
     if( sym == NULL ) {
         sym = SymCreate( name, TRUE );
-    } else {
-        /* was it referenced before definition (shouldn't happen anymore) */
-        if( sym->state == SYM_UNDEFINED && sym->state != SYM_TMACRO ) {
-            /* it is defined as something else, get out */
-            DebugMsg(( "SubStrDef(%s) exit, error\n", sym->name));
-            AsmErr( SYMBOL_REDEFINITION, sym->name );
-            return( ERROR );
-        }
-    }
-
-    sym->state = SYM_TMACRO;
-    sym->defined = TRUE;
-
-    cnt = pos;
-    for ( pos--; pos > 0 && *p ; pos--, p++)
-        if (*p == '!' && *(p+1) != NULLC)
-            p++;
-
-    if (*p == NULLC) {
-        AsmErr( INDEX_PAST_END_OF_STRING, cnt );
+    } else if( sym->state == SYM_UNDEFINED ) {
+        /* it was referenced before being defined. This is
+         * a bad idea for preprocessor text items, because it
+         * will require a full second pass!
+         */
+        dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+#if FASTPASS
+        SkipSavedState();
+        AsmWarn( 2, TEXT_MACRO_USED_PRIOR_TO_DEFINITION, sym->name );
+#endif
+    } else if( sym->state != SYM_TMACRO ) {
+        /* it is defined as something incompatible, get out */
+        DebugMsg(( "SubStrDef(%s) error, incompatible type\n", sym->name));
+        AsmErr( SYMBOL_REDEFINITION, sym->name );
         return( ERROR );
     }
 
-    if (*p == '!' && *(p+1) != NULLC)
-        p++;
-
-    for (newvalue = p, cnt = size; *p && cnt; cnt--, p++)
-        if (*p == '!' && *(p+1) != NULLC)
-            p++;
+    sym->state = SYM_TMACRO;
+    sym->isdefined = TRUE;
 
     size = p - newvalue;
     p = newvalue;
 
-    newvalue = AsmAlloc (size + 1);
+    newvalue = AsmAlloc ( size + 1 );
     memcpy( newvalue, p, size );
-    *(newvalue+size) = '\0';
-    DebugMsg(("SubStrDef(%s): result=>%s<\n", sym->name, newvalue));
+    *(newvalue+size) = NULLC;
+    DebugMsg1(("SubStrDef(%s): result=>%s<\n", sym->name, newvalue));
     AsmFree( sym->string_ptr );
     sym->string_ptr = newvalue;
 
@@ -402,7 +432,7 @@ ret_code SizeStrDef( int i )
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
         return( ERROR );
     }
-    if ( AsmBuffer[2]->token != T_STRING || AsmBuffer[2]->string_delim != '<') {
+    if ( AsmBuffer[2]->token != T_STRING || AsmBuffer[2]->string_delim != '<' ) {
         TextItemError( i );
         return( ERROR );
     }
@@ -414,19 +444,19 @@ ret_code SizeStrDef( int i )
 
     sizestr = GetLiteralValue( buffer, AsmBuffer[2]->string_ptr );
 
-    if ( sym = CreateConstantEx( AsmBuffer[0]->string_ptr, sizestr ) ) {
+    if ( sym = CreateVariable( AsmBuffer[0]->string_ptr, sizestr ) ) {
         DebugMsg(("SizeStrDef(%s) exit, value=%u\n", AsmBuffer[0]->string_ptr, sizestr));
         LstWrite( LSTTYPE_EQUATE, 0, sym );
         return( NOT_ERROR );
-    } else
-        return( ERROR );
+    }
+    return( ERROR );
 
 }
 
 /* InStr()
- * defines a numeric variable which contains position of substring
- * syntax
- * name INSTR [pos,]string,substr
+ * defines a numeric variable which contains position of substring.
+ * syntax:
+ * name INSTR [pos,]string, substr
  */
 ret_code InStrDef( int i )
 /************************/
@@ -466,7 +496,7 @@ ret_code InStrDef( int i )
             return( ERROR );
         }
         start = opndx.value;
-        if (start <= 0)
+        if ( start <= 0 )
             start = 1;
         if ( AsmBuffer[i]->token != T_COMMA ) {
             AsmError( EXPECTING_COMMA );
@@ -509,10 +539,10 @@ ret_code InStrDef( int i )
     }
 
     strpos = 0;
-    if ((sizestr >= j) && (string1 = strstr(buffer1+start-1, buffer2)))
+    if (( sizestr >= j ) && ( string1 = strstr( buffer1 + start - 1, buffer2 ) ))
         strpos = string1 - buffer1 + 1;
 
-    if ( sym = CreateConstantEx( AsmBuffer[0]->string_ptr, strpos ) ) {
+    if ( sym = CreateVariable( AsmBuffer[0]->string_ptr, strpos ) ) {
         DebugMsg(("InStrDef(%s) exit, value=%u\n", AsmBuffer[0]->string_ptr, strpos));
         LstWrite( LSTTYPE_EQUATE, 0, sym );
         return ( NOT_ERROR );
@@ -527,6 +557,7 @@ ret_code InStrDef( int i )
 static ret_code CatStrFunc( char * buffer, char * *params )
 /*********************************************************/
 {
+    int i;
     char **end = params + CATSTRMAX;
 
     DebugMsg(("@CatStr( %s, %s, %s, ...)\n",
@@ -536,10 +567,12 @@ static ret_code CatStrFunc( char * buffer, char * *params )
 
     for (; params != end; params++) {
         if ( *params ) {
-            strcpy( buffer, *params );
-            buffer += strlen( buffer );
+            i = strlen( *params );
+            memcpy( buffer, *params, i );
+            buffer += i;
         }
     }
+    *buffer = NULLC;
     return( NOT_ERROR );
 }
 
@@ -552,7 +585,7 @@ static ret_code GetNumber( char * string, int * pi )
     int i;
     int last;
 
-    last = Tokenize( string, Token_Count+1 );
+    last = Tokenize( string, Token_Count+1, FALSE );
     i = Token_Count+1;
     if( EvalOperand( &i, last, &opndx, TRUE ) == ERROR ) {
         return( ERROR );
@@ -591,12 +624,12 @@ static ret_code InStrFunc( char * buffer, char * *params )
             pos++;
     }
 
-    if (pos > strlen(*(params+1))) {
+    if ( pos > strlen( *(params+1) ) ) {
         AsmErr( INDEX_PAST_END_OF_STRING, pos );
         return( ERROR );
     }
     p = strstr( *(params+1)+pos-1, *(params+2) );
-    if (p) {
+    if ( p ) {
         found = p - *(params+1) + 1;
         myltoa( found, buffer, ModuleInfo.radix, FALSE, TRUE );
     }
@@ -693,8 +726,8 @@ void StringInit( void )
 
     /* add @CatStr() macro func */
 
-    macro = CreateMacro("@CatStr" );
-    macro->sym.defined = TRUE;
+    macro = CreateMacro( "@CatStr" );
+    macro->sym.isdefined = TRUE;
     macro->sym.predefined = TRUE;
     macro->sym.func_ptr = CatStrFunc;
     macro->sym.isfunc = TRUE;
@@ -708,8 +741,8 @@ void StringInit( void )
 
     /* add @InStr() macro func */
 
-    macro = CreateMacro("@InStr" );
-    macro->sym.defined = TRUE;
+    macro = CreateMacro( "@InStr" );
+    macro->sym.isdefined = TRUE;
     macro->sym.predefined = TRUE;
     macro->sym.func_ptr = InStrFunc;
     macro->sym.isfunc = TRUE;
@@ -723,8 +756,8 @@ void StringInit( void )
 
     /* add @SizeStr() macro func */
 
-    macro = CreateMacro("@SizeStr" );
-    macro->sym.defined = TRUE;
+    macro = CreateMacro( "@SizeStr" );
+    macro->sym.isdefined = TRUE;
     macro->sym.predefined = TRUE;
     macro->sym.func_ptr = SizeStrFunc;
     macro->sym.isfunc = TRUE;
@@ -738,8 +771,8 @@ void StringInit( void )
 
     /* add @SubStr() macro func */
 
-    macro = CreateMacro("@SubStr" );
-    macro->sym.defined = TRUE;
+    macro = CreateMacro( "@SubStr" );
+    macro->sym.isdefined = TRUE;
     macro->sym.predefined = TRUE;
     macro->sym.func_ptr = SubStrFunc;
     macro->sym.isfunc = TRUE;

@@ -26,6 +26,14 @@
 
 #define DEFAULT_STACK_SIZE      1024
 
+#ifdef __I86__
+#define NUMQUAL (long)
+#else
+#define NUMQUAL
+#endif
+
+extern const char szDgroup[];
+
 enum sim_seg {
     SIM_CODE = 0,
     SIM_STACK,
@@ -70,8 +78,6 @@ const char *GetCodeClass( void )
 static void AddToDgroup( enum sim_seg segm, const char *name )
 /************************************************************/
 {
-    char        buffer[MAX_ID_LEN+1+20];
-
     /* no DGROUP for FLAT or COFF/ELF */
     if( ModuleInfo.model == MOD_FLAT ||
        Options.output_format == OFORMAT_COFF
@@ -81,22 +87,16 @@ static void AddToDgroup( enum sim_seg segm, const char *name )
       )
         return;
 
-    strcpy( buffer, "DGROUP GROUP " );
-    if( name != NULL ) {
-        strcat( buffer, name );
-    } else {
+    if( name == NULL ) {
         switch( segm ) {
         case SIM_STACK:
             if ( ModuleInfo.distance == STACK_FAR )
                 return;
-        case SIM_DATA:
-        case SIM_DATA_UN:
-        case SIM_CONST:
-            strcat( buffer, SegmNames[segm] );
             break;
         }
+        name = SegmNames[segm];
     }
-    AddLineQueue( buffer );
+    AddLineQueueX( "%s %r %s", szDgroup, T_GROUP, name );
 }
 
 /* generate code to close the current segment */
@@ -105,11 +105,8 @@ static void close_currseg( void )
 /*******************************/
 {
     if ( CurrSeg ) {
-        char buffer[MAX_ID_LEN+1+8];
-        DebugMsg(("close_currseg: current seg=%s\n", CurrSeg->sym.name));
-        strcpy( buffer, CurrSeg->sym.name );
-        strcat( buffer, " ENDS" );
-        AddLineQueue( buffer );
+        DebugMsg1(("close_currseg: current seg=%s\n", CurrSeg->sym.name));
+        AddLineQueueX( "%s %r", CurrSeg->sym.name, T_ENDS );
     }
 }
 
@@ -117,8 +114,8 @@ static void close_currseg( void )
  * a standard segment directive line
  */
 
-static char * SetSimSeg( enum sim_seg segm, const char * name, char * buffer )
-/****************************************************************************/
+static void SetSimSeg( enum sim_seg segm, const char * name )
+/***********************************************************/
 {
     char *pAlign = "WORD";
     char *pAlignSt = "PARA";
@@ -146,29 +143,33 @@ static char * SetSimSeg( enum sim_seg segm, const char * name, char * buffer )
     if ( segm == SIM_STACK || segm == SIM_FARDATA || segm == SIM_FARDATA_UN )
         pAlign = pAlignSt;
 
-    pFmt = "%s SEGMENT %s %s %s '%s'";
+    pFmt = "%s %r %s %s %s '%s'";
     if ( name == NULL ) {
         if ( ModuleInfo.simseg_init & ( 1 << segm ) )
-            pFmt = "%s SEGMENT";
+            pFmt = "%s %r";
         else {
             ModuleInfo.simseg_init |= ( 1 << segm );
         }
         name = SegmNames[segm];
     } else {
         asm_sym * sym = SymSearch(name);
-        if ( sym && sym->state == SYM_SEG )
-            pFmt = "%s SEGMENT";
+        /* v2.04: testing for state SYM_SEG isn't enough. The segment
+         * might have been "defined" by a GROUP directive. Additional
+         * check for segment's lname index is needed.
+         */
+        //if ( sym && sym->state == SYM_SEG )
+        if ( sym && sym->state == SYM_SEG && ((dir_node *)sym)->e.seginfo->lname_idx != 0 )
+            pFmt = "%s %r";
     }
-    sprintf( buffer, pFmt, name, pAlign, pUse, SegmCombine[segm], pClass );
-    return( buffer );
+    AddLineQueueX( pFmt, name, T_SEGMENT, pAlign, pUse, SegmCombine[segm], pClass );
+    return;
 }
 
-static char * EndSimSeg( enum sim_seg segm, char * buffer )
-/*********************************************************/
+static void EndSimSeg( enum sim_seg segm )
+/****************************************/
 {
-    strcpy( buffer, SegmNames[segm] );
-    strcat( buffer, " ENDS" );
-    return( buffer );
+    AddLineQueueX( "%s %r", SegmNames[segm], T_ENDS );
+    return;
 }
 
 ret_code SimplifiedSegDir( int i )
@@ -178,13 +179,13 @@ ret_code SimplifiedSegDir( int i )
  .CODE, .STACK, .DATA, .DATA?, .FARDATA, .FARDATA?, .CONST
  */
 {
-    char        buffer[ MAX_ID_LEN+1+64 ];
-    unsigned    size;
-    const char  *string = NULL;
+    uint_32     stksize;
+    const char  *name = NULL;
     int         type;
     enum sim_seg seg;
+    //char        buffer[ MAX_ID_LEN+1+64 ];
 
-    DebugMsg(("SimplifiedSegDir(%u) enter\n", i ));
+    DebugMsg1(("SimplifiedSegDir(%s) enter\n", AsmBuffer[i]->string_ptr ));
 
     LstWrite( LSTTYPE_DIRECTIVE, 0, NULL );
 
@@ -201,7 +202,7 @@ ret_code SimplifiedSegDir( int i )
         close_currseg();  /* emit a "xxx ENDS" line to close current seg */
     }
 
-    buffer[0] = NULLC;
+    //buffer[0] = NULLC;
     i++; /* get past the directive token */
 
     /* Masm accepts a name argument for .CODE and .FARDATA[?] only.
@@ -212,46 +213,55 @@ ret_code SimplifiedSegDir( int i )
        ( type == T_DOT_CODE || type == T_DOT_FARDATA || type == T_DOT_FARDATA_UN
         || ( Options.strict_masm_compat == FALSE &&
             ( type == T_DOT_DATA || type == T_DOT_CONST || type == T_DOT_DATA_UN )))) {
-        string = AsmBuffer[i]->string_ptr;
+        name = AsmBuffer[i]->string_ptr;
         i++;
     }
 
     switch( type ) {
     case T_DOT_CODE: /* .code */
-        AddLineQueue( SetSimSeg( SIM_CODE, string, buffer ) );
+        SetSimSeg( SIM_CODE, name );
 
         if( ModuleInfo.model == MOD_TINY ) {
-            AddLineQueue( "ASSUME CS:DGROUP" );
+            name = szDgroup;
         } else if( ModuleInfo.model == MOD_FLAT ) {
-            //if ( SegAssumeTable[ASSUME_CS].flat == FALSE || SegAssumeTable[ASSUME_CS].error == TRUE )
-                AddLineQueue( "ASSUME CS:FLAT" );
+            name = "FLAT";
         } else {
-            if( string == NULL )
-                string = SegmNames[SIM_CODE];
-            strcpy( buffer, "ASSUME CS:" );
-            strcat( buffer, string );
-            AddLineQueue( buffer );
+            if( name == NULL )
+                name = SegmNames[SIM_CODE];
         }
+        AddLineQueueX( "%r %r:%s", T_ASSUME, T_CS, name );
         break;
     case T_DOT_STACK: /* .stack */
-        size = DEFAULT_STACK_SIZE;
+        stksize = DEFAULT_STACK_SIZE;
         if( i < Token_Count ) {
             expr_list opndx;
             if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
                 return( ERROR );
-            if( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+            if( opndx.kind != EXPR_CONST ) {
                 AsmError( CONSTANT_EXPECTED );
                 return( ERROR );
             }
-            size = opndx.value;
+            stksize = opndx.value;
         }
-        AddLineQueue( SetSimSeg( SIM_STACK, NULL, buffer ));
+#if FASTPASS
+        /* if code is generated which does "emit" bytes,
+         * the original source line has to be saved.
+         */
+        if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
+            SaveState();
+        }
+#endif
+        SetSimSeg( SIM_STACK, NULL );
         /* add stack to dgroup for some segmented models */
         AddToDgroup( SIM_STACK, NULL );
+#if 0
         AddLineQueue( "ORG 0" );
-        sprintf( buffer, "db %u dup (?)", size );
+        sprintf( buffer, "db %lu dup (?)", stksize );
         AddLineQueue( buffer );
-        AddLineQueue( EndSimSeg( SIM_STACK, buffer ));
+#else
+        AddLineQueueX( "ORG 0%xh", NUMQUAL stksize );
+#endif
+        EndSimSeg( SIM_STACK );
         break;
     case T_DOT_DATA:    /* .data  */
     case T_DOT_DATA_UN: /* .data? */
@@ -264,16 +274,16 @@ ret_code SimplifiedSegDir( int i )
             seg = SIM_CONST;
         }
 
-        AddLineQueue( SetSimSeg( seg, string, buffer ));
-        AddLineQueue( "ASSUME CS:ERROR" );
-        AddToDgroup( seg, string );
+        SetSimSeg( seg, name );
+        AddLineQueueX( "%r %r:ERROR", T_ASSUME, T_CS );
+        AddToDgroup( seg, name );
         break;
     case T_DOT_FARDATA:     /* .fardata  */
     case T_DOT_FARDATA_UN:  /* .fardata? */
         seg = ( type == T_DOT_FARDATA ) ? SIM_FARDATA : SIM_FARDATA_UN;
 
-        AddLineQueue( SetSimSeg( seg, string, buffer ));
-        AddLineQueue( "ASSUME CS:ERROR" );
+        SetSimSeg( seg, name );
+        AddLineQueueX( "%r %r:ERROR", T_ASSUME, T_CS );
         break;
     default: /* shouldn't happen */
         /**/myassert( 0 );
@@ -284,7 +294,7 @@ ret_code SimplifiedSegDir( int i )
 
     RunLineQueue();
 
-    DebugMsg(("SimSeg exit\n"));
+    DebugMsg1(("SimplifiedSegDir exit\n"));
     return( NOT_ERROR );
 }
 
@@ -304,10 +314,7 @@ void SetModelDefaultSegNames( void )
         SegmNames[SIM_CODE] = AsmAlloc( strlen( Options.text_seg ) + 1 );
         strcpy( SegmNames[SIM_CODE], Options.text_seg );
     } else {
-        switch( ModuleInfo.model ) {
-        case MOD_MEDIUM:
-        case MOD_LARGE:
-        case MOD_HUGE:
+        if ( SIZE_CODEPTR & ( 1 << ModuleInfo.model ) ) {
             /* for some models, the code segment contains the module name */
             SegmNames[SIM_CODE] = AsmAlloc( strlen( SegmNamesDef[SIM_CODE] ) + strlen( ModuleInfo.name ) + 1 );
             strcpy( SegmNames[SIM_CODE], ModuleInfo.name );
@@ -332,28 +339,27 @@ void SetModelDefaultSegNames( void )
 ret_code ModelSimSegmInit( int model )
 /************************************/
 {
-    char buffer[ MAX_ID_LEN+1+64 ];
+    char buffer[20];
 
     if ( Parse_Pass == PASS_1 ) {
         /* create default code segment (_TEXT) */
-        AddLineQueue( SetSimSeg( SIM_CODE, NULL, buffer ) );
-        AddLineQueue( EndSimSeg( SIM_CODE, buffer ) );
+        SetSimSeg( SIM_CODE, NULL );
+        EndSimSeg( SIM_CODE );
 
         /* create default data segment (_DATA) */
-        AddLineQueue( SetSimSeg( SIM_DATA, NULL, buffer )) ;
-        AddLineQueue( EndSimSeg( SIM_DATA, buffer ) );
+        SetSimSeg( SIM_DATA, NULL ) ;
+        EndSimSeg( SIM_DATA );
 
         /* create DGROUP for BIN/OMF if model isn't FLAT */
         if( model != MOD_FLAT &&
             ( Options.output_format == OFORMAT_OMF ||
              Options.output_format == OFORMAT_BIN )) {
-            strcpy( buffer, "DGROUP GROUP " );
+            strcpy( buffer, "%s %r %s" );
             if( model == MOD_TINY ) {
-                strcat( buffer, SegmNames[SIM_CODE] );
-                strcat( buffer, "," );
-            }
-            strcat( buffer, SegmNames[SIM_DATA] );
-            AddLineQueue( buffer );
+                strcat( buffer, ", %s" );
+                AddLineQueueX( buffer, szDgroup, T_GROUP, SegmNames[SIM_CODE], SegmNames[SIM_DATA] );
+            } else
+                AddLineQueueX( buffer, szDgroup, T_GROUP, SegmNames[SIM_DATA] );
         }
     }
     return( NOT_ERROR );

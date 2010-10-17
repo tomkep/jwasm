@@ -11,13 +11,14 @@ JWasm Readme
 
     format     option     comment
     -----------------------------------------------------------------------
+    OMF        -omf       (default) object format, 16- and 32-bit supported
     BIN        -bin       plain binary format (boot sector, BIOS, DOS COM)
     COFF       -coff      MS Win32 object format
     WIN64      -win64     MS Win64 object format
     MZ         -mz        DOS native binary format (.EXE)
     ELF32      -elf       Linux 32-bit object format
     ELF64      -elf64     Linux 64-bit object format
-    OMF        -omf       (default) object format, 16- and 32-bit supported
+    DJGPP      -djgpp     Djgpp's 32-bit COFF variant (optional).
 
     JWasm is distributed in several packages. Besides the source package
     there are some which contain precompiled binaries for Windows, DOS and
@@ -30,8 +31,9 @@ JWasm Readme
     - JWASM.EXE, a precompiled Win32 binary, runs on any Win32 platform.
 
     - JWASMD.EXE, a precompiled DOS binary, runs in DOS 32bit protected-mode.
-      It requires a 80386 cpu and needs a MS-DOS v5 compatible DOS to run 
-      (FreeDOS v1 will do). Long filenames (LFN) are supported.
+      It requires a 80386 cpu and needs a MS-DOS v5 compatible DOS to run
+      (FreeDOS v1 will do). Long filenames (LFN) are supported. JWASMD.EXE
+      won't run on 64-bit Windows.
 
     - JWASMR.EXE is a DOS real-mode program which runs on any x86 cpu.
       Similar to JWASMD.EXE it needs a MS-DOS v5 compatible DOS. Restrictions
@@ -127,8 +129,8 @@ JWasm Readme
 
     agner, BlackVortex, drizz, Paul Edwards, filofel, Peter Flass,
     James C. Fuller, gfalen, Japheth, Jimg, jj2007, Khusraw, Alex Kozlov,
-    Peter Kuznetsov, misca, Michal Necasek, H. Nidudsson, RotateRight, 
-    Ito Toshimitsu, Vortex.
+    Peter Kuznetsov, misca, Michal Necasek, H. Nidudsson, Terry Philips,
+    qWord, RotateRight, Ito Toshimitsu, Vortex.
 
     Japheth
 

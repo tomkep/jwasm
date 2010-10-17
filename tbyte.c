@@ -108,19 +108,19 @@ static int cmp_u96_max( const u96 *x )
 */
 {
     if( x->m32[2] > 0x19999999UL ) {
-        return 1;
+        return( 1 );
     } else if( x->m32[2] < 0x19999999UL ) {
-        return -1;
+        return( -1 );
     } else if( x->m32[1] > 0x99999999UL ) {
-        return 1;
+        return( 1 );
     } else if( x->m32[1] < 0x99999999UL ) {
-        return -1;
+        return( -1 );
     } else if( x->m32[0] > 0x99999998UL ) {
-        return 1;
+        return( 1 );
     } else if( x->m32[0] < 0x99999998UL ) {
-        return -1;
+        return( -1 );
     } else {
-        return 0;
+        return( 0 );
     }
 }
 
@@ -134,7 +134,7 @@ static int add_check_u96_overflow( u96 *x, unsigned int c )
     int i;
 
     if( cmp_u96_max(x) > 0 ) {
-        return 1;
+        return( 1 );
     } else {
         cy = c;
         for( i = 0; i < 3; i++ ) {
@@ -142,7 +142,7 @@ static int add_check_u96_overflow( u96 *x, unsigned int c )
             x->m32[i] = cy;
             cy >>= 32;
         }
-        return 0;
+        return( 0 );
     }
 }
 
@@ -157,7 +157,7 @@ static int bitsize32( uint_32 x )
         if( x & 0x80000000U ) break;
         x <<= 1;
     }
-    return i;
+    return( i );
 }
 
 static int bitsize64( uint_64 x )
@@ -171,7 +171,7 @@ static int bitsize64( uint_64 x )
         if( x & MAXUI64BIT ) break;
         x <<= 1;
     }
-    return i;
+    return( i );
 }
 
 static int U96LD( const u96 *op, ELD *res )
@@ -210,7 +210,7 @@ static int U96LD( const u96 *op, ELD *res )
             res->m32[0] <<= shft;
         }
     }
-    return 0;
+    return( 0 );
 }
 
 static int normalize( u192 *res )
@@ -237,7 +237,7 @@ static int normalize( u192 *res )
         bs = bitsize64(res->m64[2]);
     }
     if( bs == 0 ) {
-        return 0;
+        return( 0 );
     }
     bs1 = bs % 64;
     if (bs1) {
@@ -248,7 +248,7 @@ static int normalize( u192 *res )
         res->m64[1] |= res->m64[0] >> bs1;
         res->m64[0] <<= shft;
     }
-    return bs - 192;
+    return( bs - 192 );
 }
 
 static int add192( u192 *res, const uint_64 x, int pos )
@@ -271,7 +271,7 @@ static int add192( u192 *res, const uint_64 x, int pos )
         res->m32[i] = cy;
         cy >>= 32;
     }
-    return 0;
+    return( 0 );
 }
 
 static int multiply( const ELD *op1, const ELD *op2, ELD *res )
@@ -317,7 +317,7 @@ static int multiply( const ELD *op1, const ELD *op2, ELD *res )
     res->m32[1] = r1.m32[4];
     res->m32[2] = r1.m32[5];
     res->e = exp;
-    return 0;
+    return( 0 );
 }
 
 static int TB_create(u96 *value, long exponent, TB_LD *ld)
@@ -358,11 +358,11 @@ static int TB_create(u96 *value, long exponent, TB_LD *ld)
             ld->m++;
         }
     }
-    return 0;
+    return( 0 );
 }
 
-TB_LD * strtotb( char *p, TB_LD * ld, char negative )
-/****************************************************
+TB_LD * strtotb( const char *p, TB_LD * ld, char negative )
+/**********************************************************
     convert string into tbyte/long double
     set result sign
 */
@@ -391,7 +391,7 @@ TB_LD * strtotb( char *p, TB_LD * ld, char negative )
     }
     memset(&value, 0, sizeof(value));
     memset(&value_tmp, 0, sizeof(value_tmp));
-    exponent = 0;
+    //exponent = 0;
     exp1 = 0;
     exponent_tmp = 0;
     overflow = 0;
@@ -453,7 +453,7 @@ TB_LD * strtotb( char *p, TB_LD * ld, char negative )
             ld->m = 0;
             ld->e = 0;
             SET_SIGN(ld, sign);
-            return ld;
+            return( ld );
         }
         while ( (unsigned int)(*p - '0') < 10u )
             exp_value = 10 * exp_value + (*p++ - '0');
@@ -463,5 +463,5 @@ TB_LD * strtotb( char *p, TB_LD * ld, char negative )
     exp_value += exponent;
     TB_create(&value, exp_value, ld);
     SET_SIGN(ld, sign);
-    return ld;
+    return( ld );
 }

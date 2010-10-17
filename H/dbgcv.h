@@ -15,10 +15,19 @@
 *               CV 5 is 32-bit only, which is bad. OTOH, the advantage of
 *               this format - the type indices are 32bit instead of 16bit -
 *               is virtually irrelevant for JWasm. So CV 5 is ignored.
+*
+*               CV 8 is not "officially" described.
+*               It's an extended CV5 format. Not yet supported by JWasm.
 ****************************************************************************/
 
 #ifndef CVDBG_H
 #define CVDBG_H 1
+
+enum cv_version_signature {
+    CV4_SIGNATURE = 1,
+    CV5_SIGNATURE = 2,
+    CV8_SIGNATURE = 4
+};
 
 /* reserved primitive types (0x0000-0x0FFF) */
 
@@ -255,6 +264,37 @@ enum cv5_symbol_types {
     CV5_S_GPROC32  = 0x100B,
 
     //S_LABEL32  = 0x0209,
+};
+
+enum cv8_symbol_types {
+    CV8_FILE   = 0x1101,  /* object filename */
+    CV8_LABEL  = 0x1105,
+    CV8_TYPE   = 0x1108,
+    CV8_BPREL  = 0x110B,
+    CV8_LDATA  = 0x110C,
+    CV8_GDATA  = 0x110D,
+    CV8_PROC32 = 0x1110,
+};
+
+enum cv8_s_sections {
+    CV8_SYMBOLS   = 0xF1,
+    CV8_LINNUM    = 0xF2,
+    CV8_FILENAMES = 0xF3,
+    CV8_FILES     = 0xF4
+};
+
+struct cv8_linenumber_item {
+    uint_32 offset;
+    uint_32 line;
+};
+
+struct cv8_linenumber_header {
+    uint_32 section_start;
+    uint_16 section_index;
+    uint_32 section_length;
+    uint_32 src_file;
+    uint_32 num_items; /* number of cv8_linenumber_info items */
+    uint_32 length;
 };
 
 #pragma pack(push, 1)

@@ -1,5 +1,5 @@
 
-;--- invoke with function pointers
+;--- invoke with function pointers, MEDIUM model
 
 	.model medium, stdcall
 	.386

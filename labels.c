@@ -30,13 +30,14 @@
 
 #include "globals.h"
 #include "parser.h"
+#include "directiv.h"
 #include "fixup.h"
 #include "labels.h"
-#include "directiv.h"
 #include "segment.h"
 #include "proc.h"
 #include "types.h"
 #include "listing.h"
+#include "fastpass.h"
 
 void LabelsInit( void )
 /*********************/
@@ -69,10 +70,10 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
     uint_32             addr;
     char                buffer[20];
 
-    DebugMsg(("LabelCreate(%s, memtype=%Xh, %Xh, %u) enter\n", symbol_name, mem_type, vartype, bLocal));
+    DebugMsg1(("LabelCreate(%s, memtype=%Xh, %Xh, %u) enter\n", symbol_name, mem_type, vartype, bLocal));
 
-    if ( CurrStruct ) {
 #if 0
+    if ( CurrStruct ) {
         /* LABEL directive in a STRUCT definition?  Masm doesn't allow this,
          * it might be a remnant of Wasm syntax, which doesn't know UNION.
          * Currently it doesn't work to "initialize" such a struct, so it
@@ -85,17 +86,19 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
             sym = SymSearch( symbol_name );
         }
         return( sym );
-#else
-        AsmError( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION );
-        return( NULL );
-#endif
     }
+#endif
 
     if( CurrSeg == NULL ) {
         AsmError( MUST_BE_IN_SEGMENT_BLOCK );
         return( NULL );
     }
 
+#if FASTPASS
+    if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
+        SaveState();
+    }
+#endif
     //if( strcmp( symbol_name, "@@" ) == 0 ) {
     if( symbol_name[0] == '@' && symbol_name[1] == '@' && symbol_name[2] == NULLC ) {
         sprintf( buffer, "L&_%04u", ++ModuleInfo.anonymous_label );
@@ -108,7 +111,9 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
     if( Parse_Pass == PASS_1 ) {
         if( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
             /* don't accept EXTERNDEF for a local label! */
-            if (bLocal && CurrProc) {
+            /* v2.04: also never accept PROTOs for extern to intern conversion */
+            //if ( bLocal && CurrProc ) {
+            if ( sym->isproc || ( bLocal && CurrProc ) ) {
                 DebugMsg(("LabelCreate(%s): error, EXTERNDEF for local label\n", sym->name));
                 AsmErr( SYMBOL_REDEFINITION, symbol_name );
                 return( NULL );
@@ -118,20 +123,23 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
                  sym->mem_type != mem_type ) {
                 AsmErr( SYMBOL_TYPE_CONFLICT, symbol_name );
             }
-            dir_internal( (dir_node *)sym );
+            dir_ext2int( (dir_node *)sym );
         } else if( sym->state == SYM_UNDEFINED ) {
-            dir_remove_table( (dir_node *)sym );
+            dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
             sym->state = SYM_INTERNAL;
         } else {
-            AsmErr( SYMBOL_PREVIOUSLY_DEFINED, symbol_name );
+            /* v2.04: emit a more distinctive error msg */
+            if ( sym->state == SYM_INTERNAL && sym->mem_type == mem_type )
+                AsmErr( SYMBOL_ALREADY_DEFINED, symbol_name );
+            else
+                AsmErr( SYMBOL_REDEFINITION, symbol_name );
             return( NULL );
         }
         /* add the label to the linked list attached to curr segment */
         /* this allows to reduce the number of passes (see fixup.c) */
-        if (CurrSeg) {
-            ((dir_node *)sym)->next = (dir_node *)CurrSeg->e.seginfo->labels;
-            CurrSeg->e.seginfo->labels = sym;
-        }
+        ((dir_node *)sym)->next = (dir_node *)CurrSeg->e.seginfo->labels;
+        CurrSeg->e.seginfo->labels = sym;
+
         /* a possible language type set by EXTERNDEF must be kept! */
         if (sym->langtype == LANG_NONE)
             sym->langtype = ModuleInfo.langtype;
@@ -140,7 +148,8 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
         addr = sym->offset;
     }
 
-    sym->defined = TRUE;
+    sym->isdefined = TRUE;
+    sym->pass = Parse_Pass;
     sym->mem_type = mem_type;
     sym->type = vartype; /* if mem_type is MT_TYPE */
     SetSymSegOfs( sym );
@@ -149,7 +158,9 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
     if( Parse_Pass != PASS_1 && sym->offset != addr ) {
 #ifdef DEBUG_OUT
         if ( !ModuleInfo.PhaseError )
-            DebugMsg(("LabelCreate: Phase error, pass %u, sym >%s< first time, new=%lX - old=%lX\n", Parse_Pass+1, sym->name, sym->offset, addr));
+            DebugMsg(("LabelCreate: Phase error, pass %u, sym >%s< first time, new=%" FX32 " - old=%" FX32 "\n", Parse_Pass+1, sym->name, sym->offset, addr));
+        else
+            DebugMsg(("LabelCreate: pass %u, sym >%s< changed, new=%" FX32 " - old=%" FX32 "\n", Parse_Pass+1, sym->name, sym->offset, addr));
 #endif
         ModuleInfo.PhaseError = TRUE;
     }
@@ -252,10 +263,9 @@ ret_code LabelDirective( int i )
             ptrtype = type;
 
         if ( ptrtype != -1 ) {
-            if ( SimpleType[ptrtype].Ofssize != USE_EMPTY )
-                size = SizeFromMemtype( SimpleType[ptrtype].mem_type, SimpleType[ptrtype].Ofssize );
-            else
-                size = SizeFromMemtype( SimpleType[ptrtype].mem_type, ModuleInfo.Ofssize );
+            size = SizeFromMemtype( SimpleType[ptrtype].mem_type,
+                                   SimpleType[ptrtype].Ofssize,
+                                   NULL );
             switch ( size ) {
             case 2:
                 sym->mem_type = MT_WORD;
@@ -279,6 +289,6 @@ ret_code LabelDirective( int i )
 
         return( NOT_ERROR );
     }
-    AsmError( INVALID_LABEL_DEFINITION );
+    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
     return( ERROR );
 }

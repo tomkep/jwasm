@@ -21,6 +21,11 @@
 "-D<name>[=text]\0" "Define text macro\0"
 #ifdef DEBUG_OUT
 "-d6\0"             "DBG: Display debug trace on stdout\0"
+"-d7\0"             "DBG: Do full second pass\0"
+"-d8\0"             "DBG: Disable backpatching\0"
+#endif
+#if COFF_SUPPORT && DJGPP_SUPPORT
+"-djgpp\0"          "Generate Djgpp's COFF variant\0"
 #endif
 "-e<number>\0"      "Set error limit number (default=50)\0"
 #if ELF_SUPPORT
@@ -43,8 +48,8 @@
 #ifdef DEBUG_OUT
 "-ls\0"             "DBG: Display preprocessed line storage on stdout\0"
 #endif
-"-m<t|s|m|c|l|h|f>\0" "Set memory model:\0"
-"\0"                "(Tiny, Small, Medium, Compact, Large, Huge, Flat)\0"
+"-m<t|s|c|m|l|h|f>\0" "Set memory model:\0"
+"\0"                "(Tiny, Small, Compact, Medium, Large, Huge, Flat)\0"
 #if BIN_SUPPORT
 #if MZ_SUPPORT
 "-mz\0"             "Generate binary in DOS MZ format\0"
@@ -61,7 +66,9 @@
 #endif
 "-q, -nologo\0"     "Don't display version and copyright information\0"
 "-Sa\0"             "Maximize source listing\0"
+#if COFF_SUPPORT
 "-safeseh\0"        "Assert all exception handlers are declared\0"
+#endif
 "-Sg\0"             "Display generated code in listing\0"
 "-Sn\0"             "Suppress symbol-table listing\0"
 "-Sx\0"             "List false conditionals\0"
@@ -92,6 +99,7 @@
 "-Zs\0"             "Perform syntax check only\0"
 "-zt<0|1|2>\0"      "Set STDCALL symbol decoration: 0=No name decoration,\0"
 "\0"                "1=No '@size' suffix for functions, 2=Full (default)\0"
+"-Zv8\0"            "Enable Masm v8+ PROC visibility\0"
 "-zze\0"            "No name decoration for exported symbols\0"
 #if COFF_SUPPORT
 "-zzs\0"            "Store decorated name of start address (COFF only)\0"

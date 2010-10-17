@@ -13,14 +13,19 @@ JWasm Manual
      3.6  Directive OPTION PROCALIGN
      3.7  Directive OPTION MZ
      3.8  Directive OPTION ELF
-     3.9  Directive OPTION FRAME
-     3.10 Directive OPTION RENAMEKEYWORD
-     3.11 Directives PUSHCONTEXT/POPCONTEXT ALIGNMENT
-     3.12 Directive .X64
-     3.13 Directive INVOKE in Win64
-     3.14 Attribute LABEL for first Macro Parameter
-     3.15 Masm v8 Extensions
-     3.16 Other Differences
+     3.9  Directive OPTION WIN64
+     3.10 Directive OPTION FRAME
+     3.11 Directive OPTION RENAMEKEYWORD
+     3.12 Directives PUSHCONTEXT/POPCONTEXT ALIGNMENT
+     3.13 Directive .X64
+     3.14 Directive INVOKE in Win64
+     3.15 Attribute LABEL for first Macro Parameter
+     3.16 Masm v8 Extensions
+     3.17 Other Differences
+       a) Numeric constant __JWASM__
+       b) Operating System Argument for .MODEL
+       c) Accepted Parameters for IF[N]DEF Directive
+       d) Visibility of Procedures
     4.    Instruction Sets
     5.    Code Generation Differences
     6.    Win64 Structured Exception Handling (SEH)
@@ -63,6 +68,10 @@ JWasm Manual
      produced, a binary map will be added, which shows the file and
      memory layout of the image.
 
+    -djgpp: Selects Djgpp's variant of COFF as output format. Since it is
+     rarely used nowadays, this option isn't activated in the precompiled
+     binaries. See 9.3c how to enable it.
+
     -elf: Selects output format ELF. JWasm will produce an object module
      in 32-bit Elf format.
 
@@ -72,8 +81,8 @@ JWasm Manual
 
     -FPi: "inline FP instructions with emulation". This will make JWasm
      to create fixups for floating-point instructions if code is 16bit.
-     Some environments - Win16 and 16bit OS/2 - can then replace the FP
-     instructions by calls to an FP emulator if no coprocessor exists.
+     If supported by the linker or the OS, the FP instructions can then
+     be replaced by calls to an FP emulator if no coprocessor exists.
 
     -m<t|s|m|c|l|h|f>: generates a line containing a .MODEL directive to
      select model tiny, small, medium, compact, large, huge or flat.
@@ -100,7 +109,10 @@ JWasm Manual
     -zf<0|1>: these options select the FASTCALL calling convention type.
      The default value 0 is MS VC style, which uses registers (E)CX and
      (E)DX for the first 2 parameters which are small enough to fit into a
-     register. If -win64 is set, -zf has no effect.
+     register. Option -zf1 activates the Open Watcom fastcall convention, 
+     which uses up to four registers ( E/AX, E/DX, E/BX, E/CX ). Support
+     for OW is disabled by default and hence requires a recompile of the
+     JWasm sources to activate it. If -win64 is set, -zf has no effect.
 
     -Zd: generates line number debug information for OMF and COFF output
      format. For other formats, this option is ignored. Line number
@@ -118,6 +130,10 @@ JWasm Manual
         'or <reg>,<reg>' instead of 'cmp <reg>,0'.
       - if invoke must extend an argument's size from word to dword,
         register eax remains unchanged.
+      - the segment value of FAR externals will always be assumed unknown,
+        no matter whether the external is defined inside or outside of a 
+        segment block. Thus those labels are excluded from "far call
+        optimization". 
 
     -Zi: generates symbolic debugging info in CodeView V4 style for OMF and
      COFF output format. For other formats, this option is accepted, but
@@ -140,23 +156,28 @@ JWasm Manual
 
     -Zne: this option will disable syntax extensions which aren't supported
      by Masm. Currently these are:
-      - directive INCBIN (see 3.1)
-      - FASTCALL calling convention (see 3.2)
-      - IDs enclosed in backquotes (see 3.3)
-      - floating-point immediate operands in instructions (see 3.4)
-      - directive OPTION FIELDALIGN (see 3.5)
-      - directive OPTION PROCALIGN (see 3.6)
-      - directive OPTION MZ (see 3.7)
-      - directive OPTION ELF (see 3.8)
-      - directive OPTION RENAMEKEYWORD (see 3.10)
-      - directives PUSHCONTEXT/POPCONTEXT ALIGNMENT (see 3.11)
-      - attribute LABEL for macro parameter (see 3.14)
-      - integer initializer values for items of type [X]MMWORD (see 3.15)
-      - parameters for IF[N]DEF directive (see 3.16)
+      - directive INCBIN
+      - FASTCALL calling convention
+      - IDs enclosed in backquotes
+      - floating-point immediate operands in instructions
+      - directive OPTION FIELDALIGN
+      - directive OPTION PROCALIGN
+      - directive OPTION MZ
+      - directive OPTION ELF
+      - directive OPTION WIN64
+      - directive OPTION RENAMEKEYWORD
+      - directives PUSHCONTEXT/POPCONTEXT ALIGNMENT
+      - attribute LABEL for first macro parameter
+      - integer initializer values for items of type [X]MMWORD
+      - parameters for IF[N]DEF directive
       - name argument for .DATA, .DATA? and .CONST directives
 
     -zt<n>: "Set name decoration for STDCALL symbols". Options "-zt0" will
      make object modules compatible to ALINK + Win32.lib.
+
+    -Zv8: this option changes handling of procedure visibility to the
+     way done by Masm v8+. See Visibility of Procedures
+     for details.
 
     -zze: this option suppresses name decoration for procedures with
      the EXPORT attribute (exported name only).
@@ -229,9 +250,9 @@ JWasm Manual
       OPTION MZ:[start_fixups][,header_align][,heap_min][,heap_max]
 
     The parameters are:
-    - start_fixups: offset where segment fixups will start. The size of
-      the header will always be at least this value, even if there are no
-      fixups at all. Default - and minimum - value is 1Eh.
+    - start_fixups: offset within the header where segment fixups will start.
+      The size of the header will always be at least this value, even if there
+      are no fixups at all. Default - and minimum - value is 1Eh.
     - header_align: alignment of the header (including segment fixups).
       Value must be a power of 2, 10h is the default and minimum.
     - heap_min: the additional space (in paragraphs) which is needed by
@@ -254,7 +275,24 @@ JWasm Manual
     in the elf specs, the default value is 3 ( = ELFOSABI_LINUX ).
 
 
-    3.9 Directive OPTION FRAME
+    3.8 Directive OPTION WIN64
+
+    Directive OPTION WIN64 allows to set parameters for the Win64 output
+    format if this format is selected. For other output formats,
+    this option has no effect. The syntax for the directive is:
+
+      OPTION WIN64: store_register_params
+
+    accepted values for store_register_params are:
+     - 0: Nothing is done, the "home locations" (also sometimes called
+          "shadow space") of the first 4 register  parameters are 
+          uninitialized. This is the default setting.
+     - 1: register contents of the PROC's first 4 parameters (RCX, RDX, 
+          R8 and R9 ) will be copied to the "home locations" within
+          a PROC's prologue.
+
+
+    3.10 Directive OPTION FRAME
 
     This option affects 64-bit only. It allows to make JWasm automatically
     generate prologues and epilogues for procedures with the FRAME attribute.
@@ -272,7 +310,7 @@ JWasm Manual
     restored.
 
 
-    3.10 Directive OPTION RENAMEKEYWORD
+    3.11 Directive OPTION RENAMEKEYWORD
 
     This option allows to rename a keyword, so it can be used under a
     different name. Syntax:
@@ -285,14 +323,14 @@ JWasm Manual
     of the source, and a keyword shouldn't be renamed multiple times.
 
 
-    3.11 Directives PUSHCONTEXT/POPCONTEXT ALIGNMENT
+    3.12 Directives PUSHCONTEXT/POPCONTEXT ALIGNMENT
 
     The PUSHCONTEXT/POPCONTEXT directives understand new qualifier
     ALIGNMENT, which saves/restores current values of FIELDALIGN and
     PROCALIGN options.
 
 
-    3.12 Directive .X64
+    3.13 Directive .X64
 
      This selects a 64-bit (x86-64) cpu. Usually this directive isn't needed,
     because the output formats WIN64 and ELF64 select this cpu as default,
@@ -305,7 +343,7 @@ JWasm Manual
     because there exists a SYSCALL instruction mnemonic in this mode.
 
 
-    3.13 Directive INVOKE in Win64
+    3.14 Directive INVOKE in Win64
 
     The 64-bit version of Masm doesn't support INVOKE anymore. JWasm still
     does, but please be aware of some restrictions:
@@ -321,7 +359,7 @@ JWasm Manual
       the stack is still aligned when the code generated by INVOKE starts.
 
 
-    3.14 Attribute LABEL for first Macro Parameter
+    3.15 Attribute LABEL for first Macro Parameter
 
     The LABEL attribute for the first macro parameter allows access to a
     label which is assigned to the macro. Syntax is:
@@ -346,7 +384,7 @@ JWasm Manual
     data2 foo 2,2000
 
 
-    3.15 Masm v8 Extensions
+    3.16 Masm v8 Extensions
 
     Masm v8 introduced several extensions which are also supported by JWasm:
 
@@ -365,7 +403,7 @@ JWasm Manual
     sizes != 4, 8 and 10 ).
 
 
-    3.16 Other Differences
+    3.17 Other Differences
 
     a) Numeric constant __JWASM__
 
@@ -378,8 +416,8 @@ JWasm Manual
 
     The .MODEL directive has an optional "operating system" argument. Masm
     accepts value OS_DOS only, JWasm accepts values OS_DOS and OS_OS2.
-    However, there is no functionality behind these values, it's a
-    historical remnant.
+    This setting will affect the generated code of directives .STARTUP and
+    .EXIT for 16-bit memory models.
 
     c) Accepted Parameters for IF[N]DEF Directive
 
@@ -389,6 +427,48 @@ JWasm Manual
     a bit more picky and will display a warning if more than one item is 
     found behind the directive (Masm just takes the first and silently skips
     the rest).
+
+    d) Visibility of Procedures
+
+    When a PROTO or EXTERNDEF directive for a symbol is located in a module
+    before a matching PROC directive, the visibility of this Procedure 
+    ( "public" vs "private", or "external" vs. "static" ) is handled 
+    differently in Masm v6 or 7 and Masm v8 or newer:
+
+    Since Masm v8, a PROTO or EXTERNDEF for a symbol which is later defined
+    as a PROC will make the procedure public, no matter what a possible
+    visibility attribute of the PROC itself - or the default one set with 
+    OPTION PROC - is telling.
+
+    OTOH, with Masm v6/7, both the visibility attribute of the PROC directive
+    and the current default setting of OPTION PROC will affect ths symbol's
+    visibility.
+
+                Masm6 Masm8 JWasm JWasm+Zv8
+      -------------------------------------
+      On,E,P            x             x
+      On,E,Pn           x             x
+      On,E,Pp     x     x      x      x
+      Op,E,P      x     x      x      x
+      Op,E,Pn     x     x             x
+      Op,E,Pp     x     x      x      x
+
+      On = OPTION PROC:PRIVATE
+      Op = OPTION PROC:PUBLIC
+      E  = PROTO or EXTERNDEF before PROC
+      P  = PROC without visibility attribute
+      Pn = PROC with PRIVATE visibility attribute
+      Pp = PROC with PUBLIC visibility attribute
+      x  = procedure will be public
+
+    As default, JWasm more or less copies the Masm v6/7 behavior. The
+    difference is that an explicite visibility attribute behind PROC has 
+    the highest priority for JWasm. However, since v2.04, there's an 
+    additional cmdline option -Zv8 which will make JWasm behave like Masm v8+.
+
+    It should be noted that without a PROTO/EXTERNDEF before PROC, there
+    are no differences between Masm v6, v8 and JWasm, and the -Zv8 switch
+    also has no effect then.
 
 
     4. Instruction Sets
@@ -530,17 +610,24 @@ JWasm Manual
     - directives PAGE, TITLE, SUBTITLE, SUBTTL.
       the directives are ignored and a warning (level 3) is displayed.
     - the following parameters of the OPTION directive:
-      - NOSIGNEXTEND
       - OLDMACROS
       - EXPR16
       - READONLY
     - optional parameter NONUNIQUE for structures is ignored.
     - operators LOW32, HIGH32 (Masm v8+).
-    - INVOKE for procedures which use the Watcom C calling convention.
     - commandline option -Zd for ELF output format.
     - commandline option -Zi for ELF output format.
 
-    c) Missing features which most likely won't be implemented:
+    c) Features which aren't active in the precompiled binaries:
+
+    - support for INVOKE with procedures of the Watcom C register 
+      calling convention ( option -zf1 ). [ -DINVOKE_WC ]
+    - support for Djgpp's variant of COFF. [ -DDJGPP_SUPPORT ]
+
+    You'll have to recompile the sources with the appropriate macros
+    defined ( see the values within [] above ) to enable these features. 
+
+    d) Missing features which most likely won't be implemented:
 
     - %OUT directive
     - syntax "mm(n)" and "xmm(n)" (supported by Masm v6 and v7 only)

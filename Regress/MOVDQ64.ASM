@@ -13,6 +13,9 @@ endif
 vq	dq 123456789ABCDEF0h
 vd	dd 12345678h
 
+rd	real4 1.0
+rq	real8 1.0
+
 	.code
 
 @dd equ <dword ptr>
@@ -42,6 +45,8 @@ vd	dd 12345678h
 
 	movd mm1, vd          ;mm,  mem32
 	movd xmm1, vd         ;xmm, mem32
+	movd mm1, rd          ;mm,  mem32
+	movd xmm1, rd         ;xmm, mem32
 	movd mm1, @dd [ebx]   ;mm,  mem32
 	movd xmm1, @dd [ebx]  ;xmm, mem32
 	movd mm1, @dd [r8d]   ;mm,  mem32
@@ -53,6 +58,8 @@ vd	dd 12345678h
 
 	movd vd, mm1          ;mem32, mm
 	movd vd, xmm1         ;mem32, xmm
+	movd rd, mm1          ;mem32, mm
+	movd rd, xmm1         ;mem32, xmm
 	movd @dd [ebx], mm1   ;mem32, mm
 	movd @dd [ebx], xmm1  ;mem32, xmm
 	movd @dd [r8d], mm1   ;mem32, mm
@@ -68,8 +75,10 @@ vd	dd 12345678h
 	movq mm1, mm0         ;mm,  mm
 	movq xmm1, xmm0       ;xmm, xmm
 
-	movq mm0, vq          ;mm,  mem64
+	movq mm1, vq          ;mm,  mem64
 	movq xmm1, vq         ;xmm, mem64
+	movq mm1, rq          ;mm,  mem64
+	movq xmm1, rq         ;xmm, mem64
 	movq mm1, @dq [ebx]   ;mm,  mem64
 	movq xmm1, @dq [ebx]  ;xmm, mem64
 	movq mm1, [ebx]       ;mm,  mem64
@@ -83,6 +92,8 @@ vd	dd 12345678h
 
 	movq vq, mm0          ;mem64, mm
 	movq vq, xmm0         ;mem64, xmm
+	movq rq, mm0          ;mem64, mm
+	movq rq, xmm0         ;mem64, xmm
 	movq @dq [ebx], mm0   ;mem64, mm
 	movq @dq [ebx], xmm0  ;mem64, xmm
 	movq [ebx], mm1       ;mem64, mm

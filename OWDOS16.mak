@@ -47,9 +47,9 @@ extra_c_flags += -obmilrs -s -DNDEBUG
 LOPTD = debug dwarf op symfile
 !endif
 
-lflagsd = $(LOPTD) sys dos op map=$^*, stack=0x4000
+lflagsd = $(LOPTD) sys dos op map=$^*, stack=0x5000
 
-CC=$(WATCOM)\binnt\wcc -q -0 -w3 -zc -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -DAMD64_SUPPORT=0 -DSSE4SUPP=0 -zt=10000
+CC=$(WATCOM)\binnt\wcc -q -0 -w3 -zc -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -DAMD64_SUPPORT=0 -DSSE4SUPP=0 -zt=12000
 
 .c{$(OUTD)}.obj:
    $(CC) $<
@@ -63,12 +63,11 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   &
            $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/labels.obj  &
            $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    &
-           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queues.obj  &
+           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   &
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/omf.obj     &
-           $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   &
-           $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  &
-           $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   &
+           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj&
+           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
+           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
 !if $(DEBUG)
 !if $(TRMEM)
@@ -87,6 +86,7 @@ $(OUTD):
 	@if not exist $(OUTD) mkdir $(OUTD)
 
 $(OUTD)/$(name)r.exe: $(proj_obj)
+	set LIB=$(WATCOM)\Lib286;$(WATCOM)\Lib286\DOS
 	$(LINK) @<<
 $(lflagsd) file { $(proj_obj) } name $@
 <<

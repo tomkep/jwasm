@@ -50,7 +50,7 @@ typedef struct _IMAGE_SECTION_HEADER {
 #define IMAGE_SCN_TYPE_OVER       0x00000400
 #define IMAGE_SCN_LNK_REMOVE      0x00000800
 #define IMAGE_SCN_LNK_COMDAT      0x00001000
-#define IMAGE_SCN_GPREL           0x00008000 /*  Valid only for IA64 */
+#define IMAGE_SCN_GPREL           0x00008000 /* Valid only for IA64 */
 #define IMAGE_SCN_MEM_FARDATA     0x00008000 /* Not in PECOFF v8 spec */
 #define IMAGE_SCN_MEM_PURGEABLE   0x00020000
 #define IMAGE_SCN_MEM_16BIT       0x00020000
@@ -104,20 +104,20 @@ typedef struct _IMAGE_RELOCATION {
 
 // X86-64 relocations
 
-#define IMAGE_REL_AMD64_ABSOLUTE        0x0000  // Reference is absolute, no relocation is necessary
-#define IMAGE_REL_AMD64_ADDR64          0x0001  // 64-bit address (VA).
-#define IMAGE_REL_AMD64_ADDR32          0x0002  // 32-bit address (VA).
-#define IMAGE_REL_AMD64_ADDR32NB        0x0003  // 32-bit address w/o image base (RVA).
-#define IMAGE_REL_AMD64_REL32           0x0004  // 32-bit relative address from byte following reloc
-#define IMAGE_REL_AMD64_REL32_1         0x0005  // 32-bit relative address from byte distance 1 from reloc
-#define IMAGE_REL_AMD64_REL32_2         0x0006  // 32-bit relative address from byte distance 2 from reloc
-#define IMAGE_REL_AMD64_REL32_3         0x0007  // 32-bit relative address from byte distance 3 from reloc
-#define IMAGE_REL_AMD64_REL32_4         0x0008  // 32-bit relative address from byte distance 4 from reloc
-#define IMAGE_REL_AMD64_REL32_5         0x0009  // 32-bit relative address from byte distance 5 from reloc
-#define IMAGE_REL_AMD64_SECTION         0x000A  // Section index
-#define IMAGE_REL_AMD64_SECREL          0x000B  // 32 bit offset from base of section containing target
-#define IMAGE_REL_AMD64_SECREL7         0x000C  // 7 bit unsigned offset from base of section containing target
-#define IMAGE_REL_AMD64_TOKEN           0x000D  // 32 bit metadata token
+#define IMAGE_REL_AMD64_ABSOLUTE        0x0000  /* Reference is absolute, no relocation is necessary */
+#define IMAGE_REL_AMD64_ADDR64          0x0001  /* 64-bit address (VA).*/
+#define IMAGE_REL_AMD64_ADDR32          0x0002  /* 32-bit address (VA).*/
+#define IMAGE_REL_AMD64_ADDR32NB        0x0003  /* 32-bit address w/o image base (RVA).*/
+#define IMAGE_REL_AMD64_REL32           0x0004  /* 32-bit relative address from byte following reloc */
+#define IMAGE_REL_AMD64_REL32_1         0x0005  /* 32-bit relative address from byte distance 1 from reloc */
+#define IMAGE_REL_AMD64_REL32_2         0x0006  /* 32-bit relative address from byte distance 2 from reloc */
+#define IMAGE_REL_AMD64_REL32_3         0x0007  /* 32-bit relative address from byte distance 3 from reloc */
+#define IMAGE_REL_AMD64_REL32_4         0x0008  /* 32-bit relative address from byte distance 4 from reloc */
+#define IMAGE_REL_AMD64_REL32_5         0x0009  /* 32-bit relative address from byte distance 5 from reloc */
+#define IMAGE_REL_AMD64_SECTION         0x000A  /* Section index */
+#define IMAGE_REL_AMD64_SECREL          0x000B  /* 32 bit offset from base of section containing target */
+#define IMAGE_REL_AMD64_SECREL7         0x000C  /* 7 bit unsigned offset from base of section containing target */
+#define IMAGE_REL_AMD64_TOKEN           0x000D  /* 32 bit metadata token */
 
 #define IMAGE_SIZEOF_SYMBOL     18
 #define IMAGE_SIZEOF_AUX_SYMBOL 18

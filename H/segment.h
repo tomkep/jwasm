@@ -42,7 +42,7 @@ extern int              GetSymOfssize( struct asm_sym * );
 extern uint_32          GetCurrOffset( void );  // Get current segment's offset
 extern ret_code         SetCurrOffset( uint_32, bool, bool );
 //extern direct_idx       SetSegmentClass( struct asm_sym *, const char * );
-extern asm_sym          *CreateSegment( const char *name, const char *classname, uint_8 alignment, uint_8 is32 );
+extern asm_sym          *CreateIntSegment( const char *, const char *, uint_8, uint_8, bool );
 //extern dir_node         *GetCurrSeg( void );  /* Get current segment; NULL means none */
 //extern int              GetCurrClass( void ); /* get curr segment's class index */
 //extern uint           GetGrpIdx( struct asm_sym * );/* get symbol's group index, from the symbol itself or from the symbol's segment */
@@ -57,6 +57,9 @@ extern uint_32          GetCurrSegAlign( void );
 extern ret_code         SetOfssize( void );
 extern void             DefineFlatGroup( void );
 extern ret_code         SegmentModuleExit( void );
+extern void             DeleteGroup( dir_node * );
+extern char             *GetLname( direct_idx );
+extern void             FreeLnameQueue( void );
 
 /* simplified segment functions */
 extern char             *GetCodeSegName( void );

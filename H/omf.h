@@ -1,8 +1,14 @@
 
-// interface to OMF format output functions
+/* interface to OMF format output functions */
 
 #ifndef _OMF_H_INCLUDED_
 #define _OMF_H_INCLUDED_
+
+/* max size of LEDATA data is 1024 - (1+2+1/2+2/4+1) = 1014 */
+
+#define MAX_LEDATA_THRESHOLD    (1024 - 10)
+#define MAX_PUB_LENGTH          1024 /* OMF: max length of pubdef record */
+#define MAX_EXT_LENGTH          1024 /* OMF: max length ( in chars ) of extdef */
 
 void      omf_init( module_info * );
 void      omf_fini( void );
@@ -22,12 +28,9 @@ void      omf_end_of_pass1( void );
 void      omf_set_filepos( void );
 void      omf_write_ledata( dir_node * );
 void      omf_write_linnum( void );
-void      omf_create_modend( struct genfixup *, uint_32 );
-void      omf_write_modend( void );
+void      omf_write_modend( struct fixup *, uint_32 );
 void      omf_OutSelect( bool );
 void      omf_FlushCurrSeg( void );
-
-struct omffixup *omf_create_fixup( struct genfixup * );
 
 void      omf_write_header_dbgcv( void );
 void      omf_write_debug_tables( void );

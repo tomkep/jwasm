@@ -32,51 +32,17 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "omfpc.h"
-#include "omffixup.h"
+#include "parser.h"
+#include "directiv.h"
+#include "segment.h"
+#include "fixup.h"
+#include "omfint.h"
+#include "omfspec.h"
 #include "myassert.h"
-#include "carve.h"
 
-static carve_t  myCarver;
-
-void OmfFixInit( void )
-/*********************/
-{
-    myCarver = CarveCreate( sizeof( omffixup ), 64 );
-}
-
-void OmfFixFini( void )
-/*********************/
-{
-    CarveDestroy( myCarver );
-}
-
-omffixup *OmfFixNew( void )
-/*************************/
-{
-    return( CarveAlloc( myCarver ) );
-}
-
-#if 0
-omffixup *OmfFixDup( const fixup *fix )
-/*************************************/
-{
-    omffixup *new;
-
-    if( fix == NULL ) {
-        return( NULL );
-    }
-    new = CarveAlloc( myCarver );
-    *new = *fix;
-    return( new );
-}
-#endif
-
-void OmfFixKill( omffixup *fix )
-/******************************/
-{
-    CarveFree( myCarver, fix );
-}
+extern struct format_options formatoptions[];
+extern const char szNull[];
+extern uint GetGrpIdx( struct asm_sym *sym );
 
 static uint_8 *putIndex( uint_8 *p, uint_16 index )
 /*************************************************/
@@ -132,13 +98,23 @@ static uint_8 *putTargetDatum( uint_8 *p, uint_8 method, uint_16 datum )
     return( putIndex( p, datum ) );
 }
 
-static size_t OmfFixGenLRef( logref *log, uint_8 *buf, int type )
+/* create fields
+ * - Fix Data ( byte, type of frame and target ),
+ * - Frame Datum (index field to a SEGDEF, GRPDEF or EXTDEF),
+ * - Target Datum (index field to a SEGDEF, GRPDEF or EXTDEF),
+ * - Target Displacement ( 2- or 4-byte )
+ * of a FIXUP subrecord.
+ *
+ * type is FIX_GEN_INTEL or FIX_GEN_MS386
+ */
+
+static size_t OmfFixGenLRef( logref *lr, uint_8 *buf, int type )
 /***************************************************************/
 {
     uint_8  *p;
     uint_8  target;
 
-/**/myassert( log != NULL );
+/**/myassert( lr != NULL );
 /**/myassert( buf != NULL );
 /**/myassert( type == FIX_GEN_INTEL || type == FIX_GEN_MS386 );
 
@@ -147,23 +123,25 @@ static size_t OmfFixGenLRef( logref *log, uint_8 *buf, int type )
         cannot just arbitrarily write fixups without a displacment if their
         displacement field is 0.  So we use the is_secondary field.
     */
-    target = log->target;
-    if( log->target_offset == 0 && log->is_secondary ) {
-        target |= 0x04;
+    target = lr->target;
+    if( lr->target_offset == 0 && lr->is_secondary ) {
+        target |= 0x04; /* bit 2=1 -> no displacement field */
     }
     p = buf;
-    *p++ = ( log->frame << 4 ) | ( target );
-    p = putFrameDatum( p, log->frame, log->frame_datum );
-    p = putTargetDatum( p, target, log->target_datum );
+    *p++ = ( lr->frame << 4 ) | ( target );
+    p = putFrameDatum( p, lr->frame, lr->frame_datum );
+    p = putTargetDatum( p, target, lr->target_datum );
     if( ( target & 0x04 ) == 0 ) {
         if( type == FIX_GEN_MS386 ) {
-            p = put32( p, (uint_32)log->target_offset );
+            p = put32( p, (uint_32)lr->target_offset );
         } else {
-            p = put16( p, (uint_16)log->target_offset );
+            p = put16( p, (uint_16)lr->target_offset );
         }
     }
     return( p - buf );
 }
+
+/* de facto unused */
 
 static size_t OmfFixGenPRef( physref *ref, uint_8 *buf, int type )
 /****************************************************************/
@@ -178,6 +156,10 @@ static size_t OmfFixGenPRef( physref *ref, uint_8 *buf, int type )
     return( p - buf );
 }
 
+/* used when the MODEND record is written.
+ * is_logical is always 1 then.
+ */
+
 size_t OmfFixGenRef( logphys *ref, int is_logical, uint_8 *buf, int type )
 /************************************************************************/
 {
@@ -190,62 +172,208 @@ size_t OmfFixGenRef( logphys *ref, int is_logical, uint_8 *buf, int type )
     return( OmfFixGenPRef( &ref->phys, buf, type ) );
 }
 
-/* translate an OMF fixup into its binary representation.
- * the first two bytes will contain the fixup type and
- * the location within the LEDATA record (10 bits).
+/* fill a logref from a fixup's info */
+
+static int fill_logref( const struct fixup *fixup, logref *lr )
+/*************************************************************/
+{
+    struct asm_sym      *sym;
+
+    sym = fixup->sym; /* may be NULL! */
+
+#ifdef DEBUG_OUT
+    if ( sym )
+        DebugMsg(("fill_logref(%X): sym=%s, state=%u, fixup->type=%u\n", fixup, sym->name, sym->state, fixup->type ));
+    else
+        DebugMsg(("fill_logref(%X): sym=NULL, fixup->type=%u\n", fixup, fixup->type ));
+#endif
+
+    /*------------------------------------*/
+    /* Determine the Target and the Frame */
+    /*------------------------------------*/
+
+    if( sym == NULL ) {
+
+        if ( fixup->frame == EMPTY ) /* v1.96: nothing to do without a frame */
+            return( 0 );
+        lr->target = fixup->frame;
+        lr->target_datum = fixup->frame_datum;
+        lr->frame = FRAME_TARG;
+
+    } else if( sym->state == SYM_UNDEFINED ) { /* shouldn't happen */
+        DebugMsg(("fill_logref(%X): state of >%s< is SYM_UNDEFINED\n", fixup, sym->name));
+        AsmErr( SYMBOL_NOT_DEFINED, sym->name );
+        return( 0 );
+    } else if( sym->state == SYM_GRP ) {
+
+        DebugMsg(("fill_logref(%X): GROUP %s\n", fixup, sym->name));
+
+        lr->target = TARGET_GRP;
+        lr->target_datum = ((dir_node *)sym)->e.grpinfo->grp_idx;
+        if( fixup->frame != EMPTY ) {
+            lr->frame = fixup->frame;
+            lr->frame_datum = fixup->frame_datum;
+        } else {
+            lr->frame = FRAME_GRP;
+            lr->frame_datum = lr->target_datum;
+        }
+
+    } else if( sym->state == SYM_SEG ) {
+
+        DebugMsg(("fill_logref(%X): SEG %s\n", fixup, sym->name));
+
+        lr->target = TARGET_SEG;
+        lr->target_datum = GetSegIdx( sym );
+        if( fixup->frame != EMPTY ) {
+            lr->frame = fixup->frame;
+            lr->frame_datum = fixup->frame_datum;
+        } else {
+            lr->frame = FRAME_SEG;
+            lr->frame_datum = lr->target_datum;
+        }
+
+    } else {
+
+        /* symbol is a label */
+
+        lr->frame_datum = fixup->frame_datum;
+        if( sym->state == SYM_EXTERNAL ) {
+            DebugMsg(("fill_logref(%X): EXTERNAL %s\n", fixup, sym->name));
+
+            lr->target = TARGET_EXT;
+            lr->target_datum = sym->idx;
+
+            if( fixup->frame == FRAME_GRP && fixup->frame_datum == 0 ) {
+                /* set the frame to the frame of the corresponding segment */
+                lr->frame_datum = GetGrpIdx( sym );
+            }
+        } else {
+            //asm_sym *grpsym;
+            /* it's a SYM_INTERNAL */
+            DebugMsg(("fill_logref(%X): fixup->frame, datum=%u.%u sym->name=%s state=%X segm=%X\n",
+                      fixup, fixup->frame, fixup->frame_datum, sym->name, sym->state, sym->segment ));
+            if ( sym->segment == NULL ) { /* shouldn't happen */
+                AsmErr( SEGMENT_MISSING_FOR_FIXUP, sym->name );
+                return ( 0 );
+            }
+
+            lr->target = TARGET_SEG;
+            lr->target_datum = GetSegIdx( sym->segment );
+        }
+
+        if( fixup->frame != EMPTY ) {
+            lr->frame = (uint_8)fixup->frame;
+        } else {
+            lr->frame = FRAME_TARG;
+        }
+    }
+
+    /*--------------------*/
+    /* Optimize the fixup */
+    /*--------------------*/
+
+    if( lr->frame == ( lr->target - TARGET_SEG ) ) {
+        lr->frame = FRAME_TARG;
+    }
+
+    return( 1 );
+}
+
+/* translate a fixup into its binary representation,
+ * which is a "FIXUPP subrecord" according to OMF docs.
+ * structure:
+ * - WORD, Locat: 1MLLLLDD DDDDDDDD, is
+ *   1 = indicates FIXUPP, no THREAD
+ *   M = mode: 1=segment relative, 0=self relative
+ *   L = location, see LOC_ entries in omfspec.h
+ *   D = data record offset, 10 bits for range 0-3FFh
+ * - BYTE, Fix Data: FRRRTPGG, is
+ *   F = 0=frame defined in fixup, 1=frame defined in frame thread
+ *   R = Frame
+ *   T = 0=target defined in fixup, 1=Target defined in target thread
+ *   P = 0=target displacement is present
+ *   G = lower bits of target method (F=0), target thread number (F=1)
+ * - void/BYTE/WORD, Frame Datum
+ * - BYTE/WORD, Target Datum
+ * - WORD/DWORD, Target Displacement
  */
 
-size_t OmfFixGenFix( omffixup *fix, uint_8 *buf, int type )
-/*********************************************************/
+size_t OmfFixGenFix( struct fixup *fixup, uint_8 *buf, int type )
+/***************************************************************/
 {
     uint_8  *p;
-    uint_8  byte;
+    uint_8  locat1;
+    uint_8  self_relative = FALSE;
     uint_16 data_rec_offset;
+    logref  lr;
 
-/**/myassert( fix != NULL );
-/**/myassert( buf != NULL );
-/**/myassert( type == FIX_GEN_INTEL || type == FIX_GEN_MS386 );
-    p = buf;
-    byte = fix->self_relative ? 0x80 : 0xc0;    /* explicit fixup */
-    switch( fix->loc_method ) {
-    case FIXO_LO_BYTE:
-        byte |= ( LOC_OFFSET_LO << 2 );
+    /**/myassert( fixup != NULL );
+    /**/myassert( buf != NULL );
+    /**/myassert( type == FIX_GEN_INTEL || type == FIX_GEN_MS386 );
+
+    switch( fixup->type ) {
+    case FIX_RELOFF8:
+        self_relative = TRUE;
+        /* no break */
+    case FIX_LOBYTE:
+        locat1 = ( LOC_OFFSET_LO << 2 );
         break;
-    case FIXO_OFFSET:
-        if( fix->loader_resolved ) {
-            byte |= ( LOC_MS_LINK_OFFSET << 2 );
+    case FIX_HIBYTE:
+        locat1 = ( LOC_OFFSET_HI << 2 );
+        break;
+    case FIX_RELOFF16:
+        self_relative = TRUE;
+        /* no break */
+    case FIX_OFF16:
+        if( fixup->loader_resolved ) {
+            locat1 = ( LOC_MS_LINK_OFFSET << 2 );
         } else {
-            byte |= ( LOC_OFFSET << 2 );
+            locat1 = ( LOC_OFFSET << 2 );
         }
         break;
-    case FIXO_BASE:
-        byte |= ( LOC_BASE << 2 );
-        break;
-    case FIXO_POINTER:
-        byte |= ( LOC_BASE_OFFSET << 2 );
-        break;
-    case FIXO_HI_BYTE:
-        byte |= ( LOC_OFFSET_HI << 2 );
-        break;
-    case FIXO_OFFSET386:
-        if( fix->loader_resolved ) {
-            byte |= ( LOC_MS_LINK_OFFSET_32 << 2 );
+    case FIX_RELOFF32:
+        self_relative = TRUE;
+        /* no break */
+    case FIX_OFF32:
+        if( fixup->loader_resolved ) {
+            locat1 = ( LOC_MS_LINK_OFFSET_32 << 2 );
         } else {
-            byte |= ( LOC_MS_OFFSET_32 << 2 );
+            locat1 = ( LOC_MS_OFFSET_32 << 2 );
         }
         break;
-    case FIXO_POINTER386:
-        byte |= ( LOC_MS_BASE_OFFSET_32 << 2 );
+    case FIX_SEG:
+        locat1 = ( LOC_BASE << 2 );
+        break;
+    case FIX_PTR16:
+        locat1 = ( LOC_BASE_OFFSET << 2 );
+        break;
+    case FIX_PTR32:
+        locat1 = ( LOC_MS_BASE_OFFSET_32 << 2 );
         break;
     default:
-/**/    never_reach();
+        AsmErr( UNSUPPORTED_FIXUP_TYPE,
+               formatoptions[Options.output_format].formatname,
+               fixup->sym ? fixup->sym->name : szNull );
+        return( 0 );
     }
-/**/myassert( fix->loc_offset < 1024 );
-    data_rec_offset = fix->loc_offset;
-    byte |= data_rec_offset >> 8;
-    *p++ = byte;
+    locat1 |= self_relative ? 0x80 : 0xc0; /* explicit fixup */
+
+    lr.is_secondary = TRUE;
+    lr.target_offset = 0;
+
+    if ( fill_logref( fixup, &lr ) == 0 )
+        return( 0 );
+
+    /* calculate the fixup's location in current LEDATA */
+    //data_rec_offset = fix.loc_offset;
+    data_rec_offset = fixup->location - CurrSeg->e.seginfo->start_loc;
+
+    /**/myassert( data_rec_offset < 1024 );
+
+    locat1 |= data_rec_offset >> 8;
+    p = buf;
+    *p++ = locat1;
     *p++ = (uint_8)data_rec_offset;
-    p += OmfFixGenLRef( &fix->lr, p, type );
-    return( p - buf );
+    return( 2 + OmfFixGenLRef( &lr, p, type ) );
 }
 

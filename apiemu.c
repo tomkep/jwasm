@@ -37,7 +37,8 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
-#include "watcomc.h"
+//#include "watcomc.h"
+#include "globals.h"
 
 #define __set_errno( err ) errno = (err)
 
@@ -282,7 +283,7 @@ char *_fullpath( char *buff, const char *path, size_t size )
             if( ptr != NULL ) free( ptr );
         }
     }
-    return buff;
+    return( buff );
 }
 
 #if 0
@@ -353,16 +354,16 @@ char * _stdcall CharUpperA(char * lpsz)
     cu p;
     p.p = lpsz;
 
-    if (p.c < 0x10000)
-        if (p.c >= 'a')
-            return((char *)p.c - 0x20);
+    if ( p.c < 0x10000 )
+        if ( p.c >= 'a' )
+            return( (char *)p.c - 0x20 );
         else
-            return((char *)p.c);
+            return( (char *)p.c );
     else
-        for (;*p.p;p.p++)
-            if (*p.p >= 'a')
+        for ( ; *p.p; p.p++ )
+            if ( *p.p >= 'a' )
                 *p.p = *p.p - 0x20;
-    return(lpsz);
+    return( lpsz );
 }
 #endif
 #endif

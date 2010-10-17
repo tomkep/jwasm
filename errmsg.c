@@ -33,11 +33,11 @@
 
 #include "globals.h"
 #include "symbols.h"
+#include "parser.h"
 #include "directiv.h"
 #include "input.h"
 #include "tokenize.h"
 #include "symbols.h"
-#include "queues.h"
 #include "macro.h"
 #include "fatal.h"
 #include "msgtext.h"
@@ -48,15 +48,7 @@ extern char             *MsgGet( int resourceid, char *buffer );
 extern void             print_source_nesting_structure( void );
 extern char             banner_printed;
 
-//    WngLvls[level] /* warning levels associated with warning messages */
-//    CompFlags.errout_redirected
-
-/* globals to this module */
-#define ErrLimit Options.error_limit
-#define WngLevel Options.warning_level
-
 //static bool             Errfile_Written;
-
 //static void             PrtMsg( int severity, int msgnum, va_list args1, va_list args2 );
 //void                    PutMsg( FILE *fp, int severity, int msgnum, va_list args );
 
@@ -78,25 +70,38 @@ void DoDebugMsg( const char *format, ... )
     va_start( args, format );
     vprintf( format, args );
     va_end( args );
+#if 0
+    fflush( stdout );
+#endif
+}
+void DoDebugMsg1( const char *format, ... )
+/****************************************/
+{
+    va_list args;
+    char buffer[32];
+
+    if( !Options.debug ) return;
+
+    if( ModuleInfo.cref == FALSE ) return;
+
+    printf( "%lu%s. ", LineNumber, GetTopLine( buffer ) );
+
+    va_start( args, format );
+    vprintf( format, args );
+    va_end( args );
+#if 0
+    fflush( stdout );
+#endif
 }
 #endif
 
-static void OpenErrFile( void )
-/**********************/
-{
-//    if( !isatty( fileno( errout ) ) ) return;
-    if( FileInfo.fname[ERR] != NULL ) {
-        FileInfo.file[ERR] = fopen( FileInfo.fname[ERR], "w" );
-    }
-}
-
 void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
-/********************************************************************/
+/*************************************************************/
 {
     int             i,j;
     char           *type;
     char            msgbuf[MAXMSGSIZE];
-    char            buffer[MAX_LINE_LEN];
+    char            buffer[MAX_LINE_LEN+128];
 
     if( fp != NULL ) {
 
@@ -132,13 +137,18 @@ void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
 }
 
 static void PrtMsg( int severity, int msgnum, va_list args1, va_list args2 )
-/***************************************************************************/
+/**************************************************************************/
 {
     if( !banner_printed )
         trademark();
 
-    if( FileInfo.file[ERR] == NULL )
-        OpenErrFile();
+    /* open .err file if not already open and a name is given */
+    if( FileInfo.file[ERR] == NULL && FileInfo.fname[ERR] != NULL ) {
+        FileInfo.file[ERR] = fopen( FileInfo.fname[ERR], "w" );
+        if( FileInfo.file[ERR] == NULL )
+            Fatal( FATAL_CANNOT_OPEN_FILE, FileInfo.fname[ERR], errno );
+    }
+
     PutMsg( errout, severity, msgnum, args1 );
     fflush( errout );                       /* 27-feb-90 */
     if( FileInfo.file[ERR] ) {
@@ -150,7 +160,7 @@ static void PrtMsg( int severity, int msgnum, va_list args1, va_list args2 )
 /* notes: "included by", "macro called from", ... */
 
 void PrintNote( int msgnum, ... )
-/*****************************/
+/*******************************/
 {
     va_list args1, args2;
 
@@ -175,10 +185,10 @@ void AsmErr( int msgnum, ... )
     PrtMsg( 2, msgnum, args1, args2 );
     va_end( args1 );
     va_end( args2 );
-    ModuleInfo.error_count++;
+    ModuleInfo.g.error_count++;
     write_to_file = FALSE;
     print_source_nesting_structure();
-    if( ErrLimit != -1  &&  ModuleInfo.error_count == ErrLimit+1 ) {
+    if( Options.error_limit != -1  &&  ModuleInfo.g.error_count == Options.error_limit+1 ) {
         PrtMsg( 2, TOO_MANY_ERRORS, args1, args2 );
         /* Just simulate the END directive, don't do a fatal exit!
          This allows to continue to assemble further modules.
@@ -192,7 +202,7 @@ void AsmWarn( int level, int msgnum, ... )
 {
     va_list args1, args2;
 
-    if( level <= WngLevel ) {
+    if( level <= Options.warning_level ) {
 #ifdef DEBUG_OUT
         DebugCurrLine();
 #endif
@@ -200,21 +210,15 @@ void AsmWarn( int level, int msgnum, ... )
         va_start( args2, msgnum );
         if( !Options.warning_error ) {
             PrtMsg( 4, msgnum, args1, args2 );
-            ModuleInfo.warning_count++;
+            ModuleInfo.g.warning_count++;
         } else {
             PrtMsg( 2, msgnum, args1, args2 );
-            ModuleInfo.error_count++;
+            ModuleInfo.g.error_count++;
         }
         va_end( args1 );
         va_end( args2 );
         print_source_nesting_structure();
     }
-}
-
-void InitErrFile( void )
-/*********************/
-{
-    remove( FileInfo.fname[ERR] );
 }
 
 #ifndef NDEBUG
@@ -225,7 +229,7 @@ int InternalError( const char *file, unsigned line )
 {
     char buffer[MAX_LINE_LEN];
     DebugMsg(("InternalError enter\n"));
-    ModuleInfo.error_count++;
+    ModuleInfo.g.error_count++;
     GetCurrSrcPos( buffer );
     fprintf( errout, "%s", buffer );
     fprintf( errout, MsgGetEx( INTERNAL_ERROR ), file, line );

@@ -21,6 +21,8 @@ main proc
 	SCASQ
 	STOSQ
 	SWAPGS
+	bswap eax
+	bswap rax
 	ret
 
 main endp

@@ -209,7 +209,7 @@ ret_code LoopDirective( int i, int directive )
 #if USELOCALMAC
         ReleaseMacroData( macro );
 #else
-        dir_free( macro, FALSE );
+        SymFree( (asm_sym *)macro );
 #endif
         return( ERROR );
     }
@@ -255,7 +255,7 @@ ret_code LoopDirective( int i, int directive )
              with each iteration! */
             i = 1;
             StringBufferEnd = oldbufferend;
-            Token_Count = Tokenize( line, i );
+            Token_Count = Tokenize( line, i, FALSE );
             if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
                 break;
             macro->sym.value++;
@@ -299,10 +299,7 @@ ret_code LoopDirective( int i, int directive )
 #if USELOCALMAC
     ReleaseMacroData( macro );
 #else
-    /* free the temporary macro. dir_free() doesn't really free the whole
-     * thing, but with FASTMEM=1 this is pretty irrelevant.
-     */
-    dir_free( macro, FALSE );
+    SymFree( (asm_sym *)macro );
 #endif
     DebugMsg(("LoopDirective exit\n"));
     return( NOT_ERROR );

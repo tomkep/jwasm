@@ -17,7 +17,7 @@ typedef struct equ_item {
     struct equ_item *next;
     asm_sym *sym;
     int value;
-    bool defined;
+    bool isdefined;
 } equ_item;
 
 /* line_item: used for a linked list of preprocessed lines. After SaveState()

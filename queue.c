@@ -30,17 +30,22 @@
 
 #include <stddef.h>
 
+#include "memalloc.h"
 #include "queue.h"
 #include "myassert.h"
 
-extern void QInit( qdesc *q ) {
-/***************************/
+#if 0 /* v2.04: not needed */
+void QInit( qdesc *q )
+/********************/
+{
     q->head = NULL;
     q->tail = NULL;
 }
+#endif
 
-extern void QEnqueue( qdesc *q, void *item ) {
-/******************************************/
+void QEnqueue( qdesc *q, void *item )
+/***********************************/
+{
     if( q->head == NULL ) {
         q->head = q->tail = item;
     } else {
@@ -51,9 +56,22 @@ extern void QEnqueue( qdesc *q, void *item ) {
     *(void**)item = NULL;
 }
 
+/* add a new node to a queue */
+
+void QAddItem( qdesc *q, void *data )
+/***********************************/
+{
+    struct qnode    *node;
+
+    node = AsmAlloc( sizeof( qnode ) );
+    node->elmt = data;
+    QEnqueue( q, node );
+}
+
 #if 0
-extern void QJoinQueue( qdesc *dest, qdesc *src ) {
-/***********************************************/
+void QJoinQueue( qdesc *dest, qdesc *src )
+/****************************************/
+{
     if( dest->head == NULL ) {
         dest->head = src->head;
     } else if( src->head == NULL ) {
@@ -67,8 +85,11 @@ extern void QJoinQueue( qdesc *dest, qdesc *src ) {
 }
 #endif
 
-extern void *QDequeue( qdesc *q ) {
-/*******************************/
+#if 0 /* v2.04: not needed anymore */
+
+void *QDequeue( qdesc *q )
+/************************/
+{
     void *item;
 
     if( q->head == NULL ) {
@@ -81,3 +102,4 @@ extern void *QDequeue( qdesc *q ) {
     }
     return( item );
 }
+#endif

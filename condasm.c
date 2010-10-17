@@ -25,17 +25,16 @@
 *  ========================================================================
 *
 * Description:  JWasm conditional processing routines. Handles directives
-*               IF[E], ELSE, ENDIF
+*               [ELSE]IF[E], ELSE, ENDIF
 *               [ELSE]IFB, [ELSE]IFNB
 *               [ELSE]IFDEF, [ELSE]IFNDEF
 *               [ELSE]IFDIF[I], [ELSE]IFIDN[I]
-*               IF1, IF2
+*               [ELSE]IF1, [ELSE]IF2
 *               .ERR, .ERRNZ, .ERRE
 *               .ERRB, .ERRNB
 *               .ERRDEF, .ERRNDEF
 *               .ERRDIF[I], .ERRIDN[I]
 *               .ERR1, .ERR2
-*               COMMENT
 ****************************************************************************/
 
 
@@ -43,76 +42,43 @@
 
 #include "globals.h"
 #include "parser.h"
+#include "directiv.h"
+#include "condasm.h"
 #include "insthash.h"
 #include "expreval.h"
-#include "directiv.h"
 #include "listing.h"
 #include "input.h"
 #include "macro.h"
+#include "fastpass.h"
 
 extern bool SkipMacroMode;
 
 /*
- the current if-block can be in one of 4 states:
+ the current if-block can be in one of 3 states:
   state              assembly     possible next states
  -----------------------------------------------------------------------
-  condition check    on           active, inactive
   inactive           off          condition check, active
   active             on           done
   done               off          -
+  -----------------------------------------------------------------------
+  up to v2.04, there was a forth state:
+  condition check    on           active, inactive
+  it was necessary because conditional_assembly_prepare()
+  may be called multiple times for the very same source line.
 */
-
-typedef enum  {
-    BLOCK_ACTIVE,    /* current cond is true */
-    COND_CHECK,      /* checking current IF cond */
-    BLOCK_INACTIVE,  /* current IF cond is false, looking for elseif */
-    BLOCK_DONE       /* done TRUE section of current if, just nuke
-                        everything until we see an endif */
-} if_state;
 
 if_state CurrIfState;
 static int blocknestlevel;
 static int falseblocknestlevel;
-bool inside_comment;
-static char delim_char;
-
-// fixme char *IfSymbol;        /* save symbols in IFDEF's so they don't get expanded */
-
-static ret_code StartComment( const char * p )
-/********************************************/
-{
-    while ( isspace( *p ) ) p++;
-    if ( *p == NULLC ) {
-        AsmError( COMMENT_DELIMITER_EXPECTED );
-        return( ERROR );
-    }
-    delim_char = *p;
-    p++;
-#if 0
-    if ( *p != NULLC && isspace(*p) == FALSE ) {
-        AsmError( COMMENT_DELIMITER_EXPECTED );
-        return( ERROR );
-    }
-#endif
-    for ( ; *p; p++ )
-        if ( *p == delim_char )
-            return( NOT_ERROR );
-
-    inside_comment = TRUE;
-    return( NOT_ERROR );
-}
 
 #ifdef DEBUG_OUT
-static char *GetCurrIfStatString( void )
-/**************************************/
+static const char *GetCurrIfStatString( void )
+/********************************************/
 {
-    char *p;
+    const char *p;
     switch ( CurrIfState ) {
     case BLOCK_ACTIVE:
         p = "BLOCK_ACTIVE";
-        break;
-    case COND_CHECK:
-        p = "COND_CHECK";
         break;
     case BLOCK_INACTIVE:
         p = "BLOCK_INACTIVE";
@@ -126,83 +92,18 @@ static char *GetCurrIfStatString( void )
 #endif
 
 /*
- this code runs always. it handles the following:
- COMMENT directive
- inactive -> condition check
- active -> done
+ * this code runs after the first token has been scanned
+ * and it is a IFx, ELSEx or ENDIF.
+ * Updates CurrIfState:
+ * - inactive -> condition check
+ * - active -> done
+ * and updates variable <falseblocknesting>.
 */
 
-ret_code conditional_assembly_prepare( char *line )
-/*************************************************/
+void conditional_assembly_prepare( int directive )
+/************************************************/
 {
-    char        *ptr;
-    char        *end;
-    char        fix;
-    struct ReservedWord *resw;
-
-    if( inside_comment == TRUE ) {
-        DebugMsg(("COMMENT active, delim is >%c<, line is >%s<\n", delim_char, line));
-        if( strchr( line, delim_char ) != NULL ) {
-            DebugMsg(("COMMENT mode exited\n"));
-            inside_comment = FALSE;
-        }
-        //*line = NULLC;
-        return( EMPTY );
-    }
-
-    ptr = line;
-    while ( isspace( *ptr ) ) ptr++;
-    /* the expansion operator is still present here, since
-     it could have been used as a comment delimiter */
-    if ( *ptr == '%' ) {
-        ptr++;
-        while ( isspace( *ptr ) ) ptr++;
-    }
-
-    fix = *ptr | 0x20;
-    /* a conditional directive must start with i[f..], e[lse../ndif] or c[omment] */
-    if( fix == 'i' || fix == 'e' || fix == 'c' ) {
-        end = ptr;
-        while ( is_valid_id_char( *end )) ++end;
-        if (*end == ':') {
-            end++;
-            while ( isspace( *end ) ) end++;
-            ptr = end;
-            while ( is_valid_id_char( *end )) ++end;
-        }
-        fix = *end;
-        *end = NULLC;
-
-        //DebugMsg(("conditional_assembly_prepare IFx (%s)\n", ptr));
-
-        resw = FindResWord( ptr );
-        *end = fix;
-    } else
-        resw = NULL;
-
-    if( resw == NULL ||
-        ( ( resw->flags & RWF_SPECIAL) == 0 ) ||
-        //AsmOpTable[optable_idx[resw - AsmResWord]].specialtype != RWT_DIRECTIVE ||
-        //AsmOpTable[optable_idx[resw - AsmResWord]].opcode != DRT_CONDDIR ) {
-        AsmOpTable[resw - AsmResWord].specialtype != RWT_DIRECTIVE ||
-        AsmOpTable[resw - AsmResWord].opcode != DRT_CONDDIR ) {
-        /* it's not a conditional directive or COMMENT */
-        if(( CurrIfState == BLOCK_INACTIVE ) || ( CurrIfState == BLOCK_DONE ) ) {
-            DebugMsg(("%lu. suppressed: >%s<\n", GetTopLine(), line));
-            //if ( ModuleInfo.listif ) LstWriteSrcLine();
-            //*line = NULLC;
-            return( EMPTY );
-        }
-        return( NOT_ERROR );
-    }
-
-    switch( resw - AsmResWord ) {
-    case T_COMMENT:
-        StartComment( end );
-        DebugMsg(("COMMENT starting, delim is >%c<\n", delim_char));
-        //*line = NULLC;
-        return( EMPTY );
-        break;
+    switch( directive ) {
     case T_IF:
     case T_IF1:
     case T_IF2:
@@ -216,19 +117,16 @@ ret_code conditional_assembly_prepare( char *line )
     case T_IFNB:
     case T_IFNDEF:
         /* this must be done HERE to avoid expansion if the current
-         state is INACTIVE.
+         * state is INACTIVE.
          */
-        if( CurrIfState == BLOCK_INACTIVE || CurrIfState == BLOCK_DONE ) {
+        if( CurrIfState != BLOCK_ACTIVE ) {
             falseblocknestlevel++;
-            //if ( ModuleInfo.listif ) LstWriteSrcLine();
-            //*line = NULLC;
-            DebugMsg(("%lu. conditional_assembly_prepare IFx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
-            return( EMPTY );
-        } else {
-            CurrIfState = COND_CHECK;
+            DebugMsg1(("condasm_prepare(%s): state=%s, level=%u, falselevel=%u\n", GetResWName( directive, NULL), GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
+            return;
         }
-        DebugMsg(("%lu. conditional_assembly_prepare IFx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
+        DebugMsg1(("condasm_prepare(%s): state=%s, level=%u, falselevel=%u\n", GetResWName( directive, NULL), GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
         break;
+    case T_ELSE:
     case T_ELSEIF:
     case T_ELSEIF1:
     case T_ELSEIF2:
@@ -241,45 +139,29 @@ ret_code conditional_assembly_prepare( char *line )
     case T_ELSEIFIDNI:
     case T_ELSEIFNB:
     case T_ELSEIFNDEF:
-    case T_ELSE:
-        if ( falseblocknestlevel > 0 ) {
-            //if ( ModuleInfo.listif ) LstWriteSrcLine();
-            //*line = NULLC;
-            DebugMsg(("%lu. conditional_assembly_prepare ELSEx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
-            return( EMPTY );
-        } else if ( CurrIfState == BLOCK_INACTIVE || CurrIfState == COND_CHECK )
-            /* the block might become active */
-            /* expansion must "run" */
-            CurrIfState = COND_CHECK;
-        else {
-            /* current state is ACTIVE or DONE */
-            /* in any case this block is DONE then */
-            /* don't run expansion! */
-            CurrIfState = BLOCK_DONE;
-            //if ( ModuleInfo.listif ) LstWriteSrcLine();
-            //*line = NULLC;
-            DebugMsg(("%lu. conditional_assembly_prepare ELSEx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
-            return( EMPTY );
+        if ( blocknestlevel ) { /* v2.04: do nothing if there was no IFx */
+            if ( falseblocknestlevel > 0 ) {
+                DebugMsg1(("condasm_prepare(%s): state=%s, level=%u, falselevel=%u\n", GetResWName( directive, NULL), GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
+                return;
+            }
+            /* status may change from inactive to active,
+             * or active to done
+             */
+            CurrIfState = (( CurrIfState == BLOCK_INACTIVE ) ? BLOCK_ACTIVE : BLOCK_DONE );
         }
-        DebugMsg(("%lu. conditional_assembly_prepare ELSEx (%s): state=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
+        DebugMsg1(("condasm_prepare(%s): state=%s, level=%u, falselevel=%u\n", GetResWName( directive, NULL), GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
         break;
     case T_ENDIF:
-        if (falseblocknestlevel > 0) {
+        if ( falseblocknestlevel > 0 ) {
             falseblocknestlevel--;
-            //if ( ModuleInfo.listif ) LstWriteSrcLine();
-            //*line = NULLC;
-            DebugMsg(("%lu. conditional_assembly_prepare ENDIF: state=%u, level=%u, falselevel=%u\n", GetTopLine(), CurrIfState, blocknestlevel, falseblocknestlevel));
-            return( EMPTY );
+            DebugMsg1(("condasm_prepare(%s): state=%s, level=%u, falselevel=%u\n", GetResWName( directive, NULL), GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
+            return;
         }
-        DebugMsg(("%lu. conditional_assembly_prepare ENDIF: state=%u, level=%u, falselevel=%u\n", GetTopLine(), CurrIfState, blocknestlevel, falseblocknestlevel));
+        CurrIfState = BLOCK_ACTIVE; /* v2.04: added */
+        DebugMsg1(("condasm_prepare(%s): state=%s, level=%u, falselevel=%u\n", GetResWName( directive, NULL), GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
         break;
-    default: /* shouldn't happen */
-        //*end = NULLC;
-        DebugMsg(("conditional_assembly_prepare: unhandled directive %s\n", ptr ));
-        AsmErr( SYNTAX_ERROR_EX, ptr );
-        return( EMPTY );
     }
-    return( NOT_ERROR );
+    return;
 }
 
 /* handle [ELSE]IF[N]DEF
@@ -313,15 +195,14 @@ static bool check_defd( const char *string )
 #endif
 
     if( sym != NULL ) {
-        DebugMsg(("check_defd(%s): sym->state=%u\n", string, sym->state));
-        //if ( sym->state == SYM_INTERNAL || sym->state == SYM_MACRO || sym->state == SYM_TMACRO ) {
-        if ( sym->state == SYM_INTERNAL || sym->state == SYM_MACRO || sym->state == SYM_TMACRO || sym->state == SYM_UNDEFINED ) {
-            DebugMsg(("check_defd: sym->defined=%u\n", sym->defined));
-            return( sym->defined );
-        }
-        return( TRUE );
+        DebugMsg1(("check_defd(%s): state=%u defined=%u\n", string, sym->state, sym->isdefined ));
+        /* v2.04: changed. the "defined" flag is active for ALL symbols */
+        //if ( sym->state == SYM_INTERNAL || sym->state == SYM_MACRO || sym->state == SYM_TMACRO || sym->state == SYM_UNDEFINED ) {
+        return( sym->isdefined );
+        //}
+        //return( TRUE );
     }
-    DebugMsg(("check_defd(%s): sym=NULL\n", string ));
+    DebugMsg1(("check_defd(%s): sym=NULL\n", string ));
     return( FALSE );
 }
 
@@ -372,58 +253,67 @@ ret_code conditional_assembly_directive( int i, int directive )
     if_state NextIfState;
     expr_list opndx;
 
+    if ( CurrIfState != BLOCK_ACTIVE ) {
+        DebugMsg1(("conditional_assembly_directive(%s), CurrIfState=%u(%s), level=%u, falselevel=%u\n",
+                   GetResWName(directive, NULL), CurrIfState, GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
+        if ( i || ModuleInfo.listif ) {
+            LstWriteSrcLine();
+        }
+        return( NOT_ERROR );
+    }
+
     if ( ModuleInfo.list == TRUE ) {
         if ( MacroLevel == 0 ||
-             ModuleInfo.list_macro == LM_LISTMACROALL ||
-             ModuleInfo.listif )
-            LstWrite( LSTTYPE_MACRO, 0, NULL );
+            ModuleInfo.list_macro == LM_LISTMACROALL ||
+            ModuleInfo.listif )
+            LstWriteSrcLine();
     }
 
-    switch( CurrIfState ) {
-    case COND_CHECK:
-        DebugMsg(("%lu. conditional_assembly_directive, COND_CHECK, CurrIfState=%u, level=%u, falselevel=%u\n", GetTopLine(), CurrIfState, blocknestlevel, falseblocknestlevel));
-        switch (directive) {
-        case T_IF:
-        case T_IF1:
-        case T_IF2:
-        case T_IFB:
-        case T_IFDEF:
-        case T_IFDIF:
-        case T_IFDIFI:
-        case T_IFE:
-        case T_IFIDN:
-        case T_IFIDNI:
-        case T_IFNB:
-        case T_IFNDEF:
-            CurrIfState = BLOCK_ACTIVE;
-            blocknestlevel++;
-            if( blocknestlevel > MAX_IF_NESTING ) {
-                blocknestlevel -= 1;
-                AsmError( NESTING_LEVEL_TOO_DEEP );
-                return( ERROR );
-            }
-            if ( SkipMacroMode == TRUE ) {
-                /* avoid expression evaluation if in "skipmacro" mode */
-                CurrIfState = BLOCK_DONE;
-                return( NOT_ERROR );
-            }
+    DebugMsg1(("conditional_assembly_directive(%s), BLOCK_ACTIVE, level=%u, falselevel=%u\n", GetResWName(directive, NULL), blocknestlevel, falseblocknestlevel));
+    switch (directive) {
+    case T_IF:
+    case T_IF1:
+    case T_IF2:
+    case T_IFB:
+    case T_IFDEF:
+    case T_IFDIF:
+    case T_IFDIFI:
+    case T_IFE:
+    case T_IFIDN:
+    case T_IFIDNI:
+    case T_IFNB:
+    case T_IFNDEF:
+        if( blocknestlevel == MAX_IF_NESTING ) {
+            DebugMsg(("conditional_assembly_directive(%s): nesting limit reached, level=%u\n", GetResWName(directive, NULL), blocknestlevel ));
+            AsmError( NESTING_LEVEL_TOO_DEEP );
+            return( ERROR );
         }
-        break;
-    default:
-        /* must be ENDIF */
-        if ( directive == T_ENDIF && blocknestlevel > 0 ) {
-            blocknestlevel--;
-            CurrIfState = BLOCK_ACTIVE;
-            DebugMsg(("%lu. conditional_assembly_directive, ENDIF, CurrIfState=ACTIVE, level=%u\n", GetTopLine(), blocknestlevel ));
+        blocknestlevel++;
+        if ( SkipMacroMode == TRUE ) {
+            /* avoid expression evaluation if in "skipmacro" mode */
+            CurrIfState = BLOCK_DONE;
+            DebugMsg1(("conditional_assembly_directive(%s): skip mode, block done\n", GetResWName(directive, NULL) ));
             return( NOT_ERROR );
         }
-        DebugMsg(("%lu. conditional_assembly_directive, unexpected directive=%u\n", GetTopLine(), directive ));
-        AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
-        return( ERROR );
+        break;
+    case T_ENDIF:
+        if ( blocknestlevel == 0 ) {
+            DebugMsg(("conditional_assembly_directive(%s): nesting error, level=%u\n", GetResWName(directive, NULL), blocknestlevel ));
+            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
+            return( ERROR );
+        }
+        blocknestlevel--;
+        break;
+    default: /* ELSE[IFxx] */
+        if ( blocknestlevel == 0 ) {
+            DebugMsg(("conditional_assembly_directive(%s): nesting error, level=%u\n", GetResWName(directive, NULL), blocknestlevel ));
+            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
+            return( ERROR );
+        }
         break;
     }
 
-    i++; /* go past IFx, ELSEx, */
+    i++; /* go past IFx, ELSEx, ENDIF */
 
     /* check params and call appropriate test routine */
 
@@ -469,7 +359,7 @@ ret_code conditional_assembly_directive( int i, int directive )
         }
         i++;
         if ( AsmBuffer[i]->token != T_COMMA ) {
-            AsmError( SYNTAX_ERROR );
+            AsmErr( EXPECTING_COMMA );
             return( ERROR );
         }
         i++;
@@ -482,24 +372,21 @@ ret_code conditional_assembly_directive( int i, int directive )
             return( ERROR );
         }
         i++;
+        DebugMsg1(("conditional_assembly_directive(%s), cmp >%s< and >%s<\n", GetResWName(directive, NULL), string1, string2 ));
         switch ( directive ) {
         case T_IFDIF:
         case T_ELSEIFDIF:
-            DebugMsg(("%lu. conditional_assembly_directive, IFDIF, cmp >%s< and >%s<\n", GetTopLine(), string1, string2 ));
             NextIfState = check_dif( string1, string2, TRUE ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
             break;
         case T_IFDIFI:
         case T_ELSEIFDIFI:
-            DebugMsg(("%lu. conditional_assembly_directive, IFDIFI, cmp >%s< and >%s<\n", GetTopLine(), string1, string2 ));
             NextIfState = check_dif( string1, string2, FALSE ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
             break;
         case T_IFIDN:
         case T_ELSEIFIDN:
-            DebugMsg(("%lu. conditional_assembly_directive, IFIDN, cmp >%s< and >%s<\n", GetTopLine(), string1, string2 ));
             NextIfState = !check_dif( string1, string2, TRUE ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
             break;
         default:
-            DebugMsg(("%lu. conditional_assembly_directive, IFIDNI, cmp >%s< and >%s<\n", GetTopLine(), string1, string2 ));
             NextIfState = !check_dif( string1, string2, FALSE ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
         }
         break;
@@ -525,7 +412,9 @@ ret_code conditional_assembly_directive( int i, int directive )
         break;
     case T_IF1:
     case T_ELSEIF1:
-        NextIfState = ((Parse_Pass == PASS_1) ? BLOCK_ACTIVE : BLOCK_INACTIVE);
+        /* v2.04: changed */
+        //NextIfState = ((Parse_Pass == PASS_1) ? BLOCK_ACTIVE : BLOCK_INACTIVE);
+        NextIfState = BLOCK_ACTIVE;
         break;
     case T_IF2:
     case T_ELSEIF2:
@@ -533,7 +422,9 @@ ret_code conditional_assembly_directive( int i, int directive )
             AsmError( IF2_NOT_ALLOWED );
             break;
         }
-        NextIfState = ((Parse_Pass == PASS_1) ? BLOCK_INACTIVE : BLOCK_ACTIVE);
+        /* v2.04: changed */
+        //NextIfState = ((Parse_Pass == PASS_1) ? BLOCK_INACTIVE : BLOCK_ACTIVE);
+        NextIfState = BLOCK_ACTIVE;
         break;
     case T_IFDEF:
     case T_ELSEIFDEF:
@@ -568,12 +459,9 @@ ret_code conditional_assembly_directive( int i, int directive )
         if ( directive == T_IFNDEF || directive == T_ELSEIFNDEF )
             NextIfState = ( ( NextIfState == BLOCK_ACTIVE ) ? BLOCK_INACTIVE : BLOCK_ACTIVE );
         break;
-    case T_ELSE:
+    default: /* ELSE and ENDIF */
         NextIfState = BLOCK_ACTIVE;
         break;
-    default: /* might be T_ENDIF in a block nesting error */
-        /* just make sure that there's no invalid value in NextIfState */
-        NextIfState = CurrIfState;
     }
 
     if ( AsmBuffer[i]->token != T_FINAL ) {
@@ -583,26 +471,8 @@ ret_code conditional_assembly_directive( int i, int directive )
 
     CurrIfState = NextIfState;
 
-#ifdef DEBUG_OUT
-    {
-    char * ptr;
-    switch ( CurrIfState ) {
-    case COND_CHECK:
-        ptr = "COND_CHECK";
-        break;
-    case BLOCK_INACTIVE:
-        ptr = "BLOCK_INACTIVE";
-        break;
-    case BLOCK_ACTIVE:
-        ptr = "BLOCK_ACTIVE";
-        break;
-    case BLOCK_DONE:
-        ptr = "BLOCK_DONE";
-        break;
-    }
-    DebugMsg(("%lu. conditional_assembly_directive exit, CurrIfState=%s, level=%u, falselevel=%u\n", GetTopLine(), ptr, blocknestlevel, falseblocknestlevel));
-    }
-#endif
+    DebugMsg1(("conditional_assembly_directive(%s) exit, state=%s, level=%u, falselevel=%u\n",
+               GetResWName(directive, NULL), GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
     return( NOT_ERROR );
 }
 
@@ -648,11 +518,11 @@ ret_code conditional_error_directive( int i )
             else if ( direct == T_DOT_ERR2 && Parse_Pass == PASS_1 )
                 return( NOT_ERROR );
         }
-        if (AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
+        if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
             errtxt = i;
             i++;
         }
-        if (AsmBuffer[i]->token != T_FINAL)
+        if ( AsmBuffer[i]->token != T_FINAL )
             break;
         if ( errtxt != EMPTY )
             DispError( FORCED_ARBITRARY, errtxt );
@@ -681,7 +551,7 @@ ret_code conditional_error_directive( int i )
                 return( ERROR );
             }
         }
-        if (AsmBuffer[i]->token != T_FINAL)
+        if ( AsmBuffer[i]->token != T_FINAL )
             break;
         if ( direct == T_DOT_ERRNZ && opndx.value )
             forced_error = TRUE;
@@ -699,11 +569,7 @@ ret_code conditional_error_directive( int i )
     case T_DOT_ERRDEF:
     case T_DOT_ERRNDEF:
 
-        if ( Token_Count < i+1 ) {
-            AsmError( SYNTAX_ERROR );
-            return( ERROR );
-        }
-        if (AsmBuffer[i]->token == T_ID) {
+        if ( AsmBuffer[i]->token == T_ID ) {
             asm_sym * sym;
             char * p1 = AsmBuffer[i]->string_ptr;
             i++;
@@ -734,6 +600,9 @@ ret_code conditional_error_directive( int i )
                 AsmErr( FORCED_DEF, p1 );
             else if( direct == T_DOT_ERRNDEF && sym == NULL )
                 AsmErr( FORCED_NOT_DEF, p1 );
+        } else {
+            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            return( ERROR );
         }
         break;
     case T_DOT_ERRB:
@@ -778,7 +647,7 @@ ret_code conditional_error_directive( int i )
         }
         i++;
         if ( AsmBuffer[i]->token != T_COMMA ) {
-            AsmError( SYNTAX_ERROR );
+            AsmError( EXPECTING_COMMA );
             return( ERROR );
         }
         i++;
@@ -832,17 +701,16 @@ ret_code conditional_error_directive( int i )
     return( NOT_ERROR );
 }
 
-ret_code CheckForOpenConditionals( void )
-/***************************************/
+void CondCheckOpen( void )
+/************************/
 {
     if( blocknestlevel > 0 ) {
         AsmErr( BLOCK_NESTING_ERROR, "if-else" );
-        return( ERROR );
     }
-    return( NOT_ERROR );
+    return;
 }
 
-// init (called once per module)
+/* init (called once per module) */
 
 void CondInit( void )
 /*******************/
@@ -850,5 +718,4 @@ void CondInit( void )
     CurrIfState = BLOCK_ACTIVE;
     blocknestlevel = 0;
     falseblocknestlevel = 0;
-    inside_comment = FALSE;
 }

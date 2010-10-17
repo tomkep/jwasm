@@ -33,11 +33,10 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "symbols.h"
 #include "directiv.h"
+#include "symbols.h"
 #include "segment.h"
 #include "assume.h"
-#include "queues.h"
 #include "equate.h"
 #include "input.h"
 #include "tokenize.h"
@@ -49,6 +48,8 @@
 
 #define ONEXMM 1
 
+extern const char szDgroup[];
+
 /* prototypes */
 
 #define INIT_MODEL      0x1
@@ -56,7 +57,8 @@
 #define INIT_STACK      0x4
 #define INIT_OS         0x8
 
-static const typeinfo ModelInfo[] = {
+/* must be sorted against MOD_xxx enum, MOD_TINY = 1 ) */
+const typeinfo ModelInfo[] = {
     { "TINY",         MOD_TINY,       INIT_MODEL      },
     { "SMALL",        MOD_SMALL,      INIT_MODEL      },
     { "COMPACT",      MOD_COMPACT,    INIT_MODEL      },
@@ -79,14 +81,17 @@ static const typeinfo LangInfo[] = {
 #else
 static const typeinfo dmyLang = { NULL, 0, INIT_LANG };
 #endif
-static const typeinfo StackInfo[] = {
+static const typeinfo ModelAttr[] = {
     { "NEARSTACK",    STACK_NEAR,     INIT_STACK      },
-    { "FARSTACK",     STACK_FAR,      INIT_STACK      }
-};
-static const typeinfo OsInfo[] = {
+    { "FARSTACK",     STACK_FAR,      INIT_STACK      },
     { "OS_OS2",       OPSYS_OS2,      INIT_OS         },
     { "OS_DOS",       OPSYS_DOS,      INIT_OS         }
 };
+
+/* the following flags assume the MOD_xxx enumeration
+ * starts with 0 ( MOD_NONE ) and ends with 7 ( MOD_FLAT ).
+ *  MOD_COMPACT = 3, MOD_MEDIUM = 4
+ */
 
 static asm_sym *sym_CodeSize  ; /* numeric. requires model */
 static asm_sym *sym_DataSize  ; /* numeric. requires model */
@@ -98,14 +103,14 @@ static asm_sym *sym_Model     ; /* numeric. requires model */
 static asm_sym * AddPredefinedConstant( const char *name, int value )
 /*******************************************************************/
 {
-    asm_sym * sym = CreateConstantEx( name, value );
+    asm_sym * sym = CreateVariable( name, value );
     if (sym)
         sym->predefined = TRUE;
     return(sym);
 }
 
-static void AddPredefinedText( const char *name, char *value )
-/************************************************************/
+static void AddPredefinedText( const char *name, const char *value )
+/******************************************************************/
 {
     asm_sym *sym;
 
@@ -113,9 +118,9 @@ static void AddPredefinedText( const char *name, char *value )
     if (sym == NULL)
         sym = SymCreate( name, TRUE );
     sym->state = SYM_TMACRO;
-    sym->defined = TRUE;
+    sym->isdefined = TRUE;
     sym->predefined = TRUE;
-    sym->string_ptr = value;
+    sym->string_ptr = (char *)value;
 }
 
 /* set memory model, called by ModelDirective()
@@ -124,10 +129,10 @@ static void SetModel( void )
 /**************************/
 {
     int         value;
-    char        *textvalue;
+    const char  *textvalue;
     //asm_sym     *sym;
 
-    DebugMsg(("SetModel() enter (model=%u)\n", ModuleInfo.model ));
+    DebugMsg1(("SetModel() enter (model=%u)\n", ModuleInfo.model ));
     /* if model is set, it disables OT_SEGMENT of -Zm switch */
     if ( ModuleInfo.model == MOD_FLAT )
         ModuleInfo.offsettype = OT_FLAT;
@@ -147,17 +152,12 @@ static void SetModel( void )
         return;
 
     /* Set @CodeSize */
-    switch( ModuleInfo.model ) {
-    case MOD_MEDIUM:
-    case MOD_LARGE:
-    case MOD_HUGE:
+    if ( SIZE_CODEPTR & ( 1 << ModuleInfo.model ) ) {
         value = 1;
         SimpleType[ST_PROC].mem_type = MT_FAR;
-        break;
-    default:
+    } else {
         value = 0;
         // SimpleType[ST_PROC].mem_type = MT_NEAR; /* this is default */
-        break;
     }
     sym_CodeSize = AddPredefinedConstant( "@CodeSize", value );
     AddPredefinedText( "@code", GetCodeSegName() );
@@ -180,7 +180,7 @@ static void SetModel( void )
     if ( ModuleInfo.model == MOD_FLAT )
         textvalue = "FLAT";
     else
-        textvalue = "DGROUP";
+        textvalue = szDgroup;
 
     AddPredefinedText( "@data", textvalue );
 
@@ -226,7 +226,7 @@ ret_code ModelDirective( int i )
     os_type ostype;
     uint_16 init;
 
-    DebugMsg(("ModelDirective enter\n"));
+    DebugMsg1(("ModelDirective enter\n"));
     /* v2.03: it may occur that "code" is defined BEFORE the MODEL
      * directive (i.e. DB directives in AT-segments). For FASTPASS,
      * this may have caused errors because contents of the ModuleInfo
@@ -268,19 +268,21 @@ ret_code ModelDirective( int i )
         if ( AsmBuffer[i]->token != T_COMMA ) {
             if ( GetLangType( &i, &language ) == NOT_ERROR ) {
                 type = &dmyLang;
-            } else if ( type = FindToken( AsmBuffer[i]->string_ptr, StackInfo, sizeof(StackInfo)/sizeof(typeinfo) ) ) {
-                if ( model == MOD_FLAT ) {
-                    AsmError( INVALID_MODEL_PARAM_FOR_FLAT );
-                    return( ERROR );
+            } else if ( type = FindToken( AsmBuffer[i]->string_ptr, ModelAttr, sizeof(ModelAttr)/sizeof(ModelAttr[0]) ) ) {
+                if ( type->init & INIT_STACK ) {
+                    if ( model == MOD_FLAT ) {
+                        AsmError( INVALID_MODEL_PARAM_FOR_FLAT );
+                        return( ERROR );
+                    }
+                    distance = type->value;
+                } else {
+                    ostype = type->value;
                 }
                 i++;
-                distance = type->value;
-            } else if ( type = FindToken( AsmBuffer[i]->string_ptr, OsInfo, sizeof(OsInfo)/sizeof(typeinfo) ) ) {
-                i++;
-                ostype = type->value;
             } else {
                 break;
             }
+            /* attribute set already? */
             if ( type->init & init ) {
                 i--;
                 break;
@@ -294,24 +296,11 @@ ret_code ModelDirective( int i )
         return( ERROR );
     }
 
-    ModuleInfo.model = model;
-    if ( init & INIT_LANG ) {
-        ModuleInfo.langtype = language;
-#if AMD64_SUPPORT
-        /* v2.03: set the fastcall type if x64 is active */
-    if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_64 )
-        if ( language == LANG_FASTCALL && Options.output_format != OFORMAT_ELF ) {
-            DebugMsg(("ModelDirective: FASTCALL type set to WIN64\n"));
-            Options.fastcall = FCT_WIN64;
-        }
-#endif
-    }
-    if ( init & INIT_STACK )
-        ModuleInfo.distance = distance;
-    if ( init & INIT_OS )
-        ModuleInfo.ostype = ostype;
-
     if ( model == MOD_FLAT ) {
+        if ( ( ModuleInfo.curr_cpu & P_CPU_MASK) < P_386 ) {
+            AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+            return( ERROR );
+        }
         DefineFlatGroup();
 #if AMD64_SUPPORT
         SetDefaultOfssize( ((ModuleInfo.curr_cpu & P_CPU_MASK) >= P_64 ) ? USE64 : USE32 );
@@ -319,6 +308,23 @@ ret_code ModelDirective( int i )
         SetDefaultOfssize( USE32 );
 #endif
     }
+    ModuleInfo.model = model;
+    if ( init & INIT_LANG ) {
+        ModuleInfo.langtype = language;
+#if AMD64_SUPPORT
+        /* v2.03: set the fastcall type if x64 is active */
+        if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_64 )
+            if ( language == LANG_FASTCALL && Options.output_format != OFORMAT_ELF ) {
+                DebugMsg(("ModelDirective: FASTCALL type set to WIN64\n"));
+                Options.fastcall = FCT_WIN64;
+            }
+#endif
+    }
+    if ( init & INIT_STACK )
+        ModuleInfo.distance = distance;
+    if ( init & INIT_OS )
+        ModuleInfo.ostype = ostype;
+
     SetModelDefaultSegNames();
     SetModel();
 
@@ -344,7 +350,7 @@ ret_code SetCPU( enum asm_cpu newcpu )
 {
     int temp;
 
-    DebugMsg(("SetCPU(%X) enter\n", newcpu ));
+    DebugMsg1(("SetCPU(%X) enter\n", newcpu ));
     if ( newcpu == P_86 || ( newcpu & P_CPU_MASK ) ) {
         /* reset CPU and EXT bits */
         ModuleInfo.curr_cpu &= ~( P_CPU_MASK | P_EXT_MASK | P_PM );
@@ -406,7 +412,7 @@ ret_code SetCPU( enum asm_cpu newcpu )
     case P_387: ModuleInfo.cpu = ModuleInfo.cpu | M_8087 | M_287 | M_387; break;
     }
 
-    DebugMsg(("SetCPU: ModuleInfo.curr_cpu=%X, @Cpu=%X\n", ModuleInfo.curr_cpu, ModuleInfo.cpu ));
+    DebugMsg1(("SetCPU: ModuleInfo.curr_cpu=%X, @Cpu=%X\n", ModuleInfo.curr_cpu, ModuleInfo.cpu ));
 
     //MakeCPUConstant( newcpu );
     if ( ModuleInfo.model == MOD_NONE )
@@ -420,7 +426,7 @@ ret_code SetCPU( enum asm_cpu newcpu )
     /* Set @Cpu */
     /* differs from Codeinfo cpu setting */
 
-    sym_Cpu = CreateConstantEx( "@Cpu", ModuleInfo.cpu );
+    sym_Cpu = CreateVariable( "@Cpu", ModuleInfo.cpu );
 
     return( NOT_ERROR );
 }
@@ -475,15 +481,15 @@ ret_code cpu_directive( int i )
     enum asm_cpu newcpu;
 
     //newcpu = comp_opt( AsmBuffer[i]->value );
-    //newcpu = AsmOpTable[optable_idx[AsmBuffer[i]->value]].opnd_type[0];
-    newcpu = GetOpndType( AsmBuffer[i]->value, 0 );
+    //newcpu = SpecialTable[AsmBuffer[i]->value].opnd_type[0];
+    newcpu = GetValueSp( AsmBuffer[i]->value );
 
-    if ( SetCPU( newcpu ) == NOT_ERROR ) {
+    if ( SetCPU( newcpu ) == NOT_ERROR )
         i++;
-        if ( AsmBuffer[i]->token == T_FINAL )
-            return( NOT_ERROR );
+    if ( AsmBuffer[i]->token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
     }
-    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-    return( ERROR );
+    return( NOT_ERROR );
 }
 

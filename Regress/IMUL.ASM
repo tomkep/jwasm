@@ -1,38 +1,44 @@
 
-ifdef __JWASM__
-	.x64
-	.model flat
-endif
+;--- due to its 3 argument format,
+;--- IMUL needs special treatment in the parser.
+
+	.286
+	.model small
 
 	.data
 
-vb	db 0
 vw	dw 0
 vd	dd 0
-vq	dq 0
 
 	.code
 
-main proc
+	imul  ax,3
+	imul  ax,1000
+	imul  [vw]
+	imul  [vwx]
+
+	.386
+
+	imul  eax,3
+	imul  eax,1000
+	imul  [vd]
+	imul  [vdx]
+
 	imul  ax,bx
 	imul  eax,ebx
-	imul  rax,rbx
-	imul  ax,3
-	imul  eax,3
-	imul  rax,3
-	imul  ax,1000
-	imul  eax,1000
-	imul  rax,1000
 	imul  ax,[vw]
+	imul  ax,[vwx]
 	imul  eax,[vd]
-	imul  rax,[vq]
-	imul  [vw]
-	imul  [vd]
-	imul  [vq]
-	imul  r11,5
-	imul  r8,5
-	imul  rsi,5
+	imul  eax,[vdx]
+	imul  ax,[vw],2
+	imul  ax,[vwx],2
+	imul  eax,[vd],3
+	imul  eax,[vdx],3
 	ret
-main endp
+
+	.data
+
+vwx	dw 0
+vdx	dd 0
 
     END

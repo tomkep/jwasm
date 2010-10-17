@@ -54,9 +54,17 @@ enum fixup_types {
         FIX_OFF32_SECREL,   /* 13, 4 byte, COFF+ELF only */
 };
 
+/*  OMF: nothing (7, 12, 13 can't happen)
+ * COFF: set bit 1, 4, 9, 10, 11
+ *  ELF: set bit 8, 9, 10, 11
+ */
+/* exclude OFF64 */
+#define OMF_DISALLOWED 0x0000
+/* exclude RELOFF8, LOBYTE, PTR16, PTR32, HIBYTE */
 #define COFF_DISALLOWED 0x0E12
-#define  ELF_DISALLOWED 0x0F00
-#define  BIN_DISALLOWED 0x0000
+/* exclude SEG, PTR16, PTR32, HIBYTE */
+#define ELF_DISALLOWED  0x0F00
+#define BIN_DISALLOWED  0x0000
 
 /* fixups are also used for backpatching of forward references in pass one.
  * the instructions which depend on the distance are CALL, JMP, PUSH <imm>.
@@ -74,21 +82,26 @@ enum fixup_options {
         OPTJ_CALL
 };
 
-struct genfixup {
-    struct genfixup         *nextbp;       /* PASS 1: linked list backpatch */
-    struct genfixup         *nextrlc;      /* PASS >1: linked list relocs */
-    uint_32                 offset;        /* symbol's offset */
-    uint_32                 fixup_loc;     /* location of fixup */
-    enum fixup_types        type;
-    enum fixup_options      option;
+struct fixup {
+    struct fixup         *nextbp;       /* PASS 1: linked list backpatch */
+    struct fixup         *nextrlc;      /* PASS >1: linked list relocs */
+    uint_32              offset;        /* symbol's offset */
+    uint_32              location;      /* location of fixup */
+    enum fixup_types     type;
+    enum fixup_options   option;
 #if AMD64_SUPPORT
     /* the IP relative addressing needs to know where the instruction ends.
      * the result <end of instruction> - <fixup location> is stored here.
      */
-    uint_8                  addbytes;
+    uint_8               addbytes;
 #endif
-    unsigned char loader_resolved:1;        /* operator LROFFSET */
-
+    union {
+        unsigned char flags;
+        struct {
+            unsigned char loader_resolved:1;        /* operator LROFFSET */
+            unsigned char orgoccured:1;             /* v2.04 ORG occured behind this fix */
+        };
+    };
     union {
         struct {
             int_8           frame;          /* frame specifier (GRP,SEG,...) */
@@ -100,9 +113,10 @@ struct genfixup {
     struct asm_sym          *sym;
 };
 
-extern struct genfixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
-extern ret_code         store_fixup( struct genfixup *, int_32 * );
+extern struct fixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
+extern void          FreeFixup( struct fixup * );
+extern ret_code      store_fixup( struct fixup *, int_32 * );
 
-extern ret_code         BackPatch( struct asm_sym *sym );
+extern ret_code      BackPatch( struct asm_sym *sym );
 
 #endif

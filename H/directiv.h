@@ -32,7 +32,7 @@
 #ifndef _DIRECTIV_H_
 #define _DIRECTIV_H_
 
-#include "omfrec.h" /* needed because of obj_rec member in seg_info */
+#include "queue.h"  /* needed for qdesc type */
 
 #define MAX_LNAME       255
 #define LNAME_NULL      0
@@ -56,7 +56,6 @@ enum {
     TAB_EXT,
     TAB_SEG,
     TAB_GRP,
-    TAB_LIB,
     TAB_PROC,
     TAB_ALIAS,
     TAB_LAST,
@@ -111,11 +110,7 @@ typedef struct {
     uint                numseg;         /* number of segments in the group */
 } grp_info;
 
-/* todo: remove field segrec, which is OMF specific, and store the info directly
-   in seg_info */
-
 typedef struct {
-    obj_rec             *segrec;        /* OMF segment record */
     struct asm_sym      *group;         /* segment's group or NULL */
     uint_32             start_loc;      /* starting offset of current ledata or lidata */
     union {
@@ -130,42 +125,36 @@ typedef struct {
 #endif
     uint_32             bytes_written;  /* initialized bytes in segment */
     asm_sym             *labels;        /* linked list of labels in this seg */
-    union {
-        struct omffixup     *FixupListHead; /* for OMF */
-        struct genfixup     *FixupListHeadGen; /* for other formats */
-    };
-    union {
-        struct omffixup     *FixupListTail;    /* for OMF */
-        struct genfixup     *FixupListTailGen; /* for other formats */
-    };
+    struct fixup        *FixupListHead; /* fixup queue head */
+    struct fixup        *FixupListTail; /* fixup queue tail */
     union {
         void            *LinnumQueue;   /* for COFF line numbers */
         uint_32         fileoffset;     /* used by BIN + ELF */
         uint_32         num_linnums;    /* used by COFF (after LinnumQueue has been read) */
     };
     uint_32             num_relocs;     /* used by COFF/ELF */
+    short               idx;            /* segment # */
     seg_type            segtype;        /* segment's type (code, data, ...) */
     direct_idx          lname_idx;      /* LNAME index (OMF only) */
+    direct_idx          class_name_idx;
+    uint_16             abs_frame;      /* ABS seg, frame number */
+    uint_32             abs_offset;     /* ABS seg, offset */
     unsigned char       Ofssize;        /* segment's offset size */
     unsigned char       characteristics;/* used by COFF */
     unsigned char       alignment:4;    /* is value 2^x */
     unsigned char       readonly:1;     /* if the segment is readonly */
     unsigned char       force32:1;      /* force 32bit segdef (OMF only) */
     unsigned char       data_in_code:1; /* data items in code segm (OMF only) */
+    unsigned char       written:1;      /* code/data just written */
+    unsigned char       combine:3;
 } seg_info;
 
 #define MAX_SEGALIGNMENT 0x0F
 
-typedef struct regs_list {
-    struct regs_list    *next;
-    uint_16             idx;
-    char                reg[1];
-} regs_list;
-
 /* PROC item */
 
 typedef struct {
-    regs_list           *regslist;      /* PROC: list of registers to be saved */
+    uint_16             *regslist;      /* PROC: list of registers to be saved */
     struct dir_node     *paralist;      /* list of parameters */
     struct dir_node     *locallist;     /* PROC: list of local variables */
     struct dir_node     *labellist;     /* PROC: list of local labels */
@@ -179,9 +168,9 @@ typedef struct {
     union {
         unsigned char   flags;
         struct {
-            unsigned char       is_vararg:1;    /* if it has a vararg */
+            unsigned char       is_vararg:1;    /* if last param is VARARG */
             unsigned char       pe_type:1;      /* epilog code, 1=use LEAVE */
-            unsigned char       export:1;       /* EXPORT procedure */
+            unsigned char       export:1;       /* EXPORT attribute set */
             unsigned char       init:1;         /* has ExamineProc() been called? */
             unsigned char       forceframe:1;   /* FORCEFRAME prologuearg? */
             unsigned char       loadds:1;       /* LOADDS prologuearg? */
@@ -231,41 +220,47 @@ typedef struct field_list {
     struct asm_sym      *sym;
 } field_list;
 
-typedef enum {
+enum type_kind {
     TYPE_NONE,
     TYPE_STRUCT,
     TYPE_UNION,
     TYPE_TYPEDEF,
     TYPE_RECORD
-} type_kind;
+};
 
 typedef struct {
     field_list          *head;       /* is NULL for TYPEDEF */
     union {
-        field_list          *tail;   /* for STRUCT, UNION, RECORD */
-        struct asm_sym      *target; /* if TYPEDEF is a PTR, specifies the target TYPE */
+        field_list      *tail;       /* for STRUCT, UNION, RECORD */
+        /* target for memtypes MT_PROC or MT_PTR */
+        struct asm_sym  *target;     /* for TYPEDEF */
     };
+#ifdef __WATCOMC__
+    enum type_kind      typekind;
+#else
+    uint_8              typekind;
+#endif
     union {
         uint_8          alignment;   /* STRUCT: 1,2,4,8,16 or 32 */
         uint_8          indirection; /* TYPEDEF: level of indirection for PTR */
     };
-    type_kind           typekind;
     union {
         uint_8          flags;
         struct {
-            unsigned char   isInline:1;  /* STRUCT: inline */
-            unsigned char   isOpen:1;    /* STRUCT: set until the matching ENDS is found */
+            unsigned char   isInline:1;  /* STRUCT/UNION: inline */
+            unsigned char   isOpen:1;    /* STRUCT/UNION: set until the matching ENDS is found */
             unsigned char   OrgInside:1; /* STRUCT: struct contains an ORG */
         };
     };
+    uint_8              ptr_memtype; /* TYPEDEF: memtype of target */
 } struct_info;
 
 union entry {
-    seg_info            *seginfo;       /* SEGMENT */
-    grp_info            *grpinfo;       /* GROUP   */
-    proc_info           *procinfo;      /* PROC    */
-    struct_info         *structinfo;    /* STRUCT, UNION, TYPEDEF, RECORD */
-    macro_info          *macroinfo;     /* MACRO   */
+    seg_info            *seginfo;       /* SEGMENT, SYM_SEG */
+    grp_info            *grpinfo;       /* GROUP, SYM_GRP */
+    proc_info           *procinfo;      /* PROC, SYM_INTERNAL|SYM_EXTERNAL+isproc */
+    struct_info         *structinfo;    /* STRUCT|UNION|TYPEDEF|RECORD, SYM_TYPE */
+    macro_info          *macroinfo;     /* MACRO, SYM_MACRO */
 };
 
 /* dir_node originally was a "directive_node"
@@ -284,7 +279,7 @@ typedef struct dir_node {
         struct dir_node *nextll;
     };
     union {
-        /* for SYM_UNDEFINED, SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_INTERNAL(procs), SYM_ALIAS:
+        /* for SYM_UNDEFINED, SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_ALIAS:
          * linked list of this type of symbol.
          * for SYM_INTERNAL:
          * linked list of labels for current segment (used for BackPatch)
@@ -294,42 +289,62 @@ typedef struct dir_node {
         struct {
             unsigned char       is_vararg:1;  /* if it is a VARARG param */
             unsigned char       is_ptr:1;     /* if it is a PTR type */
-            unsigned char       is_far:1;     /* if ptr is FAR */
-            unsigned char       is32:2;       /* offset size (0|1|2, ptr only) */
+            //unsigned char       is_far:1;     /* if ptr is FAR */
+            //unsigned char       is32:2;       /* offset size (0|1|2, ptr only) */
         };
     };
     union {
         /* for SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_INTERNAL(procs), SYM_ALIAS:
          * linked list of this type of symbol, to allow fast removes.
          * Actually, the only symbols which have a "chance" to be
-         * removed are those of type SYM_EXTERNAL.
+         * removed are globals ( state=SYM_EXTERNAL, weak=TRUE )
          */
         struct dir_node *prev;
+        /* used by PROC for linked list */
+        struct dir_node *nextproc;
         /* used by PROC locals (SYM_STACK) for linked list */
         struct dir_node *nextlocal;
         /* used by PROC params (SYM_STACK) for linked list */
         struct dir_node *nextparam;
+        /* used by SYM_EXTERNAL (weak=FALSE) if altname is set */
+        struct dir_node *nextext;
     };
 } dir_node;
 
+/* tables array - queues of symbols of 1 type ie: segments */
+/* the data are actually part of the symbol table */
 typedef struct {
-    dir_node            *head;
-    dir_node            *tail;
-} symbol_queue;     /* tables array - queues of symbols of 1 type ie: segments */
-                    /* the data are actually part of the symbol table */
+    dir_node *head;
+    dir_node *tail;
+} symbol_queue;
+
+extern symbol_queue Tables[];  /* several lists */
 
 /*---------------------------------------------------------------------------*/
 
 /* Information about the module */
 
-typedef struct {
+struct module_vars {
     unsigned            error_count;     /* total of errors so far */
     unsigned            warning_count;   /* total of warnings so far */
+    unsigned            num_segs;        /* number of segments in module */
+    qdesc               GlobalQueue;     /* GLOBAL items ( =externdefs ) */
+    qdesc               PubQueue;        /* PUBLIC items */
+    qdesc               LnameQueue;      /* LNAME items (segments, groups and classes) */
+#if COFF_SUPPORT
+    qdesc               SafeSEHList;     /* list of safeseh handlers */
+#endif
+    qdesc               LibQueue;        /* includelibs */
+    symbol_queue        AltQueue;        /* weak externals */
+};
+
+typedef struct {
+    //struct module_vars; /* GCC won't allow anonymous members for std C */
+    struct module_vars  g;
     char                *proc_prologue;  /* current OPTION PROLOGUE value */
     char                *proc_epilogue;  /* current OPTION EPILOGUE value */
     unsigned            anonymous_label; /* "anonymous label" counter */
     unsigned            hll_label;       /* hll directive label counter */
-    unsigned            total_segs;      /* number of segments in module */
     dist_type           distance;        /* stack distance; */
     mod_type            model;           /* memory model; */
     lang_type           langtype;        /* language; */
@@ -340,6 +355,7 @@ typedef struct {
     enum asm_cpu        curr_cpu;        /* cpu setting (OW stylex); */
     unsigned char       radix;           /* current .RADIX setting */
     unsigned char       fieldalign;      /* -Zp, OPTION:FIELDALIGN setting */
+    unsigned char       line_listed;     /* current line has been printed */
 #if PROCALIGN
     unsigned char       procalign;       /* current OPTION:PROCALIGN setting */
 #endif
@@ -364,15 +380,22 @@ typedef struct {
     unsigned            StartupDirectiveFound:1;
     unsigned            EndDirFound:1;
     unsigned            frame_auto:1;
+    unsigned            NoSignExtend:1;  /* option nosignextend */
 
     //unsigned            flatgrp_idx;     /* index of FLAT group */
     union {
-        uint_8          osabi;           /* for ELF */
+        uint_8          osabi;            /* for ELF */
+        uint_8          win64_saveparams; /* for WIN64 */
     };
     unsigned char       simseg_init;     /* simplified segm dir flags */
     unsigned char       PhaseError;      /* phase error flag */
+    unsigned char       CommentDataInCode;/* OMF: emit coment records about data in code segs */
     uint                srcfile;         /* is a file stack index */
     dir_node            *flat_grp;       /* magic FLAT group */
+    asm_sym             *start_label;    /* start label */
+    struct fixup        *start_fixup;    /* OMF only */
+    uint_32             start_displ;     /* OMF only, displ for start label */
+    uint_8              *pCodeBuff;
     char                name[_MAX_FNAME];/* name of module */
 } module_info;
 
@@ -381,21 +404,18 @@ extern module_info      ModuleInfo;
 struct format_options {
     const char *formatname;
     void (*init)( module_info * );
+    short invalid_fixup_type;
 };
 
 /*---------------------------------------------------------------------------*/
 
 struct code_info;
 
-extern dir_node         *dir_create( const char *, int );
-extern dir_node         *dir_create_ex( const char *, int );
-extern void             dir_settype( dir_node *, int );
-extern void             dir_internal( dir_node * );
-extern void             dir_free( dir_node *, bool );
-extern void             dir_add_table( dir_node * );
-extern void             dir_remove_table( dir_node * );
+extern void             dir_ext2int( dir_node * );
+extern void             dir_add_table( symbol_queue *, dir_node * );
+extern void             dir_remove_table( symbol_queue *, dir_node * );
 
-extern int              SizeFromMemtype( memtype, int );
+extern int              SizeFromMemtype( memtype, int, asm_sym * );
 extern ret_code         MemtypeFromSize( int, memtype * );
 extern ret_code         GetLangType( int *, lang_type * );
 
@@ -408,8 +428,8 @@ extern int              SizeFromRegister( int );
 extern ret_code         EchoDef( int );         /* handle ECHO directive */
 extern ret_code         OptionDirective( int ); /* handle OPTION directive */
 
-extern void             pushitem( void *stack, void *elt );
-extern void             *popitem( void *stack );
+extern void             pushitem( void *, void * );
+extern void             *popitem( void * );
 //extern void             *peekitem( void *stack, int );
 //extern ret_code         cpu_directive( int i );
 extern ret_code         SetCPU( enum asm_cpu );
@@ -417,6 +437,7 @@ extern ret_code         StartupExitDirective( int );
 extern ret_code         EndDirective( int i, struct code_info *CodeInfo );
 extern ret_code         ModelDirective( int i );
 extern ret_code         cpu_directive( int i );
+extern ret_code         SafeSEHDirective( int i );
 
 /* make a forward declaration for struct code_info. */
 struct code_info;

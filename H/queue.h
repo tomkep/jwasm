@@ -36,9 +36,15 @@ typedef struct {
     void *tail;
 } qdesc;
 
-extern void QInit( qdesc *q );
-extern void QEnqueue( qdesc *q, void *item );
-extern void *QDequeue( qdesc *q );
+typedef struct qnode {
+    void    *next;
+    void    *elmt;
+} qnode;
+
+extern void QInit( qdesc * );
+extern void QEnqueue( qdesc *, void * );
+extern void QAddItem( qdesc *, void * );
+extern void *QDequeue( qdesc * );
 //extern void QJoinQueue( qdesc *dest, qdesc *src );
 
 #endif

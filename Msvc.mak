@@ -1,9 +1,9 @@
 
-# this makefile (NMake) creates the JWasm Win32 binary with MSVC.
+# this makefile (NMake) creates the JWasm Win32 binary with MS Visual C++.
 # it has been tested with:
-# - MS VC++ Toolkit 2003
-# - MS VC++ 6
-# - MS VC++ 2005 EE (not recommended, also see definition of c_flags below)
+# - VC++ Toolkit 2003 ( = VC++ 7.1 )
+# - VC++ 6
+# - VC++ 2005 EE (not recommended, also see definition of c_flags below)
 #
 # By setting DOS=1 one can additionally create a 32bit DOS binary.
 # This requires the HXDEV package.
@@ -19,7 +19,7 @@ WIN=1
 # HXDIR  - for DOS=1 only: root directory to search for stub LOADPEX.BIN,
 #          libs DKRNL32S.LIB + IMPHLP.LIB and tool PATCHPE.EXE.
 
-VCDIR  = \msvc8
+VCDIR  = \msvc71
 W32LIB = \Win32Inc\Lib
 HXDIR  = \HX
 
@@ -83,12 +83,11 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   \
            $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/labels.obj  \
            $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    \
-           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queues.obj  \
+           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   \
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/omf.obj     \
-           $(OUTD)/bin.obj      $(OUTD)/queue.obj    $(OUTD)/carve.obj   \
-           $(OUTD)/omfgenms.obj $(OUTD)/omfio.obj    $(OUTD)/omfrec.obj  \
-           $(OUTD)/omffixup.obj $(OUTD)/listing.obj  $(OUTD)/fatal.obj   \
+           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj\
+           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
+           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj \
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
