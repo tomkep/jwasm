@@ -32,12 +32,11 @@
 #include "parser.h"
 #include "directiv.h"
 #include "fixup.h"
-#include "labels.h"
 #include "segment.h"
 #include "proc.h"
 #include "types.h"
+#include "labels.h"
 #include "listing.h"
-#include "fastpass.h"
 
 void LabelsInit( void )
 /*********************/
@@ -60,45 +59,23 @@ char * GetNextAnonLabel( char * buffer )
 /* define a label
  * symbol_name: name of the label
  * mem_type: its memory type
- * vartype: arbitrary type if mem_type is MT_TYPE
+ * ti: qualified type pointer, may be NULL
  * bLocal: label should be defined locally if possible
  */
-asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym *vartype, bool bLocal )
-/*****************************************************************************************************/
+asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct qualified_type *ti, bool bLocal )
+/*******************************************************************************************************/
 {
     struct asm_sym      *sym;
     uint_32             addr;
     char                buffer[20];
 
-    DebugMsg1(("LabelCreate(%s, memtype=%Xh, %Xh, %u) enter\n", symbol_name, mem_type, vartype, bLocal));
-
-#if 0
-    if ( CurrStruct ) {
-        /* LABEL directive in a STRUCT definition?  Masm doesn't allow this,
-         * it might be a remnant of Wasm syntax, which doesn't know UNION.
-         * Currently it doesn't work to "initialize" such a struct, so it
-         * has been commented out.
-         */
-        if( Parse_Pass == PASS_1 ) {
-            if (!(sym = AddFieldToStruct( 0, -1, mem_type, (dir_node *)vartype, 0 )))
-                return( NULL );
-        } else {
-            sym = SymSearch( symbol_name );
-        }
-        return( sym );
-    }
-#endif
+    DebugMsg1(("LabelCreate(%s, memtype=%Xh, %" FX32 "h, %u) enter\n", symbol_name, mem_type, ti, bLocal));
 
     if( CurrSeg == NULL ) {
         AsmError( MUST_BE_IN_SEGMENT_BLOCK );
         return( NULL );
     }
 
-#if FASTPASS
-    if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
-        SaveState();
-    }
-#endif
     //if( strcmp( symbol_name, "@@" ) == 0 ) {
     if( symbol_name[0] == '@' && symbol_name[1] == '@' && symbol_name[2] == NULLC ) {
         sprintf( buffer, "L&_%04u", ++ModuleInfo.anonymous_label );
@@ -121,6 +98,7 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
             /* ensure that type of symbol is compatible! */
             if ( sym->mem_type != MT_EMPTY &&
                  sym->mem_type != mem_type ) {
+                DebugMsg(("LabelCreate(%s): error, memtype conflict %X-%X\n", sym->name, sym->mem_type, mem_type));
                 AsmErr( SYMBOL_TYPE_CONFLICT, symbol_name );
             }
             dir_ext2int( (dir_node *)sym );
@@ -143,15 +121,41 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
         /* a possible language type set by EXTERNDEF must be kept! */
         if (sym->langtype == LANG_NONE)
             sym->langtype = ModuleInfo.langtype;
+
+        /* v2.05: added to accept type prototypes */
+        if ( mem_type == MT_PROC ) {
+            if ( sym->isproc == FALSE ) {
+                CreateProc( sym, NULL, TRUE );
+                CopyPrototype( (dir_node *)sym, (dir_node *)ti->symtype );
+            }
+            mem_type = ti->symtype->mem_type;
+            ti->symtype = NULL;
+        }
+
+        sym->mem_type = mem_type;
+        if ( ti ) {
+            if ( mem_type == MT_TYPE )
+                sym->type = ti->symtype;
+            else {
+                sym->Ofssize = ti->Ofssize;
+                sym->is_ptr = ti->is_ptr;
+                sym->isfar = ti->is_far;
+                sym->target_type = ti->symtype;
+                sym->ptr_memtype = ti->ptr_memtype;
+            }
+        }
     } else {
         /* save old offset */
         addr = sym->offset;
     }
 
     sym->isdefined = TRUE;
-    sym->pass = Parse_Pass;
-    sym->mem_type = mem_type;
-    sym->type = vartype; /* if mem_type is MT_TYPE */
+    /* v2.05: the label may be "data" - due to the way struct initialization
+     * is handled. Then fields first_size and first_length must not be
+     * touched!
+     */
+    if ( sym->isdata == FALSE )
+        sym->asmpass = Parse_Pass;
     SetSymSegOfs( sym );
 //  DebugMsg(("LabelCreate(%s): ofs=%X\n", sym->name, sym->offset));
 
@@ -169,19 +173,14 @@ asm_sym *LabelCreate( const char *symbol_name, memtype mem_type, struct asm_sym 
 }
 
 /* LABEL directive.
- * syntax: <label_name> LABEL <type>
- * <type> can be a predefined or arbitrary type.
- * PTR and "PTR type" is also accepted.
+ * syntax: <label_name> LABEL <qualified type>
+ * todo: use GetQualifiedType()
  */
 
 ret_code LabelDirective( int i )
 /******************************/
 {
-    asm_sym *sym;
-    asm_sym *vartype;
-    int ptrtype;
-    int type;
-    int size;
+    struct qualified_type ti;
 
     if( i != 1 ) {  /* LABEL must be preceded by an ID */
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -190,105 +189,37 @@ ret_code LabelDirective( int i )
 
     i++;
 
-    switch ( AsmBuffer[i]->token ) {
-    case T_ID:
-        vartype = SymSearch( AsmBuffer[i]->string_ptr );
-        if ( vartype == NULL ) {
-            AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
-            return( ERROR );
-        }
-        if ( vartype->state == SYM_TYPE ) {
-            /* the label type must be a single item */
-            if ( AsmBuffer[i+1]->token != T_FINAL ) {
-                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i+1]->string_ptr );
-                return( ERROR );
-            }
-            if ( ( sym = LabelCreate( AsmBuffer[0]->string_ptr, MT_TYPE, vartype, FALSE )) == NULL )
-                return( ERROR );
+    ti.size = 0;
+    ti.is_ptr = 0;
+    ti.is_far = FALSE;
+    ti.mem_type = MT_EMPTY;
+    ti.ptr_memtype = MT_EMPTY;
+    ti.symtype = NULL;
+    ti.Ofssize = ModuleInfo.Ofssize;
+    if ( GetQualifiedType( &i, &ti ) == ERROR )
+        return( ERROR );
 
-            if ( ModuleInfo.list )
-                LstWrite( LSTTYPE_LABEL, 0, NULL );
+    DebugMsg1(("LabelDirective(%s): memtype=%Xh, far=%u, ptr=%u, type=%s)\n",
+               AsmBuffer[0]->string_ptr, ti.mem_type, ti.is_far, ti.is_ptr, ti.symtype ? ti.symtype->name : "NULL" ));
 
-            return( NOT_ERROR );
-        }
-        break;
-    case T_DIRECTIVE: /* label type PROC is a DIRECTIVE! */
-    case T_RES_ID:
-        ptrtype = -1;
-        for ( type = -1; AsmBuffer[i]->token != T_FINAL; i++ ) {
-            int last;
-            if ( AsmBuffer[i]->token == T_DIRECTIVE && AsmBuffer[i]->value == T_PROC )
-                AsmBuffer[i]->token = T_RES_ID;
-            if ( AsmBuffer[i]->token != T_RES_ID ) {
-                if ( AsmBuffer[i]->token == T_ID )
-                    i++;
-                break;
-            }
-            last = FindStdType( AsmBuffer[i]->value );
-            if ( last == -1 )
-                break;
-
-            if ( type == -1 )
-                type = last;
-            else if ( ptrtype == -1 && ( ( SimpleType[last].mem_type & MT_SPECIAL_MASK ) == MT_ADDRESS ) ) {
-                ptrtype = last;
-            } else if ( AsmBuffer[i]->value == T_PTR )
-                if ( ( SimpleType[type].mem_type & MT_SPECIAL_MASK ) == MT_ADDRESS ) {
-                    ptrtype = type;
-                    type = last;
-                }
-            else {
-                i++;
-                break;
-            }
-        }
-        if ( type == -1 )
-            break;
-
-        /* dont allow near16/far16/near32/far32 if size won't match */
-        if ( ( ModuleInfo.Ofssize > USE16 && SimpleType[type].Ofssize == USE16 ) ||
-            ( ModuleInfo.Ofssize == USE16 && SimpleType[type].Ofssize == USE32 )) {
-            AsmError( OFFSET_SIZE_MISMATCH );
-            return( ERROR );
-        }
-        if ( AsmBuffer[i]->token != T_FINAL ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-            return( ERROR );
-        }
-        if (( sym = LabelCreate( AsmBuffer[0]->string_ptr, SimpleType[type].mem_type, NULL, FALSE )) == NULL )
-            return( ERROR );
-
-        /* make sure that '<label> LABEL PTR' won't define a MT_PTR item */
-        if ( SimpleType[type].mem_type == MT_PTR && ptrtype == -1 )
-            ptrtype = type;
-
-        if ( ptrtype != -1 ) {
-            size = SizeFromMemtype( SimpleType[ptrtype].mem_type,
-                                   SimpleType[ptrtype].Ofssize,
-                                   NULL );
-            switch ( size ) {
-            case 2:
-                sym->mem_type = MT_WORD;
-                break;
-            case 4:
-                sym->mem_type = MT_DWORD;
-                break;
-            case 6:
-                sym->mem_type = MT_FWORD;
-                break;
-#if AMD64_SUPPORT
-            case 8:
-                sym->mem_type = MT_QWORD;
-                break;
-#endif
-            }
-        }
-
-        if ( ModuleInfo.list )
-            LstWrite( LSTTYPE_LABEL, 0, NULL );
-
-        return( NOT_ERROR );
+    if ( AsmBuffer[i]->token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        return( ERROR );
     }
-    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-    return( ERROR );
+
+    /* dont allow near16/far16/near32/far32 if size won't match */
+    if ( ( ti.mem_type == MT_NEAR || ti.mem_type == MT_FAR ) &&
+        ti.Ofssize != USE_EMPTY &&
+        ModuleInfo.Ofssize != ti.Ofssize ) {
+        AsmError( OFFSET_SIZE_MISMATCH );
+        return( ERROR );
+    }
+
+    if ( ModuleInfo.list )
+        LstWrite( LSTTYPE_LABEL, 0, NULL );
+
+    if ( LabelCreate( AsmBuffer[0]->string_ptr, ti.mem_type, &ti, FALSE ) == NULL )
+        return( ERROR );
+
+    return( NOT_ERROR );
 }

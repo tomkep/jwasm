@@ -1,5 +1,5 @@
 
-;--- todo: remove the @CatStr problem
+;--- see also MACRO56.ASM
 
 	.386
 	.model flat, stdcall
@@ -25,21 +25,10 @@ TE14 CATSTR  @CatStr(<invoke EFUNC,>,<2>,<%PARMS>)
 
 ;--- @CatStr works differently if used stand-alone?
 
-;	@CatStr(<invoke EFUNC,>,<2>,PARMS)	;doesn't work with JWasm!
-;	@CatStr(<invoke EFUNC,>,<2>,<PARMS>);doesn't work with JWasm!
+	@CatStr(<invoke EFUNC,>,<2>,PARMS)	;won't work with JWasm < v2.05
+	@CatStr(<invoke EFUNC,>,<2>,<PARMS>);won't work with JWasm < v2.05
 	@CatStr(<invoke EFUNC,>,<2>,%PARMS)
 	@CatStr(<invoke EFUNC,>,<2>,<%PARMS>)
-
-if 0
-FIRST textequ <invoke EFUNC>
-
-;--- this is no problem because it doesn't matter if FIRST
-;--- is expanded only after @CatStr is done.
-	@CatStr(FIRST,   <, 2, eax, ebx>)
-	@CatStr(<FIRST>, <, 2, eax, ebx>)
-	@CatStr(%FIRST,  <, 2, eax, ebx>)
-	@CatStr(<%FIRST>,<, 2, eax, ebx>)
-endif
 
 FIRST textequ <invoke EFUNC, >
 

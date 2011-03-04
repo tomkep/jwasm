@@ -1,6 +1,89 @@
 
    Changelog
 
+   03/02/2011, v2.05:
+
+   -  PROC directive: it wasn't checked that VARARG parameter was last
+      parameter.
+   -  ASSUME directive: using an arbitrary pointer type as argument
+      didn't work as expected.
+   -  CVTSI2SD, CVTSI2SS: memory operand could be of any size. Also, if
+      it was m64 in 64-bit, no REX-W prefix was generated.
+   -  MOVD: 64-bit memory operand wasn't accepted in 64-bit mode.
+   -  PINSRW: memory operands of any size were accepted.
+   -  in v2.04, a macro name which was located behind a '::' wasn't
+      expanded, which usually resulted in a syntax error.
+   -  "undefined" types may have caused a GPF if -Zi was set.
+   -  some errors fixed in INVOKE support of Open Watcom fastcall register
+      calling convention.
+   -  most conditional error directives did emit their errors in pass one,
+      which was too early.
+   -  there was a risk that macro functions in an EQU argument were
+      expanded (if the macro invocation was hidden in a text macro).
+   -  check for conflicting parameter types for PROC/PROTO wasn't as
+      rigid as Masm's.
+   -  EXTERN and EXTERNDEF didn't accept prototype type symbols.
+   -  prologue code generation was triggered slightly differently compared
+      to Masm.
+   -  syntax check of macro "local" lines was too sloppy.
+   -  when searching macro parameter and local names in macro lines, the
+      search was always case-sensitive, ignoring current case-mapping 
+      setting.
+   -  ELF64 format: relocations were stored in sections of type SHT_REL.
+      Changed to SHT_RELA.
+   -  in v2.04, SIZE operator might have returned wrong results for 
+      structured variables (SIZEOF had no problems).
+   -  in v1.93-v2.04, initialization of an array of structures may have
+      given a wrong result if both DUP and comma operators were used.
+   -  check if a data definition directive was preceded by a code label
+      - which isn't allowed without -Zm option - wasn't fool-proved.
+   -  the tokenizer did scan numbers not exactly like Masm does, which
+      caused problems if a number was immediately followed by an identifier.
+   -  MZ format: segment fixups for a segment in a group were wrong if both
+      the group and the segment weren't located at 0.
+   -  INVOKE, 16-bit code, VARARG parameter: in v2.04, if argument was a 
+      32-bit register, register SP was adjusted wrongly after the call.
+   -  it wasn't checked if GOTO labels inside macros were reserved words.
+   -  INVOKE, 64-bit Windows: in v2.04, it wasn't possible to call functions
+      which had a VARARG parameter.
+   -  PURGE directive: directive arguments weren't expanded.
+   -  preprocessor directives [ELSE]IF[E] weren't always able to detect
+      undefined symbols in their argument.
+   -  EXITM: syntax check of the directive's argument wasn't too strict.
+   -  SIZESTR: the directive's label wasn't expanded.
+   -  GOTO: a macro label placed just before the ENDM line wasn't found.
+   -  PUSH/POP: there was no error msg when the argument was a structured
+      variable with an unsuitable size.
+   -  expression evaluator was unable to handle floating-point constants.
+      Unary operators +, -, OPATTR and .TYPE are supposed to accept those.
+   -  JWasm's dot operator (.) accepted arguments that Masm does only if
+      OPTION OLDSTRUCTS is active.
+   -  in a few cases the end of "undelimited" strings wasn't detected.
+      This mostly applies to string macros (@CatStr) used as arguments
+      for other macros.
+   -  "assumed" predefined types were ignored by the TYPE operator.
+   -  in v2.03-2.04, an "empty" argument in a macro VARARG parameter list
+      did reset the list.
+   -  if the expansion operator (%) was used to convert a numeric expression
+      to text. it was always handled. This was an error, because it is
+      supposed to be accepted for arguments of preprocessor directives or
+      macros only.
+   -  line concatenation triggered by a comma as last token wasn't fully
+      Masm-compatible: if the line is an instruction, a comma should NOT
+      trigger the concatenation. OTOH, if the comma is a result of a
+      (text) macro expansion, it should trigger concatenation.
+   -  if a source file argument wasn't the first and the file couldn't
+      be found, a GPF occured.
+   -  INC/DEC: in v1.94-2.04, "unsized" memory operands were accepted.
+   -  SHLD/SHRD: syntax check was too sloopy.
+
+   Other changes:
+   -  cmdline option -eq added.
+   -  cmdline option -zld added.
+   -  INVOKE support for Open Watcom register calling convention enabled.
+   -  OWWinDll.mak and MsvcDll.mak added to create JWasm as a Win32 dll.
+   -  source code in listing file now starts at column 32.
+
    10/17/2010, v2.04c:
 
    -  in v2.04-2.04b, a type coercion of NEAR or FAR for a memory operand
@@ -15,7 +98,7 @@
       'Must be inside segment block' - and in v2.04 additionally an access
       violation did occur.
    -  using ALIAS names in expressions was rejected in v2.04. Previously,
-      this wasn't rejected, but bad fixups were created, which wasn't better.
+      this wasn't rejected, but fixups were wrong, which wasn't better.
 
    10/05/2010, v2.04a:
 
@@ -858,7 +941,7 @@
    -  Cmdline options -Cu and -Cx supported.
    -  OPTION CASEMAP:NOTPUBLIC implemented.
    -  size of symbol hash table increased from 2003 to 8009. Gives a speed
-      boost of 10-20% for programs with lots of symbols (Win32Inc/Masm32).
+      boost of 10-20% for programs with lots of symbols (WinInc/Masm32).
    -  symbol table listing is created a lot faster.
    -  wildcards allowed in source filename parameter.
     - the max. line length has been increased to 600 (512), the max. number
@@ -1306,117 +1389,117 @@
 
    05/20/2008, v1.7 (initial):
 
-    Changes in JWasm compared to Open Watcom's WASM v1.7.
+   Changes in JWasm compared to Open Watcom's WASM v1.7.
 
-    Bugfixes:
-    - string equates now handled the way MASM does.
-    - fixup of start address now refers to the group of the start 
+   Bugfixes:
+   -  string equates now handled the way MASM does.
+   -  fixup of start address now refers to the group of the start 
       address's segment. WASM still has problems if the
       start address is in a segment which isn't the first one in a group.
-    - EXTERNDEFs which aren't referenced in the source now won't
+   -  EXTERNDEFs which aren't referenced in the source now won't
       cause a EXTDEF entry to be created in the object module.
-    - EXTERNDEFs for a symbol which were contained several times in the
+   -  EXTERNDEFs for a symbol which were contained several times in the
       source caused several PUBDEFs to be created in the object module if
       the symbol was actually defined.
-    - SIZEOF (sometimes?) returned double the size of a variable.
-    - structure field names were stored in the global symbol table.
+   -  SIZEOF (sometimes?) returned double the size of a variable.
+   -  structure field names were stored in the global symbol table.
       This caused various problems and often bad code was created.
-    - some "reserved" words in WASM, which aren't reserved in MASM
+   -  some "reserved" words in WASM, which aren't reserved in MASM
       were removed from this list: "ERROR", "PRIVATE", "COMMON", "EXPORT",
       "READONLY", "IGNORE", "CASEMAP", "SMALL", "MEMORY", "COMPACT", "ABS",
       "NOTHING", "MEDIUM", "LARGE", "TINY", "HUGE", "USES", "FARSTACK", 
       "NEARSTACK", "OS_DOS", "OS_OS2".
-    - symbol type conflicts are now detected and reported as errors.
-    - default type of LOCAL variables was always WORD.
-    - alignment of LOCAL variables wasn't MASM-like.
-    - quotes and curly-bracket delimiting strings were removed during
+   -  symbol type conflicts are now detected and reported as errors.
+   -  default type of LOCAL variables was always WORD.
+   -  alignment of LOCAL variables wasn't MASM-like.
+   -  quotes and curly-bracket delimiting strings were removed during
       the tokenisation process. This isn't MASM compatible.
-    - string equates were "evaluated" very early, making it impossible to
+   -  string equates were "evaluated" very early, making it impossible to
       define a string equate which contained another string equate.
-    - a macro local caused a text equate with identical name to be generated
+   -  a macro local caused a text equate with identical name to be generated
       or changed. This side-effect wasn't expected.
-    - WASM needed ':REQ' in capitals to make a macro parameter "required".
+   -  WASM needed ':REQ' in capitals to make a macro parameter "required".
       MASM is not case sensitive here.
-    - macro parameters in the macro definition were expanded, which is a 
+   -  macro parameters in the macro definition were expanded, which is a 
       bad idea. Thus it was impossible to give macro parameters a name
       which was already used in the namespace (for example the name of a
       previously defined macro).
-    - a macro name given as parameter in a IFDEF/IFNDEF line was "evaluated".
-    - if a source line ends with a comma, it was generally concatenated with
+   -  a macro name given as parameter in a IFDEF/IFNDEF line was "evaluated".
+   -  if a source line ends with a comma, it was generally concatenated with
       the next line. This caused problems with invokation of macros with
       "empty" arguments. The automatic concatenation is now just done if
       a text item (enclosed in <> or {}) is still open at the end of the
       line and last character of the line is a comma.
-    - the object module to write was not always deleted if an error occured.
-    - arrays with 0 items caused a GPF.
-    - macros couldn't be redefined.
-    - number suffix 't' to define a decimal number) was not implemented.
-    - ALIAS directive syntax differed from MASM's.
-    - it was impossible to have a PROC with locals in a macro.
-    - LENGTHOF didn't work if a DB statement contained strings.
-    - PUBLIC + EXTERNDEF for the same label caused 2 PUBDEF records to
+   -  the object module to write was not always deleted if an error occured.
+   -  arrays with 0 items caused a GPF.
+   -  macros couldn't be redefined.
+   -  number suffix 't' to define a decimal number) was not implemented.
+   -  ALIAS directive syntax differed from MASM's.
+   -  it was impossible to have a PROC with locals in a macro.
+   -  LENGTHOF didn't work if a DB statement contained strings.
+   -  PUBLIC + EXTERNDEF for the same label caused 2 PUBDEF records to
       be written to the object module.
 
-    Other changes:
-    - local labels in procedures supported.
-    - '::' operator supported to make a label inside a procedure global.
-    - PROTO directive supported.
-    - INVOKE supported.
-    - TYPEDEF supported.
-    - UNION supported.
-    - RECORD supported.
-    - nested (and anonymous) STRUCTs and UNIONs supported.
-    - alignment argument for STRUCT supported.
-    - some MASM "options" are accepted:
+   Other changes:
+   -  local labels in procedures supported.
+   -  '::' operator supported to make a label inside a procedure global.
+   -  PROTO directive supported.
+   -  INVOKE supported.
+   -  TYPEDEF supported.
+   -  UNION supported.
+   -  RECORD supported.
+   -  nested (and anonymous) STRUCTs and UNIONs supported.
+   -  alignment argument for STRUCT supported.
+   -  some MASM "options" are accepted:
       + option proc: private | public | export
       + option dotname | nodotname (nodotname is dummy)
       + option casemap:none | notpublic | all  (notpublic is dummy)
       + option prologue: none | prologuedef | <macroname>
       + option epilogue: none | epiloguedef | <macroname>
       + option nokeyword: <reserved_word>
-    - FLAT accepted as segment attribute.
-    - EXTERNDEF will accept structure names as item's type.
-    - /Cp option added to make JWasm preserve case of identifiers.
-    - /zcw option added to let JWasm use the Watcom C name mangler.
+   -  FLAT accepted as segment attribute.
+   -  EXTERNDEF will accept structure names as item's type.
+   -  /Cp option added to make JWasm preserve case of identifiers.
+   -  /zcw option added to let JWasm use the Watcom C name mangler.
       (/zcm is the default now).
-    - LOW, HIGH, LOWWORD, HIGHWORD, OPATTR, .TYPE, TYPE, WIDTH and MASK
+   -  LOW, HIGH, LOWWORD, HIGHWORD, OPATTR, .TYPE, TYPE, WIDTH and MASK
       operators implemented.
-    - PROC: procedure parameters and locals are now true symbols with type
+   -  PROC: procedure parameters and locals are now true symbols with type
       information, internally handled similiar to "structure fields".
       The original approach handled these items as strings, which needs
       an additional "string expansion" step inside procedures and type
       information for such symbols was unavailable for the code generator.
-    - LOCAL directive accepts all variations which MASM does.
-    - LOCALs may have structured types.
-    - PROC parameters may have structured types.
-    - STRUCT "redefinitions" accepted (as long as it doesn't change the
+   -  LOCAL directive accepts all variations which MASM does.
+   -  LOCALs may have structured types.
+   -  PROC parameters may have structured types.
+   -  STRUCT "redefinitions" accepted (as long as it doesn't change the
       "structure").
-    - numeric equates can be contained multiple times in the source as long
+   -  numeric equates can be contained multiple times in the source as long
       as their values are identical.
-    - macro functions and EXITM supported.
-    - CATSTR, SUBSTR, SIZESTR and INSTR directives supported.
-    - predefined macro functions @CATSTR, @SUBSTR, @SIZESTR, @INSTR supported.
-    - ECHO implemented.
-    - types REAL4, REAL8 and REAL10 supported.
-    - pointer qualifiers NEAR16, NEAR32, FAR16 and FAR32 supported in TYPEDEF.
-    - VARARG as macro parameter qualifier supported.
-    - .IF, .ELSE, .ELSEIF, .ENDIF, .WHILE, .ENDW, .REPEAT, .UNTIL, .BREAK
+   -  macro functions and EXITM supported.
+   -  CATSTR, SUBSTR, SIZESTR and INSTR directives supported.
+   -  predefined macro functions @CATSTR, @SUBSTR, @SIZESTR, @INSTR supported.
+   -  ECHO implemented.
+   -  types REAL4, REAL8 and REAL10 supported.
+   -  pointer qualifiers NEAR16, NEAR32, FAR16 and FAR32 supported in TYPEDEF.
+   -  VARARG as macro parameter qualifier supported.
+   -  .IF, .ELSE, .ELSEIF, .ENDIF, .WHILE, .ENDW, .REPEAT, .UNTIL, .BREAK
       and .CONTINUE implemented.
-    - predefined equates @Cpu, @CurSeg, @code, @data, @stack, @Date, @Time,
+   -  predefined equates @Cpu, @CurSeg, @code, @data, @stack, @Date, @Time,
       @FileName supported.
-    - missing conditional directives (ELSEIFB, ELSEIFIDN, ...) implemented.
-    - evaluation operator "%" supported.
-    - literal character operator "!" supported.
-    - cmdline options made more MASM alike (-d1 changed to -Zd, ...).
-    - JWasm's -D cmdline option always defines a "text macro", similiar to
+   -  missing conditional directives (ELSEIFB, ELSEIFIDN, ...) implemented.
+   -  evaluation operator "%" supported.
+   -  literal character operator "!" supported.
+   -  cmdline options made more MASM alike (-d1 changed to -Zd, ...).
+   -  JWasm's -D cmdline option always defines a "text macro", similiar to
       MASM.
-    - PURGE implemented.
-    - ASSUME <stdreg>:<ptr type> is supported.
-    - WHILE implemented.
-    - @Environ macro function supported.
-    - lots of debug messages added.
-    - type PWORD has been removed (was an alias for FWORD).
-    - directive DP has been removed (was an alias for DF).
-    - directive GLOBAL has been removed (was an alias for EXTERNDEF).
-    - support for JMPF/CALLF has been removed.
+   -  PURGE implemented.
+   -  ASSUME <stdreg>:<ptr type> is supported.
+   -  WHILE implemented.
+   -  @Environ macro function supported.
+   -  lots of debug messages added.
+   -  type PWORD has been removed (was an alias for FWORD).
+   -  directive DP has been removed (was an alias for DF).
+   -  directive GLOBAL has been removed (was an alias for EXTERNDEF).
+   -  support for JMPF/CALLF has been removed.
 

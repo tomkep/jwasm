@@ -27,7 +27,6 @@
 #include "expreval.h"
 #include "types.h"
 #include "hll.h"
-#include "fastpass.h"
 #include "segment.h"
 #include "listing.h"
 
@@ -87,6 +86,12 @@ typedef enum {
     COP_OVERFLOW /* OVERFLOW? not really a valid C operator */
 } c_bop;
 
+/* must be in same order as in enum c_bop COP_ZERO .. COP_OVERFLOW */
+#define NUM_FLAGOPS 5
+static const char flaginstr[] = {
+    'z',  'c',  's',  'p',  'o'
+};
+
 static hll_list     *HllStack; /* for .WHILE, .IF, .REPEAT */
 
 static char * MakeAnonymousLabel( void )
@@ -145,7 +150,7 @@ static c_bop GetCOp( int * i )
         if ( AsmBuffer[*i]->token != T_ID )
             return( COP_NONE );
         /* a valid "flag" string must end with a question mark */
-        size = strlen( AsmBuffer[*i]->string_ptr );
+        size = strlen( p );
         if ( *(p+size-1) != '?' )
             return( COP_NONE );
         if ( size == 5 && ( 0 == _memicmp( p, "ZERO", 4 ) ) )
@@ -165,23 +170,63 @@ static c_bop GetCOp( int * i )
     return( rc );
 }
 
-/* render an instruction operand */
+/* render an instruction */
 
-static void RenderOpnd( expr_list * op, char * buffer, int start, int end )
-/*************************************************************************/
+static char *RenderInstr( char *p, char *instr, expr_list * op, int start1, int end1, int start2, int end2 )
+/**********************************************************************************************************/
 {
-    /* just copy the operand's tokens into the buffer */
-    for ( ; start < end; start++ ) {
-        strcat( buffer, AsmBuffer[start]->string_ptr );
-        strcat( buffer, " ");
+    int i;
+    i = strlen( instr );
+    /* copy the instruction */
+    memcpy( p, instr, i );
+    p += i;
+    /* copy the first operand's tokens */
+    for ( ; start1 < end1; start1++ ) {
+        *p++ = ' ';
+        strcpy( p, AsmBuffer[start1]->string_ptr );
+        p += strlen( p );
     }
-    return;
+    if ( start2 != EMPTY ) {
+        *p++ = ',';
+        /* copy the second operand's tokens */
+        for ( ; start2 < end2; start2++ ) {
+            *p++ = ' ';
+            strcpy( p, AsmBuffer[start2]->string_ptr );
+            p += strlen( p );
+        }
+    } else if ( end2 != EMPTY ) {
+        p += sprintf( p, ", %d", end2 );
+    }
+    *p++ = '\n';
+    *p = NULLC;
+    return( p );
+}
+
+/* render a Jcc instruction */
+
+static char *RenderJcc( char *p, char cc, int neg, char *label )
+/**************************************************************/
+{
+    /* create the jump opcode: j[n]cc */
+    *p++ = 'j';
+    if ( neg )
+        *p++ = 'n';
+    *p++ = cc;
+    if ( neg == FALSE )
+        *p++ = ' '; /* make sure there's room for the inverse jmp */
+
+    *p++ = ' ';
+    strcpy( p, label );
+    p += strlen( p );
+    *p++ = '\n';
+    *p = NULLC;
+    return( p );
 }
 
 /* a "token" in a C expression actually is a set of ASM tokens */
 
-static ret_code GetToken( hll_list * hll, int *i, bool is_true, expr_list * opndx )
-/*********************************************************************************/
+static ret_code HllGetToken( hll_list * hll, int *i, bool is_true, expr_list * opndx )
+/************************************************************************************/
 {
     int end_tok;
 
@@ -195,7 +240,7 @@ static ret_code GetToken( hll_list * hll, int *i, bool is_true, expr_list * opnd
     }
     opndx->kind = EXPR_EMPTY;
     if ( end_tok > *i )
-        if ( ERROR == EvalOperand( i, end_tok, opndx, TRUE ) )
+        if ( ERROR == EvalOperand( i, end_tok, opndx, 0 ) )
             return( ERROR );
     return( NOT_ERROR );
 }
@@ -227,6 +272,7 @@ static void SetLabel( hll_list *hll, int label, char * labelname )
         hll->symexit = labelname;
 }
 #endif
+
 /* a "simple" expression is
  * 1. two tokens, coupled with a <cmp> operator: == != >= <= > <
  * 2. two tokens, coupled with a "&" operator
@@ -240,13 +286,15 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
     expr_list op2;
     c_bop op;
     //int size;
-    //int end_tok;
+    char instr;
     int op1_pos;
     int op1_end;
     int op2_pos;
     int op2_end;
     char *label;
+    char *p;
     bool issigned;
+    bool neg;
 
     DebugMsg(("GetSimpleExpression(buffer=%s) enter\n", buffer ));
 
@@ -292,7 +340,7 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
         }
     }
 
-    if ( ERROR == GetToken( hll, i, is_true, opndx ) )
+    if ( ERROR == HllGetToken( hll, i, is_true, opndx ) )
         return ( ERROR );
 
     op1_end = *i;
@@ -314,44 +362,16 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
         /* no valid ASM expression detected. check for some special ops */
         /* COP_ZERO, COP_CARRY, COP_SIGN, COP_PARITY, COP_OVERFLOW */
         if ( op >= COP_ZERO ) {
-            //char t;
-            char * p;
-            //char * s;
             p = buffer;
             *jmp = p;
-            *p++ = 'j';
-            if ( is_true == FALSE )
-                *p++ = 'n';
-
-            switch ( op ) {
-            case COP_CARRY:
-                *p++ = 'c';
-                break;
-            case COP_ZERO:
-                *p++ = 'z';
-                break;
-            case COP_SIGN:
-                *p++ = 's';
-                break;
-            case COP_PARITY:
-                *p++ = 'p';
-                break;
-            case COP_OVERFLOW:
-                *p++ = 'o';
-                break;
-            }
-            *p++ = ' ';
-            if ( is_true == TRUE )
-                *p++ = ' ';
-            strcpy( p, label );
-            goto done;
+            RenderJcc( p, flaginstr[ op - COP_ZERO ], !is_true, label );
+            return( NOT_ERROR );
         }
         if ( hll->condlines )
             return( NOT_ERROR );
-        else {
-            AsmError( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE );
-            return( NOT_ERROR );
-        }
+
+        AsmError( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE );
+        return( NOT_ERROR );
     }
 
     if ( ( opndx->kind != EXPR_CONST ) && ( opndx->kind != EXPR_ADDR ) && ( opndx->kind != EXPR_REG ) )
@@ -360,11 +380,11 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
     op2_pos = *i;
 
     if ( op != COP_NONE ) {
-        if ( ERROR == GetToken( hll, i, is_true, &op2 ) ) {
+        if ( ERROR == HllGetToken( hll, i, is_true, &op2 ) ) {
             return( ERROR );
         }
         DebugMsg(("GetSimpleExpression: EvalOperand 2 ok, type=%X, i=%u\n", op2.type, *i));
-        if ( ( op2.kind != EXPR_CONST ) && ( op2.kind != EXPR_ADDR ) && ( op2.kind != EXPR_REG ) ) {
+        if ( op2.kind != EXPR_CONST && op2.kind != EXPR_ADDR && op2.kind != EXPR_REG ) {
             DebugMsg(("GetSimpleExpression: syntax error, op2.kind=%u\n", op2.kind ));
             AsmError( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE );
             return( ERROR );
@@ -374,15 +394,14 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
 
     /* now generate ASM code for expression */
 
-    buffer[0] = 0;
-    if ( ( op == COP_EQ ) ||
-        ( op == COP_NE ) ||
-        ( op == COP_GT ) ||
-        ( op == COP_LT ) ||
-        ( op == COP_GE ) ||
-        ( op == COP_LE ) ) {
-        char * p;
-
+    buffer[0] = NULLC;
+    switch ( op ) {
+    case COP_EQ:
+    case COP_NE:
+    case COP_GT:
+    case COP_LT:
+    case COP_GE:
+    case COP_LE:
         /* optimisation: generate 'or EAX,EAX' instead of 'cmp EAX,0' */
         if ( Options.masm_compat_gencode &&
             ( op == COP_EQ || op == COP_NE ) &&
@@ -390,154 +409,88 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
             opndx->indirect == FALSE &&
             op2.kind == EXPR_CONST &&
             op2.value == 0 ) {
-            strcat( buffer," or " );
-            RenderOpnd( opndx, buffer, op1_pos, op1_end );
-            strcat( buffer, ", " );
-            RenderOpnd( opndx, buffer, op1_pos, op1_end );
+            p = RenderInstr( buffer, "or", opndx, op1_pos, op1_end, op1_pos, op1_end );
         } else {
-            strcat( buffer," cmp " );
-            RenderOpnd( opndx, buffer, op1_pos, op1_end );
-            strcat( buffer, ", " );
-            RenderOpnd( &op2, buffer, op2_pos, op2_end );
+            p = RenderInstr( buffer, "cmp", opndx, op1_pos, op1_end, op2_pos, op2_end );
         }
-        strcat( buffer, "\n" );
 
-        p = buffer + strlen( buffer );
         *jmp = p;
 
-        if (IS_SIGNED( opndx->mem_type ) || IS_SIGNED(op2.mem_type))
+        if ( IS_SIGNED( opndx->mem_type ) || IS_SIGNED( op2.mem_type ) )
             issigned = TRUE;
         else
             issigned = FALSE;
 
-        *p++ = 'j';
         switch ( op ) {
         case COP_EQ:
-            if ( is_true ) { *p++ = 'z'; *p++ = ' '; }
-            else           { *p++ = 'n'; *p++ = 'z'; }
+            instr = 'z';
+            neg = !is_true;
             break;
         case COP_NE:
-            if ( is_true ) { *p++ = 'n'; *p++ = 'z'; }
-            else           { *p++ = 'z'; *p++ = ' '; }
+            instr = 'z';
+            neg = is_true;
             break;
         case COP_GT:
-            if ( issigned == TRUE ) {
-                if ( is_true ) { *p++ = 'g'; *p++ = ' '; }
-                else           { *p++ = 'l'; *p++ = 'e'; }
-            } else {
-                if ( is_true ) { *p++ = 'a'; *p++ = ' '; }
-                else           { *p++ = 'b'; *p++ = 'e'; }
-            }
+            instr = ( issigned ? 'g' : 'a' );
+            neg = !is_true;
             break;
         case COP_LT:
-            if ( issigned == TRUE ) {
-                if ( is_true ) { *p++ = 'l'; *p++ = ' '; }
-                else           { *p++ = 'g'; *p++ = 'e'; }
-            } else {
-                if ( is_true ) { *p++ = 'b'; *p++ = ' '; }
-                else           { *p++ = 'a'; *p++ = 'e'; }
-            }
+            instr = ( issigned ? 'l' : 'b' );
+            neg = !is_true;
             break;
         case COP_GE:
-            if ( issigned == TRUE ) {
-                if ( is_true ) { *p++ = 'g'; *p++ = 'e'; }
-                else           { *p++ = 'l'; *p++ = ' '; }
-            } else {
-                if ( is_true ) { *p++ = 'a'; *p++ = 'e'; }
-                else           { *p++ = 'b'; *p++ = ' '; }
-            }
+            instr = ( issigned ? 'l' : 'b' );
+            neg = is_true;
             break;
         case COP_LE:
-            if ( issigned == TRUE ) {
-                if ( is_true ) { *p++ = 'l'; *p++ = 'e'; }
-                else           { *p++ = 'g'; *p++ = ' '; }
-            } else {
-                if ( is_true ) { *p++ = 'b'; *p++ = 'e'; }
-                else           { *p++ = 'a'; *p++ = ' '; }
-            }
+            instr = ( issigned ? 'g' : 'a' );
+            neg = is_true;
             break;
         }
-        *p++ = ' ';
-        strcpy( p, label );
-
-    } else if ( op == COP_ANDB ) {
-        char * p;
-
-        strcat( buffer," test " );
-        RenderOpnd( opndx, buffer, op1_pos, op1_end );
-        strcat( buffer, ", " );
-        RenderOpnd( &op2, buffer, op2_pos, op2_end );
-        strcat( buffer, "\n" );
-
-        p = buffer + strlen( buffer );
+        RenderJcc( p, instr, neg, label );
+        break;
+    case COP_ANDB:
+        p = RenderInstr( buffer, "test", opndx, op1_pos, op1_end, op2_pos, op2_end );
         *jmp = p;
-
-        if ( is_true )
-            strcpy( p, "jne " );
-        else
-            strcpy( p, "je  " );
-
-        strcat( p, label );
-
-    } else if ( op == COP_NONE ) {
-        char * p;
-
+        RenderJcc( p, 'e', is_true, label );
+        break;
+    case COP_NONE:
         switch ( opndx->kind ) {
         case EXPR_REG:
             if ( opndx->indirect == FALSE ) {
-                strcat( buffer, "and " );
-                RenderOpnd( opndx, buffer, op1_pos, op1_end );
-                strcat( buffer, ", " );
-                RenderOpnd( opndx, buffer, op1_pos, op1_end );
-                strcat( buffer, "\n" );
-                p = buffer + strlen( buffer );
+                p = RenderInstr( buffer, "and", opndx, op1_pos, op1_end, op1_pos, op1_end );
                 *jmp = p;
-                if ( is_true )
-                    strcpy( p, "jnz " );
-                else
-                    strcpy( p, "jz  " );
-                strcat( p, label );
+                RenderJcc( p, 'z', is_true, label );
                 break;
             }
+            /* no break */
         case EXPR_ADDR:
-            strcat( buffer, "cmp " );
-            RenderOpnd( opndx, buffer, op1_pos, op1_end );
-            strcat( buffer, ", 0\n" );
-            p = buffer + strlen( buffer );
+            p = RenderInstr( buffer, "cmp", opndx, op1_pos, op1_end, EMPTY, 0 );
             *jmp = p;
-            if ( is_true )
-                strcpy( p, "jnz " );  /* switched */
-            else
-                strcpy( p, "jz  " );
-            strcat( buffer, label );
+            RenderJcc( p, 'z', is_true, label );
             break;
         case EXPR_CONST:
+#if 0
+            /* v2.05: string constant is allowed! */
             if ( opndx->string != NULL ) {
                 AsmError( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE );
                 return ( ERROR );
             }
+#endif
             *jmp = buffer;
-            if ( is_true == TRUE )
-                if ( opndx->value )
-                    sprintf( buffer, "jmp %s", label );
-                else
-                    strcpy( buffer, " "); /* make sure there is a char */
-            if ( is_true == FALSE )
-                if ( opndx->value == 0 )
-                    sprintf( buffer, "jmp %s", label );
-                else
-                    strcpy( buffer, " " ); /* make sure there is a char */
+            if ( ( is_true == TRUE && opndx->value ) ||
+                ( is_true == FALSE && opndx->value == 0 ) )
+                sprintf( buffer, "jmp %s\n", label );
+            else
+                strcpy( buffer, " \n" ); /* make sure there is a char */
             break;
         }
     }
-done:
-    strcat( buffer, "\n" );
-
     return( NOT_ERROR );
 }
 
-static void InvertJmp( char * p )
-/*******************************/
+static void InvertJmp( char *p )
+/******************************/
 {
     if ( *p == 'e' || *p == 'z' || *p == 'c' || *p == 's' || *p == 'p' || *p == 'o' ) {
         *(p+1) = *p;
@@ -848,13 +801,6 @@ ret_code HllStartDef( int i )
 
     DebugMsg1(("HllStartDef(%u [=%s]) enter\n", i, AsmBuffer[i]->string_ptr ));
 
-#if FASTPASS
-    /* make sure the directive is stored */
-    if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
-        SaveState();
-    }
-#endif
-
     i++; /* skip directive */
 
     hll = AsmAlloc( sizeof(hll_list) );
@@ -930,7 +876,7 @@ ret_code HllStartDef( int i )
                 hll->condlines = "";
             /* create a jump to second label */
             /* optimisation: if second label is just a jump, dont jump! */
-            if ( hll->condlines && _memicmp(hll->condlines, "jmp", 3) ) {
+            if ( hll->condlines && _memicmp( hll->condlines, "jmp", 3 ) ) {
                 AddLineQueueX( " jmp %s", hll->symtest );
             } else {
                 AsmFree( hll->symtest );

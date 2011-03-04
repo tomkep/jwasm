@@ -38,11 +38,21 @@ typedef enum  {
                         everything until we see an endif */
 } if_state;
 
+enum cond_class {
+    CC_NULL,
+    CC_NUMARG,
+    CC_LITARG,
+    CC_BLKARG,
+    CC_SYMARG,
+    CC_PASS1,
+    CC_PASS2,
+};
+
 extern if_state CurrIfState;
 
 extern void conditional_assembly_prepare( int );
-extern ret_code conditional_assembly_directive( int i, int directive );
-extern ret_code conditional_error_directive( int i );
+extern ret_code CondAsmDirective( int );
+extern ret_code ErrorDirective( int );
 extern void CondCheckOpen( void );
 extern void CondInit( void );
 

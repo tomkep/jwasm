@@ -31,7 +31,9 @@
 #define _stricmp strcasecmp
 #define _strcmpi strcasecmp
 #define _strnicmp strncasecmp
+#ifndef __WATCOMC__
 #define _memicmp strncasecmp
+#endif
 
 #define _ltoa   ltoa
 #define _strupr strupr

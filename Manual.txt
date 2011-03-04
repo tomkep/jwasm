@@ -79,6 +79,9 @@ JWasm Manual
      in 64-bit Elf format. Additionally, this option will set cpu to x86-64
      and model to flat.
 
+    -eq: suppress displaying error messages on the screen. They are still
+     written into an error file.
+
     -FPi: "inline FP instructions with emulation". This will make JWasm
      to create fixups for floating-point instructions if code is 16bit.
      If supported by the linker or the OS, the FP instructions can then
@@ -106,19 +109,15 @@ JWasm Manual
      default calling convention to FASTCALL. This is to make JWasm compatible
      with Masm64 (ML64.EXE).
 
-    -zf<0|1>: these options select the FASTCALL calling convention type.
-     The default value 0 is MS VC style, which uses registers (E)CX and
-     (E)DX for the first 2 parameters which are small enough to fit into a
-     register. Option -zf1 activates the Open Watcom fastcall convention, 
-     which uses up to four registers ( E/AX, E/DX, E/BX, E/CX ). Support
-     for OW is disabled by default and hence requires a recompile of the
-     JWasm sources to activate it. If -win64 is set, -zf has no effect.
-
     -Zd: generates line number debug information for OMF and COFF output
      format. For other formats, this option is ignored. Line number
      information allows a debugger to trace the binary on the source code
      level. Debuggers which have been verified to work with this option:
      MS CodeView, CDB, WinDbg, MS VC++ EE 2008, OW WD/WDW, PellesC IDE.
+
+    -zf<0|1>: these options select the FASTCALL calling convention type
+     for 16- and 32-bit code. The default value 0 is MS VC style, while 
+     value 1 activates the Open Watcom fastcall type.
 
     -Zg: this option makes JWasm try an exact copy of Masm's code
      generation, which results in the following changes:
@@ -140,16 +139,17 @@ JWasm Manual
      ignored. Debuggers which have been verified to work with this option:
      MS CodeView, CDB, WinDbg, MS VC++ EE 2008, OW WD/WDW, PellesC IDE.
 
-    -zlc, -zlf, -zls: these options reduce size of the output module.
+    -zlc, -zld, -zlf, -zls: these options reduce size of the output module.
      They might be useful if lots of - small - modules are to be assembled
-     and put into a static library.
+     and put into a static library. Also, the OMF coment records written
+     if -zlc or -zld is NOT set may not be accepted by all linkers.
 
     -Zm: this option (or setting OPTION M510) will do:
       - set OPTION OLDSTRUCTS
       - set OPTION DOTNAME
       - set OPTION SETIF2:TRUE
       - set OPTION OFFSET:SEGMENT (if no model is set)
-      - set OPTION NOSCOPED (if no model with language is set)
+      - set OPTION NOSCOPED (if no model with language specifier is set)
       - allow to define data items behind code labels
       - allow "invalid" use of REP/REPE/REPNE instruction prefixes
      Other Masm v5.1 compatibility options aren't implemented yet.
@@ -204,10 +204,18 @@ JWasm Manual
 
     3.2 FASTCALL Register Calling Convention.
 
-    In 16- and 32-bit mode, one can use either the Microsoft or the
-    Watcom register calling convention. In 64-bit mode, FASTCALL means
-    the standard Windows 64 ABI if option -win64 was given and it is the
-    default then. For -elf64, there is currently no FASTCALL support.
+    In 16- and 32-bit mode, one may use either the Microsoft or the
+    Watcom register calling convention. It's selected by option -zf.
+
+    The Microsoft FASTCALL convention uses registers (E)CX and (E)DX for
+    the first 2 parameters which are small enough to fit into a register.
+
+    The Open Watcom fastcall convention uses up to four registers ( E/AX,
+    E/DX, E/BX, E/CX ). 
+
+    In 64-bit mode, FASTCALL means the standard Windows 64 ABI if option
+    -win64 was given and it is the default then. For -elf64, there is 
+    currently no FASTCALL support.
 
 
     3.3 IDs enclosed in Back Quotes
@@ -218,8 +226,11 @@ JWasm Manual
 
     3.4 Floating-Point Immediates in Instructions
 
-    Floating-point immediate values are accepted as instruction operands
-    ("mov eax,1.0").
+    Floating-point immediate values are accepted as instruction operands.
+    As default, the type is a REAL4, which has a magnitude of 32 bits:
+    "mov eax, 1.0". With type coercion, it's also possible to define a
+    64-bit "double", although it's probably useful in 64-bit code only: 
+    "mov rax, real8 ptr 1.0"
 
 
     3.5 Directive OPTION FIELDALIGN
@@ -602,8 +613,7 @@ JWasm Manual
 
     a) Bugs which are known but not fixed yet:
 
-    - JWasm won't accept a '>' in a macro parameter enclosed in <>,
-      example: <"this param -> isn't valid in JWasm">
+    There are currently no known bugs.
 
     b) Features which aren't implemented yet:
 
@@ -620,8 +630,6 @@ JWasm Manual
 
     c) Features which aren't active in the precompiled binaries:
 
-    - support for INVOKE with procedures of the Watcom C register 
-      calling convention ( option -zf1 ). [ -DINVOKE_WC ]
     - support for Djgpp's variant of COFF. [ -DDJGPP_SUPPORT ]
 
     You'll have to recompile the sources with the appropriate macros

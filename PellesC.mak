@@ -53,7 +53,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
            $(OUTD)/apiemu.obj   $(OUTD)/dbgcv.obj    $(OUTD)/end.obj     \
-           $(OUTD)/cpumodel.obj 
+           $(OUTD)/cpumodel.obj $(OUTD)/cmdline.obj
 ######
 
 !ifdef DOS

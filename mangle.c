@@ -37,25 +37,20 @@
 #include "directiv.h"
 #include "mangle.h"
 
-/* constants used by the OW fastcall name mangler ( changes ) */
-enum changes {
-    NORMAL           = 0,
-    USCORE_FRONT     = 1,
-    USCORE_BACK      = 2
-};
-
 #if MANGLERSUPP
 #if !defined(__GNUC__) && !defined(__POCC__)
 #define tolower(c) ((c >= 'A' && c <= 'Z') ? c | 0x20 : c )
 #endif
 #endif
 
-typedef char *(*mangle_func)( struct asm_sym *, char * );
+typedef int (*mangle_func)( struct asm_sym *, char * );
 
-static char *ow_decorate( struct asm_sym *sym, char *buffer );
-static char *ms32_decorate( struct asm_sym *sym, char *buffer );
+static int ms32_decorate( struct asm_sym *sym, char *buffer );
+#if OWFC_SUPPORT
+static int ow_decorate( struct asm_sym *sym, char *buffer );
+#endif
 #if AMD64_SUPPORT
-static char *ms64_decorate( struct asm_sym *sym, char *buffer );
+static int ms64_decorate( struct asm_sym *sym, char *buffer );
 #endif
 
 /* table of FASTCALL types.
@@ -65,7 +60,9 @@ static char *ms64_decorate( struct asm_sym *sym, char *buffer );
 
 static mangle_func fcmanglers[] = {
     ms32_decorate, /* FCT_MS32 */
+#if OWFC_SUPPORT
     ow_decorate,   /* FCT_WATCOMC */
+#endif
 #if AMD64_SUPPORT
     ms64_decorate  /* FCT_WIN64 */
 #endif
@@ -73,57 +70,72 @@ static mangle_func fcmanglers[] = {
 
 /* VoidMangler: no change to symbol name */
 
-static char *VoidMangler( struct asm_sym *sym, char *buffer )
-/**********************************************************/
+static int VoidMangler( struct asm_sym *sym, char *buffer )
+/*********************************************************/
 {
-    strcpy( buffer, sym->name );
-    return( buffer );
+    memcpy( buffer, sym->name, sym->name_size + 1 );
+    return( sym->name_size );
 }
 
 /* UCaseMangler: convert symbol name to upper case */
 
-static char *UCaseMangler( struct asm_sym *sym, char *buffer )
-/************************************************************/
+static int UCaseMangler( struct asm_sym *sym, char *buffer )
+/**********************************************************/
 {
-    strcpy( buffer, sym->name );
+    memcpy( buffer, sym->name, sym->name_size + 1 );
     _strupr( buffer );
-    return( buffer );
+    return( sym->name_size );
 }
 
 /* UScoreMangler: add '_' prefix to symbol name */
 
-static char *UScoreMangler( struct asm_sym *sym, char *buffer )
-/*************************************************************/
+static int UScoreMangler( struct asm_sym *sym, char *buffer )
+/***********************************************************/
 {
     buffer[0] = '_';
-    strcpy( buffer+1, sym->name );
-    return( buffer );
+    memcpy( buffer+1, sym->name, sym->name_size + 1 );
+    return( sym->name_size + 1 );
 }
 
 /* StdcallMangler: add '_' prefix and '@size' suffix to proc names */
 /*                 add '_' prefix to other symbols */
 
-static char *StdcallMangler( struct asm_sym *sym, char *buffer )
-/*************************************************************/
+static int StdcallMangler( struct asm_sym *sym, char *buffer )
+/************************************************************/
 {
     dir_node    *dir = (dir_node *)sym;
 
-    if( Options.stdcall_decoration == STDCALL_FULL &&
-       sym->isproc ) {
-        sprintf( buffer, "_%s@%d", sym->name, dir->e.procinfo->parasize );
-        return( buffer );
+    if( Options.stdcall_decoration == STDCALL_FULL && sym->isproc ) {
+        return( sprintf( buffer, "_%s@%d", sym->name, dir->e.procinfo->parasize ) );
     } else {
         return( UScoreMangler( sym, buffer ) );
     }
 }
+
+/* MS FASTCALL 32bit */
+
+static int ms32_decorate( struct asm_sym *sym, char *buffer )
+/***********************************************************/
+{
+    return ( sprintf( buffer, "@%s@%u", sym->name, ((dir_node *)sym)->e.procinfo->parasize ) );
+}
+
+#if OWFC_SUPPORT
+
+/* flag values used by the OW fastcall name mangler ( changes ) */
+enum changes {
+    NORMAL           = 0,
+    USCORE_FRONT     = 1,
+    USCORE_BACK      = 2
+};
 
 /* FASTCALL OW style:
  *  add '_' suffix to proc names and labels
  *  add '_' prefix to other symbols
  */
 
-static char *ow_decorate( struct asm_sym *sym, char *buffer )
-/***********************************************************/
+static int ow_decorate( struct asm_sym *sym, char *buffer )
+/*********************************************************/
 {
     char                *name;
     enum changes        changes = NORMAL;
@@ -146,33 +158,25 @@ static char *ow_decorate( struct asm_sym *sym, char *buffer )
 
     if( changes & USCORE_FRONT )
         *name++ = '_';
-    strcpy( name, sym->name );
+    memcpy( name, sym->name, sym->name_size + 1 );
+    name += sym->name_size;
     if( changes & USCORE_BACK ) {
-        name += sym->name_size;
         *name++ = '_';
         *name = NULLC;
     }
-    return( name );
+    return( name - buffer );
 }
-
-/* MS FASTCALL 32bit */
-
-static char * ms32_decorate( struct asm_sym *sym, char *buffer )
-/**************************************************************/
-{
-    sprintf( buffer, "@%s@%u", sym->name, ((dir_node *)sym)->e.procinfo->parasize );
-    return( buffer );
-}
+#endif
 
 #if AMD64_SUPPORT
 
 /* MS FASTCALL 64bit */
 
-static char * ms64_decorate( struct asm_sym *sym, char *buffer )
-/**************************************************************/
+static int ms64_decorate( struct asm_sym *sym, char *buffer )
+/***********************************************************/
 {
-    strcpy( buffer, sym->name );
-    return( buffer );
+    memcpy( buffer, sym->name, sym->name_size + 1 );
+    return( sym->name_size );
 }
 #endif
 
@@ -187,8 +191,8 @@ static char *CMangler( struct asm_sym *sym, char *buffer )
     }
 }
 
-static mangle_func GetMangler( char *mangle_type )
-/************************************************/
+static mangle_func GetMangler( const char *mangle_type )
+/******************************************************/
 {
     if( mangle_type != NULL && mangle_type[1] == NULLC ) {
         switch ( tolower( *mangle_type ) ) {
@@ -205,12 +209,18 @@ static mangle_func GetMangler( char *mangle_type )
 }
 #endif
 
-char *Mangle( struct asm_sym *sym, char *buffer )
-/***********************************************/
+int Mangle( struct asm_sym *sym, char *buffer )
+/*********************************************/
 {
     mangle_func mangler;
 
     switch( sym->langtype ) {
+    case LANG_C:
+        if( Options.no_cdecl_decoration )
+            mangler = VoidMangler;
+        else
+            mangler = UScoreMangler; /* leading underscore (MS C) */
+        break;
     case LANG_SYSCALL:
         mangler = VoidMangler;
         break;
@@ -220,21 +230,15 @@ char *Mangle( struct asm_sym *sym, char *buffer )
         else
             mangler = StdcallMangler;
         break;
-    case LANG_BASIC:
-    case LANG_FORTRAN:
     case LANG_PASCAL:
+    case LANG_FORTRAN:
+    case LANG_BASIC:
         mangler = UCaseMangler;
         break;
     case LANG_FASTCALL:          /* registers passing parameters */
         mangler = fcmanglers[Options.fastcall];
         break;
-    case LANG_C:
-        if( Options.no_cdecl_decoration )
-            mangler = VoidMangler;
-        else
-            mangler = UScoreMangler; /* leading underscore (MS C) */
-        break;
-    case LANG_NONE:
+    default: /* LANG_NONE */
 #if MANGLERSUPP
         mangler = sym->mangler;
         if( mangler == NULL )
@@ -253,8 +257,8 @@ char *Mangle( struct asm_sym *sym, char *buffer )
 /* the "mangle_type" is an extension inherited from OW Wasm
  * accepted are "C" and "N". It's NULL if MANGLESUPP == 0 (standard)
  */
-void SetMangler( struct asm_sym *sym, char *mangle_type, int langtype )
-/*********************************************************************/
+void SetMangler( struct asm_sym *sym, int langtype, const char *mangle_type )
+/***************************************************************************/
 {
 #if MANGLERSUPP
     mangle_func mangler;

@@ -1,6 +1,8 @@
 
 ;--- struct access test
 
+	.dosseg
+
 s1 struct
 v1		db ?
 v2		db ?
@@ -22,6 +24,10 @@ v1	db 4 dup (?)
 v2	db 3 dup (?)
 s1	char ?	;member with name s1, arbitrary type
 s3 ends
+
+s4 struct
+m1	s1 <>
+s4 ends
 
 mac1 macro value
 	exitm <value*2>
@@ -61,6 +67,9 @@ main:
 	mov si,type s2
 	mov si,type s1.v4
 	mov al,[bx].s1.v2
+	mov al,s1.v1[bx]
+	mov al, [bx].s4.m1.v1
+	mov al, s4.m1.v1[bx]
 	ret
 
 _TEXT ends

@@ -40,7 +40,7 @@ extern void             SetSymSegOfs( struct asm_sym * ); /* Store location info
 extern int              GetSymOfssize( struct asm_sym * );
 //extern direct_idx       GetLnameIdx( const char * );
 extern uint_32          GetCurrOffset( void );  // Get current segment's offset
-extern ret_code         SetCurrOffset( uint_32, bool, bool );
+extern ret_code         SetCurrOffset( dir_node *, uint_32, bool, bool );
 //extern direct_idx       SetSegmentClass( struct asm_sym *, const char * );
 extern asm_sym          *CreateIntSegment( const char *, const char *, uint_8, uint_8, bool );
 //extern dir_node         *GetCurrSeg( void );  /* Get current segment; NULL means none */
@@ -52,6 +52,7 @@ extern ret_code         SegmentDir( int );      // SEGMENT directive
 extern ret_code         EndsDir( int );         // ENDS directive
 extern ret_code         SetCurrSeg( int );      // SEGMENT directive if pass > 1
 extern void             SegmentInit( int );     // init segments
+extern void             SegmentFini( void );    /* exit segments */
 extern asm_sym          *GetGroup( struct asm_sym * );
 extern uint_32          GetCurrSegAlign( void );
 extern ret_code         SetOfssize( void );
@@ -66,6 +67,7 @@ extern char             *GetCodeSegName( void );
 extern const char       *GetCodeClass( void );
 extern ret_code         SimplifiedSegDir( int ); // .CODE, .DATA, ... directive
 extern ret_code         ModelSimSegmInit( int type );
+extern void             ModelSimSegmExit( void );
 extern void             SetModelDefaultSegNames( void );
 
 #endif

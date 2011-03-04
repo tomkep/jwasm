@@ -91,10 +91,9 @@ const char szCVCompiler[] = { "Microsoft (R) Macro Assembler Version 6.15.8803" 
 const char szCVCompiler[] = { "JWasm v" _JWASM_VERSION_ };
 #endif
 
-ret_code MsgInit( void )
-/**********************/
+void MsgInit( void )
+/******************/
 {
-    return( NOT_ERROR );
 }
 
 void MsgFini( void )
@@ -148,22 +147,6 @@ char *MsgGetEx( int msgid )
     return( MsgGet( msgid, NULL ) );
 }
 
-void MsgPrintf( int msgid )
-/*************************/
-{
-    trademark();
-    printf( MsgGet( msgid, NULL ));
-}
-
-#if 0
-void MsgPrintf1( int msgid, char *token )
-/***************************************/
-{
-    trademark();
-    printf( MsgGet( msgid, NULL ), token );
-}
-#endif
-
 void MsgPrintUsage( void )
 /************************/
 {
@@ -179,7 +162,7 @@ void MsgPrintUsage( void )
 char *MsgGetJWasmName( char * buffer )
 /************************************/
 {
-    sprintf( buffer, MsgGet( MSG_JWASM, NULL ), _JWASM_VERSION_, __DATE__ );
+    sprintf( buffer, MsgGetEx( MSG_JWASM ), _JWASM_VERSION_, __DATE__ );
     return( buffer );
 }
 
@@ -189,7 +172,7 @@ int trademark( void )
     char buffer[128];
     if( banner_printed == FALSE ) {
         banner_printed = TRUE;
-        printf( MsgGet( MSG_BANNER, NULL ), MsgGetJWasmName( buffer ) );
+        printf( MsgGetEx( MSG_BANNER ), MsgGetJWasmName( buffer ) );
         return( 4 ); /* return number of lines printed */
     }
     return( 0 );

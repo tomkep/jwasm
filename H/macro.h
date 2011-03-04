@@ -35,18 +35,19 @@
 
 /* functions in expans.c */
 
-extern ret_code ExpandToken( int count, char * string, bool addbrackets, bool Equ_Mode );
+//extern ret_code ExpandToken( int count, char * string, int addbrackets, int Equ_Mode );
 extern ret_code ExpandLine( char * );
-extern int      RunMacro( dir_node *, char *, char *, bool, bool, bool );
+extern void     ExpandLinePart( int, char *, int, int );
+extern int      RunMacro( dir_node *, char *, char *, int, int, bool * );
 extern int      GetLiteralValue( char *, const char * );
 
 /* functions in macro.c */
 
-extern dir_node *CreateMacro( const char * );// create a macro symbol
+extern dir_node *CreateMacro( const char * );/* create a macro symbol */
 extern void     ReleaseMacroData( dir_node * );
-extern ret_code StoreMacro( dir_node *, int, bool );  // store macro content
-extern ret_code MacroDef( int );             // handle MACRO directive
-extern ret_code PurgeDef( int );             // handle PURGE directive
+extern ret_code StoreMacro( dir_node *, int, bool );  /* store macro content */
+extern ret_code MacroDef( int );             /* MACRO directive */
+extern ret_code PurgeDirective( int );       /* PURGE directive */
 extern ret_code MacroInit( int );
 #ifdef DEBUG_OUT
 extern void     MacroFini( void );
@@ -55,10 +56,10 @@ extern void     MacroFini( void );
 /* functions in string.c */
 
 extern asm_sym  *SetTextMacro( asm_sym*, const char *, const char * ); // EQU for texts
-extern ret_code CatStrDef( int );            // CatStr + TEXTEQU directive
-extern ret_code SubStrDef( int );            // SubStr directive
-extern ret_code SizeStrDef( int );           // SizeStr directive
-extern ret_code InStrDef( int );             // InStr directive
+extern ret_code CatStrDef( int );            /* CatStr + TEXTEQU directive */
+extern ret_code SubStrDef( int );            /* SubStr directive */
+extern ret_code SizeStrDef( int );           /* SizeStr directive */
+extern ret_code InStrDef( int );             /* InStr directive */
 extern void     StringInit( void );
 #ifdef DEBUG_OUT
 extern void     StringFini( void );
@@ -66,6 +67,10 @@ extern void     StringFini( void );
 
 /* functions in loop.c */
 
-extern ret_code LoopDirective( int, int );   // FOR,FORC,IRP,IRPC,REPT,...
+extern ret_code LoopDirective( int );   /* FOR,FORC,IRP,IRPC,REPT,.. */
+
+/* functions in input.c */
+
+extern ret_code IncludeDirective( int );
 
 #endif

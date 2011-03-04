@@ -30,11 +30,6 @@ extern struct MZDATA mzdata;
 #define OPTQUAL
 #endif
 
-typedef struct _option {
-    const char *name;
-    int OPTQUAL (*func)(int *);
-} option;
-
 /* OPTION directive helper functions */
 
 /* OPTION DOTNAME */
@@ -64,19 +59,19 @@ static int OPTQUAL SetCaseMap( int *pi )
 /**************************************/
 {
     int i = *pi;
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token == T_ID) {
-        if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"NONE") ) {
+    if ( AsmBuffer[i]->token == T_ID ) {
+        if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "NONE" ) ) {
             ModuleInfo.case_sensitive = TRUE;        /* -Cx */
             ModuleInfo.convert_uppercase = FALSE;
-        } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"NOTPUBLIC") ) {
+        } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "NOTPUBLIC" ) ) {
             ModuleInfo.case_sensitive = FALSE;       /* -Cp */
             ModuleInfo.convert_uppercase = FALSE;
-        } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"ALL") ) {
+        } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "ALL" ) ) {
             ModuleInfo.case_sensitive = FALSE;       /* -Cu */
             ModuleInfo.convert_uppercase = TRUE;
         } else {
@@ -349,30 +344,30 @@ static int OPTQUAL SetPrologue( int *pi )
 /***************************************/
 {
     int i = *pi;
-    char * name;
-    //asm_sym * sym;
 
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token != T_ID) {
+    if ( AsmBuffer[i]->token != T_ID ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
-    if (0 == _stricmp(AsmBuffer[i]->string_ptr,"NONE")) {
-        name = NULL;
-    } else if (0 == _stricmp(AsmBuffer[i]->string_ptr,"PROLOGUEDEF")) {
-        name = "";
-    } else {
-        name = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1);
-        strcpy( name, AsmBuffer[i]->string_ptr );
-    }
-    if ( ModuleInfo.proc_prologue && *ModuleInfo.proc_prologue )
+    if ( ModuleInfo.proc_prologue ) {
         AsmFree( ModuleInfo.proc_prologue );
+        ModuleInfo.proc_prologue = NULL;
+    }
+    if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "NONE" ) ) {
+        ModuleInfo.prologuemode = PEM_NONE;
+    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "PROLOGUEDEF" ) ) {
+        ModuleInfo.prologuemode = PEM_DEFAULT;
+    } else {
+        ModuleInfo.prologuemode = PEM_MACRO;
+        ModuleInfo.proc_prologue = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1);
+        strcpy( ModuleInfo.proc_prologue, AsmBuffer[i]->string_ptr );
+    }
 
-    ModuleInfo.proc_prologue = name;
     i++;
     *pi = i;
     return( NOT_ERROR );
@@ -387,31 +382,31 @@ static int OPTQUAL SetEpilogue( int *pi )
 /***************************************/
 {
     int i = *pi;
-    char * name = (char *)-1;
-    //asm_sym * sym;
 
-    if (AsmBuffer[i]->token != T_COLON) {
+    if ( AsmBuffer[i]->token != T_COLON ) {
         AsmError( COLON_EXPECTED );
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token != T_ID) {
+    if ( AsmBuffer[i]->token != T_ID ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
-    if (0 == _stricmp(AsmBuffer[i]->string_ptr,"NONE")) {
-        name = NULL;
-    } else if (0 == _stricmp(AsmBuffer[i]->string_ptr,"EPILOGUEDEF")) {
-        name = "";
-    } else {
-        name = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1);
-        strcpy( name, AsmBuffer[i]->string_ptr );
+    if ( ModuleInfo.proc_epilogue ) {
+        AsmFree( ModuleInfo.proc_epilogue );
+        ModuleInfo.proc_epilogue = NULL;
     }
 
-    if ( ModuleInfo.proc_epilogue && *ModuleInfo.proc_epilogue )
-        AsmFree( ModuleInfo.proc_epilogue );
+    if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "NONE" ) ) {
+        ModuleInfo.epiloguemode = PEM_NONE;
+    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "EPILOGUEDEF" ) ) {
+        ModuleInfo.epiloguemode = PEM_DEFAULT;
+    } else {
+        ModuleInfo.epiloguemode = PEM_MACRO;
+        ModuleInfo.proc_epilogue = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1);
+        strcpy( ModuleInfo.proc_epilogue, AsmBuffer[i]->string_ptr );
+    }
 
-    ModuleInfo.proc_epilogue = name;
     i++;
     *pi = i;
     return( NOT_ERROR );
@@ -435,11 +430,11 @@ static int OPTQUAL SetOffset( int *pi )
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->string_ptr );
         return( ERROR );
     }
-    if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"GROUP" ) ) {
+    if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "GROUP" ) ) {
         ModuleInfo.offsettype = OT_GROUP;
-    } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"FLAT" ) ) {
+    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "FLAT" ) ) {
         ModuleInfo.offsettype = OT_FLAT;
-    } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"SEGMENT" ) ) {
+    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "SEGMENT" ) ) {
         ModuleInfo.offsettype = OT_SEGMENT;
     } else {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -549,7 +544,7 @@ static int OPTQUAL SetFieldAlign( int *pi )
         return( ERROR );
     }
     i++;
-    if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
     if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
         AsmError( CONSTANT_EXPECTED );
@@ -589,7 +584,7 @@ static int OPTQUAL SetProcAlign( int *pi )
         return( ERROR );
     }
     i++;
-    if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
     if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
         AsmError( CONSTANT_EXPECTED );
@@ -629,12 +624,12 @@ static int OPTQUAL SetMZ( int *pi )
     }
     i++;
     for (j = 0, parms = (uint_16 *)&mzdata ; j < 4; j++) {
-        if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
             return( ERROR );
         if ( opndx.kind == EXPR_EMPTY ) {
         } else if ( opndx.kind == EXPR_CONST ) {
             if ( opndx.value > 0xFFFF ) {
-                AsmError( CONSTANT_VALUE_TOO_LARGE );
+                AsmErr( CONSTANT_VALUE_TOO_LARGE, opndx.value64 );
                 return( ERROR );
             }
             *(parms + j) = opndx.value;
@@ -679,10 +674,10 @@ static int OPTQUAL SetFrame( int *pi )
         AsmError( SYNTAX_ERROR );
         return( ERROR );
     }
-    if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"AUTO" ) ) {
+    if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "AUTO" ) ) {
         ModuleInfo.frame_auto = 1;
         i++;
-    } else if ( 0 == _stricmp(AsmBuffer[i]->string_ptr,"NOAUTO" ) ) {
+    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "NOAUTO" ) ) {
         ModuleInfo.frame_auto = 0;
         i++;
     }
@@ -707,11 +702,11 @@ static int OPTQUAL SetElf( int *pi )
         return( ERROR );
     }
     i++;
-    if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
     if ( opndx.kind == EXPR_CONST ) {
         if ( opndx.llvalue > 0xFF ) {
-            AsmError( CONSTANT_VALUE_TOO_LARGE );
+            AsmErr( CONSTANT_VALUE_TOO_LARGE, opndx.value64 );
             return( ERROR );
         }
         if ( Options.output_format == OFORMAT_ELF )
@@ -803,11 +798,11 @@ static int OPTQUAL SetWin64( int *pi )
         return( ERROR );
     }
     i++;
-    if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
     if ( opndx.kind == EXPR_CONST ) {
         if ( opndx.llvalue > 0x1 ) {
-            AsmError( CONSTANT_VALUE_TOO_LARGE );
+            AsmErr( CONSTANT_VALUE_TOO_LARGE, opndx.value64 );
             return( ERROR );
         }
         ModuleInfo.win64_saveparams = opndx.value;
@@ -823,14 +818,19 @@ static int OPTQUAL SetWin64( int *pi )
 static int OPTQUAL Unsupported( int *pi )
 /***************************************/
 {
-    AsmErr( NOT_SUPPORTED, AsmBuffer[(*pi)-2]->pos );
+    AsmErr( NOT_SUPPORTED, AsmBuffer[(*pi)-2]->tokpos );
     return( ERROR );
 }
+
+struct asm_option {
+    const char *name;
+    int OPTQUAL (*func)(int *);
+};
 
 /* the table must be here after the option helper functions
  * to avoid having to define prototypes.
  */
-static const option optiontab[] = {
+static const struct asm_option optiontab[] = {
     { "CASEMAP",      SetCaseMap     },
     { "PROC",         SetProc        },
     { "PROLOGUE",     SetPrologue    },

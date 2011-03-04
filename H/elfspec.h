@@ -202,6 +202,8 @@ typedef struct {
 #define SHT_REL         9               // as RELA but no explicit addends
 #define SHT_SHLIB       10              // reserved but evil
 #define SHT_DYNSYM      11              // dynamic link symbol table
+
+#define SHT_LOOS        0x60000000      /* reserved for environment specific use */
 #define SHT_OS          0x60000001      // info to identify target OS
 #define SHT_IMPORTS     0x60000002      // info on refs to external symbols
 #define SHT_EXPORTS     0x60000003      // info on symbols exported by ordinal
@@ -209,6 +211,8 @@ typedef struct {
 #define SHT_PROGFRAGS   0x60001001      // similar to SHT_PROGBITS
 #define SHT_IDMDLL      0x60001002      // symbol name demangling information
 #define SHT_DEFLIB      0x60001003      // default static libraries
+#define SHT_HIOS        0x6fffffff
+
 #define SHT_LOPROC      0x70000000      // processor specific
 #define SHT_X86_64_UNWIND 0x70000001    // contains entries for stack unwinding
 #define SHT_HIPROC      0x7fffffff
@@ -222,20 +226,22 @@ typedef struct {
 #define SHT_EXPORTS_O   14              // info on symbols exported by ordinal
 #define SHT_RES_O       15              // read-only resource data.
 
-// sh_flags values
+/* sh_flags values */
 
-#define SHF_WRITE       0x00000001      // section writable during execution
-#define SHF_ALLOC       0x00000002      // section occupies space during exec.
-#define SHF_EXECINSTR   0x00000004      // section contains code.
-#define SHF_BEGIN       0x01000000      // section to be placed at the beginning
+#define SHF_WRITE       0x00000001      // 0 section writable during execution
+#define SHF_ALLOC       0x00000002      // 1 section occupies space during exec.
+#define SHF_EXECINSTR   0x00000004      // 2 section contains code.
+#define SHF_MERGE       0x00000010      // 4 section can be merged
+#define SHF_STRINGS     0x00000020      // 5 section contains asciiz strings
+#define SHF_BEGIN       0x01000000      // 24 section to be placed at the beginning
                                         // of like-named sections by static link
-#define SHF_END         0x02000000      // same, end.
+#define SHF_END         0x02000000      // 25 same, end.
 #define SHF_MASKPROC    0xf0000000      // processor specific flags
 
-#define SHF_X86_64_LARGE 0x1000000      // section with more than 2GB
-#define SHF_ALPHA_GPREL 0x10000000      
+#define SHF_X86_64_LARGE 0x1000000      // section with more than 2GB - value may be wrong!!!
+#define SHF_ALPHA_GPREL 0x10000000
 
-// symbol table entry
+/* symbol table entry */
 
 typedef struct {
     uint_32  st_name;        // symbol name index into string table
@@ -325,41 +331,42 @@ typedef struct {
 //386
 enum elf32_relocations {
  R_386_NONE      =  0,
- R_386_32        =  1, /* direct */
- R_386_PC32      =  2, /* PC-relative */
- R_386_GOT32     =  3, /* GOT entry */
- R_386_PLT32     =  4, /* PLT entry */
+ R_386_32        =  1, /* direct,       S + A     */
+ R_386_PC32      =  2, /* PC-relative,  S + A - P */
+ R_386_GOT32     =  3, /* GOT entry,    G + A     */
+ R_386_PLT32     =  4, /* PLT entry,    L + A - P */
  R_386_COPY      =  5,
- R_386_GLOB_DAT  =  6, /* create GOT entry */
- R_386_JMP_SLOT  =  7, /* create PLT entry */
- R_386_RELATIVE  =  8, /* relative to program base */
- R_386_GOTOFF    =  9, /* offset to GOT */
- R_386_GOTPC     = 10,
+ R_386_GLOB_DAT  =  6, /* create GOT entry, S */
+ R_386_JMP_SLOT  =  7, /* create PLT entry, S */
+ R_386_RELATIVE  =  8, /* rel. to program base, B + A */
+ R_386_GOTOFF    =  9, /* offset to GOT, S + A - GOT */
+ R_386_GOTPC     = 10, /* GOT + A - P */
+ R_386_32PLT     = 11, /* L + A       */
 /* GNU extensions for LD */
- R_386_16        = 20, /* 16-bit direct */
- R_386_PC16      = 21, /* 16-bit PC-relative */
- R_386_8         = 22, /* 8-bit direct */
- R_386_PC8       = 23  /* 8-bit PC-relative */
+ R_386_16        = 20, /* 16-bit direct,      S + A     */
+ R_386_PC16      = 21, /* 16-bit PC-relative, S + A - P */
+ R_386_8         = 22, /* 8-bit direct,       S + A     */
+ R_386_PC8       = 23  /* 8-bit PC-relative,  S + A - P */
 };
 
 //X86_64
 enum elf64_relocations {
  R_X86_64_NONE        =   0,
- R_X86_64_64          =   1,
- R_X86_64_PC32        =   2,
- R_X86_64_GOT32       =   3,
- R_X86_64_PLT32       =   4,
- R_X86_64_COPY        =   5,
- R_X86_64_GLOB_DAT    =   6,
- R_X86_64_JUMP_SLOT   =   7,
- R_X86_64_RELATIVE    =   8,
- R_X86_64_GOTPCREL    =   9,
- R_X86_64_32          =  10,
- R_X86_64_32S         =  11,
- R_X86_64_16          =  12,
- R_X86_64_PC16        =  13,
- R_X86_64_8           =  14,
- R_X86_64_PC8         =  15,
+ R_X86_64_64          =   1,    /* S + A     */
+ R_X86_64_PC32        =   2,    /* S + A - P */
+ R_X86_64_GOT32       =   3,    /* G + A     */
+ R_X86_64_PLT32       =   4,    /* L + A - P */
+ R_X86_64_COPY        =   5,    /*           */
+ R_X86_64_GLOB_DAT    =   6,    /* S         */
+ R_X86_64_JUMP_SLOT   =   7,    /* S         */
+ R_X86_64_RELATIVE    =   8,    /* B + A     */
+ R_X86_64_GOTPCREL    =   9,    /* G + GOT + A - P */
+ R_X86_64_32          =  10,    /* S + A     */
+ R_X86_64_32S         =  11,    /* S + A     */
+ R_X86_64_16          =  12,    /* S + A     */
+ R_X86_64_PC16        =  13,    /* S + A - P */
+ R_X86_64_8           =  14,    /* S + A     */
+ R_X86_64_PC8         =  15,    /* S + A - P */
  R_X86_64_DPTMOD64    =  16,
  R_X86_64_DTPOFF64    =  17,
  R_X86_64_TPOFF64     =  18,
@@ -368,9 +375,9 @@ enum elf64_relocations {
  R_X86_64_DTPOFF32    =  21,
  R_X86_64_GOTTPOFF    =  22,
  R_X86_64_TPOFF32     =  23,
- R_X86_64_PC64        =  24,
- R_X86_64_GOTOFF64    =  25,
- R_X86_64_GOTPC32     =  26,
+ R_X86_64_PC64        =  24,    /* S + A - P   */
+ R_X86_64_GOTOFF64    =  25,    /* S + A - GOT */
+ R_X86_64_GOTPC32     =  26,    /* GOT + A - P */
  R_X86_64_SIZE32      =  32,
  R_X86_64_SIZE64      =  33
 };

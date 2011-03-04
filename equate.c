@@ -66,12 +66,13 @@ static void SaveVariableState(asm_sym *sym)
     equ_item *p;
     DebugMsg1(( "SaveVariableState(%s)=%d\n", sym->name, sym->value ));
     sym->saved = TRUE; /* don't try to save this symbol (anymore) */
-    p = AsmAlloc(sizeof(equ_item));
+    p = AsmAlloc( sizeof(equ_item) );
     p->next = NULL;
     p->sym = sym;
-    p->value   = sym->value;
+    p->lvalue   = sym->value;
+    p->hvalue   = sym->value3264; /* v2.05: added */
     p->isdefined = sym->isdefined;
-    if (modstate.EquTail) {
+    if ( modstate.EquTail ) {
         modstate.EquTail->next = p;
         modstate.EquTail = p;
     } else {
@@ -133,7 +134,7 @@ static asm_sym * CreateAssemblyTimeVariable( void )
         opndx.hlvalue = 0;
         opndx.kind = EXPR_CONST;
     } else {
-        if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
             return( NULL );
         if( AsmBuffer[i]->token != T_FINAL ) {
             AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -150,7 +151,7 @@ static asm_sym * CreateAssemblyTimeVariable( void )
         if ( opndx.hlvalue != 0 ||
             opndx.value64 < minintvalues[ModuleInfo.Ofssize] ||
             opndx.value64 > maxintvalues[ModuleInfo.Ofssize] ) {
-            AsmError( CONSTANT_VALUE_TOO_LARGE );
+            AsmErr( CONSTANT_VALUE_TOO_LARGE, opndx.value64 );
             return( NULL );
         }
     }
@@ -243,10 +244,10 @@ asm_sym * CreateConstant( void )
     char                *name = AsmBuffer[0]->string_ptr;
     int                 i = 2;
     ret_code            rc;
+    char                *p;
     bool                cmpvalue = FALSE;
     expr_list           opndx;
-    char                buffer[MAX_LINE_LEN];
-    char                nameb[MAX_ID_LEN+1];
+    char                argbuffer[MAX_LINE_LEN];
 
     DebugMsg1(( "CreateConstant(%s) enter\n", name ));
 
@@ -260,7 +261,7 @@ asm_sym * CreateConstant( void )
          */
     } else if( sym->state == SYM_TMACRO ) {
 
-        return ( SetTextMacro( sym, name, AsmBuffer[1]->pos + 4 ) );
+        return ( SetTextMacro( sym, name, AsmBuffer[2]->tokpos ) );
 
     } else if( sym->equate == FALSE ) {
 
@@ -269,9 +270,9 @@ asm_sym * CreateConstant( void )
         return( NULL );
 
     } else {
-        if ( sym->pass == ( Parse_Pass & 0xFF ) )
+        if ( sym->asmpass == ( Parse_Pass & 0xFF ) )
             cmpvalue = TRUE;
-        sym->pass = Parse_Pass;
+        sym->asmpass = Parse_Pass;
     }
 
     /* try to evalate the expression */
@@ -284,54 +285,31 @@ asm_sym * CreateConstant( void )
         return ( SetTextMacro( sym, name, AsmBuffer[2]->string_ptr ) );
     } else if ( AsmBuffer[2]->token == T_NUM &&
         AsmBuffer[3]->token == T_FINAL &&
-        AsmBuffer[2]->hvalue == 0 ) {
+        AsmBuffer[2]->hivalflg == HV_NULL ) {
         opndx.llvalue = AsmBuffer[2]->value64;
         opndx.hlvalue = 0;
         opndx.string = NULL;
         opndx.instr = EMPTY;
         opndx.kind = EXPR_CONST;
-        opndx.flags = 0;
+        opndx.flags1 = 0;
         rc = NOT_ERROR;
         DebugMsg1(( "CreateConstant(%s): simple numeric value=%" FX32 "\n", name, AsmBuffer[2]->value64 ));
         i++;
     } else {
         if ( Parse_Pass == PASS_1 ) {
+            p = AsmBuffer[2]->tokpos;
             /* if the expression cannot be evaluated to a numeric value,
-             * it's to become a text macro. The value of this macro is the
-             * ORIGINAL, unexpanded line!!! Also important is that macro
-             * function calls are NEVER resolved,
+             * it's to become a text macro. The value of this macro will be
+             * the original (unexpanded!) line - that's why it has to be
+             * saved here to argbuffer[].
              */
-            int k;
-            char *p;
-            DebugMsg1(("CreateConstant(%s): b.E line=>%s<\n", name, AsmBuffer[1]->pos + 4 ));
-            p = AsmBuffer[1]->pos+4;
-            strcpy( buffer, p ); /* save original line */
-            /* the name string might get destroyed if a macro is executed */
-            strcpy( nameb, name );
-            name = nameb;
-
-            /* expand the line */
-            while ( 1 ) {
-                rc = NOT_ERROR;
-                for( k = 2; k < Token_Count; k++ ) {
-                    if ( ExpandToken( k, p, FALSE, TRUE ) == STRING_EXPANDED )
-                        rc = STRING_EXPANDED;
-                }
-                /* if there was an expansion, the tokenizer must be called. */
-                /* if Token_Count is 0, there was a macro function call and
-                 * the loop must continue. this should never happen, however!
-                 */
-                if ( rc == STRING_EXPANDED ) {
-                    k = Token_Count;
-                    Token_Count = Tokenize( p, 2, FALSE );
-                    if (k)
-                        break;
-                } else
-                    break;
-            }
-            DebugMsg1(("CreateConstant(%s): a.E line=>%s<\n", name, AsmBuffer[1]->pos + 4 ));
+            strcpy( argbuffer, p );
+            DebugMsg1(("CreateConstant(%s): before ExpandLinePart: >%s<\n", name, p ));
+            /* expand EQU argument (macro functions won't be expanded!) */
+            ExpandLinePart( 2, p, FALSE, TRUE );
+            DebugMsg1(("CreateConstant(%s): after ExpandLinePart: >%s<\n", name, p ));
         }
-        rc = EvalOperand( &i, Token_Count, &opndx, FALSE );
+        rc = EvalOperand( &i, Token_Count, &opndx, EXPF_NOERRMSG | EXPF_NOLCREATE );
     }
     /* what is an acceptable 'number' for EQU?
      * 1. a constant value - if magnitude is <= 32.
@@ -357,7 +335,7 @@ asm_sym * CreateConstant( void )
 
         if ( !sym ) {
             sym = SymCreate( name, TRUE );
-            sym->pass = Parse_Pass;
+            sym->asmpass = Parse_Pass;
         } else if ( sym->state == SYM_UNDEFINED ) {
             dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
         } else if ( sym->state == SYM_EXTERNAL ) {
@@ -393,15 +371,13 @@ asm_sym * CreateConstant( void )
         return( sym );
     }
     DebugMsg1(("CreateConstant(%s): value is NOT numeric, calling SetTextMacro()\n", name ));
-    return ( SetTextMacro( sym, name, buffer ) );
+    return ( SetTextMacro( sym, name, argbuffer ) );
 }
 
-/* DefineConstant is used by
- *   EQU:    redefine=FALSE
- *   '=':    redefine=TRUE
- */
-ret_code DefineConstant( bool redefine )
-/**************************************/
+/* EQU and '=' directives */
+
+ret_code EquDirective( int i )
+/****************************/
 {
     asm_sym *sym;
 
@@ -409,7 +385,7 @@ ret_code DefineConstant( bool redefine )
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
         return( ERROR );
     }
-    if ( sym = ( redefine ? CreateAssemblyTimeVariable() : CreateConstant() ) ) {
+    if ( sym = ( ( AsmBuffer[i]->dirtype == DRT_EQUALSGN ) ? CreateAssemblyTimeVariable() : CreateConstant() ) ) {
         if ( ModuleInfo.list == TRUE ) {
             LstWrite( LSTTYPE_EQUATE, 0, sym );
         }

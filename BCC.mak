@@ -47,7 +47,8 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj \
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
-           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj
+           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj\
+           $(OUTD)/cmdline.obj
 ######
 
 TARGET1=$(OUTD)\$(name).exe 
@@ -73,7 +74,7 @@ $(BCDIR)\Lib\c0x32.obj $(proj_obj:BCC32R/=+), $(name).exe, $(name).map, import32
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h
 	@$(CC) /o$* msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h H/directve.h
 	@$(CC) /o$* parser.c
 
 ######

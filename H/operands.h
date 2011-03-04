@@ -105,6 +105,11 @@ enum operand_type {
 
     OP_MGT8     = ( OP_M16 | OP_M32 | OP_M64 ),
     OP_MGT16    = ( OP_M32 | OP_M64 ),
+#if AMD64_SUPPORT
+    OP_RM3264   = ( OP_R32 | OP_R64 | OP_M32 | OP_M64 ), /* v2.05: added */
+#else
+    OP_RM3264   = ( OP_R32 | OP_M32 ),
+#endif
     OP_MFPTR    = ( OP_M32 | OP_M48 | OP_M80 ),
     OP_M_ANY    = ( OP_M8 | OP_M16 | OP_M32 | OP_M48 | OP_M64 | OP_M80 | OP_M128 ),
     /* OP_M without M80 will make some instr (i.e. FBSTP [esp]) fail! */
@@ -117,10 +122,9 @@ typedef enum operand_type OPNDTYPE;
 
 enum operand3_type { /* this is a 4bit field only! */
     OP3_NONE = 0x00,
-    //OP3_CL   = 0x01, /* v1.96: value not used */
-    OP3_XMM0 = 0x01, /* v2.01: introduced with SSE4.1 */
+    OP3_CL   = 0x01,
     OP3_I8_U = 0x02,
-    //OP3_I    = 0x03, /* v1.96: value not used */
+    OP3_XMM0 = 0x03, /* v2.01: introduced with SSE4.1 */
     OP3_HID  = 0x08 /* this is a flag, data in bits 0-2! */
 };
 

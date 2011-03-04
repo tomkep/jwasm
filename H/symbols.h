@@ -74,10 +74,10 @@ typedef enum {
         MT_PROC  = 0x80,
         MT_NEAR  = 0x81,
         MT_FAR   = 0x82,
-        MT_PTR   = 0x83,
         MT_EMPTY = 0xC0,
         MT_BITS  = 0xC1,
         MT_ABS   = 0xC2,
+        MT_PTR   = 0xC3,   /* v2.05: changed, old value 0x83 */
         MT_TYPE  = 0xC4,
         MT_FLOAT   = 0x20, /* bit 5 */
         MT_SPECIAL = 0x80, /* bit 7 */
@@ -99,7 +99,7 @@ typedef enum {
  *   mem_type (MT_EMPTY).
  */
 typedef ret_code (* macro_func)( char *, char * * );
-typedef uint_32 (* internal_func)( struct asm_sym * );
+typedef void (* internal_func)( struct asm_sym * );
 
 struct debug_info {
     uint_32 start_line;  /* procs's start line */
@@ -116,7 +116,7 @@ typedef struct asm_sym {
         struct asm_sym  *next;
         char            *name;
 
-        struct asm_sym  *segment;      /* for SYM_INTERNAL, SYM_EXTERNAL */
+        struct asm_sym  *segment;      /* used by SYM_INTERNAL, SYM_EXTERNAL */
         union {
             int_32          offset;    /* used by SYM_INTERNAL */
             int_32          value;     /* used by MT_ABS */
@@ -125,49 +125,56 @@ typedef struct asm_sym {
             struct asm_sym *substitute;/* v2.04b: used by SYM_ALIAS */
             macro_func      func_ptr;  /* used by SYM_MACRO */
             int_32          max_offset;/* used by SYM_SEG */
+            int_32          class_lname_idx;/* used by SYM_CLASS_LNAME */
         };
         union {
-            /* for SYM_INTERNAL (memtype != NEAR|FAR), SYM_STRUCT_FIELD */
+            /* for SYM_INTERNAL (memtype != NEAR|FAR|ABS), SYM_STRUCT_FIELD */
             uint_32         first_size;   /* size of 1st initializer in bytes */
             /* for SYM_INTERNAL (memtype == NEAR|FAR),
-             * SYM_EXTERNAL,
-             * SYM_STACK,
-             ( + SYM_TYPE (typedefs) ) */
+             * SYM_GRP (Ofssize),
+             * SYM_EXTERNAL (Ofssize, comm, weak, isfar, is_ptr, ptr_memtype),
+             * SYM_STACK (Ofssize, isfar, is_vararg, is_ptr, ptr_memtype ),
+             * SYM_TYPE, TYPE_TYPEDEF (Ofssize, isfar, is_ptr, ptr_memtype )
+             */
             struct {
-                unsigned char   Ofssize;   /* also for SYM_TYPE, SYM_GRP, SYM_STACK */
+                unsigned char   Ofssize;   /* offset size (USE16, USE32) */
+                unsigned char   is_ptr;    /* PTR indirection */
+                union {
+                    unsigned char ptr_memtype;/* pointer target type */
+                    unsigned char asmpass;    /* SYM_INTERNAL (mem_type NEAR|FAR) */
+                };
+                unsigned char   seg_ofssize:2;    /* SYM_EXTERNAL only */
                 unsigned char   comm:1;    /* is communal */
                 unsigned char   weak:1;    /* 1 if an unused "externdef" */
-                unsigned char   isfar:1;   /* for communal, SYM_TYPE, SYM_STACK */
-                unsigned char   pass;      /* SYM_INTERNAL (mem_type NEAR|FAR) */
+                unsigned char   isfar:1;   /* SYM_EXTERNAL, SYM_TYPE, SYM_STACK */
+                unsigned char   is_vararg:1;/* SYM_STACK, VARARG param */
             };
             /* for SYM_MACRO */
             struct {
-                unsigned char   vararg:1;   // accept additional params
-                unsigned char   isfunc:1;   // it's a macro function
-                unsigned char   runsync:1;  // run macro synchronous
+                unsigned char   mac_vararg:1;/* accept additional params */
+                unsigned char   isfunc:1;   /* it's a macro function */
 #if MACROLABEL
-                unsigned char   label:1;    // macro is "label-aware"
+                unsigned char   label:1;    /* macro is "label-aware" */
 #endif
+                //unsigned char   runsync:1;  /* run macro synchronous */
             };
         };
-        /* first_length is used for data items only
-         * (SYM_INTERNAL & SYM_STRUCT_FIELD).
-         * idx is used by SYM_EXTERNAL
-         */
         union {
-            /* for SYM_INTERNAL, SYM_STRUCT_FIELD */
+            /* first_length is used for data items only
+             * for SYM_INTERNAL (except "labels"), SYM_STRUCT_FIELD */
             uint_32         first_length; /* size of 1st initializer--elts. dup'd */
-            /* for SYM_EXTERNAL, SYM_CLASS_LNAME */
-            uint            idx;          /* (external definition) index */
-            uint_32         max_mbr_size; /* SYM_TYPE: max size members */
+            /* SYM_TYPE (TYPEKIND_STRUCT or TYPEKIND_UNION) */
+            uint_32         max_mbr_size; /* max size members */
+            /* SYM_STACK, SYM_TYPE (TYPEKIND_TYPEDEF), SYM_EXTERNAL, SYM_INTERNAL (labels) */
+            struct asm_sym  *target_type; /* set if ptr_memtype is MT_TYPE */
         };
         union {
             /* for SYM_INTERNAL, SYM_STRUCT_FIELD,
              * SYM_TYPE, SYM_STACK,
-             * SYM_EXTERNAL (comm==1)
+             * SYM_EXTERNAL (comm=1)
              */
             uint_32         total_size;   /* total number of bytes (sizeof) */
-            /* for SYM_INTERNAL ABS (equates) */
+            /* for SYM_INTERNAL, MT_ABS (numeric equates) */
             int_32          value3264;    /* high bits for equates */
         };
         union {
@@ -191,21 +198,21 @@ typedef struct asm_sym {
         unsigned short  global:1;     /* symbol has been added to the globals queue */
         unsigned short  equate:1;     /* symbol has been defined with EQU */
         unsigned short  predefined:1; /* symbol is predefined */
-        unsigned short  variable:1;   /* symbol is variable (redef) */
+        unsigned short  variable:1;   /* symbol is variable ('=' directive) */
         unsigned short  public:1;     /* symbol has been added to the publics queue */
         unsigned short  list:1;       /* symbol is to be listed */
-        unsigned short  isarray:1;    /* symbol is an array */
-        unsigned short  included:1;   /* COFF: static symbol added to public queue */
-        unsigned short  saved:1;      /* symbol has been saved ("fast pass") */
+        unsigned short  isarray:1;    /* symbol is an array (total_length is valid) */
+        unsigned short  included:1;   /* COFF: static symbol added to public queue. ELF:symbol added to symbol table */
+        unsigned short  saved:1;      /* assembly time variables only: symbol has been saved ("fast pass") */
         unsigned short  isproc:1;     /* symbol is PROC or PROTO */
-        unsigned short  labelinexpr:1;/* equates: expression contains label */
+        unsigned short  isdata:1;     /* field first_size is valid */
 #if FASTMEM==0
         unsigned short  staticmem:1;  /* symbol stored in static memory */
 #endif
 #ifdef DEBUG_OUT
         unsigned short  forward:1;    /* symbol was forward referenced */
 #endif
-        lang_type       langtype;
+        enum lang_type  langtype;
         enum sym_state  state;
         memtype         mem_type;
 #if (MAX_ID_LEN <= 255)
@@ -214,10 +221,11 @@ typedef struct asm_sym {
         uint_16         name_size;
 #endif
         struct asm_sym  *type;        /* set if memtype is MT_TYPE */
-        struct fixup    *fixup;
-#if 0 //MANGLERSUPP /* obsolete */
-        char            *(*mangler)( struct asm_sym *sym, char *buffer );
-#endif
+        union {
+            struct fixup *fixup;      /* SYM_INTERNAL, SYM_UNDEFINED, SYM_EXTERNAL? only */
+            /* for SYM_EXTERNAL */
+            uint         ext_idx;     /* (external definition) index */
+        };
 } asm_sym;
 
 extern  struct asm_sym  *SymLookup( const char *name );
@@ -229,19 +237,19 @@ extern  void            SymSetCmpFunc( void );
 extern  void            SymFree( struct asm_sym *sym);
 //extern  int             SymChangeName( const char *old, const char *new );
 extern  void            SymSetName( struct asm_sym * sym, const char *name );
+extern  struct asm_sym *SymAddToTable( struct asm_sym *sym );
 extern  void            SymInit( void );
 extern  void            SymFini( void );
 extern  void            SymPassInit( int pass );
 extern  struct asm_sym **SymSort( uint_32 * );
 extern  void            SymMakeAllSymbolsPublic( void );
-//extern  void            SymSetCurrPC( void );
 extern  int             SymEnum( struct asm_sym * *, int * );
 extern  struct asm_sym  *SymIsType( const char * );
 
 #ifdef __WATCOMC__
-typedef int (__watcall * StrCmpFunc)(const char *, const char * );
+typedef int (__watcall * StrCmpFunc)(const void *, const void *, unsigned );
 #else
-typedef int (* StrCmpFunc)(const char *, const char * );
+typedef int (* StrCmpFunc)(const void *, const void *, unsigned );
 #endif
 extern StrCmpFunc SymCmpFunc;
 

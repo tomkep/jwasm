@@ -53,7 +53,9 @@
 
 dir_node *CurrStruct;
 static dir_node *redef_struct;
-static const char szRecord[] = "RECORD";
+/* text constants for 'Non-benign <x> redefinition' error msg */
+static const char szStructure[] = "structure";
+static const char szRecord[] = "record";
 
 void TypesInit()
 /**************/
@@ -123,7 +125,7 @@ struct asm_sym *SearchNameInStruct( asm_sym *tstruct, const char *name, unsigned
                     break;
                 }
             }
-        } else if ( len == fl->sym->name_size && SymCmpFunc( name, fl->sym->name ) == 0 ) {
+        } else if ( len == fl->sym->name_size && SymCmpFunc( name, fl->sym->name, len ) == 0 ) {
             DebugMsg(("SearchNameInStruct: '%s' found in struct %s\n", name, tstruct->name ));
             sym = fl->sym;
             break;
@@ -181,7 +183,6 @@ ret_code StructDirective( int i )
     char *name;
     unsigned alignment;
     unsigned int offset;
-    int name_loc;
     int cmd = AsmBuffer[i]->value;
     //unsigned int size;
     asm_sym *sym;
@@ -215,15 +216,12 @@ ret_code StructDirective( int i )
 #else
         if ( AsmBuffer[i]->token == T_ID ) {
 #endif
-            name_loc = i;
             name = AsmBuffer[i]->string_ptr;
             i++;
         } else {
-            name_loc = -1;
             name = "";
         }
     } else {
-        name_loc = 0;
         name = AsmBuffer[0]->string_ptr;
     }
 
@@ -232,7 +230,7 @@ ret_code StructDirective( int i )
         unsigned int power;
         expr_list opndx;
         /* get the optional alignment parameter */
-        if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) != ERROR ) {
+        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) != ERROR ) {
             if (opndx.kind == EXPR_EMPTY ) {
                 ;
             } else if (opndx.kind != EXPR_CONST ) {
@@ -293,12 +291,14 @@ ret_code StructDirective( int i )
          */
         if ( CurrStruct ) {
             sym = CurrStruct->e.structinfo->tail->sym->type;
+            /**/myassert( sym );
             CurrStruct->e.structinfo->tail = CurrStruct->e.structinfo->tail->next;
         }
+        /**/myassert( sym );
         dir = (dir_node *)sym;
         dir->e.structinfo->tail = dir->e.structinfo->head;
-        /**/myassert( sym != NULL );
         sym->offset = 0;
+        sym->isdefined = TRUE;
         ((dir_node *)sym)->next = CurrStruct;
         CurrStruct = (dir_node *)sym;
         return( NOT_ERROR );
@@ -393,7 +393,7 @@ ret_code EndstructDirective( int i )
         CurrStruct = CurrStruct->next;
         if ( CurrStruct )
             UpdateStructSize( size );
-        if ( FileInfo.file[LST] )
+        if ( AsmFile[LST] )
             LstWrite( LSTTYPE_STRUCT, size, dir->sym.name );
         return( NOT_ERROR );
     }
@@ -412,7 +412,7 @@ ret_code EndstructDirective( int i )
     }
 
     if ( i == 1 ) { /* an global struct ends with <name ENDS>  */
-        if ( SymCmpFunc( AsmBuffer[0]->string_ptr, dir->sym.name ) != 0 ) {
+        if ( SymCmpFunc( AsmBuffer[0]->string_ptr, dir->sym.name, dir->sym.name_size ) != 0 ) {
             /* names don't match */
             DebugMsg(("EndstructDirective: names don't match, i=%u, name=%s - %s\n", i, AsmBuffer[0]->string_ptr, dir->sym.name));
             AsmErr( UNMATCHED_BLOCK_NESTING, AsmBuffer[0]->string_ptr );
@@ -449,7 +449,7 @@ ret_code EndstructDirective( int i )
     /* v2.0: add the embedded struct AFTER it has been parsed! */
     if ( i == 1 ) {
         asm_sym *sym;
-        sym = AddFieldToStruct( -1, -1, MT_TYPE, dir, dir->sym.total_size );
+        sym = AddFieldToStruct( EMPTY, -1, MT_TYPE, dir, dir->sym.total_size );
         /* the member name was stored in the type name */
         sym->name = dir->sym.name;
         sym->name_size = strlen( dir->sym.name );
@@ -458,7 +458,7 @@ ret_code EndstructDirective( int i )
         dir->sym.name_size = 0;
     }
 
-    if ( FileInfo.file[LST] ) {
+    if ( AsmFile[LST] ) {
         LstWrite( LSTTYPE_STRUCT, size, dir->sym.name );
     }
 #if 1
@@ -481,7 +481,7 @@ ret_code EndstructDirective( int i )
     if ( CurrStruct == NULL ) {
         if ( redef_struct ) {
             if ( AreStructsEqual( dir, redef_struct) == FALSE ) {
-                AsmErr( NON_BENIGN_XXX_REDEFINITION, "structure", dir->sym.name );
+                AsmErr( NON_BENIGN_XXX_REDEFINITION, szStructure, dir->sym.name );
             }
             DebugMsg(("EndstructDirective: delete the redefinition of %s\n", dir->sym.name ));
             SymFree( (asm_sym *)dir );
@@ -504,7 +504,7 @@ ret_code EndstructDirective( int i )
 }
 
 /* this function is called in pass 1 only.
- * name_loc: index of field name or -1
+ * name_loc: index of field name or EMPTY
  * loc: initializer location, may be -1
  * mem_type: mem_type of item
  * vartype: arbitrary type of item if memtype is MT_TYPE
@@ -528,13 +528,13 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
     offset = CurrStruct->sym.offset;
 
 #ifdef DEBUG_OUT
-    if ( name_loc < 0 )
+    if ( name_loc == EMPTY )
         DebugMsg1(("AddFieldToStruct(%s): anonymous, curr ofs=%u, vartype=%s, size=%u\n", CurrStruct->sym.name, offset, vartype ? vartype->sym.name : "NULL", size ));
     else
         DebugMsg1(("AddFieldToStruct(%s): name=%s, curr ofs=%u, vartype=%s, size=%u\n", CurrStruct->sym.name, AsmBuffer[name_loc]->string_ptr, offset, vartype ? vartype->sym.name : "NULL", size ));
 #endif
 
-    if ( name_loc >= 0 ) {
+    if ( name_loc != EMPTY ) {
         /* the field has a name */
         name = AsmBuffer[name_loc]->string_ptr;
         /* check if field name is already used */
@@ -591,6 +591,8 @@ struct asm_sym * AddFieldToStruct( int name_loc, int loc, memtype mem_type, dir_
                 if ( AsmBuffer[i]->token == T_ID ) {
                     asm_sym *sym2 = SymSearch( AsmBuffer[i]->string_ptr );
                     if ( sym2 && sym2->variable ) {
+                        if ( sym2->predefined && sym2->sfunc_ptr )
+                            sym2->sfunc_ptr( sym2 );
                         myltoa( sym2->uvalue, init, ModuleInfo.radix, sym2->value3264 < 0, TRUE );
                     } else {
                         strcpy( init, AsmBuffer[i]->string_ptr );
@@ -720,7 +722,7 @@ ret_code AlignInStruct( int value )
     return( NOT_ERROR );
 }
 
-/* called by data_init() when a structure field has been created
+/* called by data_dir() when a structure field has been created
  * now called on pass 1 only.
  */
 void UpdateStructSize(int no_of_bytes)
@@ -755,308 +757,168 @@ ret_code SetStructCurrentOffset(int offset)
     return( NOT_ERROR );
 }
 
-/* TYPEDEF worker
- * this function is called by TypedefDirective()
- * and might also be called by EXTERN[DEF]/PROC/LOCAL
- * and create an anonymous pointer type then:
- * EXTERNDEF: ptr <type>
- * In those cases, name is NULL.
+/* get a qualified type.
+ * Used by
+ * - TYPEDEF
+ * - PROC/PROTO params and LOCALs
+ * - EXTERNDEF
+ * - EXTERN
+ * - LABEL
+ * - ASSUME for GPRs
  */
-asm_sym *CreateTypeDef( char *name, int *pi )
-/*******************************************/
+ret_code GetQualifiedType( int *pi, struct qualified_type *pti )
+/**************************************************************/
 {
-    char        *token;
-    int         i = *pi;
-    struct asm_sym      *sym;
-    struct asm_sym      *symtype;
-    memtype             mem_type;
-    memtype             ptr_memtype;
-    dir_node            *dir;
-    dir_node            *dir2;
-    int                 type;
-    int                 size;
-    int                 indirection;
-    int                 ptrqual;
+    int             type;
+    int             tmp;
+    int             i = *pi;
+    int             distance = FALSE;
+    dir_node        *dir;
 
-    if ( name ) {
-        sym = SymSearch( name );
-        if ( sym == NULL || sym->state == SYM_UNDEFINED ) {
-            sym = CreateTypeSymbol( sym, name, TRUE );
-            if ( sym == NULL )
-                return( NULL );
-        } else {
-            /* MASM allows to have the TYPEDEF included multiple times */
-            /* but the types must be identical! */
-            if ( ( sym->state != SYM_TYPE ) ||
-                ( ((dir_node *)sym)->e.structinfo->typekind != TYPE_TYPEDEF &&
-                 ((dir_node *)sym)->e.structinfo->typekind != TYPE_NONE ) ) {
-                AsmErr( SYMBOL_REDEFINITION, sym->name );
-                return( NULL );
-            }
+    /* convert "directive" PROC to a type qualifier */
+    for ( tmp = i; AsmBuffer[tmp]->token != T_FINAL && AsmBuffer[tmp]->token != T_COMMA; tmp++ )
+        if ( AsmBuffer[tmp]->token == T_DIRECTIVE && AsmBuffer[tmp]->value == T_PROC ) {
+            AsmBuffer[tmp]->token = T_STYPE;
+            AsmBuffer[tmp]->value8 = ST_PROC;
         }
-    } else {
-        sym = CreateTypeSymbol( NULL, "", FALSE );
-    }
-    dir = (dir_node *)sym;
-    sym->Ofssize = ModuleInfo.Ofssize;
-
-#if 0
-    /* "name TYPEDEF" is a valid syntax */
-    if ( i >= Token_Count ) {
-        AsmError( SYNTAX_ERROR );
-        return( NULL );
-    }
-#endif
-    dir->e.structinfo->typekind = TYPE_TYPEDEF;
-    sym->isdefined = TRUE;
-    ptr_memtype = MT_EMPTY;
-
-    token = AsmBuffer[i]->string_ptr;
-    type = -1;
-    if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_COMMA )
-        type = ST_NULL;
-    else if ( AsmBuffer[i]->token == T_RES_ID )
-        type = FindStdType( AsmBuffer[i]->value );
-    else if ( AsmBuffer[i]->token == T_DIRECTIVE ) {
-        /* PROC or PROTO may occur */
-        if ( AsmBuffer[i]->value == T_PROTO ) {
-            dir_node * dir2;  /* create a PROTOtype item without name */
-            /* v2.04: added check if prototype is set already */
-            if ( dir->e.structinfo->target == NULL && sym->mem_type == MT_EMPTY ) {
-                dir2 = (dir_node *)CreateProc( NULL, "", FALSE );
-                DebugMsg1(("CreateTypeDef PROTO, created new unnamed prototype %p\n", dir2 ));
-            } else if ( sym->mem_type == MT_PROC ) {
-                dir2 = (dir_node *)dir->e.structinfo->target;
+    /* with NEAR/FAR, there are several syntax variants allowed:
+     * 1. NEARxx | FARxx
+     * 2. PTR NEARxx | FARxx
+     * 3. NEARxx | FARxx PTR [<type>]
+     */
+    /* read qualified type */
+    for ( type = ERROR; AsmBuffer[i]->token == T_STYPE || AsmBuffer[i]->token == T_RES_ID; i++ ) {
+        if ( AsmBuffer[i]->token == T_STYPE ) {
+            tmp = AsmBuffer[i]->value8;
+            if ( type == ERROR )
+                type = tmp;
+            if ( SimpleType[tmp].mem_type == MT_FAR ||
+                SimpleType[tmp].mem_type == MT_NEAR ) {
+                if ( distance == FALSE ) {
+                    pti->is_far = ( SimpleType[tmp].mem_type == MT_FAR );
+                    if ( SimpleType[tmp].Ofssize != USE_EMPTY )
+                        pti->Ofssize = SimpleType[tmp].Ofssize;
+                    distance = TRUE;
+                } else if ( AsmBuffer[i-1]->value != T_PTR )
+                    break;
             } else {
-                AsmErr( SYMBOL_TYPE_CONFLICT, sym->name );
-                return( NULL );
+                if ( pti->is_ptr )
+                    pti->ptr_memtype = SimpleType[tmp].mem_type;
+                i++;
+                break;
             }
-            i++;
-            DebugMsg1(("CreateTypeDef PROTO, call ExamineProc(sym=%p i=%d, 0)\n", dir2, i));
-            if( ExamineProc( dir2, i, FALSE ) == ERROR )
-                return ( NULL );
-            DebugMsg1(("CreateTypeDef PROTO, ExamineProc() returned status ok\n"));
-            sym->mem_type = MT_PROC;
-            /* v2.03: set value of field total_size (previously was 0) */
-             if( dir2->sym.mem_type == MT_NEAR ) {
-                 sym->total_size = (2 << dir2->sym.Ofssize);
-             } else {
-                 sym->isfar = TRUE; /* v2.04: added */
-                 sym->total_size = (2 + (2 << dir2->sym.Ofssize));
-             }
-             dir->e.structinfo->target = (asm_sym *)dir2;
-            *pi = Token_Count;
-            DebugMsg1(("CreateTypeDef(%s) ok, mem_type=%Xh\n", sym->name, sym->mem_type ));
-            return( sym );
-        }
-        if ( AsmBuffer[i]->value == T_PROC )
-            type = ST_PROC;
+        } else if ( AsmBuffer[i]->value == T_PTR ) {
+            type = ST_PTR;
+            pti->is_ptr++;
+        } else
+            break;
     }
 
-    if( type == -1 ) {
-        /* must be an ID */
-        if ( AsmBuffer[i]->token != T_ID ) {
-            AsmErr( SYNTAX_ERROR_EX, token );
-            return( NULL );
-        }
-        DebugMsg1(("CreateTypeDef(%s): arbitrary type\n", sym->name ));
-        /* besides PROTO typedef, an arbitrary type is ok */
-        symtype = SymSearch( token );
-        if( symtype == NULL || symtype->state == SYM_UNDEFINED ) {
-            AsmErr( SYMBOL_NOT_DEFINED, token );
-            return( NULL );
-        }
-        if( symtype->state != SYM_TYPE ) {
-            AsmError( INVALID_QUALIFIED_TYPE );
-            return( NULL );
-        }
-        /* v2.04a: simplify the type if it is scalar */
-        dir2 = (dir_node *)symtype;
-        if ( dir2->e.structinfo->typekind == TYPE_TYPEDEF &&
-            symtype->mem_type != MT_TYPE &&
-            dir2->e.structinfo->target == NULL ) {
-            mem_type = symtype->mem_type;
-            size = symtype->total_size;
-            indirection = dir2->e.structinfo->indirection;
-            symtype = NULL;
-            i++;
-            goto simple_type;
-        }
-#if 1
-        /* v2.04: compare the basic types if symbol was already defined */
-        if ( sym->mem_type != MT_EMPTY ) {
-            asm_sym *sym2;
-            asm_sym *sym3;
-            for ( sym2 = sym; sym2->type; sym2 = sym2->type );
-            for ( sym3 = symtype; sym3->type; sym3 = sym3->type );
-            if ( ( ((dir_node *)sym2)->e.structinfo->typekind != TYPE_TYPEDEF && sym2 != sym3 ) ||
-                ( sym2->mem_type != sym3->mem_type  )) {
-                DebugMsg(("CreateTypeDef(%s): error, memtypes=%X/%X\n", sym->name, sym2->mem_type, sym3->mem_type ));
-                AsmErr( SYMBOL_TYPE_CONFLICT, sym->name );
-                return( NULL );
-            }
-        }
-#else
-        if ( ( ( sym->mem_type != MT_TYPE ) && ( sym->mem_type != MT_EMPTY ) ) ||
-            ( ( sym->total_size != 0 ) && ( sym->total_size != symtype->total_size ) ) ||
-            ( ( sym->type != NULL ) && ( sym->type != symtype ) ) ) {
-            DebugMsg(("CreateTypeDef(%s): error, memtype=%X size=%" FU32 "/%" FU32 " type=%p/%p type.memtype=%X\n", sym->name, sym->mem_type, sym->total_size, symtype->total_size, sym->type, symtype, symtype->mem_type ));
-            AsmErr( SYMBOL_TYPE_CONFLICT, sym->name );
-            return( NULL );
-        }
-#endif
-        i++;
-        sym->mem_type = MT_TYPE;
-        sym->total_size = symtype->total_size;
-        sym->type = symtype;
-        DebugMsg1(("CreateTypeDef(%s) ok, mem_type=MT_TYPE, size=%" FU32 ", type=%p type.memtype=%X\n",
-                   sym->name, sym->total_size, sym->type, symtype->mem_type ));
-    } else {
-        /* it's a simple or void type */
-        mem_type = SimpleType[type].mem_type;
-        ptrqual = EMPTY;
-        indirection = 0;
-        symtype = NULL;
-
-        size = SizeFromMemtype( SimpleType[type].mem_type, SimpleType[type].Ofssize, NULL );
-
-        while ( AsmBuffer[i]->token == T_RES_ID ) {
-            switch ( AsmBuffer[i]->value ) {
-            case T_FAR:
-            case T_FAR16:
-            case T_FAR32:
-            case T_NEAR:
-            case T_NEAR16:
-            case T_NEAR32:
-                if ( ptrqual == EMPTY ) {
-                    ptrqual = AsmBuffer[i]->value;
-                    type = FindStdType( ptrqual );
-                    size = SizeFromMemtype( SimpleType[type].mem_type, SimpleType[type].Ofssize, NULL );
-
-                    if ( ptrqual == T_NEAR16 || ptrqual == T_FAR16 )
-                        sym->Ofssize = USE16;
-                    else if ( ptrqual == T_NEAR32 || ptrqual == T_FAR32 )
-                        sym->Ofssize = USE32;
-
-                    if ( ptrqual == T_FAR || ptrqual == T_FAR16 || ptrqual == T_FAR32 )
-                        sym->isfar = TRUE;
-                    else
-                        sym->isfar = FALSE;
-                }
-                i++;
-                if ( indirection == 0 &&
-                    ( AsmBuffer[i]->token != T_RES_ID ||
-                     AsmBuffer[i]->value != T_PTR ) ) {
-                    AsmError( INVALID_QUALIFIED_TYPE );
-                    return( NULL );
-                }
-                DebugMsg1(("CreateTypeDef(%s): pointer type, indirection=%u, qual=%d\n", sym->name, indirection, ptrqual ));
-                continue;
-            case T_PTR:
-                mem_type = MT_PTR;
-                indirection++;
-                /* v2,94: added */
-                if ( indirection == 1 && ptrqual == EMPTY )
-                    if ( SIZE_DATAPTR & ( 1 << ModuleInfo.model ) )
-                        sym->isfar = TRUE;
-                i++;
-                DebugMsg1(("CreateTypeDef(%s): pointer type, indirection=%u, qual=%d\n", sym->name, indirection, ptrqual ));
-                continue;
-            }
-            break; /* other T_RES_IDs ( scalar types, FLAT, VARARG,... ) break */
-        }
-
-        DebugMsg1(("CreateTypeDef(%s): typeindex=%u memtype=%Xh size=%u i=%u token=%u\n",
-                   sym->name, type, sym->mem_type, size, i, AsmBuffer[i]->token));
-
-        if ( AsmBuffer[i]->token == T_ID  ) {
-            symtype = SymSearch( AsmBuffer[i]->string_ptr );
-            DebugMsg1(("CreateTypeDef: ptr dest=%X (name=%s)\n", symtype, symtype ? symtype->name : "" ));
-            /* v2.04: added */
-            if ( symtype == NULL )
-                symtype = CreateTypeSymbol( dir->e.structinfo->target, AsmBuffer[i]->string_ptr, TRUE );
-            if ( symtype ) {
-                /* accept pointers to PROTOs and arbitrary types */
-                if ( symtype->state == SYM_TYPE ) {
-                    DebugMsg1(("CreateTypeDef: >%s< is arbitrary type\n", symtype->name ));
-                    if ( symtype->mem_type == MT_PROC ) {
-                        DebugMsg(("CreateTypeDef: >%s< is function pointer\n", symtype->name ));
-                        /* v2.03: ptr to PROTO has size of the proc */
-                        if ( type == ST_PTR && indirection == 1 )
-                            size = symtype->total_size;
-                        /* v2.04: added */
-                        if ( indirection && ( ptrqual == EMPTY ))
-                            sym->isfar = symtype->isfar;
+    if ( type == ST_PTR ) {
+        if ( AsmBuffer[i]->token == T_ID && AsmBuffer[i-1]->value == T_PTR ) {
+            pti->symtype = SymSearch( AsmBuffer[i]->string_ptr );
+            if ( pti->symtype == NULL || pti->symtype->state == SYM_UNDEFINED )
+                pti->symtype = CreateTypeSymbol( pti->symtype, AsmBuffer[i]->string_ptr, TRUE );
+            else if ( pti->symtype->state != SYM_TYPE ) {
+                AsmErr( INVALID_QUALIFIED_TYPE, AsmBuffer[i]->string_ptr );
+                return( ERROR );
+            } else {
+                dir = (dir_node *)pti->symtype;
+                /* if it's a typedef, simplify the info */
+                if ( dir->e.structinfo->typekind == TYPE_TYPEDEF ) {
+                    pti->is_ptr     += pti->symtype->is_ptr;
+                    if ( pti->symtype->is_ptr == 0 ) {
+                        pti->ptr_memtype = pti->symtype->mem_type;
+                        if ( distance == FALSE && pti->is_ptr == 1 &&
+                            ( pti->symtype->mem_type == MT_NEAR ||
+                             pti->symtype->mem_type == MT_PROC ||
+                             pti->symtype->mem_type == MT_FAR ) )
+                            pti->is_far = pti->symtype->isfar;
+                            if ( pti->symtype->Ofssize != USE_EMPTY )
+                                pti->Ofssize = pti->symtype->Ofssize;
+                    } else {
+                        pti->ptr_memtype = pti->symtype->ptr_memtype;
+                        if ( distance == FALSE && pti->is_ptr == 1 ) {
+                            pti->is_far = pti->symtype->isfar;
+                            if ( pti->symtype->Ofssize != USE_EMPTY )
+                                pti->Ofssize = pti->symtype->Ofssize;
+                        }
                     }
-                } else {
-                    DebugMsg(("CreateTypeDef: invalid type, symbol state=%u\n", symtype->state));
-                    if ( sym->state == SYM_UNDEFINED )
-                        AsmErr( SYMBOL_NOT_DEFINED, symtype->name );
+                    if ( pti->symtype->mem_type == MT_TYPE )
+                        pti->symtype  = dir->sym.type;
                     else
-                        AsmErr( SYMBOL_TYPE_CONFLICT, symtype->name );
-                    return( NULL );
+                        pti->symtype  = dir->sym.target_type;
                 }
-            } /* if symbol isn't found, don't emit an error! */
-            i++;
-        } else if ( AsmBuffer[i]->token == T_RES_ID && AsmBuffer[i]->type == RWT_TYPE ) {
-            /* v2.04: store mem_type of pointer */
-            if ( indirection ) {
-                ptr_memtype = SimpleType[SpecialTable[ AsmBuffer[i]->value ].value8].mem_type;
             }
             i++;
         }
-        /* v2.04:check if the arbitrary type is just an alias of a simple type.
-         * If yes, use the simple type instead.
-         */
-        if ( symtype ) {
-            for ( ; symtype->type; symtype = symtype->type );
-            if ( ((dir_node *)symtype)->e.structinfo->typekind == TYPE_TYPEDEF &&
-                ((dir_node *)symtype)->e.structinfo->indirection == 0 &&
-                ((dir_node *)symtype)->e.structinfo->target == NULL ) {
-                ptr_memtype = symtype->mem_type;
-                symtype = NULL;
+    }
+
+    if( type == ERROR ) {
+        if ( AsmBuffer[i]->token != T_ID ) {
+            if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_COMMA )
+                AsmError( QUALIFIED_TYPE_EXPECTED );
+            else {
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+                i++;
             }
+            return( ERROR );
         }
-    simple_type:
-        /* if type did exist already, check for type conflicts
-         * v2.04: this code has been rewritten */
-        if ( sym->mem_type != MT_EMPTY ) {
-            asm_sym *sym2;
-            for ( sym2 = sym; sym2->type; sym2 = sym2->type );
-            if ( sym2->mem_type != mem_type ||
-                dir->e.structinfo->indirection != indirection ||
-                dir->e.structinfo->target != symtype ||
-                dir->e.structinfo->ptr_memtype != ptr_memtype ) {
-                DebugMsg(("CreateTypeDef(%s): error, memtype=%X/%X indirection=%u/%u types=%p/%p ptypes=%X/%X\n",
-                          sym->name, sym->mem_type, mem_type,
-                          dir->e.structinfo->indirection, indirection,
-                          dir->e.structinfo->target, symtype,
-                          dir->e.structinfo->ptr_memtype, ptr_memtype ));
-                AsmErr( SYMBOL_TYPE_CONFLICT, sym->name );
-                return( NULL );
-            }
+        pti->symtype = SymSearch( AsmBuffer[i]->string_ptr );
+        if( pti->symtype == NULL || pti->symtype->state != SYM_TYPE ) {
+            DebugMsg(("GetQualifiedType: invalid type : %s\n", AsmBuffer[i]->string_ptr ));
+            if ( pti->symtype == NULL || pti->symtype ->state == SYM_UNDEFINED )
+                AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
+            else
+                AsmErr( INVALID_QUALIFIED_TYPE, AsmBuffer[i]->string_ptr );
+            return( ERROR );
         }
-        sym->mem_type = mem_type;
-        sym->total_size = size;
-        dir->e.structinfo->target = symtype;
-        dir->e.structinfo->indirection = indirection;
-        dir->e.structinfo->ptr_memtype = ptr_memtype;
-        DebugMsg1(("CreateTypeDef(%s) ok, mem_type=%Xh, size=%u, indirection=%u target=%p\n", sym->name, sym->mem_type, size, indirection, symtype ));
+        dir = (dir_node *)pti->symtype;
+        if ( dir->e.structinfo->typekind == TYPE_TYPEDEF ) {
+            pti->mem_type = pti->symtype->mem_type;
+            pti->is_far   = pti->symtype->isfar;
+            pti->is_ptr   = pti->symtype->is_ptr;
+            pti->Ofssize  = pti->symtype->Ofssize;
+            pti->size     = pti->symtype->total_size;
+            pti->ptr_memtype = pti->symtype->ptr_memtype;
+            if ( pti->symtype->mem_type == MT_TYPE )
+                pti->symtype  = dir->sym.type;
+            else
+                pti->symtype  = dir->sym.target_type;
+        } else {
+            pti->mem_type = MT_TYPE;
+            pti->size = pti->symtype->total_size;
+        }
+        i++;
+    } else {
+        if ( pti->is_ptr )
+            type = ST_PTR;
+        pti->mem_type = SimpleType[type].mem_type;
+        if ( pti->mem_type == MT_PTR )
+            pti->size = SizeFromMemtype( pti->is_far ? MT_FAR : MT_NEAR, pti->Ofssize, NULL );
+        else
+            pti->size = SizeFromMemtype( pti->mem_type, pti->Ofssize, NULL );
     }
     *pi = i;
-    return( (asm_sym *)dir );
+    DebugMsg1(("GetQualifiedType: i=%u, memtype=%Xh, ptr=%u, far=%u, ofssize=%d, arbtype=%s:%X\n",
+               i, pti->mem_type, pti->is_ptr, pti->is_far, pti->Ofssize,
+               pti->symtype ? pti->symtype->name : "NULL",
+               pti->symtype ? pti->symtype->mem_type : 0 ));
+    return( NOT_ERROR );
 }
 
-/* Handle TYPEDEF directive. Called on pass 1 only.
- * usual syntax is:
- * <type name> TYPEDEF [[far|near [ptr]]<ref type name>]
+/* TYPEDEF directive. Syntax is:
+ * <type name> TYPEDEF [proto|[far|near [ptr]]<qualified type>]
  */
 ret_code TypedefDirective( int i )
 /********************************/
 {
-    char *name;
+    struct asm_sym      *sym;
+    dir_node            *dir;
+    char                *name;
+    struct qualified_type ti;
 
-    DebugMsg1(("TypeDef enter, i=%d\n", i));
+    DebugMsg1(("TypedefDirective(%d) enter\n", i));
 
     if( i != 1 ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -1066,10 +928,123 @@ ret_code TypedefDirective( int i )
 
     i++; /* go past TYPEDEF */
 
-    if ( CreateTypeDef( name, &i ) == NULL )
+    sym = SymSearch( name );
+    if ( sym == NULL || sym->state == SYM_UNDEFINED ) {
+        sym = CreateTypeSymbol( sym, name, TRUE );
+        if ( sym == NULL )
+            return( ERROR );
+    } else {
+        /* MASM allows to have the TYPEDEF included multiple times */
+        /* but the types must be identical! */
+        if ( ( sym->state != SYM_TYPE ) ||
+            ( ((dir_node *)sym)->e.structinfo->typekind != TYPE_TYPEDEF &&
+             ((dir_node *)sym)->e.structinfo->typekind != TYPE_NONE ) ) {
+            AsmErr( SYMBOL_REDEFINITION, sym->name );
+            return( ERROR );
+        }
+    }
+
+    sym->isdefined = TRUE;
+    if ( Parse_Pass > PASS_1 )
+        return( NOT_ERROR );
+    dir = (dir_node *)sym;
+    dir->e.structinfo->typekind = TYPE_TYPEDEF;
+
+    /* PROTO is special */
+    if ( AsmBuffer[i]->token == T_DIRECTIVE && AsmBuffer[i]->value == T_PROTO) {
+        dir_node * dir2;  /* create a PROTOtype item without name */
+        /* v2.04: added check if prototype is set already */
+        if ( sym->target_type == NULL && sym->mem_type == MT_EMPTY ) {
+            dir2 = (dir_node *)CreateProc( NULL, "", FALSE );
+            DebugMsg1(("TypedefDirective PROTO, created new unnamed prototype %p\n", dir2 ));
+        } else if ( sym->mem_type == MT_PROC ) {
+            dir2 = (dir_node *)sym->target_type;
+        } else {
+            AsmErr( SYMBOL_TYPE_CONFLICT, sym->name );
+            return( ERROR );
+        }
+        i++;
+        DebugMsg1(("TypedefDirective PROTO, call ExamineProc(sym=%p i=%d, 0)\n", dir2, i));
+        if( ExamineProc( dir2, i, FALSE ) == ERROR )
+            return ( ERROR );
+        DebugMsg1(("TypedefDirective PROTO, ExamineProc() returned status ok\n"));
+        sym->mem_type = MT_PROC;
+        dir2->sym.isproc = TRUE; /* v2.05: added */
+        sym->Ofssize = dir2->sym.seg_ofssize;
+        /* v2.03: set value of field total_size (previously was 0) */
+        sym->total_size = (2 << sym->Ofssize);
+        if( dir2->sym.mem_type != MT_NEAR ) {
+            sym->isfar = TRUE; /* v2.04: added */
+            sym->total_size += 2;
+        }
+        sym->target_type = (asm_sym *)dir2;
+        DebugMsg1(("TypedefDirective(%s) ok, mem_type=%Xh, ofssize=%u\n", sym->name, sym->mem_type, sym->Ofssize ));
+        return( NOT_ERROR );
+    }
+    ti.size = 0;
+    ti.is_ptr = 0;
+    ti.is_far = FALSE;
+    ti.mem_type = MT_EMPTY;
+    ti.ptr_memtype = MT_EMPTY;
+    ti.symtype = NULL;
+    ti.Ofssize = ModuleInfo.Ofssize;
+
+    /* "empty" type is ok for TYPEDEF */
+    if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_COMMA )
+        ;
+    else if ( GetQualifiedType( &i, &ti ) == ERROR )
         return( ERROR );
+
+    /* if type did exist already, check for type conflicts
+     * v2.05: this code has been rewritten */
+    if ( sym->mem_type != MT_EMPTY ) {
+        asm_sym *to;
+        asm_sym *tn;
+        char oo;
+        char on;
+        for( tn = ti.symtype; tn && tn->type; tn = tn->type );
+        to = ( sym->mem_type == MT_TYPE ) ? sym->type : sym->target_type;
+        for( ; to && to->type; to = to->type );
+        oo = ( sym->Ofssize != USE_EMPTY ) ? sym->Ofssize : ModuleInfo.Ofssize;
+        on = ( ti.Ofssize != USE_EMPTY ) ? ti.Ofssize : ModuleInfo.Ofssize;
+        if ( ti.mem_type != sym->mem_type ||
+            ( ti.mem_type == MT_TYPE && tn != to ) ||
+            ( ti.mem_type == MT_PTR &&
+             ( ti.is_far != sym->isfar ||
+              on != oo ||
+              ti.ptr_memtype != sym->ptr_memtype ||
+              tn != to ))) {
+            DebugMsg(("TypedefDirective: old-new memtype=%X-%X type=%X(%s)-%X(%s) far=%u-%u ind=%u-%u ofss=%d-%d pmt=%X-%X\n",
+                      sym->mem_type, ti.mem_type,
+                      (sym->mem_type == MT_TYPE) ? sym->type : sym->target_type,
+                      (sym->mem_type == MT_TYPE) ? sym->type->name : sym->target_type ? sym->target_type->name : "",
+                      ti.symtype, ti.symtype ? ti.symtype->name : "",
+                      sym->isfar, ti.is_far,
+                      sym->is_ptr, ti.is_ptr,
+                      sym->Ofssize, ti.Ofssize,
+                      sym->ptr_memtype, ti.ptr_memtype ));
+            AsmErr( SYMBOL_TYPE_CONFLICT, name );
+            return( ERROR );
+        }
+    }
+
+    sym->mem_type = ti.mem_type;
+    sym->Ofssize = ti.Ofssize;
+    sym->total_size = ti.size;
+    sym->is_ptr = ti.is_ptr;
+    sym->isfar = ti.is_far;
+    if ( ti.mem_type == MT_TYPE )
+        sym->type = ti.symtype;
+    else
+        sym->target_type = ti.symtype;
+    sym->ptr_memtype = ti.ptr_memtype;
+    DebugMsg1(("TypedefDirective(%s) ok, mem_type=MT_TYPE, size=%" FU32 ", type=%p type.memtype=%X\n",
+               sym->name, sym->total_size, sym->type, ti.symtype ? ti.symtype->mem_type : 0 ));
+
+    DebugMsg1(("TypedefDirective(%s) ok, mem_type=%Xh, size=%u, indirection=%u target=%p\n", sym->name, sym->mem_type, ti.size, ti.is_ptr, ti.symtype ));
+
     if ( AsmBuffer[i]->token != T_FINAL ) {
-        DebugMsg(("TypeDef: unexpected token %u, idx=%u\n", AsmBuffer[i]->token, i));
+        DebugMsg(("TypedefDirective: unexpected token %u, idx=%u\n", AsmBuffer[i]->token, i));
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
@@ -1079,8 +1054,8 @@ ret_code TypedefDirective( int i )
 
 /* generate a RECORD. Called on pass 1 only */
 
-ret_code RecordDef( int i )
-/*************************/
+ret_code RecordDirective( int i )
+/*******************************/
 {
     char *name;
     struct asm_sym *sym;
@@ -1093,7 +1068,7 @@ ret_code RecordDef( int i )
     int name_loc;
     expr_list opndx;
 
-    DebugMsg(("RecordDef enter, i=%u\n", i));
+    DebugMsg1(("RecordDirective(%d) enter\n", i));
     if ( i != 1 ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
@@ -1116,7 +1091,7 @@ ret_code RecordDef( int i )
                ( ((dir_node *)sym)->e.structinfo->typekind == TYPE_RECORD ||
                ((dir_node *)sym)->e.structinfo->typekind == TYPE_NONE ) ) {
         /* v2.04: allow redefinition of record and forward references */
-        if ( ((dir_node *)sym)->e.structinfo->typekind == TYPE_RECORD ) {
+        if ( Parse_Pass == PASS_1 && ((dir_node *)sym)->e.structinfo->typekind == TYPE_RECORD ) {
             oldr = (dir_node *)sym;
             sym = CreateTypeSymbol( NULL, name, FALSE );
             redef_err = 0;
@@ -1125,9 +1100,11 @@ ret_code RecordDef( int i )
         AsmErr( SYMBOL_REDEFINITION, name );
         return( ERROR );
     }
+    sym->isdefined = TRUE;
+    if ( Parse_Pass > PASS_1 )
+        return( NOT_ERROR );
     dir = (dir_node *)sym;
     dir->e.structinfo->typekind = TYPE_RECORD;
-    dir->sym.isdefined = TRUE;
 
     i++; /* go past RECORD */
 
@@ -1145,7 +1122,7 @@ ret_code RecordDef( int i )
         }
         i++;
         /* get width */
-        if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
             break;
         if ( opndx.kind != EXPR_CONST ) {
             AsmError( CONSTANT_EXPECTED );
@@ -1210,14 +1187,13 @@ ret_code RecordDef( int i )
             }
         }
 
-        if ( AsmBuffer[i]->token != T_FINAL )
-            if ( AsmBuffer[i]->token == T_COMMA ) {
-                if ( (i + 1) < Token_Count )
-                    i++;
-            } else {
-                AsmError( EXPECTING_COMMA );
+        if ( i < Token_Count ) {
+            if ( AsmBuffer[i]->token != T_COMMA || AsmBuffer[i+1]->token == T_FINAL ) {
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->tokpos );
                 break;
             }
+            i++;
+        }
 
     } while ( i < Token_Count );
 
@@ -1248,7 +1224,7 @@ ret_code RecordDef( int i )
         /* record can be freed, because the record's fields are global items */
         SymFree( (asm_sym *)dir );
     }
-    DebugMsg(("RecordDef exit, no error\n"));
+    DebugMsg(("RecordDirective(%s) exit, no error\n", name ));
     return( NOT_ERROR );
 }
 

@@ -126,7 +126,9 @@ uint_32 mymmap_size = 0;   /* size in bytes */
 static uint_8 *pBase; /* start list of 512 kB blocks */
 static uint_8 *pCurr; /* points into current block */
 static int currfree;  /* free memory left in current block */
+#ifdef DEBUG_OUT
 static int blocks;    /* number of blocks allocated so far */
+#endif
 #endif
 
 void MemInit( void )
@@ -148,9 +150,11 @@ void MemInit( void )
 #endif
 #endif
 #if FASTMEM
-    currfree = 0;
-    blocks = 0;
     pBase = NULL;
+    currfree = 0;
+#ifdef DEBUG_OUT
+    blocks = 0;
+#endif
 #endif
 }
 
@@ -202,14 +206,14 @@ void *AsmAlloc( size_t size )
 
 #if FASTMEM
     size = (size + 3) & ~3;
-    if (currfree < size) {
+    if ( currfree < size ) {
         DebugMsg(("AsmAlloc: new block, req. size=%Xh\n", size ));
-        if (size > BLKSIZE-4) {
+        if ( size > BLKSIZE-4 ) {
 #ifndef __UNIX__
  #if defined(__OS2__)
             DosAllocMem( (void**)&pCurr, size+4, PAG_COMMIT|PAG_READ|PAG_WRITE);
  #elif defined(__NT__)
-            pCurr = (uint_8 *)VirtualAlloc(NULL, size+4, MEM_COMMIT, PAGE_READWRITE);
+            pCurr = (uint_8 *)VirtualAlloc( NULL, size+4, MEM_COMMIT, PAGE_READWRITE );
  #else
             pCurr = malloc( size+4 );
  #endif
@@ -247,22 +251,27 @@ void *AsmAlloc( size_t size )
 #endif
             currfree = BLKSIZE - sizeof(uint_8 *);
         }
-        if (!pCurr) {
+        if ( !pCurr ) {
             currfree = 0;
             Fatal( FATAL_OUT_OF_MEMORY );
         }
         *(uint_8 * *)pCurr = pBase;
         pBase = pCurr;
         pCurr += sizeof(uint_8 *);
+#ifdef DEBUG_OUT
         blocks++;
+#endif
     }
     ptr = pCurr;
     pCurr += size;
     currfree -= size;
-#else
+
+#else /* ! FASTMEM */
 
 #ifdef TRMEM
     ptr = _trmem_alloc( size, _trmem_guess_who(), memHandle );
+    memcalls++;
+    DebugMsg(("AsmAlloc(0x%X)=%X cnt=%d\n", size, ptr, memcalls ));
 #else
     ptr = malloc( size );
 #endif
@@ -280,6 +289,8 @@ void AsmFree( void *ptr )
     if( ptr != NULL ) {
 #ifdef TRMEM
         _trmem_free( ptr, _trmem_guess_who(), memHandle );
+        DebugMsg(("AsmFree(0x%X) cnt=%d\n", ptr, memcalls ));
+        memcalls--;
 #else
         free( ptr );
 #endif
@@ -292,13 +303,13 @@ void *MemAlloc( size_t size )
 {
     void        *ptr;
     ptr = malloc( size );
+#ifdef TRMEM
+    memcalls++;
+    DebugMsg(("MemAlloc(0x%X)=%X cnt=%d\n", size, ptr, memcalls ));
+#endif
     if( ptr == NULL ) {
         Fatal( FATAL_OUT_OF_MEMORY );
     }
-#ifdef TRMEM
-    memcalls++;
-    DebugMsg(("MemAlloc(%Xh)=%X cnt=%d\n", size, ptr, memcalls ));
-#endif
     return( ptr );
 }
 
@@ -306,8 +317,8 @@ void MemFree( void *ptr )
 /***********************/
 {
 #ifdef TRMEM
+    DebugMsg(("MemFree(0x%X) cnt=%d\n", ptr, memcalls ));
     memcalls--;
-    DebugMsg(("MemFree(%Xh) cnt=%d\n", ptr, memcalls ));
 #endif
     free( ptr );
     return;
@@ -326,4 +337,26 @@ void *MemRealloc( void *ptr, size_t size )
     return( new );
 }
 #endif
+
+#if 0 //def DEBUG_OUT
+#ifdef __WATCOMC__
+/* the C heap is used for line queues only - due to speed issues. */
+/* so this heap check function has become less useful. */
+void heap( char *func )
+/*********************/
+{
+    switch(_heapchk()) {
+    case _HEAPBADNODE:
+    case _HEAPBADBEGIN:
+    DebugMsg(("Function : %s - ", func ));
+        DebugMsg(("ERROR - heap is damaged\n"));
+        exit(1);
+        break;
+    default:
+        break;
+    }
+}
+#endif
+#endif
+
 

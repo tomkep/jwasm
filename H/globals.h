@@ -50,6 +50,7 @@
 #define _MAX_DIR FILENAME_MAX
 #define _MAX_DRIVE 4
 #pragma warn(disable:2030) /* disable '=' used in a conditional expression */
+#pragma warn(disable:2231) /* disable enum value x not handled in switch statement */
 #elif defined(__BORLANDC__)
 #define _stricmp  stricmp
 #define _strnicmp strnicmp
@@ -101,10 +102,10 @@
 #define REMOVECOMENT 0 /* 1=remove comments from source          */
 #define PAGE4K       0 /* support 4kB-page OMF segment alignment */
 #ifndef DJGPP_SUPPORT
-#define DJGPP        0 /* support for Djgpp COFF variant         */
+#define DJGPP_SUPPORT 0 /* support for Djgpp COFF variant         */
 #endif
-#ifndef INVWC_SUPPORT
-#define INVWC_SUPPORT 0 /* support watcom_c fastcall for INVOKE */
+#ifndef OWFC_SUPPORT
+#define OWFC_SUPPORT 1 /* support open watcom fastcall convention */
 #endif
 
 #ifndef FASTPASS
@@ -126,8 +127,8 @@
 /* JWasm version info */
 
 #define _BETA_
-#define _JWASM_VERSION_ "2.04c" _BETA_
-#define _JWASM_VERSION_INT_ 204
+#define _JWASM_VERSION_ "2.05" _BETA_
+#define _JWASM_VERSION_INT_ 205
 
 #include "errmsg.h"
 
@@ -178,13 +179,9 @@ enum {
 
 #define NUM_FILE_TYPES 4
 
-typedef struct {
-    FILE        *file[NUM_FILE_TYPES];      /* ASM, ERR, OBJ and LST */
-    char        *fname[NUM_FILE_TYPES];
-} File_Info;
-
 /* Information about source, object, listing and error files */
-extern File_Info        FileInfo;
+extern FILE *AsmFile[];    /* ASM, ERR, OBJ and LST */
+extern char *AsmFName[];   /* ASM, ERR, OBJ and LST */
 
 #define ASM_EXT "asm"
 #define ERR_EXT "err"
@@ -198,6 +195,7 @@ extern File_Info        FileInfo;
 
 /* enumerations */
 
+/* output formats. Order must match formatoptions[] in assemble.c */
 enum oformat {
     OFORMAT_OMF,
     OFORMAT_COFF,
@@ -209,7 +207,7 @@ enum oformat {
 
 enum hformat {
     HFORMAT_NONE,
-    HFORMAT_MZ,
+    HFORMAT_MZ,    /* MZ binary */
     HFORMAT_PE,    /* PE binary, not supported yet */
 #if AMD64_SUPPORT
     HFORMAT_WIN64, /* COFF for 64bit */
@@ -229,7 +227,7 @@ enum fpo {
  * the order cannot be changed, it's
  * returned by OPATTR and used in user-defined prologue/epilogue.
  */
-typedef enum {
+enum lang_type {
     LANG_NONE     = 0,
     LANG_C        = 1,
     LANG_SYSCALL  = 2,
@@ -238,7 +236,7 @@ typedef enum {
     LANG_FORTRAN  = 5,
     LANG_BASIC    = 6,
     LANG_FASTCALL = 7
-} lang_type;
+};
 
 /* Memory model type.
  * the order cannot be changed, it's
@@ -384,7 +382,7 @@ enum naming_types {
 
 enum segofssize {
     USE_EMPTY = 0xFE,
-    USE16 = 0,
+    USE16 = 0, /* don't change values of USE16,USE32,USE64! */
     USE32 = 1,
 #if AMD64_SUPPORT
     USE64 = 2
@@ -396,7 +394,9 @@ enum segofssize {
  */
 enum fastcall_type {
     FCT_MS32,       /* MS 32bit fastcall (ecx,edx) */
+#if OWFC_SUPPORT
     FCT_WATCOMC,    /* OW register calling convention (eax, ebx, ecx, edx) */
+#endif
 #if AMD64_SUPPORT
     FCT_WIN64       /* Win64 fastcall convention (rcx, rdx, r8, r9) */
 #endif
@@ -409,7 +409,32 @@ enum stdcall_decoration {
 
 struct qitem {
     void * next;
-    char value[];
+    char value[1];
+};
+
+/* first 4 entries must match file type enum! */
+enum opt_names {
+    OPTN_ASM_FN,
+    OPTN_ERR_FN,                  /* -Fr option */
+    OPTN_OBJ_FN,                  /* -Fo option */
+    OPTN_LST_FN,                  /* -Fl option */
+    OPTN_MODULE_NAME,             /* -nm option */
+    OPTN_TEXT_SEG,                /* -nt option */
+    OPTN_DATA_SEG,                /* -nd option */
+    OPTN_CODE_CLASS,              /* -nc option */
+#if BUILD_TARGET
+    OPTN_BUILD_TARGET,            /* -bt option */
+#endif
+#if MANGLERSUPP
+    OPTN_DEFNAME_MANGLER,
+#endif
+    OPTN_LAST
+};
+enum opt_queues {
+    OPTQ_FINCLUDE,
+    OPTQ_MACRO,
+    OPTQ_INCPATH,
+    OPTQ_LAST
 };
 
 struct global_options {
@@ -420,6 +445,7 @@ struct global_options {
 
     /* error handling stuff */
     int         error_limit;             /* -e option  */
+    uint_8      no_error_disp;           /* -eq option */
     uint_8      warning_level;           /* -Wn option */
     bool        warning_error;           /* -WX option */
 #ifdef DEBUG_OUT
@@ -429,22 +455,13 @@ struct global_options {
     bool        print_linestore;         /* -ls option */
     uint_16     max_passes;              /* -pm option */
 #endif
-#if BUILD_TARGET
-    char        *build_target;           /* -bt option */
-#endif
-    char        *code_class;             /* -nc option */
-    char        *data_seg;               /* -nd option */
-    char        *text_seg;               /* -nt option */
-    char        *module_name;            /* -nm option */
-    char        *ForceInclude;           /* -FI option */
-
-    struct qitem *SymQueue;              /* list of symbols set by -D */
-    struct qitem *IncQueue;              /* list of include paths set by -I */
-
+    char        *names[OPTN_LAST];
+    struct qitem *queues[OPTQ_LAST];
 #if COCTALS
     bool        allow_c_octals;          /* -o option */
 #endif
     bool        no_comment_data_in_code_records; /* -zlc option */
+    bool        no_opt_farcall;          /* -zld option */
 //    bool        no_dependencies;         /* -zld option */
     bool        no_file_entry;           /* -zlf option */
     bool        no_section_aux_entry;    /* -zls option  */
@@ -470,13 +487,12 @@ struct global_options {
     enum oformat output_format;          /* -omf, -coff, -elf options */
     enum hformat header_format;          /* -mz, -pe options */
     uint_8      fieldalign;              /* -Zp option  */
-    lang_type   langtype;                /* -Gc|d|z option */
+    enum lang_type langtype;             /* -Gc|d|z option */
     mod_type    model;                   /* -mt|s|m|c|l|h|f option */
     enum asm_cpu cpu;                    /* -0|1|2|3|4|5|6 & -fp{0|2|3|5|6|c} option */
     unsigned char fastcall;              /* -zf0 & -zf1 option */
     bool        syntax_check_only;       /* -Zs option */
 #if MANGLERSUPP
-    char        *default_name_mangler;   /* OW peculiarity */
     enum naming_types naming_convention; /* OW naming peculiarities */
 #endif
 };
@@ -521,7 +537,11 @@ extern void             OutputByte( unsigned char );
 //extern void             OutputCodeByte( unsigned char );
 extern void             FillDataBytes( unsigned char, int len );
 extern void             OutputBytes( const unsigned char *, int len, struct fixup * );
-extern void             AssembleModule( void );
+#ifdef __SW_BD
+extern int  __stdcall   AssembleModule( const char * );
+#else
+extern int              AssembleModule( const char * );
+#endif
 extern void             AddLinnumDataRef( unsigned );
 extern void             RunLineQueue( void );
 extern void             RunLineQueueEx( void );

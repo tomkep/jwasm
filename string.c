@@ -45,15 +45,24 @@ static uint_32 equcnt;
 
 /* generic parameter names. In case the parameter name is
  * displayed in an error message ("required parameter %s missing")
+ * v2.05: obsolete
  */
-static const char * parmnames[] = {"p1","p2","p3"};
+//static const char * parmnames[] = {"p1","p2","p3"};
 
-static void TextItemError( int i )
-/********************************/
+void TextItemError( int i )
+/*************************/
 {
     if ( AsmBuffer[i]->token == T_STRING && *AsmBuffer[i]->string_ptr == '<' ) {
         AsmError( MISSING_ANGLE_BRACKET_OR_BRACE_IN_LITERAL );
         return;
+    }
+    /* v2.05: better error msg if (text) symbol isn't defined */
+    if ( AsmBuffer[i]->token == T_ID ) {
+        asm_sym *sym = SymSearch( AsmBuffer[i]->string_ptr );
+        if ( sym == NULL || sym->state == SYM_UNDEFINED ) {
+            AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
+            return;
+        }
     }
     AsmError( TEXT_ITEM_REQUIRED );
     return;
@@ -78,6 +87,7 @@ ret_code CatStrDef( int i )
 #endif
     DebugMsg1(("CatStrDef(%u) enter\n", i ));
 
+#if 0 /* can't happen */
     /* syntax must be <id> CATSTR textitem[,textitem,...] */
     if ( i != 1 ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -87,7 +97,7 @@ ret_code CatStrDef( int i )
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
         return( ERROR );
     }
-
+#endif
     i++; /* go past CATSTR/TEXTEQU */
 
     buffer[0] = NULLC;
@@ -260,6 +270,7 @@ ret_code SubStrDef( int i )
      * 0  1      2      3 4    5   6
      * ID SUBSTR SRC_ID , POS [, LENGTH]
      */
+#if 0 /* can't happen */
     if ( i != 1 ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
@@ -268,7 +279,7 @@ ret_code SubStrDef( int i )
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
         return( ERROR );
     }
-
+#endif
     name = AsmBuffer[0]->string_ptr;
 
     i++; /* go past SUBSTR */
@@ -292,7 +303,7 @@ ret_code SubStrDef( int i )
 
     /* get pos, must be a numeric value and > 0 */
 
-    if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR ) {
+    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR ) {
         DebugMsg(("SubStrDef(%s): invalid pos value\n", name));
         return( ERROR );
     }
@@ -318,7 +329,7 @@ ret_code SubStrDef( int i )
         }
         i++;
         /* get size, must be a constant */
-        if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR ) {
+        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR ) {
             DebugMsg(("SubStrDef(%s): invalid size value\n", name));
             return( ERROR );
         }
@@ -428,12 +439,14 @@ ret_code SizeStrDef( int i )
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
+#if 0 /* this is checked in ParseLine() */
     if ( AsmBuffer[0]->token != T_ID ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
         return( ERROR );
     }
+#endif
     if ( AsmBuffer[2]->token != T_STRING || AsmBuffer[2]->string_delim != '<' ) {
-        TextItemError( i );
+        TextItemError( 2 );
         return( ERROR );
     }
     if ( Token_Count > 3 ) {
@@ -481,23 +494,30 @@ ret_code InStrDef( int i )
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
+#if 0 /* this is checked in ParseLine() */
     if ( AsmBuffer[0]->token != T_ID ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
         return( ERROR );
     }
+#endif
 
     i++; /* go past INSTR */
 
     if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-        if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
             return( ERROR );
         if ( opndx.kind != EXPR_CONST ) {
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
         start = opndx.value;
-        if ( start <= 0 )
-            start = 1;
+        if ( start <= 0 ) {
+            /* v2.05: don't change the value. if it's invalid, the result
+             * is to be 0. Emit a level 3 warning instead.
+             */
+            //start = 1;
+            AsmWarn( 3, POSITIVE_VALUE_EXPECTED );
+        }
         if ( AsmBuffer[i]->token != T_COMMA ) {
             AsmError( EXPECTING_COMMA );
             return( ERROR );
@@ -539,7 +559,8 @@ ret_code InStrDef( int i )
     }
 
     strpos = 0;
-    if (( sizestr >= j ) && ( string1 = strstr( buffer1 + start - 1, buffer2 ) ))
+    /* v2.05: check for start > 0 added */
+    if ( ( start > 0 ) && ( sizestr >= j ) && ( string1 = strstr( buffer1 + start - 1, buffer2 ) ))
         strpos = string1 - buffer1 + 1;
 
     if ( sym = CreateVariable( AsmBuffer[0]->string_ptr, strpos ) ) {
@@ -587,7 +608,7 @@ static ret_code GetNumber( char * string, int * pi )
 
     last = Tokenize( string, Token_Count+1, FALSE );
     i = Token_Count+1;
-    if( EvalOperand( &i, last, &opndx, TRUE ) == ERROR ) {
+    if( EvalOperand( &i, last, &opndx, 0 ) == ERROR ) {
         return( ERROR );
     }
     if( opndx.kind != EXPR_CONST || opndx.string != NULL || AsmBuffer[i]->token != T_FINAL ) {
@@ -732,10 +753,10 @@ void StringInit( void )
     macro->sym.func_ptr = CatStrFunc;
     macro->sym.isfunc = TRUE;
     macro->e.macroinfo->parmcnt = CATSTRMAX;
-    macro->e.macroinfo->parmlist = AsmAlloc(sizeof(mparm_list) * CATSTRMAX);
+    macro->e.macroinfo->parmlist = AsmAlloc( sizeof( struct mparm_list ) * CATSTRMAX );
     for (i = 0; i < CATSTRMAX; i++) {
         macro->e.macroinfo->parmlist[i].deflt = NULL;
-        macro->e.macroinfo->parmlist[i].label = "p";
+        //macro->e.macroinfo->parmlist[i].label = "p";
         macro->e.macroinfo->parmlist[i].required = FALSE;
     }
 
@@ -747,10 +768,10 @@ void StringInit( void )
     macro->sym.func_ptr = InStrFunc;
     macro->sym.isfunc = TRUE;
     macro->e.macroinfo->parmcnt = 3;
-    macro->e.macroinfo->parmlist = AsmAlloc(sizeof(mparm_list) * 3);
+    macro->e.macroinfo->parmlist = AsmAlloc(sizeof( struct mparm_list) * 3);
     for (i = 0; i < 3; i++) {
         macro->e.macroinfo->parmlist[i].deflt = NULL;
-        macro->e.macroinfo->parmlist[i].label = parmnames[i];
+        //macro->e.macroinfo->parmlist[i].label = parmnames[i];
         macro->e.macroinfo->parmlist[i].required = (i != 0);
     }
 
@@ -762,9 +783,9 @@ void StringInit( void )
     macro->sym.func_ptr = SizeStrFunc;
     macro->sym.isfunc = TRUE;
     macro->e.macroinfo->parmcnt = 1;
-    macro->e.macroinfo->parmlist = AsmAlloc(sizeof(mparm_list));
+    macro->e.macroinfo->parmlist = AsmAlloc(sizeof( struct mparm_list));
     macro->e.macroinfo->parmlist[0].deflt = NULL;
-    macro->e.macroinfo->parmlist[0].label = parmnames[0];
+    //macro->e.macroinfo->parmlist[0].label = parmnames[0];
     /* macro->e.macroinfo->parmlist[0].required = TRUE; */
     /* the string parameter is NOT required, '@SizeStr()' is valid */
     macro->e.macroinfo->parmlist[0].required = FALSE;
@@ -777,10 +798,10 @@ void StringInit( void )
     macro->sym.func_ptr = SubStrFunc;
     macro->sym.isfunc = TRUE;
     macro->e.macroinfo->parmcnt = 3;
-    macro->e.macroinfo->parmlist = AsmAlloc(sizeof(mparm_list) * 3);
+    macro->e.macroinfo->parmlist = AsmAlloc(sizeof( struct mparm_list) * 3);
     for (i = 0; i < 3; i++) {
         macro->e.macroinfo->parmlist[i].deflt = NULL;
-        macro->e.macroinfo->parmlist[i].label = parmnames[i];
+        //macro->e.macroinfo->parmlist[i].label = parmnames[i];
         macro->e.macroinfo->parmlist[i].required = (i < 2);
     }
 

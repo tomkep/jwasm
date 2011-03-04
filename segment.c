@@ -44,13 +44,13 @@
 #include "assume.h"
 #include "listing.h"
 #include "msgtext.h"
+#include "types.h"
+#include "fixup.h"
 
 #include "myassert.h"
 
-/* prototypes and externals */
-
-extern asm_sym          *sym_CurSeg;    /* @CurSeg symbol */
-extern asm_sym          symPC;          /* '$' symbol */
+struct asm_sym  symPC = {NULL,"$", NULL, 0};  /* the '$' symbol     */
+struct asm_sym  *symCurSeg;     /* @CurSeg symbol */
 
 #define INIT_ATTR       0x01
 #define INIT_ALIGN      0x02
@@ -110,7 +110,32 @@ static int              saved_stkindex;
 
 /* generic byte buffer, used for OMF LEDATA records only */
 static uint_8           codebuf[ 1024 ];
-static uint_32          total_size; /* total size of code buffer */
+static uint_32          buffer_size; /* total size of code buffer */
+
+void SetCurPC( struct asm_sym *sym )
+/**********************************/
+{
+    if( CurrStruct ) {
+        //symPC.segment = NULL;
+        symPC.mem_type = MT_ABS;
+        symPC.offset = CurrStruct->sym.offset + (CurrStruct->next ? CurrStruct->next->sym.offset : 0);
+    } else {
+        symPC.mem_type = MT_NEAR;
+        symPC.segment = (asm_sym *)CurrSeg;
+        symPC.offset = GetCurrOffset();
+    }
+    DebugMsg1(("SetCurPC: curr value=%" FX32 "h\n", symPC.offset ));
+}
+
+#if 0
+/* value of text macros can't be set by internal function call yet! */
+void SetCurSeg( struct asm_sym *sym )
+/***********************************/
+{
+    symCurSeg->string_ptr = CurrSeg ? CurrSeg->sym.name : "";
+    DebugMsg1(("SetCurSeg: curr value=>%s<\n", symCurSeg->string_ptr ));
+}
+#endif
 
 /* find a class name.
  * those names aren't in the symbol table!
@@ -123,7 +148,7 @@ char *GetLname( direct_idx idx )
 
     for( node = ModuleInfo.g.LnameQueue.head; node != NULL; node = node->next ) {
         sym = (asm_sym *)node->elmt;
-        if( sym->state == SYM_CLASS_LNAME && sym->idx == idx ) {
+        if( sym->state == SYM_CLASS_LNAME && sym->class_lname_idx == idx ) {
             return( sym->name );
         }
     }
@@ -144,7 +169,7 @@ static direct_idx FindLnameIdx( const char *name )
         if( sym->state != SYM_CLASS_LNAME )
             continue;
         if( _stricmp( sym->name, name ) == 0 ) {
-            return( sym->idx );
+            return( sym->class_lname_idx );
         }
     }
     return( LNAME_NULL );
@@ -192,7 +217,7 @@ void FreeLnameQueue( void )
 static void UpdateCurrSegVars( void )
 /***********************************/
 {
-    assume_info     *info;
+    struct assume_info *info;
 
     DebugMsg1(("UpdateCurrSegVars(%s)\n", CurrSeg ? CurrSeg->sym.name : "NULL" ));
     info = &(SegAssumeTable[ ASSUME_CS ]);
@@ -200,8 +225,8 @@ static void UpdateCurrSegVars( void )
         info->symbol = NULL;
         info->flat = FALSE;
         info->error = TRUE;
-        sym_CurSeg->string_ptr = "";
-        symPC.segment = NULL;
+        symCurSeg->string_ptr = "";
+        //symPC.segment = NULL;
     } else {
         info->flat = FALSE;
         info->error = FALSE;
@@ -213,8 +238,8 @@ static void UpdateCurrSegVars( void )
         } else {
             info->symbol = &CurrSeg->sym;
         }
-        sym_CurSeg->string_ptr = CurrSeg->sym.name;
-        symPC.segment = &CurrSeg->sym;
+        symCurSeg->string_ptr = CurrSeg->sym.name;
+        //symPC.segment = &CurrSeg->sym;
     }
     return;
 }
@@ -267,7 +292,7 @@ static direct_idx InsertClassLname( const char *name )
 
     sym = SymCreate( name, FALSE );
     sym->state = SYM_CLASS_LNAME;
-    sym->idx = ++LnamesIdx;
+    sym->class_lname_idx = ++LnamesIdx;
 
     /* put it into the lname table */
 
@@ -400,8 +425,6 @@ ret_code GrpDef( int i )
 {
     char        *name;
     dir_node    *grp;
-    seg_item    *new;
-    seg_item    *curr;
     dir_node    *seg;
 
     /* GROUP directive must be at pos 1, needs a name at pos 0 */
@@ -420,8 +443,7 @@ ret_code GrpDef( int i )
         return( ERROR );
     }
 
-    name = AsmBuffer[0]->string_ptr;
-    grp = CreateGroup( name );
+    grp = CreateGroup( AsmBuffer[0]->string_ptr );
     if( grp == NULL )
         return( ERROR );
 
@@ -430,22 +452,11 @@ ret_code GrpDef( int i )
     do {
 
         /* get segment name */
-#if 0 /* v2: tokenizer handles dotnames ok */
-        /* the tokenizer has problems with "dotnames" */
-        if ( AsmBuffer[i]->token == T_DOT && AsmBuffer[i+1]->token == T_ID) {
-            name = StringBufferEnd;
-            *name = '.';
-            i++;
-            strcpy( name + 1, AsmBuffer[i]->string_ptr );
-        } else if ( AsmBuffer[i]->token == T_ID ) {
-#else
-        if ( AsmBuffer[i]->token == T_ID ) {
-#endif
-            name = AsmBuffer[i]->string_ptr;
-        } else {
+        if ( AsmBuffer[i]->token != T_ID ) {
             AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
             return( ERROR );
         }
+        name = AsmBuffer[i]->string_ptr;
         i++;
 
         seg = (dir_node *)SymSearch( name );
@@ -483,35 +494,36 @@ ret_code GrpDef( int i )
 
         /* insert segment in group if it's not there already */
         if ( seg->e.seginfo->group == NULL ) {
+            seg_item    *si;
 
             /* set the segment's grp */
             seg->e.seginfo->group = &grp->sym;
 
-            new = AsmAlloc( sizeof(seg_item) );
-            new->seg = seg;
-            new->next = NULL;
+            si = AsmAlloc( sizeof(seg_item) );
+            si->seg = seg;
+            si->next = NULL;
             grp->e.grpinfo->numseg++;
 
             /* insert the segment at the end of linked list */
             if( grp->e.grpinfo->seglist == NULL ) {
-                grp->e.grpinfo->seglist = new;
+                grp->e.grpinfo->seglist = si;
             } else {
+                seg_item    *curr;
                 curr = grp->e.grpinfo->seglist;
                 while( curr->next != NULL ) {
                     curr = curr->next;
                 }
-                curr->next = new;
+                curr->next = si;
             }
         }
 
-        if ( AsmBuffer[i]->token != T_FINAL )
-            if ( AsmBuffer[i]->token == T_COMMA ) {
-                if ( (i + 1) < Token_Count )
-                    i++;
-            } else {
-                AsmError( EXPECTING_COMMA );
+        if ( i < Token_Count ) {
+            if ( AsmBuffer[i]->token != T_COMMA || AsmBuffer[i+1]->token == T_FINAL ) {
+                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->tokpos );
                 return( ERROR );
             }
+            i++;
+        }
 
     } while ( i < Token_Count );
 
@@ -551,7 +563,7 @@ static ret_code CloseSeg( const char * name )
 
     DebugMsg1(("CloseSeg(%s) enter\n", name));
 
-    if( CurrSeg == NULL || ( SymCmpFunc( CurrSeg->sym.name, name ) != 0 ) ) {
+    if( CurrSeg == NULL || ( SymCmpFunc( CurrSeg->sym.name, name, CurrSeg->sym.name_size ) != 0 ) ) {
         DebugMsg(("CloseSeg(%s): nesting error, CurrSeg=%s\n", name, CurrSeg ? CurrSeg->sym.name : "(null)" ));
         AsmErr( BLOCK_NESTING_ERROR, name );
         return( ERROR );
@@ -618,12 +630,11 @@ int GetSymOfssize( struct asm_sym *sym )
     if( curr == NULL ) {
         /* v2.04: SYM_STACK added */
         //if( sym->state == SYM_EXTERNAL || ( sym->state == SYM_INTERNAL && sym->isproc ) || sym->state == SYM_GRP )
-        if( sym->state == SYM_EXTERNAL ||
-           ( sym->state == SYM_INTERNAL && sym->isproc ) ||
-           sym->state == SYM_STACK ||
-           sym->state == SYM_GRP )
+        if( sym->state == SYM_EXTERNAL )
+            return( sym->seg_ofssize );
+        if( sym->state == SYM_STACK || sym->state == SYM_GRP )
             return( sym->Ofssize );
-        else if( sym->state == SYM_SEG  )
+        if( sym->state == SYM_SEG  )
             return( ((dir_node *)sym)->e.seginfo->Ofssize );
     } else {
         return( curr->e.seginfo->Ofssize );
@@ -796,6 +807,9 @@ asm_sym *CreateIntSegment( const char *name, const char *classname, uint_8 align
 ret_code EndsDir( int i )
 /***********************/
 {
+    if( CurrStruct != NULL ) {
+        return( EndstructDirective( i ) );
+    }
     /* a label must precede ENDS */
     if( i != 1 ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -862,7 +876,7 @@ static void UnlinkSeg( dir_node *dir )
     return;
 }
 
-/* SEGMENT directive (Pass ONE only!) */
+/* SEGMENT directive */
 
 ret_code SegmentDir( int i )
 /**************************/
@@ -884,6 +898,9 @@ ret_code SegmentDir( int i )
     char                *name;
     struct asm_sym      *sym;
     expr_list           opndx;
+
+    if ( Parse_Pass != PASS_1 )
+        return( SetCurrSeg( i ) );
 
     if( i != 1 ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -1018,7 +1035,7 @@ ret_code SegmentDir( int i )
                 continue;
             }
             i++;
-            if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+            if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
                 continue;
             if ( AsmBuffer[i]->token != T_CL_BRACKET ) {
                 AsmErr( EXPECTED, ")" );
@@ -1044,9 +1061,11 @@ ret_code SegmentDir( int i )
         } else if ( type->init & INIT_AT ) {
             DebugMsg1(("SegmentDir(%s): AT found\n", name ));
             dir->e.seginfo->combine = type->value;
-            dir->e.seginfo->alignment = -1;
+            /* v2.05: always use MAX_SEGALIGNMENT */
+            //dir->e.seginfo->alignment = -1;
+            dir->e.seginfo->alignment = MAX_SEGALIGNMENT;
             i++;
-            if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) != ERROR ) {
+            if ( EvalOperand( &i, Token_Count, &opndx, 0 ) != ERROR ) {
                 if ( opndx.kind == EXPR_CONST && opndx.string == NULL ) {
                     dir->e.seginfo->abs_frame = opndx.value;
                     dir->e.seginfo->abs_offset = 0;
@@ -1138,6 +1157,9 @@ ret_code SegmentDir( int i )
     }
     push_seg( dir ); /* set CurrSeg */
 
+    if ( ModuleInfo.list )
+        LstWrite( LSTTYPE_LABEL, 0, NULL );
+
     return( SetOfssize() );
 }
 
@@ -1146,13 +1168,8 @@ ret_code SegmentDir( int i )
 ret_code SegmentModuleExit( void )
 /********************************/
 {
-    /* close current segment if model is set.
-     * This strategy is sufficient for segments opened with
-     * simplified segment directives.
-     */
-    if ( CurrSeg && ModuleInfo.model != MOD_NONE )
-        CloseSeg( CurrSeg->sym.name );
-
+    if ( ModuleInfo.model != MOD_NONE )
+        ModelSimSegmExit();
     /* if there's still an open segment, it's an error */
     if ( CurrSeg ) {
         AsmErr( BLOCK_NESTING_ERROR, CurrSeg->sym.name );
@@ -1162,6 +1179,35 @@ ret_code SegmentModuleExit( void )
 
     return( NOT_ERROR );
 }
+
+/* this is called once per module after the last pass is finished */
+
+#ifdef DEBUG_OUT
+void SegmentFini( void )
+/**********************/
+{
+#if FASTPASS
+#if FASTMEM==0
+    dir_node    *curr;
+    /* this is debugging code only. Usually FASTPASS and FASTMEM
+     * are both either TRUE or FALSE.
+     * It's active if both DEBUG and TRMEM is set in Makefile.
+     */
+    DebugMsg(("SegmentFini() enter\n"));
+    for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+        struct fixup *fix;
+        DebugMsg(("SegmentFini(): segment %s\n", curr->sym.name ));
+        for ( fix = curr->e.seginfo->FixupListHead; fix ; ) {
+            struct fixup *next = fix->nextrlc;
+            AsmFree( fix );
+            fix = next;
+        }
+    }
+    DebugMsg(("SegmentFini() exit\n"));
+#endif
+#endif
+}
+#endif
 
 /* init. called for each pass */
 
@@ -1185,8 +1231,22 @@ void SegmentInit( int pass )
         grpdefidx   = 0;
         LnamesIdx   = 1; /* the first Lname is a null-string */
         //pCodeBuff = NULL;
-        total_size = 0;
+        buffer_size = 0;
         //flat_grp    = NULL;
+
+        symPC.sfunc_ptr = &SetCurPC;
+        symPC.mem_type = MT_NEAR;
+        symPC.state = SYM_INTERNAL;
+        symPC.isdefined = TRUE;
+        symPC.predefined = TRUE;
+        symPC.variable = TRUE; /* added v1.96. Important for fixup creation */
+#if FASTMEM==0
+        symPC.staticmem = TRUE;
+#endif
+        symPC.name_size = 1; /* sizeof("$") */
+        symPC.list = FALSE; /* don't display the '$' symbol in symbol list */
+        SymAddToTable( &symPC );
+
 #if 0 /* v2.03: obsolete, also belongs to simplified segment handling */
         /* set ModuleInfo.code_class */
         if( Options.code_class  )
@@ -1206,7 +1266,7 @@ void SegmentInit( int pass )
      */
 
     if ( ModuleInfo.pCodeBuff == NULL && Options.output_format != OFORMAT_OMF ) {
-        for( curr = Tables[TAB_SEG].head, total_size = 0; curr; curr = curr->next ) {
+        for( curr = Tables[TAB_SEG].head, buffer_size = 0; curr; curr = curr->next ) {
             /* v2.04: can't happen */
             //if( ( curr->sym.state != SYM_SEG ) || ( curr->sym.segment == NULL ) )
             //    continue;
@@ -1221,12 +1281,12 @@ void SegmentInit( int pass )
                 if ( curr->e.seginfo->segtype == SEGTYPE_CODE )
                     i = i + (i >> 2);
                 DebugMsg(("SegmentInit(%u), %s: max_ofs=%" FX32 ", alloc_size=%" FX32 "h\n", pass, curr->sym.name, curr->sym.max_offset, i ));
-                total_size += i;
+                buffer_size += i;
             }
         }
-        if ( total_size ) {
-            ModuleInfo.pCodeBuff = AsmAlloc( total_size );
-            DebugMsg(("SegmentInit(%u): total buffer size=%" FX32 ", start=%p\n", pass, total_size, ModuleInfo.pCodeBuff ));
+        if ( buffer_size ) {
+            ModuleInfo.pCodeBuff = AsmAlloc( buffer_size );
+            DebugMsg(("SegmentInit(%u): total buffer size=%" FX32 ", start=%p\n", pass, buffer_size, ModuleInfo.pCodeBuff ));
         }
     }
     /* Reset length of all segments to zero.
@@ -1235,7 +1295,7 @@ void SegmentInit( int pass )
 #if FASTMEM==0
     /* fastmem clears the memory blocks, but malloc() won't */
     if ( ModuleInfo.pCodeBuff )
-        memset( ModuleInfo.pCodeBuff, 0, total_size );
+        memset( ModuleInfo.pCodeBuff, 0, buffer_size );
 #endif
     for( curr = Tables[TAB_SEG].head, p = ModuleInfo.pCodeBuff; curr; curr = curr->next ) {
         /* v2.04: can't happen */
@@ -1279,7 +1339,7 @@ void SegmentInit( int pass )
         if ( stkindex )
             memcpy( &SegStack, saved_SegStack, stkindex * sizeof(dir_node *) );
 
-        //sym_CurSeg->string_ptr = saved_CurSeg_name;
+        //symCurSeg->string_ptr = saved_CurSeg_name;
 
         UpdateCurrSegVars();
     }
@@ -1300,6 +1360,6 @@ void SegmentSaveState( void )
         memcpy( saved_SegStack, &SegStack, stkindex * sizeof(dir_node *) );
     }
 
-    //saved_CurSeg_name  = sym_CurSeg->string_ptr;
+    //saved_CurSeg_name  = symCurSeg->string_ptr;
 }
 #endif

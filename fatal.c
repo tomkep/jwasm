@@ -40,6 +40,10 @@
 #include "msgtext.h"
 
 extern void PutMsg( FILE *fp, int severity, int msgnum, va_list args );
+#ifdef __SW_BD
+#include <setjmp.h>
+extern jmp_buf jmpenv;
+#endif
 
 typedef void (*err_act)( void );
 
@@ -89,7 +93,11 @@ void Fatal( unsigned msg, ... )
     if( Fatal_Msg[msg].action != NULL ) {
         Fatal_Msg[msg].action();
     }
+#ifdef __SW_BD
+    longjmp( jmpenv, Fatal_Msg[msg].ret );
+#else
     exit( Fatal_Msg[msg].ret );
+#endif
 }
 
 #if 0
@@ -97,7 +105,7 @@ void SeekError( void )
 /********************/
 {
     DebugMsg(("SeekError occured\n"));
-    Fatal( FATAL_FILE_SEEK_ERROR, FileInfo.fname[OBJ], errno );
+    Fatal( FATAL_FILE_SEEK_ERROR, AsmFName[OBJ], errno );
 };
 #endif
 
@@ -105,6 +113,6 @@ void WriteError( void )
 /*********************/
 {
     DebugMsg(("WriteError occured\n"));
-    Fatal( FATAL_FILE_WRITE_ERROR, FileInfo.fname[OBJ], errno );
+    Fatal( FATAL_FILE_WRITE_ERROR, AsmFName[OBJ], errno );
 };
 

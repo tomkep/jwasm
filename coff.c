@@ -160,8 +160,8 @@ static uint_32 Coff_AllocString( const char * string, int len )
     stringitem *name;
     uint_32 oldsize = SizeLongNames;
 
-    SizeLongNames += len+1;
-    name = AsmAlloc(len+1+sizeof( stringitem ));
+    SizeLongNames += len + 1;
+    name = AsmAlloc( len + 1 + sizeof( stringitem ) );
     name->next = NULL;
     strcpy( name->string, string );
     if ( LongNamesHead ) {
@@ -217,7 +217,7 @@ ret_code coff_write_section_table( module_info *ModuleInfo )
         if ( len <= IMAGE_SIZEOF_SHORT_NAME )
             strncpy( ish.Name, buffer, IMAGE_SIZEOF_SHORT_NAME );
         else
-            sprintf( ish.Name, "/%u", Coff_AllocString(buffer, len) );
+            sprintf( ish.Name, "/%u", Coff_AllocString( buffer, len ) );
 
         /* v2.04: what is the old line supposed to do? */
         //ish.Misc.PhysicalAddress = offset - (size_relocs + sizeof(IMAGE_FILE_HEADER) + ModuleInfo->g.num_segs * sizeof(IMAGE_SECTION_HEADER));
@@ -307,11 +307,11 @@ ret_code coff_write_section_table( module_info *ModuleInfo )
         }
 
         DebugMsg(( "coff_write_section_table: %s, Fixups=%u, Linnums=%u\n", curr->sym.name, ish.NumberOfRelocations, ish.NumberOfLinenumbers ));
-        if ( fwrite( &ish, 1, sizeof( ish ), FileInfo.file[OBJ] ) != sizeof( ish ) )
+        if ( fwrite( &ish, 1, sizeof( ish ), AsmFile[OBJ] ) != sizeof( ish ) )
             WriteError();
     }
 #if SETDATAPOS
-    data_pos = ftell( FileInfo.file[OBJ] );
+    data_pos = ftell( AsmFile[OBJ] );
 #endif
     DebugMsg(("coff_write_section_table: exit\n"));
     return( NOT_ERROR );
@@ -417,13 +417,13 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
 
 #if COMPID
     /* write "@comp.id" entry */
-    if ( fwrite( &isCompId, 1, sizeof(IMAGE_SYMBOL), FileInfo.file[OBJ] ) != sizeof(IMAGE_SYMBOL) )
+    if ( fwrite( &isCompId, 1, sizeof(IMAGE_SYMBOL), AsmFile[OBJ] ) != sizeof(IMAGE_SYMBOL) )
         WriteError();
     ifh.NumberOfSymbols++;
 #endif
     /* "@feat.00" entry (for SafeSEH) */
     if ( Options.safeseh ) {
-        if ( fwrite( &isFeat00, 1, sizeof(IMAGE_SYMBOL), FileInfo.file[OBJ] ) != sizeof(IMAGE_SYMBOL) )
+        if ( fwrite( &isFeat00, 1, sizeof(IMAGE_SYMBOL), AsmFile[OBJ] ) != sizeof(IMAGE_SYMBOL) )
             WriteError();
         ifh.NumberOfSymbols++;
     }
@@ -443,12 +443,12 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
         p = srcname;
         i = strlen( p );
         is.NumberOfAuxSymbols = i / sizeof(IMAGE_AUX_SYMBOL) + (i % sizeof(IMAGE_AUX_SYMBOL) ? 1 : 0);
-        if ( fwrite( &is, 1, sizeof(is), FileInfo.file[OBJ] ) != sizeof(is) )
+        if ( fwrite( &is, 1, sizeof(is), AsmFile[OBJ] ) != sizeof(is) )
             WriteError();
 
         for ( i = is.NumberOfAuxSymbols;i;i--, p += sizeof(IMAGE_AUX_SYMBOL) ) {
             strncpy( ias.File.Name, p, sizeof(IMAGE_AUX_SYMBOL) );
-            if ( fwrite( &ias, 1, sizeof(ias), FileInfo.file[OBJ] ) != sizeof(ias) )
+            if ( fwrite( &ias, 1, sizeof(ias), AsmFile[OBJ] ) != sizeof(ias) )
                 WriteError();
         }
         ifh.NumberOfSymbols += is.NumberOfAuxSymbols + 1;
@@ -463,7 +463,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             strncpy( is.N.ShortName, p, IMAGE_SIZEOF_SHORT_NAME );
         else {
             is.N.Name.Short = 0;
-            is.N.Name.Long = Coff_AllocString(p, len);
+            is.N.Name.Long = Coff_AllocString( p, len );
         }
         is.Value = 0;
         is.SectionNumber = i;
@@ -475,7 +475,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
 
         DebugMsg(("coff_write_symbols(%u, SECT): %s, type=%x, stgcls=%x\n", ifh.NumberOfSymbols, curr->sym.name, is.Type, is.StorageClass ));
 
-        if ( fwrite( &is, 1, sizeof(is), FileInfo.file[OBJ] ) != sizeof(is) )
+        if ( fwrite( &is, 1, sizeof(is), AsmFile[OBJ] ) != sizeof(is) )
             WriteError();
         ifh.NumberOfSymbols++;
 
@@ -489,7 +489,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             ias.Section.CheckSum = 0;
             ias.Section.Number = 0;
             ias.Section.Selection = 0;
-            if ( fwrite( &ias, 1, sizeof(ias), FileInfo.file[OBJ] ) != sizeof(ias) )
+            if ( fwrite( &ias, 1, sizeof(ias), AsmFile[OBJ] ) != sizeof(ias) )
                 WriteError();
             DebugMsg(("coff_write_symbols(%u, SECT): %s, AUX, relocs=%u, linnums=%u\n", ifh.NumberOfSymbols, curr->sym.name, ias.Section.NumberOfRelocations, ias.Section.NumberOfLinenumbers ));
             ifh.NumberOfSymbols++;
@@ -504,8 +504,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             DebugMsg(("coff_write_symbols(EXT+COMM): %s skipped, used=%u, comm=%u, weak=%u\n", curr->sym.name, curr->sym.used, curr->sym.comm, curr->sym.weak ));
             continue;
         }
-        Mangle( &curr->sym, buffer );
-        len = strlen( buffer );
+        len = Mangle( &curr->sym, buffer );
 
         is.Type = CoffGetType(&curr->sym);
         is.StorageClass = CoffGetClass(&curr->sym);
@@ -526,14 +525,14 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             is.N.Name.Short = 0;
             is.N.Name.Long = Coff_AllocString( buffer, len );
         }
-        if ( fwrite( &is, 1, sizeof(is), FileInfo.file[OBJ] ) != sizeof(is) )
+        if ( fwrite( &is, 1, sizeof(is), AsmFile[OBJ] ) != sizeof(is) )
             WriteError();
         ifh.NumberOfSymbols++;
         if ( curr->sym.comm == FALSE && curr->sym.altname ) {
             memset( &ias, 0, sizeof(ias) );
-            ias.Sym.TagIndex = curr->sym.altname->idx;
+            ias.Sym.TagIndex = curr->sym.altname->ext_idx;
             ias.Sym.Misc.TotalSize = IMAGE_WEAK_EXTERN_SEARCH_ALIAS;
-            if ( fwrite( &ias, 1, sizeof(ias), FileInfo.file[OBJ] ) != sizeof(ias) )
+            if ( fwrite( &ias, 1, sizeof(ias), AsmFile[OBJ] ) != sizeof(ias) )
                 WriteError();
             ifh.NumberOfSymbols++;
         }
@@ -544,8 +543,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
      */
     vp = NULL;
     while ( sym = GetPublicData(&vp) ) {
-        Mangle( sym, buffer );
-        len = strlen( buffer );
+        len = Mangle( sym, buffer );
 #ifdef DEBUG_OUT
         if ( sym->state == SYM_INTERNAL && sym->isproc == TRUE && Options.line_numbers )
             DebugMsg(("coff_write_symbols(%u): %s, file=%u\n", ifh.NumberOfSymbols, sym->name, sym->debuginfo->file ));
@@ -560,12 +558,12 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             is.StorageClass = IMAGE_SYM_CLASS_FILE;
             is.NumberOfAuxSymbols = GetFileAuxEntries( sym->debuginfo->file, &p );
             is.Value = sym->debuginfo->next_file;
-            if ( fwrite( &is, 1, sizeof(is), FileInfo.file[OBJ] ) != sizeof(is) )
+            if ( fwrite( &is, 1, sizeof(is), AsmFile[OBJ] ) != sizeof(is) )
                 WriteError();
 
             for ( i = is.NumberOfAuxSymbols; i; i--, p += sizeof(IMAGE_AUX_SYMBOL) ) {
                 strncpy( ias.File.Name, p, sizeof(IMAGE_AUX_SYMBOL) );
-                if ( fwrite( &ias, 1, sizeof(ias), FileInfo.file[OBJ] ) != sizeof(ias) )
+                if ( fwrite( &ias, 1, sizeof(ias), AsmFile[OBJ] ) != sizeof(ias) )
                     WriteError();
             }
             ifh.NumberOfSymbols += is.NumberOfAuxSymbols + 1;
@@ -592,12 +590,12 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             strncpy( is.N.ShortName, buffer, IMAGE_SIZEOF_SHORT_NAME );
         else {
             is.N.Name.Short = 0;
-            is.N.Name.Long = Coff_AllocString(buffer, len);
+            is.N.Name.Long = Coff_AllocString( buffer, len );
         }
 
         DebugMsg(("coff_write_symbols(%u, PUB+INT): %s, ofs=%X, type=%X, stgcls=%X\n", ifh.NumberOfSymbols, buffer, is.Value, is.Type, is.StorageClass ));
 
-        if ( fwrite( &is, 1, sizeof(is), FileInfo.file[OBJ] ) != sizeof(is) )
+        if ( fwrite( &is, 1, sizeof(is), AsmFile[OBJ] ) != sizeof(is) )
             WriteError();
         ifh.NumberOfSymbols++;
         if ( Options.line_numbers && sym->isproc ) {
@@ -611,14 +609,14 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             ias.Sym.Misc.TotalSize = sym->total_size;
             ias.Sym.FcnAry.Function.PointerToLinenumber = sym->debuginfo->ln_fileofs;
             ias.Sym.FcnAry.Function.PointerToNextFunction = sym->debuginfo->next_proc;
-            if ( fwrite( &ias, 1, sizeof(ias), FileInfo.file[OBJ] ) != sizeof(ias) )
+            if ( fwrite( &ias, 1, sizeof(ias), AsmFile[OBJ] ) != sizeof(ias) )
                 WriteError();
 
             strncpy( is.N.ShortName, ".bf", IMAGE_SIZEOF_SHORT_NAME );
             is.Type = IMAGE_SYM_TYPE_NULL;
             is.NumberOfAuxSymbols = 1;
             is.StorageClass = IMAGE_SYM_CLASS_FUNCTION;
-            if ( fwrite( &is, 1, sizeof(is), FileInfo.file[OBJ] ) != sizeof(is) )
+            if ( fwrite( &is, 1, sizeof(is), AsmFile[OBJ] ) != sizeof(is) )
                 WriteError();
             ias.Sym.TagIndex = 0;
             ias.Sym.Misc.LnSz.Linenumber = sym->debuginfo->start_line;
@@ -626,7 +624,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
                 ias.Sym.FcnAry.Function.PointerToNextFunction = sym->debuginfo->next_proc + 2;
             else
                 ias.Sym.FcnAry.Function.PointerToNextFunction = 0;
-            if ( fwrite( &ias, 1, sizeof(ias), FileInfo.file[OBJ] ) != sizeof(ias) )
+            if ( fwrite( &ias, 1, sizeof(ias), AsmFile[OBJ] ) != sizeof(ias) )
                 WriteError();
 
             strncpy( is.N.ShortName, ".lf", IMAGE_SIZEOF_SHORT_NAME );
@@ -634,7 +632,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             is.NumberOfAuxSymbols = 0;
             is.StorageClass = IMAGE_SYM_CLASS_FUNCTION;
             is.Value = sym->debuginfo->line_numbers;
-            if ( fwrite( &is, 1, sizeof(is), FileInfo.file[OBJ] ) != sizeof(is) )
+            if ( fwrite( &is, 1, sizeof(is), AsmFile[OBJ] ) != sizeof(is) )
                 WriteError();
 
             strncpy( is.N.ShortName, ".ef", IMAGE_SIZEOF_SHORT_NAME );
@@ -642,11 +640,11 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
             is.NumberOfAuxSymbols = 1;
             is.StorageClass = IMAGE_SYM_CLASS_FUNCTION;
             is.Value = sym->offset + sym->total_size;
-            if ( fwrite( &is, 1, sizeof(is), FileInfo.file[OBJ] ) != sizeof(is) )
+            if ( fwrite( &is, 1, sizeof(is), AsmFile[OBJ] ) != sizeof(is) )
                 WriteError();
             ias.Sym.TagIndex = 0;
             ias.Sym.Misc.LnSz.Linenumber = sym->debuginfo->end_line;
-            if ( fwrite( &ias, 1, sizeof(ias), FileInfo.file[OBJ] ) != sizeof(ias) )
+            if ( fwrite( &ias, 1, sizeof(ias), AsmFile[OBJ] ) != sizeof(ias) )
                 WriteError();
 
             ifh.NumberOfSymbols += 6;
@@ -658,8 +656,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
     for( curr = Tables[TAB_ALIAS].head ; curr != NULL ;curr = curr->next ) {
         asm_sym * sym;
 
-        Mangle( &curr->sym, buffer );
-        len = strlen( buffer );
+        len = Mangle( &curr->sym, buffer );
 
         if ( len <= IMAGE_SIZEOF_SHORT_NAME )
             strncpy( is.N.ShortName, buffer, IMAGE_SIZEOF_SHORT_NAME );
@@ -676,7 +673,7 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
 
         DebugMsg(("coff_write_symbols(%u, ALIAS): symbol %s, ofs=%X\n", ifh.NumberOfSymbols, buffer, is.Value ));
 
-        if ( fwrite( &is, 1, sizeof(is), FileInfo.file[OBJ] ) != sizeof(is) )
+        if ( fwrite( &is, 1, sizeof(is), AsmFile[OBJ] ) != sizeof(is) )
             WriteError();
         ifh.NumberOfSymbols++;
 
@@ -686,10 +683,10 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
         //sym = SymSearch( curr->sym.string_ptr );
         sym = curr->sym.substitute;
         if (sym)
-            ias.Sym.TagIndex = sym->idx;
+            ias.Sym.TagIndex = sym->ext_idx;
 
         ias.Sym.Misc.TotalSize = IMAGE_WEAK_EXTERN_SEARCH_ALIAS;
-        if ( fwrite( &ias, 1, sizeof(ias), FileInfo.file[OBJ] ) != sizeof(ias) )
+        if ( fwrite( &ias, 1, sizeof(ias), AsmFile[OBJ] ) != sizeof(ias) )
             WriteError();
         ifh.NumberOfSymbols++;
 
@@ -698,17 +695,17 @@ ret_code coff_write_symbols( module_info *ModuleInfo )
     /* the string table is ALWAYS written, even if no strings are defined */
 
     DebugMsg(("coff_write_symbols(string_table): size=%u\n", SizeLongNames ));
-    if ( fwrite( &SizeLongNames, 1, sizeof(SizeLongNames), FileInfo.file[OBJ] ) != sizeof(SizeLongNames) )
+    if ( fwrite( &SizeLongNames, 1, sizeof(SizeLongNames), AsmFile[OBJ] ) != sizeof(SizeLongNames) )
         WriteError();
     for ( pName = LongNamesHead; pName; pName = pName->next ) {
         i = strlen( pName->string ) + 1;
-        if ( fwrite( pName->string, 1, i, FileInfo.file[OBJ] ) != i )
+        if ( fwrite( pName->string, 1, i, AsmFile[OBJ] ) != i )
             WriteError();
     }
 
     /* update the COFF file header */
 
-    update_header( FileInfo.file[OBJ] );
+    update_header( AsmFile[OBJ] );
 
     DebugMsg(("coff_write_symbols: exit\n"));
     return( NOT_ERROR );
@@ -722,18 +719,14 @@ static int GetStartLabel( char * buffer, bool msg )
 
     if ( ModuleInfo.start_label ) {
         Mangle( ModuleInfo.start_label, temp );
-#if AMD64_SUPPORT
-        if ( Options.entry_decorated || Options.header_format == HFORMAT_WIN64 )
-#else
         if ( Options.entry_decorated )
-#endif
             strcpy( buffer, temp );
         else {
             if ( ModuleInfo.start_label->langtype != LANG_C &&
                 ModuleInfo.start_label->langtype != LANG_STDCALL &&
                 ModuleInfo.start_label->langtype != LANG_SYSCALL ) {
                 if ( *ModuleInfo.start_label->name != '_' ) {
-                    if (msg)
+                    if ( msg && ( Options.fastcall != FCT_WIN64 ) )
                         AsmWarn( 2, LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL, ModuleInfo.start_label->name );
                     strcpy( buffer, temp );
                 } else {
@@ -766,9 +759,9 @@ ret_code coff_write_header( module_info *ModuleInfo )
     LongNamesHead = NULL;
     SizeLongNames = sizeof(uint_32);
 
-    srcname = FileInfo.fname[ASM];
+    srcname = AsmFName[ASM];
     srcname += strlen( srcname );
-    while ( srcname > FileInfo.fname[ASM] &&
+    while ( srcname > AsmFName[ASM] &&
            *(srcname-1) != '/' &&
            *(srcname-1) != '\\') srcname--;
 
@@ -846,8 +839,8 @@ ret_code coff_write_header( module_info *ModuleInfo )
             /* 1. exports */
             for( ; dir ; dir = dir->next ) {
                 if( dir->e.procinfo->export ) {
-                    Mangle( &dir->sym, buffer );
-                    size += strlen( buffer ) + sizeof(" -export:");
+                    size += Mangle( &dir->sym, buffer );
+                    size += sizeof(" -export:");
                     if ( Options.no_export_decoration == TRUE )
                         size += dir->sym.name_size + 1;
                 }
@@ -901,7 +894,7 @@ ret_code coff_write_header( module_info *ModuleInfo )
         directives->sym.max_offset = size_drectve;
 
 #if AMD64_SUPPORT
-    if ( Options.header_format == HFORMAT_WIN64 )
+    if ( Options.fastcall == FCT_WIN64 )
         ifh.Machine = IMAGE_FILE_MACHINE_AMD64;
     else
 #endif
@@ -917,8 +910,8 @@ ret_code coff_write_header( module_info *ModuleInfo )
     ifh.SizeOfOptionalHeader = 0;
     ifh.Characteristics = 0;
 
-    fseek( FileInfo.file[OBJ], 0, SEEK_SET );
-    if ( fwrite( &ifh, 1, sizeof(ifh), FileInfo.file[OBJ] ) != sizeof(ifh) ) {
+    fseek( AsmFile[OBJ], 0, SEEK_SET );
+    if ( fwrite( &ifh, 1, sizeof(ifh), AsmFile[OBJ] ) != sizeof(ifh) ) {
         DebugMsg(("coff_write_header: error writing file header\n"));
         WriteError();
     }
@@ -972,7 +965,7 @@ static uint_32 SetSymbolIndices( module_info *ModuleInfo )
     for( curr = Tables[TAB_EXT].head ; curr != NULL ; curr = curr->next ) {
         if ( curr->sym.comm == FALSE && curr->sym.weak == TRUE )
             continue;
-        curr->sym.idx = index++;
+        curr->sym.ext_idx = index++;
         if ( curr->sym.comm == FALSE && curr->sym.altname )
             index++;
     }
@@ -999,12 +992,157 @@ static uint_32 SetSymbolIndices( module_info *ModuleInfo )
                 index += 1 + GetFileAuxEntries( sym->debuginfo->file, NULL );
                 lastfile = sym->debuginfo->file;
             }
-            sym->idx = index++;
+            sym->ext_idx = index++;
             index += 6;
         } else
-            sym->idx = index++;
+            sym->ext_idx = index++;
     }
     return( index );
+}
+
+/* write fixups for a section. */
+
+static void coff_write_fixups( dir_node *section, uint_32 *poffset, uint_32 *pindex )
+/***********************************************************************************/
+{
+    uint_32 offset = *poffset;
+    uint_32 index = *pindex;
+    struct fixup *fix;
+    IMAGE_RELOCATION ir;
+
+    for ( fix = section->e.seginfo->FixupListHead; fix ; fix = fix->nextrlc ) {
+#if AMD64_SUPPORT
+        //if ( Options.header_format == HFORMAT_WIN64 ) {
+        if ( section->e.seginfo->Ofssize == USE64 ) {
+            switch ( fix->type ) {
+            case FIX_VOID:
+                continue;
+            case FIX_RELOFF32: /* 32bit offset */
+                ir.Type = IMAGE_REL_AMD64_REL32 + (fix->addbytes - 4);
+                break;
+            case FIX_OFF32: /* 32bit offset */
+                ir.Type = IMAGE_REL_AMD64_ADDR32;
+                break;
+#if IMAGERELSUPP
+            case FIX_OFF32_IMGREL:
+                ir.Type = IMAGE_REL_AMD64_ADDR32NB;
+                break;
+#endif
+#if SECTIONRELSUPP
+            case FIX_OFF32_SECREL:
+                ir.Type = IMAGE_REL_AMD64_SECREL;
+                break;
+#endif
+            case FIX_OFF64: /* 64bit offset */
+                ir.Type = IMAGE_REL_AMD64_ADDR64;
+                break;
+            case FIX_SEG: /* segment fixup */
+                ir.Type = IMAGE_REL_AMD64_SECTION; /* ??? */
+                break;
+                //case FIX_???: /* absolute fixup */
+                //  ir.Type = IMAGE_REL_I386_ABSOLUTE; /* ??? */
+                //  break;
+            case FIX_RELOFF8:
+            case FIX_RELOFF16:
+            case FIX_OFF8:
+            case FIX_OFF16:
+            case FIX_HIBYTE:
+            case FIX_PTR16: /* 16bit far pointer */
+            case FIX_PTR32: /* 32bit far pointer */
+                /* not supported by COFF64! shouldn't reach this point */
+            default:
+                AsmErr( UNKNOWN_FIXUP_TYPE, fix->type, section->sym.name, fix->location );
+                continue; /* v2.03: skip this fixup */
+                //break;
+            }
+        } else
+#endif
+            switch ( fix->type ) {
+            case FIX_VOID:
+                continue;
+            case FIX_RELOFF16: /* 16bit offset */
+                ir.Type = IMAGE_REL_I386_REL16;
+                break;
+            case FIX_OFF16: /* 16bit offset */
+                ir.Type = IMAGE_REL_I386_DIR16;
+                break;
+            case FIX_RELOFF32: /* 32bit offset */
+                ir.Type = IMAGE_REL_I386_REL32;
+                break;
+            case FIX_OFF32: /* 32bit offset */
+                ir.Type = IMAGE_REL_I386_DIR32;
+                break;
+#if IMAGERELSUPP
+            case FIX_OFF32_IMGREL:
+                ir.Type = IMAGE_REL_I386_DIR32NB;
+                break;
+#endif
+#if SECTIONRELSUPP
+            case FIX_OFF32_SECREL:
+                ir.Type = IMAGE_REL_I386_SECREL;
+                break;
+#endif
+            case FIX_SEG: /* segment fixup */
+                ir.Type = IMAGE_REL_I386_SECTION; /* ??? */
+                break;
+            case FIX_OFF8:
+            case FIX_RELOFF8:/* shouldn't happen */
+            case FIX_HIBYTE:
+            case FIX_PTR16: /* 16bit far pointer */
+            case FIX_PTR32: /* 32bit far pointer */
+                /* not supported by COFF! shouldn't reach this point */
+                // ir.Type = IMAGE_REL_I386_ABSOLUTE; /* ??? */
+                // break;
+            default:
+                AsmErr( UNKNOWN_FIXUP_TYPE, fix->type, section->sym.name, fix->location );
+                continue; /* v2.03: skip this fixup */
+                //break;
+            }
+        /* if it's not EXTERNAL/PUBLIC, add symbol */
+        /* if it's an assembly time variable, create helper symbol */
+        if ( fix->sym->variable == TRUE ) {
+#if HELPSYMS
+            asm_sym *sym;
+            char buffer[12];
+            sprintf( buffer, "$$%06X", fix->offset );
+            sym = SymCreate( buffer, FALSE );
+            sym->state = fix->sym->state;
+            sym->mem_type = fix->sym->mem_type;
+            sym->offset = fix->offset;
+            sym->segment = fix->segment;
+            sym->variable = TRUE; /* storage class LABEL */
+            fix->sym = sym;
+            AddPublicData( fix->sym );
+            fix->sym->idx = index++;
+#else
+            /* just use the segment entry. This approach requires
+             * that the offset is stored inline at the reloc location
+             * (patch in fixup.c)
+             */
+            fix->sym = fix->segment;
+#endif
+        } else if (( fix->sym->state == SYM_INTERNAL ) &&
+                   fix->sym->included == FALSE &&
+                   fix->sym->public == FALSE ) {
+            fix->sym->included = TRUE;
+            AddPublicData( fix->sym );
+            DebugMsg(("coff_write_data(%s, %Xh): %s added to symbol table, idx=%u\n",
+                      section->sym.name, offset, fix->sym->name, index ));
+            fix->sym->ext_idx = index++;
+            if ( Options.line_numbers && fix->sym->isproc )
+                index += 6;
+        }
+        ir.VirtualAddress = fix->location;
+        ir.SymbolTableIndex = fix->sym->ext_idx;
+        if ( fwrite( &ir, 1, sizeof(ir), AsmFile[OBJ] ) != sizeof(ir) )
+            WriteError();
+        DebugMsg(("coff_write_fixup(%s, %Xh): reloc loc=%X type=%u idx=%u sym=%s\n",
+                  section->sym.name, offset, ir.VirtualAddress, ir.Type, ir.SymbolTableIndex, fix->sym->name));
+        offset += sizeof( ir );
+        section->e.seginfo->num_relocs++;
+    } /* end for */
+    *poffset = offset;
+    *pindex = index;
 }
 
 /* write section contents and fixups
@@ -1014,9 +1152,7 @@ ret_code coff_write_data( module_info *ModuleInfo )
 /*************************************************/
 {
     dir_node *section;
-    struct fixup *fix;
     uint_32 offset = 0;
-    IMAGE_RELOCATION ir;
     int i;
     uint_32 index;
 
@@ -1035,21 +1171,21 @@ ret_code coff_write_data( module_info *ModuleInfo )
         uint_32 *pdw;
         for( sehp = ModuleInfo->g.SafeSEHList.head, pdw = (uint_32 *)sxdata->e.seginfo->CodeBuffer; sehp ; sehp = sehp2 ) {
             sehp2 = sehp->next;
-            DebugMsg(("coff_write_data: .sxdata value=%08Xh\n", ((asm_sym *)sehp->elmt)->idx));
-            *pdw++ = ((asm_sym *)sehp->elmt)->idx;
+            DebugMsg(("coff_write_data: .sxdata value=%08Xh\n", ((asm_sym *)sehp->elmt)->ext_idx));
+            *pdw++ = ((asm_sym *)sehp->elmt)->ext_idx;
             AsmFree( sehp );
         }
     }
 
 #if SETDATAPOS
-    fseek( FileInfo.file[OBJ], data_pos, SEEK_SET );
+    fseek( AsmFile[OBJ], data_pos, SEEK_SET );
 #endif
 
 #if HELPSYMS==0
     for( i = 0, section = Tables[TAB_SEG].head; section ; i++, section = section->next ) {
-        section->sym.idx = sectionstart + i;
+        section->sym.ext_idx = sectionstart + i;
         if ( Options.no_section_aux_entry == FALSE )
-            section->sym.idx += i;
+            section->sym.ext_idx += i;
     }
 #endif
 
@@ -1083,150 +1219,23 @@ ret_code coff_write_data( module_info *ModuleInfo )
                 size++;
             }
             if ( section->e.seginfo->CodeBuffer == NULL ) {
-                fseek( FileInfo.file[OBJ], size, SEEK_CUR );
+                fseek( AsmFile[OBJ], size, SEEK_CUR );
             } else {
                 /* if there was an ORG, the buffer content will
                  * start with the ORG address. The bytes from
                  * 0 - ORG must be written by moving the file pointer!
                  */
                 if ( section->e.seginfo->start_loc ) {
-                    fseek( FileInfo.file[OBJ], section->e.seginfo->start_loc, SEEK_CUR );
+                    fseek( AsmFile[OBJ], section->e.seginfo->start_loc, SEEK_CUR );
                     size -= section->e.seginfo->start_loc;
                 }
 
-                if ( fwrite( section->e.seginfo->CodeBuffer, 1, size, FileInfo.file[OBJ] ) != size )
+                if ( fwrite( section->e.seginfo->CodeBuffer, 1, size, AsmFile[OBJ] ) != size )
                     WriteError();
             }
-            for ( fix = section->e.seginfo->FixupListHead; fix ; fix = fix->nextrlc ) {
-#if AMD64_SUPPORT
-                if ( Options.header_format == HFORMAT_WIN64 ) {
-                    switch ( fix->type ) {
-                    case FIX_VOID:
-                        continue;
-                    case FIX_RELOFF32: /* 32bit offset */
-                        ir.Type = IMAGE_REL_AMD64_REL32 + (fix->addbytes - 4);
-                        break;
-                    case FIX_OFF32: /* 32bit offset */
-                        ir.Type = IMAGE_REL_AMD64_ADDR32;
-                        break;
-#if IMAGERELSUPP
-                    case FIX_OFF32_IMGREL:
-                        ir.Type = IMAGE_REL_AMD64_ADDR32NB;
-                        break;
-#endif
-#if SECTIONRELSUPP
-                    case FIX_OFF32_SECREL:
-                        ir.Type = IMAGE_REL_AMD64_SECREL;
-                        break;
-#endif
-                    case FIX_OFF64: /* 64bit offset */
-                        ir.Type = IMAGE_REL_AMD64_ADDR64;
-                        break;
-                    case FIX_SEG: /* segment fixup */
-                        ir.Type = IMAGE_REL_AMD64_SECTION; /* ??? */
-                        break;
-                    //case FIX_???: /* absolute fixup */
-                    //  ir.Type = IMAGE_REL_I386_ABSOLUTE; /* ??? */
-                    //  break;
-                    case FIX_LOBYTE:
-                    case FIX_HIBYTE:
-                    case FIX_RELOFF8:
-                    case FIX_RELOFF16:
-                    case FIX_OFF16:
-                    case FIX_PTR16: /* 16bit far pointer */
-                    case FIX_PTR32: /* 32bit far pointer */
-                        /* not supported by COFF64! shouldn't reach this point */
-                    default:
-                        AsmErr( UNKNOWN_FIXUP_TYPE, fix->type, fix->location );
-                        continue; /* v2.03: skip this fixup */
-                        //break;
-                    }
-                } else
-#endif
-                switch (fix->type) {
-                case FIX_VOID:
-                    continue;
-                case FIX_RELOFF16: /* 16bit offset */
-                    ir.Type = IMAGE_REL_I386_REL16;
-                    break;
-                case FIX_OFF16: /* 16bit offset */
-                    ir.Type = IMAGE_REL_I386_DIR16;
-                    break;
-                case FIX_RELOFF32: /* 32bit offset */
-                    ir.Type = IMAGE_REL_I386_REL32;
-                    break;
-                case FIX_OFF32: /* 32bit offset */
-                    ir.Type = IMAGE_REL_I386_DIR32;
-                    break;
-#if IMAGERELSUPP
-                case FIX_OFF32_IMGREL:
-                    ir.Type = IMAGE_REL_I386_DIR32NB;
-                    break;
-#endif
-#if SECTIONRELSUPP
-                case FIX_OFF32_SECREL:
-                    ir.Type = IMAGE_REL_I386_SECREL;
-                    break;
-#endif
-                case FIX_SEG: /* segment fixup */
-                    ir.Type = IMAGE_REL_I386_SECTION; /* ??? */
-                    break;
-                case FIX_LOBYTE:
-                case FIX_HIBYTE:
-                case FIX_RELOFF8:/* shouldn't happen */
-                case FIX_PTR16: /* 16bit far pointer */
-                case FIX_PTR32: /* 32bit far pointer */
-                    /* not supported by COFF! shouldn't reach this point */
-                    // ir.Type = IMAGE_REL_I386_ABSOLUTE; /* ??? */
-                    // break;
-                default:
-                    AsmErr( UNKNOWN_FIXUP_TYPE, fix->type, fix->location );
-                    continue; /* v2.03: skip this fixup */
-                    //break;
-                }
-                /* if it's not EXTERNAL/PUBLIC, add symbol */
-                /* if it's an assembly time variable, create helper symbol */
-                if ( fix->sym->variable == TRUE ) {
-#if HELPSYMS
-                    asm_sym *sym;
-                    char buffer[12];
-                    sprintf( buffer, "$$%06X", fix->offset );
-                    sym = SymCreate( buffer, FALSE );
-                    sym->state = fix->sym->state;
-                    sym->mem_type = fix->sym->mem_type;
-                    sym->offset = fix->offset;
-                    sym->segment = fix->segment;
-                    sym->variable = TRUE; /* storage class LABEL */
-                    fix->sym = sym;
-                    AddPublicData( fix->sym );
-                    fix->sym->idx = index++;
-#else
-                    /* just use the segment entry. This approach requires
-                     that the offset is stored inline at the reloc location
-                     (patch in fixup.c)
-                     */
-                    fix->sym = fix->segment;
-#endif
-                } else if (( fix->sym->state == SYM_INTERNAL ) &&
-                    fix->sym->included == FALSE &&
-                    fix->sym->public == FALSE ) {
-                    fix->sym->included = TRUE;
-                    AddPublicData( fix->sym );
-                    DebugMsg(("coff_write_data(%s, %Xh): %s added to symbol table, idx=%u\n",
-                              section->sym.name, offset, fix->sym->name, index ));
-                    fix->sym->idx = index++;
-                    if ( Options.line_numbers && fix->sym->isproc )
-                        index += 6;
-                }
-                ir.VirtualAddress = fix->location;
-                ir.SymbolTableIndex = fix->sym->idx;
-                if ( fwrite( &ir, 1, sizeof(ir), FileInfo.file[OBJ] ) != sizeof(ir) )
-                    WriteError();
-                DebugMsg(("coff_write_data(%s, %Xh): reloc loc=%X type=%u idx=%u sym=%s\n",
-                          section->sym.name, offset, ir.VirtualAddress, ir.Type, ir.SymbolTableIndex, fix->sym->name));
-                offset += sizeof(ir);
-                section->e.seginfo->num_relocs++;
-            } /* end for */
+
+            coff_write_fixups( section, &offset, &index );
+
             /* write line number data. The peculiarity of COFF (compared to OMF) is
              * that line numbers are always relative to a function start.
              */
@@ -1244,7 +1253,7 @@ ret_code coff_write_data( module_info *ModuleInfo )
                     if ( lni->number == 0 ) {
                         last = lni->sym;
                         if ( lastproc )
-                             lastproc->debuginfo->next_proc = lni->sym->idx;
+                             lastproc->debuginfo->next_proc = lni->sym->ext_idx;
                         lastproc = lni->sym;
                         lni->sym->debuginfo->next_proc = 0;
                         il.Linenumber = 0;
@@ -1252,12 +1261,12 @@ ret_code coff_write_data( module_info *ModuleInfo )
                         /* if symbol table index is 0, then the proc wasn't added
                          * to the "publics" queue in AddLinnumDataRef().
                          */
-                        if ( lni->sym->idx == 0 ) {
+                        if ( lni->sym->ext_idx == 0 ) {
                             DebugMsg(("coff_write_data(%s, %Xh): error, %s has symbol table index 0\n",
                                       section->sym.name, offset, lni->sym->name ));
                         }
 #endif
-                        il.Type.SymbolTableIndex = lni->sym->idx;
+                        il.Type.SymbolTableIndex = lni->sym->ext_idx;
                         lni->sym->debuginfo->start_line = lni->line_number;
                         //((dir_node *)lni->sym)->e.procinfo->file = lni->file;
                         lni->sym->debuginfo->ln_fileofs = data_pos + offset;
@@ -1272,7 +1281,7 @@ ret_code coff_write_data( module_info *ModuleInfo )
                         last->debuginfo->line_numbers++;
                         last->debuginfo->end_line = lni->number;
                     }
-                    if ( fwrite( &il, 1, sizeof(il), FileInfo.file[OBJ] ) != sizeof(il) )
+                    if ( fwrite( &il, 1, sizeof(il), AsmFile[OBJ] ) != sizeof(il) )
                         WriteError();
                     offset += sizeof(il);
                     line_numbers++;

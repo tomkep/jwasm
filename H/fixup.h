@@ -40,11 +40,11 @@ enum fixup_types {
         FIX_RELOFF8,        /*  1, 1 byte */
         FIX_RELOFF16,       /*  2, 2 byte */
         FIX_RELOFF32,       /*  3, 4 byte */
-        FIX_LOBYTE,         /*  4, 1 byte, OMF only */
+        FIX_OFF8,           /*  4, 1 byte, OMF, BIN + GNU-ELF only */
         FIX_OFF16,          /*  5, 2 byte */
         FIX_OFF32,          /*  6, 4 byte */
 #if AMD64_SUPPORT
-        FIX_OFF64,          /*  7, 8 byte, COFF64+BIN only */
+        FIX_OFF64,          /*  7, 8 byte, COFF64, ELF64 + BIN only */
 #endif
         FIX_SEG = 8,        /*  8, 2 byte */
         FIX_PTR16,          /*  9, 4 byte, OMF only */
@@ -72,14 +72,16 @@ enum fixup_types {
  * OPTJ_EXTEND:   Jcc <label> for cpu < 80386, size may change (2 -> 5/7 or 8/10)
  * OPTJ_JXX:      Jcc <label> for cpu >= 80386, size may change (2 -> 5 )
  * OPTJ_CALL:     call <label>, may become push cs, call NEAR or call FAR
+ * OPTJ_PUSH:     push <label>, assumed byte, may become variable or label.
  */
 
 enum fixup_options {
-        OPTJ_NONE,      /* normal jump, PUSH */
+        OPTJ_NONE,      /* normal jump */
         OPTJ_EXPLICIT,
         OPTJ_EXTEND,
         OPTJ_JXX,
-        OPTJ_CALL
+        OPTJ_CALL,
+        OPTJ_PUSH      /* PUSH */
 };
 
 struct fixup {
@@ -104,7 +106,7 @@ struct fixup {
     };
     union {
         struct {
-            int_8           frame;          /* frame specifier (GRP,SEG,...) */
+            int_8           frame_type;     /* frame specifier (GRP,SEG,...) */
             uint_16         frame_datum;    /* additional data, usually index */
         };
         asm_sym             *segment;       /* symbol's segment if assembly time var */

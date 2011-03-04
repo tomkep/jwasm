@@ -6,10 +6,10 @@
 
 	.data
 
-vw	dw     0
-vsw SWORD  0
-vd	dd     0
-vsd SDWORD 0
+m16  dw     0
+m16s SWORD  0
+m32  dd     0
+m32s SDWORD 0
 
 	.code
 
@@ -21,11 +21,11 @@ main proc
 	push word ptr [ebx]
 	push dword ptr [bx]
 	push [bx][si+2]
-	push [vw]
-	push [vsw]
-	push [vd]
-	push [vsd]
-	push word ptr [vd]
+	push [m16]
+	push [m16s]
+	push [m32]
+	push [m32s]
+	push word ptr [m32]
 	pushf
 	pushfd
 	push 1

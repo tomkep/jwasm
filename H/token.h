@@ -32,6 +32,8 @@
 #ifndef _TOKEN_H_
 #define _TOKEN_H_
 
+/* T_REG - T_RES_ID match RWT_REG - RWT_RES_ID */
+
 enum state {
         T_FINAL,
         T_INSTRUCTION,
@@ -39,6 +41,7 @@ enum state {
         T_DIRECTIVE,
         T_UNARY_OPERATOR,
         T_BINARY_OPERATOR,
+        T_STYPE,
         T_RES_ID,
         T_ID,
         T_STRING,
@@ -56,11 +59,15 @@ enum state {
         T_CL_SQ_BRACKET = ']',
         T_COMMA         = ',',
         T_COLON         = ':',
-        T_PLUS          = '+',
-        T_MINUS         = '-',
         T_DOT           = '.',
         T_QUESTION_MARK = '?',
         T_PERCENT       = '%'
+};
+
+/* values fo hivalflg */
+enum num_flag {
+    HV_NULL,  /* number fits in 64 bit */
+    HV_STORED /* number's bits 64-127 are stored in token buffer */
 };
 
 struct asm_tok {
@@ -71,27 +78,21 @@ struct asm_tok {
 #endif
     union {
         unsigned char  dirtype;    /* T_DIRECTIVE: type */
-        unsigned char  value8;     /* T_RES_ID, RWT_TYPE: index type table */
+        unsigned char  value8;     /* T_STYPE: index type table */
         unsigned char  precedence; /* T_UNARY_OPERATOR/T_BINARY_OPERATOR */
         char  string_delim;        /* T_STRING: string delimiter  */
         char  floattype;           /* T_FLOAT: 0 or 'r' */
+        char  hivalflg;            /* T_NUM: see enum num_flag above */
     };
-    uint_8      type;              /* T_RES_ID: RWT_TYPE or RWT_RESID */
     char        *string_ptr;
     union {
         struct {
-            int_32  value;
-            union {
-                char   *pos;    /* points to item in CurrSource */
-                int_32 hvalue; /* for T_NUM only */
-            };
+            int_32 value;
+            int_32 hvalue;
         };
-        unsigned char bytes[16]; /* used by T_FLOAT + T_NUM */
-        struct {
-            uint_64 value64;
-            uint_64 hivalue64;
-        };
+        uint_64 value64;
     };
+    char   *tokpos;                /* points to item in CurrSource */
 };
 
 #endif

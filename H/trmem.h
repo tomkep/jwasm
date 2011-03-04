@@ -140,68 +140,12 @@ unsigned _trmem_prt_list( _trmem_hdl );
 unsigned long _trmem_get_current_usage( _trmem_hdl );
 unsigned long _trmem_get_peak_usage( _trmem_hdl );
 
-/*
-    _trmem_set_min_alloc sets a minimum allocation size.  If an allocation is
-    done which is smaller than this minimum, trmem will print a warning.
-*/
-void _trmem_set_min_alloc( size_t, _trmem_hdl );
-
-/*
-    _trmem_validate does some consitancy checks on an allocated chunk.
-    _trmem_chk_range ensures that the __len memory locations beginning at
-        __start are inside the boundaries of an allocated chunk.
-*/
-int _trmem_validate( void *__ptr, _trmem_who, _trmem_hdl );
-int _trmem_validate_all( _trmem_hdl );
-int _trmem_chk_range( void *__start, size_t __len, _trmem_who, _trmem_hdl );
-
-/*
-    _trmem_prt_use_seg_num changes whether the memory tracker (for windows
-    programs) prints selector and offset, or segment number and offset for
-    code pointers. Pass TRUE to set too segment number and offset; the old value
-    is returned. The default is FALSE.
-    NOTE: the memory tracker uses toolhelp to lookup the segment number.
-*/
-#ifdef __WINDOWS__
-int _trmem_prt_use_seg_num( _trmem_hdl, int use_set_num );
-#endif
-
-
-#ifdef __WATCOMC__
-/*
-    !!!! WARNING !!!! WARNING !!!!
-
-    _trmem_guess_who is a pragma that determines the caller of the current
-    function.  The pragma makes the following assumptions:
-
-        The current function was compiled with the /of option.
-        The current function does not have a __near or __far keyword.
-
-    You may not want your entire application compiled with /of; be careful.
-    (i.e., /of generates fatter prologs than are necessary for most apps.)
-
-    Actually, _trmem_guess_who doesn't really have to "guess" now that /of
-    exists.
-
-    _trmem_whoami returns the CS:eIP of an address within itself.  There are
-    no restrictions on a module using _trmem_whoami (i.e., no need for /of).
-*/
 _trmem_who  _trmem_guess_who( void );
-_trmem_who  _trmem_whoami( void );
 
     #pragma aux _trmem_guess_who = \
-        0x8b 0x45 0x04      /*      mov     eax,+4[ebp]         */ \
+        0x8b 0x45 0x04      /*  mov eax,[ebp+4] */ \
         parm caller         [] \
         value               [eax] \
         modify exact        [eax];
-
-    #pragma aux _trmem_whoami = \
-        0xe8 0x00 0x00 0x00 0x00 /* call    near L1             */ \
-        0x58                /* L1:  pop     eax                 */ \
-        parm caller         [] \
-        value               [eax] \
-        modify exact        [eax];
-
-#endif
 
 #endif

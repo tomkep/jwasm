@@ -38,6 +38,7 @@
 #include "posndir.h"
 #include "fastpass.h"
 #include "fixup.h"
+#include "tokenize.h"
 
 #include "myassert.h"
 
@@ -94,8 +95,9 @@ ret_code OrgDirective( int i )
     //int_32          value = 0;
     expr_list opndx;
 
+    DebugMsg1(("OrgDirective(%u) enter\n", i));
     i++;
-    if ( ( ERROR == EvalOperand( &i, Token_Count, &opndx, TRUE ) ) )
+    if ( ( ERROR == EvalOperand( &i, Token_Count, &opndx, 0 ) ) )
         return( ERROR );
     if ( AsmBuffer[i]->token != T_FINAL ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
@@ -105,18 +107,22 @@ ret_code OrgDirective( int i )
         if ( opndx.kind == EXPR_CONST )
             return( SetStructCurrentOffset( opndx.value ) );
     } else {
+        if( CurrSeg == NULL ) {
+            AsmError( MUST_BE_IN_SEGMENT_BLOCK );
+            return( ERROR );
+        }
 #if FASTPASS
-        if ( StoreState == FALSE && Parse_Pass == PASS_1 )
-            SaveState();
+        if ( StoreState == FALSE )
+            FStoreLine();
 #endif
         /* v2.04: added */
-        if ( Parse_Pass == PASS_1 && CurrSeg && CurrSeg->e.seginfo->FixupListHead )
+        if ( Parse_Pass == PASS_1 && CurrSeg->e.seginfo->FixupListHead )
             CurrSeg->e.seginfo->FixupListHead->orgoccured = TRUE;
 
         if ( opndx.kind == EXPR_CONST )
-            return( SetCurrOffset( opndx.value, FALSE, FALSE ) );
+            return( SetCurrOffset( CurrSeg, opndx.value, FALSE, FALSE ) );
         else if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE )
-            return( SetCurrOffset( opndx.sym->offset + opndx.value, FALSE, FALSE ) );
+            return( SetCurrOffset( CurrSeg, opndx.sym->offset + opndx.value, FALSE, FALSE ) );
     }
     AsmError( ORG_NEEDS_A_CONSTANT_OR_LOCAL_OFFSET );
     return( ERROR );
@@ -137,7 +143,7 @@ static void fill_in_objfile_space( uint size )
     /* v2.04: no output if nothing has been written yet */
     if( CurrSeg->e.seginfo->written == FALSE ) {
 
-        SetCurrOffset( size, TRUE, TRUE );
+        SetCurrOffset( CurrSeg, size, TRUE, TRUE );
 
     } else if( CurrSeg->e.seginfo->segtype != SEGTYPE_CODE ) {
 
@@ -182,8 +188,8 @@ void AlignCurrOffset( int value )
     }
 }
 
-ret_code AlignDirective( int directive, int i )
-/********************************************/
+ret_code AlignDirective( int i )
+/******************************/
 {
     int_32 align_val;
     int seg_align;
@@ -193,10 +199,10 @@ ret_code AlignDirective( int directive, int i )
 
     DebugMsg1(("AlignDirective enter\n"));
 
-    i++;
-    switch( directive ) {
+    switch( AsmBuffer[i]->value ) {
     case T_ALIGN:
-        if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+        i++;
+        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
             return( ERROR );
         if ( opndx.kind == EXPR_CONST ) {
             int power;
@@ -220,6 +226,7 @@ ret_code AlignDirective( int directive, int i )
         break;
     case T_EVEN:
         align_val = 2;
+        i++;
         break;
     }
     if ( AsmBuffer[i]->token != T_FINAL ) {
@@ -232,9 +239,8 @@ ret_code AlignDirective( int directive, int i )
         return( AlignInStruct( align_val ));
 
 #if FASTPASS
-    if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
-        SaveState();
-    }
+    if ( StoreState == FALSE )
+        FStoreLine();
 #endif
     seg_align = GetCurrSegAlign(); /* # of bytes */
     if( seg_align <= 0 ) {
@@ -257,7 +263,7 @@ ret_code AlignDirective( int directive, int i )
         align_val -= seg_align;
         fill_in_objfile_space( align_val );
     }
-    if ( FileInfo.file[LST] ) {
+    if ( AsmFile[LST] ) {
         LstWrite( LSTTYPE_DATA, CurrAddr, NULL );
     }
     DebugMsg1(("AlignDirective exit\n"));

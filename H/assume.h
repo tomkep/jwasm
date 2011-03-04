@@ -40,20 +40,29 @@ enum err_flags {
     RH_ERROR  = 0x10
 };
 
-typedef struct {
-    asm_sym             *symbol;        /* segment, group or type that is to
+struct assume_info {
+    struct asm_sym      *symbol;        /* segment, group or type that is to
                                            be associated with the register */
     unsigned char       error;          /* register assumed to ERROR */
     unsigned char       flat;           /* register assumed to FLAT  */
-} assume_info;
+};
+
+/* v2.05: introduced */
+struct stdassume_typeinfo {
+    struct asm_sym      *type;
+    struct asm_sym      *target_type;
+    memtype             mem_type;
+    unsigned char       ptr_memtype;
+    unsigned char       is_ptr;
+};
 
 /* segment assume table is sorted by seg reg number: ES,CS,SS,DS,FS,GS */
-extern assume_info SegAssumeTable[];
-extern assume_info StdAssumeTable[];
+extern struct assume_info SegAssumeTable[];
+extern struct assume_info StdAssumeTable[];
 
 #define NUM_SEGREGS 6
 
-extern void AssumeInit( void );     // init assume tables
+extern void AssumeInit( void );     /* init assume tables */
 
 extern enum assume_segreg search_assume( struct asm_sym *sym,
                                          enum assume_segreg def, bool search_grps );
@@ -62,12 +71,13 @@ extern enum assume_segreg  GetAssume( struct asm_sym *, struct asm_sym*, enum as
 extern struct asm_sym   *GetOverrideAssume( enum assume_segreg );
 
 extern struct asm_sym   *GetStdAssume( int );
+extern struct asm_sym   *GetStdAssumeEx( int );
 
 extern ret_code         AssumeDirective( int );
 extern void             ModelAssumeInit( void );
 extern void             SetSegAssumeTable( void * );
-extern void             SetStdAssumeTable( void * );
 extern void             GetSegAssumeTable( void * );
-extern void             GetStdAssumeTable( void * );
+extern void             SetStdAssumeTable( void *, struct stdassume_typeinfo * );
+extern void             GetStdAssumeTable( void *, struct stdassume_typeinfo * );
 
 #endif

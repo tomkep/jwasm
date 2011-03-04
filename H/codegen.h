@@ -74,7 +74,7 @@
 #define FPE_MAX         0xDF
 
 #define IS_MEM_TYPE( op, typ ) ( (op) == MT_##typ || (op) == MT_S##typ )
-#define IS_MEMTYPE_SIZ( op, siz ) ( ( ( (op) & MT_SPECIAL_MASK ) == 0 ) && ( ( (op) & MT_SIZE_MASK ) == ( siz - 1 ) ) )
+#define IS_MEMTYPE_SIZ( op, siz ) ( ( ( (op) & MT_SPECIAL_MASK ) < MT_SPECIAL ) && ( ( (op) & MT_SIZE_MASK ) == ( siz - 1 ) ) )
 
 extern ret_code         match_phase_1( struct code_info * );
 

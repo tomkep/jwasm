@@ -5,7 +5,7 @@ for %%f in (*.asn) do call :cmpmz  %%f
 for %%f in (*.aso) do call :cmperr %%f
 for %%f in (*.asz) do call :lnkomf %%f
 call :safeseh
-call :coffweak
+call :coff
 call :coffdbg
 call :ifdef
 exit
@@ -39,11 +39,16 @@ link /nologo /SAFESEH SAFESEH.OBJ SAFESEH.LIB
 jfc -pe SAFESEH.EXE SAFESEH.EXP
 goto end
 
-:coffweak
+:coff
+rem weak externals
 jwasm -q -coff EXTERN4.ASC
 if errorlevel 1 goto end
 link /nologo /subsystem:console EXTERN4.OBJ
 jfc -pe EXTERN4.EXE EXTERN4.EXP
+
+jwasm -q -coff SEH64.ASC
+if errorlevel 1 goto end
+jfc -co SEH64.OBJ SEH64.EXP
 goto end
 
 :coffdbg
@@ -53,7 +58,7 @@ jfc -co DBGCV.OBJ DBGCV.EXP
 goto end
 
 :ifdef
-..\owdos16r\jwasmr -q ISDEF.ASC
+..\owdos16r\jwasmr -q -zlc -zld ISDEF.ASC
 if errorlevel 1 goto end
 jfc ISDEF.OBJ ISDEF.EXP
 goto end

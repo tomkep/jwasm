@@ -28,7 +28,8 @@ JWasm Readme
 
     2. Requirements
 
-    - JWASM.EXE, a precompiled Win32 binary, runs on any Win32 platform.
+    - JWASM.EXE, a precompiled Win32 binary, should run on any 32- or 64-bit
+      Windows.
 
     - JWASMD.EXE, a precompiled DOS binary, runs in DOS 32bit protected-mode.
       It requires a 80386 cpu and needs a MS-DOS v5 compatible DOS to run
@@ -39,8 +40,9 @@ JWasm Readme
       Similar to JWASMD.EXE it needs a MS-DOS v5 compatible DOS. Restrictions
       of this version are:
       - doesn't support long filenames
+      - doesn't support Open Watcom fastcall register convention
       - supports OMF, BIN and MZ output formats only
-      - no support for 64-bit
+      - no support for 64-bit and SSE4.
 
     Memory requirements depend on the source which is assembled. The source
     itself is not kept in memory, but the symbol table is, and this table
@@ -91,20 +93,23 @@ JWasm Readme
      JWasm is written in C. The following Makefiles are supplied
     in the source package: 
 
-    name        tool chain used               creates binary for
+    name         tool chain used               creates binary for
     ---------------------------------------------------------------
-    Makefile    OW v1.7a/v1.8                 Win32, DOS (32-bit)
-    OWDOS16.MAK OW v1.7a/v1.8                 DOS (16-bit)
-    OWOS2.MAK   OW v1.7a/v1.8                 OS/2 (32-bit)
-    OWLinux.MAK OW v1.7a/v1.8                 Linux
-    MSVC.MAK    VC++ TK 2003/VC++ 2005 EE     Win32 [, DOS (32-bit)]
-    PCC.MAK     PCC                           Win32
-    PellesC.MAK Pelles C v5                   Win32 [, DOS (32-bit)]
-    BCC.MAK     Borland C++ Cmdline Tools     Win32
-    GccWin.MAK  GCC, MinGW/Cygwin             Win32
-    GccDos.MAK  GCC, DGPJJ                    DOS (32-bit)
-    GccUnix.MAK GCC, FreeBSD/Linux            FreeBSD [, Linux]
-    TCC.MAK     Tiny C                        Win32
+    Makefile     OW v1.7a-v1.9                 Win32, DOS (32-bit)
+    OWDOS16.MAK  OW v1.7a-v1.9                 DOS (16-bit)
+    OWOS2.MAK    OW v1.7a-v1.9                 OS/2 (32-bit)
+    OWLinux.MAK  OW v1.7a-v1.9                 Linux
+    MSVC.MAK     VC++ TK 2003/VC++ 2005 EE     Win32 [, DOS (32-bit)]
+    PCC.MAK      PCC                           Win32
+    PellesC.MAK  Pelles C v5                   Win32 [, DOS (32-bit)]
+    BCC.MAK      Borland C++ Cmdline Tools     Win32
+    GccWin.MAK   GCC, MinGW/Cygwin             Win32
+    GccDos.MAK   GCC, DGPJJ                    DOS (32-bit)
+    GccUnix.MAK  GCC, FreeBSD/Linux            FreeBSD [, Linux]
+    TCC.MAK      Tiny C                        Win32
+    ---------------------------------------------------------------
+    OWWinDll.MAK OW v1.7a-v1.9                 Win32 (JWasm.dll)
+    MsvcDll.MAK  VC++ TK 2003                  Win32 (JWasm.dll)
 
      The makefiles which use the OW tool chain are supposed to be run
     with Open Watcom's WMake, MSVC.MAK should be run with MS NMAKE, 

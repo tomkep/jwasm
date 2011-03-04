@@ -45,7 +45,7 @@ proj_obj = $(OUTD)/main.o     $(OUTD)/assemble.o $(OUTD)/assume.o  \
            $(OUTD)/context.o  $(OUTD)/extern.o   $(OUTD)/simsegm.o \
            $(OUTD)/apiemu.o   $(OUTD)/dbgcv.o    $(OUTD)/end.o     \
            $(OUTD)/backptch.o $(OUTD)/msgtext.o  $(OUTD)/tbyte.o   \
-           $(OUTD)/cpumodel.o $(OUTD)/safeseh.o
+           $(OUTD)/cpumodel.o $(OUTD)/safeseh.o  $(OUTD)/cmdline.o
 ######
 
 #.c.o:
@@ -68,7 +68,7 @@ endif
 $(OUTD)/msgtext.o: msgtext.c H/msgdef.h H/usage.h
 	$(CC) -c $(inc_dirs) $(c_flags) -o $*.o msgtext.c
 
-$(OUTD)/parser.o: parser.c H/instruct.h H/special.h
+$(OUTD)/parser.o: parser.c H/instruct.h H/special.h H/directve.h
 	$(CC) -c $(inc_dirs) $(c_flags) -o $*.o parser.c
 
 ######

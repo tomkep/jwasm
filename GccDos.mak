@@ -43,7 +43,8 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/safeseh.obj  $(OUTD)/listing.obj   $(OUTD)/fatal.obj  \
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
-           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj
+           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj\
+           $(OUTD)/cmdline.obj
 ######
 proj_obj += $(OUTD)/apiemu.obj
 
@@ -60,7 +61,7 @@ $(OUTD)/$(name).exe : $(proj_obj)
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) -o $(OUTD)/msgtext.obj msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h H/directve.h
 	$(CC) -o $(OUTD)/parser.obj parser.c
 
 ######

@@ -10,6 +10,6 @@
 /*---------------------------------------------------------------------------*/
 
 extern void      ContextInit( int );
-extern ret_code  ContextDirective( int, int );
+extern ret_code  ContextDirective( int );
 
 #endif

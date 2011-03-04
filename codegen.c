@@ -472,8 +472,29 @@ static ret_code check_3rd_operand( struct code_info *CodeInfo )
     if( ( CodeInfo->pcurr->opnd_type_3rd == OP3_NONE ) ||
        ( CodeInfo->pcurr->opnd_type_3rd & OP3_HID ) )
         return( ( CodeInfo->opnd_type[OPND3] == OP_NONE ) ? NOT_ERROR : ERROR );
-    else
-        return( ( CodeInfo->opnd_type[OPND3] == OP_NONE ) ? ERROR : NOT_ERROR );
+    else {
+        DebugMsg(("check_3rd_operand: %X-%X\n", CodeInfo->pcurr->opnd_type_3rd, CodeInfo->opnd_type[OPND3] ));
+        /* current variant needs a 3rd operand */
+        switch ( CodeInfo->pcurr->opnd_type_3rd ) {
+        case OP3_CL:
+            if ( CodeInfo->opnd_type[OPND3] == OP_CL )
+                return( NOT_ERROR );
+            break;
+        case OP3_I8_U:
+            /* idata_nofixup doesn't work reliably for 3rd arguments */
+            if ( ( CodeInfo->opnd_type[OPND3] & OP_I ) &&
+                CodeInfo->data[OPND3] >= 0 &&
+                CodeInfo->data[OPND3] < 0x100 )
+                return( NOT_ERROR );
+            break;
+        case OP3_XMM0:
+            if ( CodeInfo->opnd_type[OPND3] == OP_XMM &&
+                CodeInfo->data[OPND3] == 0 )
+                return( NOT_ERROR );
+            break;
+        }
+        return(  ERROR );
+    }
 }
 
 static ret_code output_3rd_operand( struct code_info *CodeInfo )
@@ -596,8 +617,8 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                     opnd2 = OP_I8;
                     if( CodeInfo->InsFixup[OPND2] != NULL ) {
                     /* v1.96: make sure FIX_HIBYTE isn't overwritten! */
-                        if (CodeInfo->InsFixup[OPND2]->type != FIX_HIBYTE)
-                            CodeInfo->InsFixup[OPND2]->type = FIX_LOBYTE;
+                        if ( CodeInfo->InsFixup[OPND2]->type != FIX_HIBYTE )
+                            CodeInfo->InsFixup[OPND2]->type = FIX_OFF8;
                     }
                 } else if( opnd1 & OP_R16 ) {
                     /* v2.04: the check has already happened in check_size() or idata_xxx() */
@@ -754,9 +775,26 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                     return( ERROR );
                 output_data( CodeInfo, opnd1, OPND1 );
                 output_data( CodeInfo, opnd2, OPND2 );
+                return( output_3rd_operand( CodeInfo ) );
+            }
+            break;
+        case OP_RM3264: /* v2.05: added, replaces OP_M32 */
+            if( opnd2 & tbl_op2 ) {
+                DebugMsg1(("match_phase_3: OP_RM3264\n"));
+#if AMD64_SUPPORT
+#if 1 /* still needed for CVTxx */
+                if ( opnd2 & OP_M64 )
+                    CodeInfo->prefix.rex |= REX_W;
+#endif
+#endif
+                if( output_opc( CodeInfo ) == ERROR )
+                    return( ERROR );
+                output_data( CodeInfo, opnd1, OPND1 );
+                output_data( CodeInfo, opnd2, OPND2 );
                 return( NOT_ERROR );
             }
             break;
+#if 0 /* v2.05: replaced by OP_RM3264 */
         case OP_M32: /* v2.0: added for MOVD */
             if( ( opnd2 & OP_M ) &&
                ( IS_MEMTYPE_SIZ( CodeInfo->mem_type, sizeof(uint_32) ) || CodeInfo->mem_type == MT_EMPTY ) ) {
@@ -768,6 +806,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, OPNDTYPE determinant 
                 return( NOT_ERROR );
             }
             break;
+#endif
         default:
             if( ( opnd2 & tbl_op2 ) || (CodeInfo->mem_type == MT_EMPTY && (opnd2 & OP_M_ANY) && (tbl_op2 & OP_M_ANY) )) {
                 DebugMsg1(("match_phase_3: default branch\n"));
@@ -874,39 +913,6 @@ ret_code match_phase_1( struct code_info *CodeInfo )
         asm_op1 = CodeInfo->pcurr->opnd_type[OPND1];
 
         switch( asm_op1 ) {
-#if 0 /* v2.0: special cases no longer needed */
-        case OP_MMX:
-             if( opnd1 & OP_MMX ) {
-                 retcode = match_phase_2( CodeInfo );
-                 if ( retcode != EMPTY )
-                     return( retcode );
-             }
-             break;
-        case OP_XMM:
-             if( opnd1 & OP_XMM ) {
-                 retcode = match_phase_2( CodeInfo );
-                 if ( retcode != EMPTY )
-                     return( retcode );
-             }
-             break;
-        case OP_R16: /* ARPL, LLDT, LMSW, LTR, SLDT, SMSW, STR, VERR, VERW */
-            if( opnd1 & asm_op1 ) {
-                temp_opsiz = CodeInfo->prefix.opsiz;
-                CodeInfo->prefix.opsiz = FALSE;
-                retcode = match_phase_2( CodeInfo );
-                if( retcode != EMPTY )
-                    return( retcode );
-                CodeInfo->prefix.opsiz = temp_opsiz;
-            }
-            break;
-        case OP_M16: /* value isn't used anymore as first operand type */
-            if( opnd1 & asm_op1 ) {
-                retcode = match_phase_2( CodeInfo );
-                if( retcode != EMPTY )
-                    return( retcode );
-            }
-            break;
-#endif
 #if 1 /* to be fixed: why is this needed?! */
         case OP_I32: /* CALL, JMP, PUSHD */
         case OP_I16: /* CALL, JMP, RETx, ENTER, PUSHW */

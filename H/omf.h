@@ -8,7 +8,7 @@
 
 #define MAX_LEDATA_THRESHOLD    (1024 - 10)
 #define MAX_PUB_LENGTH          1024 /* OMF: max length of pubdef record */
-#define MAX_EXT_LENGTH          1024 /* OMF: max length ( in chars ) of extdef */
+#define MAX_EXT_LENGTH          1020 /* OMF: max length ( in chars ) of extdef */
 
 void      omf_init( module_info * );
 void      omf_fini( void );

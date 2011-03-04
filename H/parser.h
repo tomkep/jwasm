@@ -37,14 +37,18 @@
 
 enum asm_stypes {
 #undef pick
-#define pick( name, memtype, ofssize ) ST_ ## name ,
+#define pick( name, memtype, ofssize ) name ,
 #include "stypes.h"
 };
 
-/* define tokens for SpecialTable (registers, directives, operators, ... ) */
+/* define tokens for SpecialTable (registers, operators, ... ) */
 enum special_token {
 #define  res(token, string, len, type, value, value8, flags, cpu, sflags) T_ ## token ,
 #include "special.h"
+#undef res
+/* define tokens for SpecialTable (directives) */
+#define  res(token, string, len, value, value8, flags, cpu, sflags) T_ ## token ,
+#include "directve.h"
 #undef res
 SPECIAL_LAST
 };
@@ -140,15 +144,17 @@ enum ALLOWED_PREFIX {
  AP_NO_FWAIT = 0x05
 };
 
-// values for field type in asm_special:
+/* values for field type in asm_special.
+ * it should match order of T_REGISTER - T_RES_ID in token.h
+ */
 
 enum special_type {
- RWT_REGISTER,
- RWT_RES_ID,
+ RWT_REG = 2,  /* same value as for T_REG */
  RWT_DIRECTIVE,
- RWT_TYPE,
+ RWT_UNARY_OP,
  RWT_BINARY_OP,
- RWT_UNARY_OP
+ RWT_STYPE,
+ RWT_RES_ID
 };
 
 // values for sflags if register
@@ -224,20 +230,20 @@ enum directive_flags {
                      /* enclose strings in <> in macro expansion step */
  DF_NOEXPAND = 0x04, /* don't expand params for directive (PURGE, FOR, IFDEF, ...) */
  DF_LABEL    = 0x08, /* directive requires a label */
- DF_NOSTRUC  = 0x10  /* directive not allowed inside structs/unions */
+ DF_NOSTRUC  = 0x10, /* directive not allowed inside structs/unions */
+ DF_NOCONCAT = 0x20, /* don't concat line */
+ DF_PROC     = 0x40, /* directive triggers prologue generation */
+ DF_STORE    = 0x80  /* for FASTPASS */
 };
 
 /* values for <value8> if type == RWT_DIRECTIVE
  * CONDDIR, ERRDIR, LOOPDIR and INCLUDE must be consecutive!
  */
+#define  res(token, function) DRT_ ## token ,
 enum directive_type {
- DRT_CONDDIR  = 0x01, /* preprocessor conditional assembly directive (IF, ELSE, ...) */
- DRT_ERRDIR   = 0x02, /* preprocessor error directive (.ERR, .ERRNZ, ...) */
- DRT_LOOPDIR  = 0x03, /* preprocessor loop directive (FOR, REPEAT, WHILE, ...) */
- DRT_INCLUDE  = 0x04, /* preprocessor include directive */
- DRT_DATADIR  = 0x05, /* data definition directive */
- DRT_EQUALSGN = 0x06, /* '=' directive */
+#include "dirtype.h"
 };
+#undef  res
 
 
 /* code_info describes the current instruction. It's the communication
@@ -317,7 +323,7 @@ extern void     DisableKeyword( uint token );
 #if RENAMEKEY
 extern void     RenameKeyword( uint token, const char *name, uint_8 len );
 #endif
-extern ret_code ParseItems( void );
+extern ret_code ParseLine( void );
 extern char     *GetResWName( enum asm_token reg, char *buff );
 extern ret_code ParseInit( void );
 #if AMD64_SUPPORT

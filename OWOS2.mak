@@ -1,7 +1,7 @@
 
 # this makefile creates the 32bit OS/2 binary of JWasm.
 # tools used:
-# - Open Watcom v1.7a/v1.8
+# - Open Watcom v1.7a/v1.8/v1.9
 
 name = JWasm
 
@@ -62,7 +62,8 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   &
-           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj
+           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj&
+           $(OUTD)/cmdline.obj
 ######
 
 TARGET1=$(OUTD)/$(name).exe
@@ -80,7 +81,7 @@ $(lflagso) file { $(proj_obj) } name $@ op stack=0x20000
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h H/directve.h
 	$(CC) parser.c
 
 ######

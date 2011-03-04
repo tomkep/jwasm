@@ -126,6 +126,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
  * possible return values are:
  * - NOT_ERROR,
  * - ERROR,
+ * Opnd_Count is 0.
  */
 {
     int_32              addr;
@@ -137,25 +138,35 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
     dir_node            *symseg;
     unsigned            opidx = IndexFromToken( CodeInfo->token );
 
+    /* v2.05: just 1 operand possible */
+    if ( Opnd_Count != OPND1 ) {
+        AsmError( SYNTAX_ERROR );
+        return( ERROR );
+    }
+    if ( opndx->explicit )
+        CodeInfo->mem_type = opndx->mem_type;
     /*
      * Masm checks overrides for branch instructions with immediate operand.
      * No segment prefix byte is emitted.
      */
     if ( opndx->override != EMPTY ) {
         segm_override( opndx, NULL );
-        if ( SegOverride && opndx->sym && opndx->sym->segment && SegOverride != opndx->sym->segment ) {
-            if ( opndx->sym )
-                AsmErr( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS, opndx->sym->name );
-            else
-                AsmErr( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS, "" );
-            return( ERROR );
+        DebugMsg(("process_branch(%" FX32 "): segment override %s\n", GetCurrOffset(), SegOverride->name ));
+        if ( SegOverride && opndx->sym && opndx->sym->segment ) {
+            if ( SegOverride != opndx->sym->segment &&  SegOverride != ((dir_node *)opndx->sym->segment)->e.seginfo->group ) {
+                AsmErr( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS, opndx->sym ? opndx->sym->name : "" );
+                return( ERROR );
+            }
+            /* v2.05: switch to far jmp/call */
+            if ( SegOverride != &CurrSeg->sym && SegOverride != CurrSeg->e.seginfo->group ) {
+                DebugMsg(("process_branch(%" FX32 "): segment override %s caused FAR jmp/call\n", GetCurrOffset(), SegOverride->name ));
+                //CodeInfo->isfar = TRUE;
+                CodeInfo->mem_type = MT_FAR;
+            }
         }
     }
 
-    if ( opndx->explicit )
-        CodeInfo->mem_type = opndx->mem_type;
-
-    CodeInfo->data[Opnd_Count] = opndx->value;
+    CodeInfo->data[OPND1] = opndx->value;
     sym = opndx->sym;
     if( sym == NULL ) { /* no symbolic label specified? */
         DebugMsg(("process_branch(%" FX32 "): sym=NULL, op.memtype=%Xh\n", GetCurrOffset(), opndx->mem_type ));
@@ -168,10 +179,10 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
         if( IS_JMPCALL( CodeInfo->token ) )
             CodeInfo->isfar = TRUE; /* ??? most likely nonsense! */
 
-        if( CodeInfo->data[Opnd_Count] > USHRT_MAX )
-            CodeInfo->opnd_type[Opnd_Count] = OP_I32;
+        if( CodeInfo->data[OPND1] > USHRT_MAX )
+            CodeInfo->opnd_type[OPND1] = OP_I32;
         else
-            CodeInfo->opnd_type[Opnd_Count] = OP_I16;
+            CodeInfo->opnd_type[OPND1] = OP_I16;
 
         return( NOT_ERROR );
 #endif
@@ -188,7 +199,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
      * This applies to PROTOs and EXTERNDEFs in Pass 1.
      */
     if ( ( state == SYM_EXTERNAL ) && sym->weak ) {
-        DebugMsg(("process_branch(%s): EXTERNAL/INTERNAL assumed UNDEFINED (ofs=%" FX32 "!\n", sym->name, sym->offset ));
+        DebugMsg(("process_branch(%s): EXTERNDEF assumed UNDEFINED (ofs=%" FX32 "!)\n", sym->name, sym->offset ));
         state = SYM_UNDEFINED;
     }
 
@@ -199,7 +210,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
          * in this pass and its offset is < $, don't use current offset
          */
         if ( state == SYM_INTERNAL &&
-            sym->pass != ( Parse_Pass & 0xFF) &&
+            sym->asmpass != ( Parse_Pass & 0xFF) &&
             sym->offset < addr )
             ;
         else
@@ -216,8 +227,11 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                 if ( symseg->e.seginfo->group != NULL &&
                     symseg->e.seginfo->group == CurrSeg->e.seginfo->group )
                     ;
-                else if ( opndx->mem_type == MT_NEAR ) {
-                    AsmError( NO_FAR_JUMP_TO_NEAR_LABEL );
+                /* v2.05: added SegOverride condition */
+                //else if ( opndx->mem_type == MT_NEAR ) {
+                else if ( opndx->mem_type == MT_NEAR && SegOverride == NULL ) {
+                    DebugMsg(("process_branch: error, opndx.mem_type is MT_NEAR\n" ));
+                    AsmError( CANNOT_HAVE_IMPLICIT_FAR_JUMP_OR_CALL_TO_NEAR_LABEL );
                     return( ERROR );
                 }
             }
@@ -251,14 +265,14 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
             if( CodeInfo->token == T_CALL &&
                 CodeInfo->mem_type == MT_EMPTY &&
                 ( sym->mem_type == MT_FAR || SegOverride ) ) {
-                DebugMsg(("process_branch: FAR call optimization applied!\n" ));
+                DebugMsg1(("process_branch: FAR call optimization applied!\n" ));
                 FarCallToNear( CodeInfo ); /* switch mem_type to NEAR */
             }
 
             //addr = sym->offset; /* v2.02: this has been done above */
             DebugMsg(("process_branch: step1: addr=%Xh\n", addr ));
             addr -= ( GetCurrOffset() + 2 );  /* calculate the displacement */
-            addr += CodeInfo->data[Opnd_Count];
+            addr += CodeInfo->data[OPND1];
             /*  JCXZ, LOOPW, LOOPEW, LOOPZW, LOOPNEW, LOOPNZW,
                JECXZ, LOOPD, LOOPED, LOOPZD, LOOPNED, LOOPNZD? */
             if (( CodeInfo->Ofssize && InstrTable[opidx].byte1_info == F_16A ) ||
@@ -273,7 +287,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
             DebugMsg(("process_branch: CI.memtype=%Xh addr=%Xh\n", CodeInfo->mem_type, addr ));
             if( CodeInfo->mem_type != MT_NEAR && CodeInfo->token != T_CALL
                 && ( addr >= SCHAR_MIN && addr <= SCHAR_MAX ) ) {
-                CodeInfo->opnd_type[Opnd_Count] = OP_I8;
+                CodeInfo->opnd_type[OPND1] = OP_I8;
             } else {
                 if ( opndx->instr == T_SHORT || ( IS_XCX_BRANCH( CodeInfo->token ) ) ) {
                     /* v1.96: since JWasm's backpatch strategy is to move from
@@ -298,20 +312,20 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                 /* is there a type coercion? */
                 if ( opndx->Ofssize != USE_EMPTY ) {
                     if ( opndx->Ofssize == USE16 ) {
-                        CodeInfo->opnd_type[Opnd_Count] = OP_I16;
+                        CodeInfo->opnd_type[OPND1] = OP_I16;
                         addr -= 1; /* 16 bit displacement */
                     } else {
-                        CodeInfo->opnd_type[Opnd_Count] = OP_I32;
+                        CodeInfo->opnd_type[OPND1] = OP_I32;
                         addr -= 3; /* 32 bit displacement */
                     }
                     SET_OPSIZ( CodeInfo, opndx->Ofssize == USE32 );
                     if ( CodeInfo->prefix.opsiz )
                         addr--;
                 } else if( CodeInfo->Ofssize ) {
-                    CodeInfo->opnd_type[Opnd_Count] = OP_I32;
+                    CodeInfo->opnd_type[OPND1] = OP_I32;
                     addr -= 3; /* 32 bit displacement */
                 } else {
-                    CodeInfo->opnd_type[Opnd_Count] = OP_I16;
+                    CodeInfo->opnd_type[OPND1] = OP_I16;
                     addr -= 1; /* 16 bit displacement */
                 }
                 if( IS_CONDJMP( CodeInfo->token ) ) {
@@ -321,7 +335,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
             }
 
             /* store the displacement */
-            CodeInfo->data[Opnd_Count] = addr;
+            CodeInfo->data[OPND1] = addr;
             DebugMsg1(("process_branch: displacement=%" FX32 "\n", addr ));
 
             /* automatic (conditional) jump expansion.
@@ -330,11 +344,11 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
              */
             if( ( ModuleInfo.curr_cpu & P_CPU_MASK) < P_386 && IS_JCC( CodeInfo->token ) ) {
                 /* look into jump extension */
-                if( CodeInfo->opnd_type[Opnd_Count] != OP_I8 ) {
+                if( CodeInfo->opnd_type[OPND1] != OP_I8 ) {
                     if( CodeInfo->mem_type == MT_EMPTY && ModuleInfo.ljmp == TRUE ) {
                         jumpExtend( CodeInfo, FALSE );
                         addr -= 1;
-                        CodeInfo->data[Opnd_Count] = addr;
+                        CodeInfo->data[OPND1] = addr;
                         //return( SCRAP_INSTRUCTION );
                     //} else if( !PhaseError ) {
                     } else {
@@ -426,10 +440,10 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
             find_frame( sym );
             if( IS_OPER_32( CodeInfo ) ) {
                 fixup_type = FIX_PTR32;
-                CodeInfo->opnd_type[Opnd_Count] = OP_J48;
+                CodeInfo->opnd_type[OPND1] = OP_J48;
             } else {
                 fixup_type = FIX_PTR16;
-                CodeInfo->opnd_type[Opnd_Count] = OP_I32;
+                CodeInfo->opnd_type[OPND1] = OP_I32;
             }
             break;
         default:
@@ -438,7 +452,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
             AsmError( INVALID_OPERAND_SIZE );
             return( ERROR );
         }
-        CodeInfo->InsFixup[Opnd_Count] = AddFixup( sym, fixup_type, fixup_option );
+        CodeInfo->InsFixup[OPND1] = AddFixup( sym, fixup_type, fixup_option );
         return( NOT_ERROR );
     }  /* end if FAR JMP/CALL */
 
@@ -452,10 +466,10 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
             fixup_option = OPTJ_CALL;
             if( CodeInfo->Ofssize ) {
                 fixup_type = FIX_RELOFF32;
-                CodeInfo->opnd_type[Opnd_Count] = OP_I32;
+                CodeInfo->opnd_type[OPND1] = OP_I32;
             } else {
                 fixup_type = FIX_RELOFF16;
-                CodeInfo->opnd_type[Opnd_Count] = OP_I16;
+                CodeInfo->opnd_type[OPND1] = OP_I16;
             }
             break;
         }
@@ -467,7 +481,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
             /* forward reference
              * default distance is short, we will expand later if needed
              */
-            CodeInfo->opnd_type[Opnd_Count] = OP_I8;
+            CodeInfo->opnd_type[OPND1] = OP_I8;
             fixup_type = FIX_RELOFF8;
             fixup_option = (opndx->instr == T_SHORT) ? OPTJ_EXPLICIT : OPTJ_NONE;
             break;
@@ -475,10 +489,10 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
             fixup_option = OPTJ_EXPLICIT;
             if( CodeInfo->Ofssize ) {
                 fixup_type = FIX_RELOFF32;
-                CodeInfo->opnd_type[Opnd_Count] = OP_I32;
+                CodeInfo->opnd_type[OPND1] = OP_I32;
             } else {
                 fixup_type = FIX_RELOFF16;
-                CodeInfo->opnd_type[Opnd_Count] = OP_I16;
+                CodeInfo->opnd_type[OPND1] = OP_I16;
             }
             find_frame( sym );/* added v1.95 (after change in fixup.c */
             break;
@@ -496,7 +510,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                 AsmError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED );
                 return( ERROR );
             }
-            CodeInfo->opnd_type[Opnd_Count] = OP_I8;
+            CodeInfo->opnd_type[OPND1] = OP_I8;
             fixup_option = OPTJ_EXPLICIT;
             fixup_type = FIX_RELOFF8;
             break;
@@ -508,7 +522,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                 /* forward reference */
                 fixup_option = ( opndx->instr == T_SHORT ) ? OPTJ_EXPLICIT : OPTJ_JXX;
                 fixup_type = FIX_RELOFF8;
-                CodeInfo->opnd_type[Opnd_Count] = OP_I8;
+                CodeInfo->opnd_type[OPND1] = OP_I8;
                 break;
             case MT_NEAR:
                 fixup_option = OPTJ_EXPLICIT;
@@ -516,13 +530,13 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                 //if ( opndx->explicit && opndx->Ofssize != USE_EMPTY ) {
                 if ( opndx->Ofssize != USE_EMPTY ) {
                     SET_OPSIZ( CodeInfo, opndx->Ofssize >= USE32 );
-                    CodeInfo->opnd_type[Opnd_Count] = (opndx->Ofssize >= USE32) ? OP_I32 : OP_I16;
+                    CodeInfo->opnd_type[OPND1] = (opndx->Ofssize >= USE32) ? OP_I32 : OP_I16;
                 } else if( CodeInfo->Ofssize ) {
                     fixup_type = FIX_RELOFF32;
-                    CodeInfo->opnd_type[Opnd_Count] = OP_I32;
+                    CodeInfo->opnd_type[OPND1] = OP_I32;
                 } else {
                     fixup_type = FIX_RELOFF16;
-                    CodeInfo->opnd_type[Opnd_Count] = OP_I16;
+                    CodeInfo->opnd_type[OPND1] = OP_I16;
                 }
                 break;
             case MT_FAR:
@@ -537,10 +551,10 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                     CodeInfo->isfar = TRUE;
                     if( IS_OPER_32( CodeInfo ) ) {
                         fixup_type = FIX_PTR32;
-                        CodeInfo->opnd_type[Opnd_Count] = OP_J48;
+                        CodeInfo->opnd_type[OPND1] = OP_J48;
                     } else {
                         fixup_type = FIX_PTR16;
-                        CodeInfo->opnd_type[Opnd_Count] = OP_I32;
+                        CodeInfo->opnd_type[OPND1] = OP_I32;
                     }
                     break;
                 }
@@ -560,7 +574,7 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                 else
                     fixup_option = OPTJ_EXTEND;
                 fixup_type = FIX_RELOFF8;
-                CodeInfo->opnd_type[Opnd_Count] = OP_I8;
+                CodeInfo->opnd_type[OPND1] = OP_I8;
                 break;
             case MT_NEAR: /* allow Jxx NEAR if LJMP on */
             case MT_FAR:
@@ -569,11 +583,11 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
                         jumpExtend( CodeInfo, TRUE );
                         fixup_type = FIX_PTR16;
                         CodeInfo->isfar = TRUE;
-                        CodeInfo->opnd_type[Opnd_Count] = OP_I32;
+                        CodeInfo->opnd_type[OPND1] = OP_I32;
                     } else {
                         jumpExtend( CodeInfo, FALSE );
                         fixup_type = FIX_RELOFF16;
-                        CodeInfo->opnd_type[Opnd_Count] = OP_I16;
+                        CodeInfo->opnd_type[OPND1] = OP_I16;
                     }
                     break;
                 }
@@ -584,6 +598,6 @@ ret_code process_branch( struct code_info *CodeInfo, const expr_list *opndx )
             }
         }
     } /* end switch (CodeInfo->token) */
-    CodeInfo->InsFixup[Opnd_Count] = AddFixup( sym, fixup_type, fixup_option );
+    CodeInfo->InsFixup[OPND1] = AddFixup( sym, fixup_type, fixup_option );
     return( NOT_ERROR );
 }

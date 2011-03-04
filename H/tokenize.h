@@ -32,10 +32,17 @@
 #ifndef _TOKENIZE_H_INCLUDED
 #define _TOKENIZE_H_INCLUDED
 
+struct line_status {
+    char *input;
+    char *output;
+    char is_concat; /* TRUE if line has been concatenated */
+};
+
 extern char     *CurrSource;      // current source line
 extern char     *StringBufferEnd; // start free space in string buffer
 
-extern int      Tokenize( const char * , unsigned int, int );
+extern ret_code GetToken( unsigned int, struct line_status *p );
+extern int      Tokenize( char * , unsigned int, int );
 extern int      GetTokenStateSize( void );
 extern void     SaveTokenState( unsigned char * pSave );
 extern void     RestoreTokenState( unsigned char * pSave );

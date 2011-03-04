@@ -1,7 +1,7 @@
 
 # this makefile creates a DOS 16-bit real-mode version of JWasm (JWASMR.EXE).
 # tools used:
-# - Open Watcom v1.7a/v1.8
+# - Open Watcom v1.7a/v1.8/v1.9
 
 name = JWasm
 
@@ -49,10 +49,10 @@ LOPTD = debug dwarf op symfile
 
 lflagsd = $(LOPTD) sys dos op map=$^*, stack=0x5000
 
-CC=$(WATCOM)\binnt\wcc -q -0 -w3 -zc -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -DAMD64_SUPPORT=0 -DSSE4SUPP=0 -zt=12000
+CC=$(WATCOM)\binnt\wcc -q -0 -w3 -zc -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -DAMD64_SUPPORT=0 -DSSE4SUPP=0 -DOWFC_SUPPORT=0 -zt=12000
 
 .c{$(OUTD)}.obj:
-   $(CC) $<
+	@$(CC) $<
 
 proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj &
@@ -69,6 +69,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
            $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
+           $(OUTD)/cmdline.obj  &
 !if $(DEBUG)
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
@@ -92,10 +93,10 @@ $(lflagsd) file { $(proj_obj) } name $@
 <<
 
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
-	$(CC) msgtext.c
+	@$(CC) msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
-	$(CC) parser.c
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h H/directve.h
+	@$(CC) parser.c
 
 ######
 

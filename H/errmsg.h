@@ -37,18 +37,16 @@
     extern void DoDebugMsg1( const char *format, ... );
     #define DebugMsg( x ) DoDebugMsg x
     #define DebugMsg1( x ) DoDebugMsg1 x
-    #define DebugCurrLine() printf( "%s\n", CurrSource );
 #else
     #define DebugMsg( x )
     #define DebugMsg1( x )
-    #define DebugCurrLine()
 #endif
 // use DebugMsg((....)) to call it
 
 //#define AsmWarning( errno )   AsmWarn( 0,errno )
 //#define AsmIntErr( x )        printf( "Internal error %d\n", x )
 
-#ifdef __UNIX__
+#if defined( __UNIX__ ) || defined ( __SW_BD )
 #define errout stderr
 #else
 #define errout stdout

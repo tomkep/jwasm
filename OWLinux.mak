@@ -48,7 +48,7 @@ extra_c_flags += -ot -s -DNDEBUG
 LOPTD = debug dwarf op symfile
 !endif
 
-CC = $(WATCOM)\Binnt\wcc386 -q -3$(CCV) -bc -bt=linux $(inc_dirs) $(extra_c_flags) $(c_flags64) -fo$@
+CC = $(WATCOM)\Binnt\wcc386 -q -3$(CCV) -zc -bc -bt=linux $(inc_dirs) $(extra_c_flags) $(c_flags64) -fo$@
 
 .c{$(OUTD)}.obj:
 	$(CC) $<
@@ -72,7 +72,8 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/trmem.obj    &
 !endif
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   &
-           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj
+           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj&
+           $(OUTD)/cmdline.obj
 ######
 
 ALL: $(OUTD) $(OUTD)/$(name)
@@ -95,7 +96,7 @@ name $@.
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h H/directve.h
 	$(CC) parser.c
 
 ######

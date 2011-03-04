@@ -31,12 +31,10 @@
 #ifndef _MSGTEXT_H_
 #define _MSGTEXT_H_
 
-extern ret_code MsgInit( void );
+extern void     MsgInit( void );
 extern void     MsgFini( void );
 extern char   * MsgGet( int, char * );
 extern char   * MsgGetEx( int ); /* doesn't need a buffer */
-extern void     MsgPrintf( int msgid );
-//extern void     MsgPrintf1( int msgid, char *token );
 extern void     MsgPrintUsage( void );
 extern char   * MsgGetJWasmName( char * buffer );
 extern int      trademark( void );

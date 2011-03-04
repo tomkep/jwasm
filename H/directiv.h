@@ -79,13 +79,13 @@ typedef enum {
 
 /*---------------------------------------------------------------------------*/
 
-typedef struct {
-    enum asm_token token;
+struct simpletype {
+    //enum asm_token token;
     memtype mem_type;
     uint_8 Ofssize;
-} simpletype;
+};
 
-extern simpletype SimpleType[];
+extern struct simpletype SimpleType[];
 
 typedef struct {
       char      *string;        /* the token string */
@@ -184,27 +184,27 @@ typedef struct {
 
 /* macro parameter */
 
-typedef struct mparm_list {
-    const char          *label;         /* name of parameter */
+struct mparm_list {
+    //const char          *label;         /* name of parameter */
     char                *deflt;         /* optional default parm */
     unsigned char       required:1;     /* is parm required (REQ) */
-} mparm_list;
+};
 
 /* macro line */
 
-typedef struct asmlines {
+struct asmlines {
     struct asmlines     *next;
     uint_8              ph_count; /* placeholders contained in this line */
-    char                line[];
-} asmlines;
+    char                line[1];
+};
 
 /* macro item */
 
 typedef struct {
     uint_16             parmcnt;    /* no of params */
     uint_16             localcnt;   /* no of locals */
-    mparm_list          *parmlist;  /* array of parameter items */
-    asmlines            *data;      /* prepared macro source lines */
+    struct mparm_list   *parmlist;  /* array of parameter items */
+    struct asmlines     *data;      /* prepared macro source lines */
 #ifdef DEBUG_OUT
     uint_32             count;      /* no of times the macro was invoked */
 #endif
@@ -229,21 +229,14 @@ enum type_kind {
 };
 
 typedef struct {
-    field_list          *head;       /* is NULL for TYPEDEF */
-    union {
-        field_list      *tail;       /* for STRUCT, UNION, RECORD */
-        /* target for memtypes MT_PROC or MT_PTR */
-        struct asm_sym  *target;     /* for TYPEDEF */
-    };
+    field_list          *head;
+    field_list          *tail;
 #ifdef __WATCOMC__
     enum type_kind      typekind;
 #else
     uint_8              typekind;
 #endif
-    union {
-        uint_8          alignment;   /* STRUCT: 1,2,4,8,16 or 32 */
-        uint_8          indirection; /* TYPEDEF: level of indirection for PTR */
-    };
+    uint_8              alignment;   /* STRUCT: 1,2,4,8,16 or 32 */
     union {
         uint_8          flags;
         struct {
@@ -252,7 +245,6 @@ typedef struct {
             unsigned char   OrgInside:1; /* STRUCT: struct contains an ORG */
         };
     };
-    uint_8              ptr_memtype; /* TYPEDEF: memtype of target */
 } struct_info;
 
 union entry {
@@ -272,32 +264,29 @@ typedef struct dir_node {
     struct asm_sym sym;
     union {
         /* additional fields, used by
-         SYM_SEG, SYM_GRP, SYM_INTERNAL(procs), SYM_TYPE, SYM_MACRO */
+         * SYM_SEG - seg_info
+         * SYM_GRP - grp_info
+         * SYM_INTERNAL,SYM_EXTERNAL (isproc=1) - proc_info
+         * SYM_TYPE - struct_info
+         * SYM_MACRO - macro_info
+         */
         union entry e;
         /* used to save the local hash table (contains PROC locals: params,
          locals, labels). Details see SymGetLocal(), SymSetLocal() in symbols.c */
         struct dir_node *nextll;
     };
+    /* for SYM_UNDEFINED, SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_ALIAS:
+     * linked list of this type of symbol.
+     * for SYM_INTERNAL:
+     * linked list of labels for current segment (used for BackPatch)
+     */
+    struct dir_node *next;
     union {
-        /* for SYM_UNDEFINED, SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_ALIAS:
-         * linked list of this type of symbol.
-         * for SYM_INTERNAL:
-         * linked list of labels for current segment (used for BackPatch)
-         */
-        struct dir_node *next;
-        /* used by PROC params ( SYM_STACK ) */
-        struct {
-            unsigned char       is_vararg:1;  /* if it is a VARARG param */
-            unsigned char       is_ptr:1;     /* if it is a PTR type */
-            //unsigned char       is_far:1;     /* if ptr is FAR */
-            //unsigned char       is32:2;       /* offset size (0|1|2, ptr only) */
-        };
-    };
-    union {
-        /* for SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_INTERNAL(procs), SYM_ALIAS:
+        /* for SYM_UNDEFINED, SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_INTERNAL(procs)
          * linked list of this type of symbol, to allow fast removes.
          * Actually, the only symbols which have a "chance" to be
-         * removed are globals ( state=SYM_EXTERNAL, weak=TRUE )
+         * removed are SYM_UNDEFINED and SYM_EXTERNAL (weak=TRUE ) during
+         * pass one.
          */
         struct dir_node *prev;
         /* used by PROC for linked list */
@@ -338,16 +327,22 @@ struct module_vars {
     symbol_queue        AltQueue;        /* weak externals */
 };
 
+enum prologue_epilogue_mode {
+    PEM_DEFAULT,
+    PEM_MACRO,
+    PEM_NONE
+};
+
 typedef struct {
     //struct module_vars; /* GCC won't allow anonymous members for std C */
     struct module_vars  g;
-    char                *proc_prologue;  /* current OPTION PROLOGUE value */
-    char                *proc_epilogue;  /* current OPTION EPILOGUE value */
+    char                *proc_prologue;  /* prologue macro if PEM_MACRO */
+    char                *proc_epilogue;  /* epilogue macro if PEM_MACRO */
     unsigned            anonymous_label; /* "anonymous label" counter */
     unsigned            hll_label;       /* hll directive label counter */
     dist_type           distance;        /* stack distance; */
     mod_type            model;           /* memory model; */
-    lang_type           langtype;        /* language; */
+    enum lang_type      langtype;        /* language; */
     os_type             ostype;          /* operating system; */
     seg_order           segorder;        /* .alpha, .seq, .dosseg */
     offset_type         offsettype;      /* OFFSET:GROUP|FLAT|SEGMENT */
@@ -356,6 +351,7 @@ typedef struct {
     unsigned char       radix;           /* current .RADIX setting */
     unsigned char       fieldalign;      /* -Zp, OPTION:FIELDALIGN setting */
     unsigned char       line_listed;     /* current line has been printed */
+    unsigned char       StructInit;      /* for initialization of struct data items */
 #if PROCALIGN
     unsigned char       procalign;       /* current OPTION:PROCALIGN setting */
 #endif
@@ -390,6 +386,8 @@ typedef struct {
     unsigned char       simseg_init;     /* simplified segm dir flags */
     unsigned char       PhaseError;      /* phase error flag */
     unsigned char       CommentDataInCode;/* OMF: emit coment records about data in code segs */
+    unsigned char       prologuemode;
+    unsigned char       epiloguemode;
     uint                srcfile;         /* is a file stack index */
     dir_node            *flat_grp;       /* magic FLAT group */
     asm_sym             *start_label;    /* start label */
@@ -417,31 +415,27 @@ extern void             dir_remove_table( symbol_queue *, dir_node * );
 
 extern int              SizeFromMemtype( memtype, int, asm_sym * );
 extern ret_code         MemtypeFromSize( int, memtype * );
-extern ret_code         GetLangType( int *, lang_type * );
-
-//extern uint             GetExtIdx( struct asm_sym * ); /* Get the index of an extrn defn */
+extern ret_code         GetLangType( int *, enum lang_type * );
 
 extern const typeinfo   *FindToken( const char *token, const typeinfo *, int );
-extern int              FindStdType( int );  /* find a predefined type */
-//extern int              RegisterValueToIndex( int, bool *);
+//extern int              FindStdType( int );  /* find a predefined type */
 extern int              SizeFromRegister( int );
-extern ret_code         EchoDef( int );         /* handle ECHO directive */
-extern ret_code         OptionDirective( int ); /* handle OPTION directive */
-
 extern void             pushitem( void *, void * );
 extern void             *popitem( void * );
-//extern void             *peekitem( void *stack, int );
-//extern ret_code         cpu_directive( int i );
 extern ret_code         SetCPU( enum asm_cpu );
+
+extern ret_code         OptionDirective( int ); /* handle OPTION directive */
 extern ret_code         StartupExitDirective( int );
-extern ret_code         EndDirective( int i, struct code_info *CodeInfo );
+extern ret_code         EndDirective( int i );
 extern ret_code         ModelDirective( int i );
 extern ret_code         cpu_directive( int i );
 extern ret_code         SafeSEHDirective( int i );
-
-/* make a forward declaration for struct code_info. */
-struct code_info;
-
-extern ret_code         directive( int, struct code_info * );
+extern ret_code         SegOrderDirective( int i );
+extern ret_code         RadixDirective( int i );
+extern ret_code         AliasDirective( int i );
+extern ret_code         EchoDirective( int i );
+extern ret_code         IncludeLibDirective( int i );
+extern ret_code         IncBinDirective( int i );
+extern ret_code         NameDirective( int i );
 
 #endif

@@ -34,10 +34,11 @@
 
 enum exprtype {
     EXPR_EMPTY = EMPTY,
-    EXPR_UNDEF = 0,     // undefined type when error occures or result is undefined
-    EXPR_ADDR,          // e.g. "foo", "seg foo" and "offset foo"
-    EXPR_CONST,         // a constant; note that "label1 - label2" -> constant
-    EXPR_REG            // a register
+    EXPR_UNDEF = 0,     /* undefined type when error occures or result is undefined */
+    EXPR_ADDR,          /* e.g. "foo", "seg foo" and "offset foo" */
+    EXPR_CONST,         /* constant; note that "label1 - label2" -> constant */
+    EXPR_REG,           /* register */
+    EXPR_FLOAT          /* v2.05: float */
 };
 
 // argument types accepted by unary operators
@@ -90,6 +91,7 @@ typedef struct expr_list {
     char            *string;        // for strings only -- NULL otherwise
     int             base_reg;       // position of token for base register
                                     // if type is EXPR_REG, it holds register
+                                    // if type is EXPR_FLOAT, it holds float pos
     int             idx_reg;        // position of token for index register
     int             label;          // position of token holding the label
     int             override;       // position of token holding the override label
@@ -101,13 +103,14 @@ typedef struct expr_list {
     uint_8          scale;          // scaling factor 1, 2, 4, or 8 - 386 code only
     uint_8          Ofssize;        // for MT_NEAR | MT_FAR
     union {
-        uint_8      flags;
+        uint_8      flags1;
         struct {
             unsigned indirect : 1;   // Whether inside [] or not
             unsigned explicit : 1;   // Whether expression type explicitly given
             unsigned abs      : 1;   // external ABS
             unsigned is_type : 1;    // constant is a type
             unsigned is_opattr : 1;  // current operator is OPATTR
+            unsigned negative : 1;   // for EXPR_FLOAT only
         };
     };
     struct asm_sym  *sym;   // label used
@@ -115,7 +118,13 @@ typedef struct expr_list {
     struct asm_sym  *type;  // for DOT operator. Must be last (see TokenAssign)!
 } expr_list;
 
-extern ret_code     EvalOperand( int *, int, expr_list *, bool );
+/* flags for last argument of EvalOperand() */
+enum expr_flags {
+    EXPF_NOERRMSG  = 1,  /* suppress error messages */
+    EXPF_NOLCREATE = 2   /* don't create label if it isn't defined yet */
+};
+
+extern ret_code     EvalOperand( int *, int, expr_list *, uint_8 );
 extern void         ExprEvalInit( void );
 
 #endif

@@ -1,6 +1,7 @@
 
 ;--- OPATTR test
 
+	.dosseg
 	.286
 	.model small
 	.386
@@ -17,6 +18,7 @@ externdef stdcall ExitProcess:proc
 label2 label byte
 var1 db 0
 externdef var2:byte
+var5 SBYTE 0
 
 	.code
 
@@ -34,6 +36,7 @@ var4	db 0
 	dw OPATTR var3          ;local var
 	dw OPATTR label1        ;code label
 	dw OPATTR var4			;data label in code seg
+	dw OPATTR var5			;signed internal var
 	dw OPATTR label2
 	dw OPATTR undefined_var ;undefined var
 	dw OPATTR main          ;PROC c

@@ -16,7 +16,8 @@
 typedef struct equ_item {
     struct equ_item *next;
     asm_sym *sym;
-    int value;
+    int lvalue;
+    int hvalue;
     bool isdefined;
 } equ_item;
 
@@ -29,7 +30,7 @@ typedef struct line_item {
     struct line_item *next;
     uint_32 lineno:20, srcfile:12;
     uint_32 list_pos; /* position .LST file */
-    char line[];
+    char line[1];
 } line_item;
 
 extern line_item *LineStoreCurr;
@@ -55,14 +56,28 @@ typedef struct mod_state {
 
 extern mod_state modstate;
 extern bool StoreState; /* is 1 if states are to be stored in pass one */
-extern bool UseSavedState; /* is 1 if preprocessed lines are to be used */
 
-void SaveState( void );
+/* UseSavedState: is TRUE if preprocessed lines are to be read in pass 2,3,...
+ * Currently, this flag is set DURING pass one! That's bad,
+ * because it means that the flag itself doesn't tell whether
+ * (preprocessed) lines are read.
+ * the fix proposal is: set the flag - conditionally - AFTER pass one.
+ * Also, rename the flag (perhaps UseSavedLines )!
+ */
+extern bool UseSavedState; 
+
+//void SaveState( void );
 void SegmentSaveState( void );
 void AssumeSaveState( void );
 void ContextSaveState( void );
-void StoreLine( char * );
+void StoreLine( char *, uint_32 );
 void SkipSavedState( void );
+
+#define FStoreLine() if ( Parse_Pass == PASS_1 ) StoreLine( CurrSource, list_pos )
+
+#else
+
+#define FStoreLine()
 
 #endif
 

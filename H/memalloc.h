@@ -50,9 +50,9 @@ extern void MemFree( void *ptr );
 #define AsmTmpAlloc( amount )   _alloca( amount )
 #endif
 
-// AsmAlloc() and AsmFree() are fast variants, which
-// are to be used for all allocations which aren't "global"
-
+/* AsmAlloc() and AsmFree() are fast variants, which
+ * are to be used for all allocations which aren't "global"
+ */
 extern  void    *AsmAlloc( size_t );
 #if FASTMEM
 /* be careful not to use a function call as argument for AsmFree()! */

@@ -106,10 +106,12 @@ static ret_code DoPatch( struct asm_sym *sym, struct fixup *fixup )
                 FreeFixup( fixup );
                 DebugMsg(("DoPatch: FIX_RELOFF32/FIX_RELOFF16, return\n"));
                 return( NOT_ERROR );
-            case FIX_LOBYTE:  /* push <forward reference> */
-                size = 1;    /* size increases from 2 to 3/5 */
-                DebugMsg(("DoPatch: FIX_LOBYTE\n"));
-                goto patch;
+            case FIX_OFF8:  /* push <forward reference> */
+                if ( fixup->option == OPTJ_PUSH ) {
+                    size = 1;    /* size increases from 2 to 3/5 */
+                    DebugMsg(("DoPatch: FIX_OFF8\n"));
+                    goto patch;
+                }
             }
         }
     }
@@ -241,7 +243,7 @@ ret_code BackPatch( struct asm_sym *sym )
 /***************************************/
 /*
  * patching for forward reference labels in Jmp/Call instructions;
- * called by LabelCreate(), ProcDef() and data_init(), that is, whenever
+ * called by LabelCreate(), ProcDef() and data_dir(), that is, whenever
  * a (new) label is defined. The new label is the <sym> parameter.
  * During the process, the label's offset might be changed!
  *

@@ -44,7 +44,6 @@
 #include "listing.h"
 #include "segment.h"
 
-extern char             *MsgGet( int resourceid, char *buffer );
 extern void             print_source_nesting_structure( void );
 extern char             banner_printed;
 
@@ -65,7 +64,8 @@ void DoDebugMsg( const char *format, ... )
     va_list args;
     if( !Options.debug ) return;
 
-    if( ModuleInfo.cref == FALSE ) return;
+    if( ModuleInfo.cref == FALSE && AsmFName[ASM] != NULL )
+        return;
 
     va_start( args, format );
     vprintf( format, args );
@@ -125,10 +125,10 @@ void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
         fwrite( "\n", 1, 1, fp );
 
         /* if in Pass 1, add the error msg to the listing */
-        if ( FileInfo.file[LST] &&
+        if ( AsmFile[LST] &&
              severity &&
              Parse_Pass == PASS_1 &&
-             fp == FileInfo.file[ERR] ) {
+             fp == AsmFile[ERR] ) {
             LstWrite( LSTTYPE_DIRECTIVE, GetCurrOffset(), 0 );
             LstPrintf( "                           %s", buffer );
             LstNL();
@@ -139,21 +139,25 @@ void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
 static void PrtMsg( int severity, int msgnum, va_list args1, va_list args2 )
 /**************************************************************************/
 {
+#ifndef __SW_BD
     if( !banner_printed )
         trademark();
-
+#endif
     /* open .err file if not already open and a name is given */
-    if( FileInfo.file[ERR] == NULL && FileInfo.fname[ERR] != NULL ) {
-        FileInfo.file[ERR] = fopen( FileInfo.fname[ERR], "w" );
-        if( FileInfo.file[ERR] == NULL )
-            Fatal( FATAL_CANNOT_OPEN_FILE, FileInfo.fname[ERR], errno );
+    if( AsmFile[ERR] == NULL && AsmFName[ERR] != NULL ) {
+        AsmFile[ERR] = fopen( AsmFName[ERR], "w" );
+        if( AsmFile[ERR] == NULL )
+            Fatal( FATAL_CANNOT_OPEN_FILE, AsmFName[ERR], errno );
     }
 
-    PutMsg( errout, severity, msgnum, args1 );
-    fflush( errout );                       /* 27-feb-90 */
-    if( FileInfo.file[ERR] ) {
+    /* v2.05: new option -eq */
+    if ( Options.no_error_disp == FALSE ) {
+        PutMsg( errout, severity, msgnum, args1 );
+        fflush( errout );                       /* 27-feb-90 */
+    }
+    if( AsmFile[ERR] ) {
         //Errfile_Written = TRUE;
-        PutMsg( FileInfo.file[ERR], severity, msgnum, args2 );
+        PutMsg( AsmFile[ERR], severity, msgnum, args2 );
     }
 }
 
@@ -178,7 +182,7 @@ void AsmErr( int msgnum, ... )
     va_list args1, args2;
 
 #ifdef DEBUG_OUT
-    DebugCurrLine();
+    printf( "%s\n", CurrSource );
 #endif
     va_start( args1, msgnum );
     va_start( args2, msgnum );
@@ -204,7 +208,7 @@ void AsmWarn( int level, int msgnum, ... )
 
     if( level <= Options.warning_level ) {
 #ifdef DEBUG_OUT
-        DebugCurrLine();
+        printf( "%s\n", CurrSource );
 #endif
         va_start( args1, msgnum );
         va_start( args2, msgnum );

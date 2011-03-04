@@ -2,13 +2,11 @@
 # this makefile in OW WMake style creates JWASM.EXE (Win32) and optionally
 # JWASMD.EXE (DOS).
 # tools used:
-# - Open Watcom v1.8
+# - Open Watcom v1.8/v1.9
 # - HXDEV (only needed if DOS=1 is set below to create JWASMD.EXE)
 #
 # to create a debug version, run "WMake debug=1".
 # to create a version with DJGPP support, run "WMake djgpp=1".
-# to create a version which supports Open Watcom's fastcall register
-# convention, run "WMake invwc=1".
 
 WIN=1
 DOS=1
@@ -29,10 +27,6 @@ DEBUG=0
 
 !ifndef DJGPP
 DJGPP=0
-!endif
-
-!ifndef INVWC
-INVWC=0
 !endif
 
 # to track memory leaks, the Open Watcom TRMEM module can be included.
@@ -68,13 +62,10 @@ extra_c_flags += -obmilrt -s -DNDEBUG
 !endif
 
 !if $(TRMEM)
-extra_c_flags += -DTRMEM -DFASTMEM=0
+extra_c_flags += -of -DTRMEM -DFASTMEM=0
 !endif
 !if $(DJGPP)
 extra_c_flags += -DDJGPP_SUPPORT=1
-!endif
-!if $(INVWC)
-extra_c_flags += -DINVWC_SUPPORT=1
 !endif
 #########
 
@@ -83,6 +74,8 @@ LOPT = op quiet
 # for OW v1.8, the debug version needs user32.lib to resolve CharUpperA()
 # without it, WD(W) will crash immediately.
 LOPTD = debug dwarf op symfile lib user32.lib
+!else
+LOPTD = 
 !endif
 
 lflagsw = $(LOPTD) system nt $(LOPT) op map=$^*
@@ -105,7 +98,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
            $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj&
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
-           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    &
+           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/cmdline.obj &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
@@ -157,7 +150,7 @@ op map=$^*, stub=$(HXDIR)\Bin\loadpex.bin, stack=0x40000, heapsize=0x100000
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h H/directve.h
 	$(CC) parser.c
 
 ######

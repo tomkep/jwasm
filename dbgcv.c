@@ -235,10 +235,11 @@ static uint_8 * cv_write_type( dir_node *types, struct asm_sym *sym, uint_8 *pt 
     int         size;
     uint_16     cnt = 0;
 
-    if ( type->e.structinfo->typekind == TYPE_TYPEDEF ) /* filter typedefs */
+    /* handle structs, unions and records only */
+    if ( type->e.structinfo->typekind != TYPE_STRUCT &&
+        type->e.structinfo->typekind != TYPE_UNION &&
+        type->e.structinfo->typekind != TYPE_RECORD )
         return( pt );
-
-    /* remaining: structs, unions and records */
 
     if ( sym->total_size >= 0x8000 )
         typelen = sizeof( uint_32 );
@@ -585,7 +586,7 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
     ps += sizeof(uint_32);
 
     /* 1. record: object name */
-    objname = FileInfo.fname[OBJ];
+    objname = AsmFName[OBJ];
     for ( i = strlen( objname ); i; i-- )
         if ( *(objname+i-1) == '/' || *(objname+i-1) == '\\' )
             break;

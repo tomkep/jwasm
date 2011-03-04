@@ -90,17 +90,17 @@ typedef struct _IMAGE_RELOCATION {
 } IMAGE_RELOCATION;
 #pragma pack(pop)
 
-#define IMAGE_REL_I386_ABSOLUTE 0x0000
-#define IMAGE_REL_I386_DIR16    0x0001
-#define IMAGE_REL_I386_REL16    0x0002
-#define IMAGE_REL_I386_DIR32    0x0006
-#define IMAGE_REL_I386_DIR32NB  0x0007
-#define IMAGE_REL_I386_SEG12    0x0009
-#define IMAGE_REL_I386_SECTION  0x000A
-#define IMAGE_REL_I386_SECREL   0x000B
-#define IMAGE_REL_I386_TOKEN    0x000C
-#define IMAGE_REL_I386_SECREL7  0x000D
-#define IMAGE_REL_I386_REL32    0x0014
+#define IMAGE_REL_I386_ABSOLUTE 0x0000 /* relocation is ignored */
+#define IMAGE_REL_I386_DIR16    0x0001 /* 16bit VA */
+#define IMAGE_REL_I386_REL16    0x0002 /* 16bit PC-relative offset */
+#define IMAGE_REL_I386_DIR32    0x0006 /* 32bit VA */
+#define IMAGE_REL_I386_DIR32NB  0x0007 /* 32bit RVA (IMAGEREL) */
+#define IMAGE_REL_I386_SEG12    0x0009 /* ??? */
+#define IMAGE_REL_I386_SECTION  0x000A /* 16bit section index */
+#define IMAGE_REL_I386_SECREL   0x000B /* 32bit offset (SECTIONREL) */
+#define IMAGE_REL_I386_TOKEN    0x000C /* CLR token */
+#define IMAGE_REL_I386_SECREL7  0x000D /* 7bit offset */
+#define IMAGE_REL_I386_REL32    0x0014 /* 32bit PC-relative offset */
 
 // X86-64 relocations
 

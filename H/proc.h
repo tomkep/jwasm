@@ -36,22 +36,19 @@ extern dir_node         *CurrProc;      /* current procedure */
 
 /*---------------------------------------------------------------------------*/
 
-extern ret_code         proc_check( void );
 extern ret_code         ExamineProc( dir_node *, int , bool );  /* common for PROC/PROTO */
 extern ret_code         LocalDef( int );        /* LOCAL directive */
 extern asm_sym         *CreateProc( asm_sym *, const char *, unsigned char );
 extern void             DeleteProc( dir_node * );
 extern ret_code         ProcDef( int );         /* PROC directive */
-extern asm_sym         *CreateProto( int, const char * );
-extern ret_code         ProtoDef( int );/* PROTO directive */
+extern ret_code         CopyPrototype( dir_node *, dir_node * );
 extern ret_code         EndpDef( int );         /* ENDP directive */
 #if AMD64_SUPPORT
 extern ret_code         ExcFrameDirective( int );
 #endif
 extern ret_code         InvokeDirective( int );
 extern ret_code         RetInstr( int, int );   /* emit return statement from procedure */
-//extern int              WritePrologue( void );  /* emit prologue statement after the */
-                                                /* declaration of a procedure */
+extern void             write_prologue( void );
 extern void             ProcInit( void );
 
 #endif

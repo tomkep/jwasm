@@ -42,12 +42,14 @@
 #include "expreval.h"
 #include "fastpass.h"
 #include "types.h"
+#include "tokenize.h"
+#include "listing.h"
 
 /* prototypes */
 
 /* table SegAssume is for the segment registers: */
 
-assume_info      SegAssumeTable[NUM_SEGREGS];
+struct assume_info SegAssumeTable[NUM_SEGREGS];
 
 /* table StdAssume is for the standard registers:
  * (E)AX=0, (E)CX=1, (E)DX=2, (E)BX=3
@@ -59,11 +61,15 @@ assume_info      SegAssumeTable[NUM_SEGREGS];
 #define NUM_STDREGS 8
 #endif
 
-assume_info      StdAssumeTable[NUM_STDREGS];
+struct assume_info StdAssumeTable[NUM_STDREGS];
+
+static struct asm_sym *stdsym[NUM_STDREGS];
 
 #if FASTPASS
-static assume_info saved_SegAssumeTable[NUM_SEGREGS];
-static assume_info saved_StdAssumeTable[NUM_STDREGS];
+static struct assume_info saved_SegAssumeTable[NUM_SEGREGS];
+static struct assume_info saved_StdAssumeTable[NUM_STDREGS];
+/* v2.05: saved type info content */
+static struct stdassume_typeinfo saved_StdTypeInfo[NUM_STDREGS];
 #endif
 
 /* order to use for assume searches */
@@ -87,17 +93,45 @@ void GetSegAssumeTable( void *savedstate )
     DebugMsg(("GetSegAssumeTable\n" ));
     memcpy( savedstate, &SegAssumeTable, sizeof(SegAssumeTable) );
 }
-void SetStdAssumeTable( void *savedstate )
-/****************************************/
+
+/* unlike the segment register assumes, the
+ * register assumes need more work to save/restore the
+ * current status, because they have their own
+ * type symbols, which may be reused.
+ */
+
+void SetStdAssumeTable( void *savedstate, struct stdassume_typeinfo *ti )
+/***********************************************************************/
 {
+    int i;
     DebugMsg(("SetStdAssumeTable\n" ));
     memcpy( &StdAssumeTable, savedstate, sizeof(StdAssumeTable) );
+    for ( i = 0; i < NUM_STDREGS; i++, ti++ ) {
+        if ( StdAssumeTable[i].symbol ) {
+            StdAssumeTable[i].symbol->type        = ti->type;
+            StdAssumeTable[i].symbol->target_type = ti->target_type;
+            StdAssumeTable[i].symbol->mem_type    = ti->mem_type;
+            StdAssumeTable[i].symbol->ptr_memtype = ti->ptr_memtype;
+            StdAssumeTable[i].symbol->is_ptr      = ti->is_ptr;
+        }
+    }
 }
-void GetStdAssumeTable( void *savedstate )
-/****************************************/
+
+void GetStdAssumeTable( void *savedstate, struct stdassume_typeinfo *ti )
+/***********************************************************************/
 {
+    int i;
     DebugMsg(("GetStdAssumeTable\n" ));
     memcpy( savedstate, &StdAssumeTable, sizeof(StdAssumeTable) );
+    for ( i = 0; i < NUM_STDREGS; i++, ti++ ) {
+        if ( StdAssumeTable[i].symbol ) {
+            ti->type        = StdAssumeTable[i].symbol->type;
+            ti->target_type = StdAssumeTable[i].symbol->target_type;
+            ti->mem_type    = StdAssumeTable[i].symbol->mem_type;
+            ti->ptr_memtype = StdAssumeTable[i].symbol->ptr_memtype;
+            ti->is_ptr      = StdAssumeTable[i].symbol->is_ptr;
+        }
+    }
 }
 
 #if FASTPASS
@@ -105,7 +139,7 @@ void AssumeSaveState( )
 /*********************/
 {
     GetSegAssumeTable( &saved_SegAssumeTable );
-    GetStdAssumeTable( &saved_StdAssumeTable );
+    GetStdAssumeTable( &saved_StdAssumeTable, saved_StdTypeInfo );
 }
 #endif
 
@@ -122,11 +156,12 @@ void AssumeInit( )
     for( reg = 0; reg < NUM_STDREGS; reg++ ) {
         StdAssumeTable[reg].symbol = NULL;
         StdAssumeTable[reg].error = 0;
+        stdsym[reg] = NULL;
     }
 #if FASTPASS
     if ( Parse_Pass != PASS_1 ) {
         SetSegAssumeTable( &saved_SegAssumeTable );
-        SetStdAssumeTable( &saved_StdAssumeTable );
+        SetStdAssumeTable( &saved_StdAssumeTable, saved_StdTypeInfo );
     }
 #endif
 }
@@ -181,10 +216,27 @@ void ModelAssumeInit( void )
     }
 }
 
+/* used by INVOKE directive */
+
 struct asm_sym * GetStdAssume( int reg )
 /**************************************/
 {
-    return (StdAssumeTable[reg].symbol);
+    if ( StdAssumeTable[reg].symbol )
+        if ( StdAssumeTable[reg].symbol->mem_type == MT_TYPE )
+            return( StdAssumeTable[reg].symbol->type );
+        else
+            return( StdAssumeTable[reg].symbol->target_type );
+    return ( NULL );
+}
+
+/* v2.05: new, used by
+ * expression evaluator if a register is used for indirect addressing
+ */
+
+struct asm_sym * GetStdAssumeEx( int reg )
+/****************************************/
+{
+    return( StdAssumeTable[reg].symbol );
 }
 
 ret_code AssumeDirective( int i )
@@ -199,23 +251,23 @@ ret_code AssumeDirective( int i )
  */
 {
     int             reg;
-    int             size;
     int             j;
-    int             type;
+    int             size;
     uint_32         flags;
-    int             indirection;
-    assume_info     *info;
+    struct assume_info *info;
     struct asm_sym  *sym;
     bool            segtable;
+    struct qualified_type ti;
 
     DebugMsg1(( "AssumeDirective enter, pass=%u\n", Parse_Pass+1 ));
 
     for( i++; i < Token_Count; i++ ) {
-        indirection = 0;
+
         if( ( AsmBuffer[i]->token == T_ID )
             && (0 == _stricmp( AsmBuffer[i]->string_ptr, szNothing )) ) {
             AssumeInit();
-            continue;
+            i++;
+            break;
         }
 
         /*---- get the info ptr for the register ----*/
@@ -265,6 +317,7 @@ ret_code AssumeDirective( int i )
             } else
                 info->error |= (( reg >= T_AH && reg <= T_BH ) ? RH_ERROR : ( flags & OP_R ));
             info->symbol = NULL;
+            i++;
         } else if( 0 == _stricmp( AsmBuffer[i]->string_ptr, szNothing )) {
             if ( segtable ) {
                 info->flat = FALSE;
@@ -272,63 +325,46 @@ ret_code AssumeDirective( int i )
             } else
                 info->error &= ~(( reg >= T_AH && reg <= T_BH ) ? RH_ERROR : ( flags & OP_R ));
             info->symbol = NULL;
+            i++;
         } else if ( segtable == FALSE ) {
-            if( AsmBuffer[i]->token == T_RES_ID &&
-               AsmBuffer[i]->value == T_PTR &&
-               AsmBuffer[i+1]->token != T_FINAL &&
-               AsmBuffer[i+1]->token != T_COMMA ) {
-                i++;
-                indirection++;
-            }
-            type = -1;
-            sym = NULL;
-            if ( AsmBuffer[i]->token == T_RES_ID ) {
-                type = FindStdType( AsmBuffer[i]->value );
-            }
-            if ( type != -1 ) {
-                size = SizeFromMemtype( SimpleType[type].mem_type, SimpleType[type].Ofssize, NULL );
-                /* v2.04: added check for ID */
-            } else if ( type == -1 && AsmBuffer[i]->token == T_ID ) {
 
-                sym = SymSearch( AsmBuffer[i]->string_ptr );
-                if ( sym == NULL ) {/* in pass 1 a forward reference is allowed */
-                    sym = SymCreate( AsmBuffer[i]->string_ptr, TRUE );
-#if FASTPASS
-                    /* ensure that directive is rerun in pass 2
-                     * so an error msg can be emitted.
-                     */
-                    if ( StoreState == FALSE )
-                        SaveState();
-#endif
-                }
-                if ( sym->state == SYM_UNDEFINED ) {
-                    DebugMsg(("AssumeDirective: forward referenced symbol %s\n", sym->name ));
-                    /* change symbol to a type.
-                     * It'll still have type TYPE_NONE */
-                    CreateTypeSymbol( sym, NULL, TRUE );
-                }
-                if ( sym->state != SYM_TYPE ||
-                    ( Parse_Pass != PASS_1 && ((dir_node *)sym)->e.structinfo->typekind == TYPE_NONE )) {
-                    DebugMsg(("AssumeDirective: error, sym %s: state=%u, typekind=%u\n", sym->name, sym->state, ((dir_node *)sym)->e.structinfo->typekind ));
-                    if ( sym->state != SYM_TYPE ) /* v2.0: no error if undefined type */
-                        AsmErr( QUALIFIED_TYPE_EXPECTED, i );
-                    return( ERROR );
-                }
-                size = sym->total_size;
-            } else {
-                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            /* v2.05: changed to use new GetQualifiedType() function */
+            ti.size = 0;
+            ti.is_ptr = 0;
+            ti.is_far = FALSE;
+            ti.mem_type = MT_EMPTY;
+            ti.ptr_memtype = MT_EMPTY;
+            ti.symtype = NULL;
+            ti.Ofssize = ModuleInfo.Ofssize;
+            if ( GetQualifiedType( &i, &ti ) == ERROR )
                 return( ERROR );
-            }
 
             /* v2.04: check size of argument! */
-            j = OperandSize( flags, NULL );
-            if ( ( indirection == 0 && j != size ) ||
-                ( indirection > 0 && j < CurrWordSize ) ) {
+            size = OperandSize( flags, NULL );
+            if ( ( ti.is_ptr == 0 && size != ti.size ) ||
+                ( ti.is_ptr > 0 && size < CurrWordSize ) ) {
                 AsmError( TYPE_IS_WRONG_SIZE_FOR_REGISTER );
                 return( ERROR );
             }
             info->error &= ~(( reg >= T_AH && reg <= T_BH ) ? RH_ERROR : ( flags & OP_R ));
-            info->symbol = sym;
+            if ( stdsym[j] == NULL ) {
+                stdsym[j] = CreateTypeSymbol( NULL, "", FALSE );
+                ((dir_node *)stdsym[j])->e.structinfo->typekind = TYPE_TYPEDEF;
+            }
+
+            stdsym[j]->total_size = ti.size;
+            stdsym[j]->mem_type   = ti.mem_type;
+            stdsym[j]->is_ptr     = ti.is_ptr;
+            stdsym[j]->isfar      = ti.is_far;
+            stdsym[j]->Ofssize    = ti.Ofssize;
+            stdsym[j]->ptr_memtype = ti.ptr_memtype; /* added v2.05 rc13 */
+            if ( ti.mem_type == MT_TYPE )
+                stdsym[j]->type = ti.symtype;
+            else
+                stdsym[j]->target_type = ti.symtype;
+
+            info->symbol = stdsym[j];
+
         } else { /* segment register */
             if( AsmBuffer[i]->token == T_UNARY_OPERATOR &&
                AsmBuffer[i]->value == T_SEG ) {
@@ -343,13 +379,10 @@ ret_code AssumeDirective( int i )
                     if ( Parse_Pass != PASS_1 ) {
                         AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
                     }
-#if FASTPASS
                     /* ensure that directive is rerun in pass 2
                      * so an error msg can be emitted.
                      */
-                    if ( StoreState == FALSE )
-                        SaveState();
-#endif
+                    FStoreLine();
                 } else if ( sym->state != SYM_SEG &&
                            sym->state != SYM_GRP ) {
                     AsmError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
@@ -375,14 +408,16 @@ ret_code AssumeDirective( int i )
             }
             info->error = FALSE;
             info->symbol = sym;
+            i++;
         }
-        i++;
 
-        /* go past comma */
-        if( ( i < Token_Count ) && ( AsmBuffer[i]->token != T_COMMA ) ) {
-            AsmError( EXPECTING_COMMA );
-            return( ERROR );
-        }
+        /* comma expected */
+        if( i < Token_Count && AsmBuffer[i]->token != T_COMMA )
+            break;
+    }
+    if ( i < Token_Count ) {
+        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->tokpos );
+        return( ERROR );
     }
     return( NOT_ERROR );
 }

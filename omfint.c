@@ -708,7 +708,7 @@ void omf_intInit( void )
 /**********************/
 {
     RegList( myFuncs, NUM_FUNCS );
-    file_out = WriteOpen( FileInfo.file[OBJ] );
+    file_out = WriteOpen( AsmFile[OBJ] );
 }
 
 void omf_intFini( void )

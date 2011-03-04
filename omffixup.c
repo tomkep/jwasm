@@ -194,9 +194,9 @@ static int fill_logref( const struct fixup *fixup, logref *lr )
 
     if( sym == NULL ) {
 
-        if ( fixup->frame == EMPTY ) /* v1.96: nothing to do without a frame */
+        if ( fixup->frame_type == EMPTY ) /* v1.96: nothing to do without a frame */
             return( 0 );
-        lr->target = fixup->frame;
+        lr->target = fixup->frame_type;
         lr->target_datum = fixup->frame_datum;
         lr->frame = FRAME_TARG;
 
@@ -210,8 +210,8 @@ static int fill_logref( const struct fixup *fixup, logref *lr )
 
         lr->target = TARGET_GRP;
         lr->target_datum = ((dir_node *)sym)->e.grpinfo->grp_idx;
-        if( fixup->frame != EMPTY ) {
-            lr->frame = fixup->frame;
+        if( fixup->frame_type != EMPTY ) {
+            lr->frame = fixup->frame_type;
             lr->frame_datum = fixup->frame_datum;
         } else {
             lr->frame = FRAME_GRP;
@@ -224,8 +224,8 @@ static int fill_logref( const struct fixup *fixup, logref *lr )
 
         lr->target = TARGET_SEG;
         lr->target_datum = GetSegIdx( sym );
-        if( fixup->frame != EMPTY ) {
-            lr->frame = fixup->frame;
+        if( fixup->frame_type != EMPTY ) {
+            lr->frame = fixup->frame_type;
             lr->frame_datum = fixup->frame_datum;
         } else {
             lr->frame = FRAME_SEG;
@@ -241,9 +241,9 @@ static int fill_logref( const struct fixup *fixup, logref *lr )
             DebugMsg(("fill_logref(%X): EXTERNAL %s\n", fixup, sym->name));
 
             lr->target = TARGET_EXT;
-            lr->target_datum = sym->idx;
+            lr->target_datum = sym->ext_idx;
 
-            if( fixup->frame == FRAME_GRP && fixup->frame_datum == 0 ) {
+            if( fixup->frame_type == FRAME_GRP && fixup->frame_datum == 0 ) {
                 /* set the frame to the frame of the corresponding segment */
                 lr->frame_datum = GetGrpIdx( sym );
             }
@@ -251,7 +251,7 @@ static int fill_logref( const struct fixup *fixup, logref *lr )
             //asm_sym *grpsym;
             /* it's a SYM_INTERNAL */
             DebugMsg(("fill_logref(%X): fixup->frame, datum=%u.%u sym->name=%s state=%X segm=%X\n",
-                      fixup, fixup->frame, fixup->frame_datum, sym->name, sym->state, sym->segment ));
+                      fixup, fixup->frame_type, fixup->frame_datum, sym->name, sym->state, sym->segment ));
             if ( sym->segment == NULL ) { /* shouldn't happen */
                 AsmErr( SEGMENT_MISSING_FOR_FIXUP, sym->name );
                 return ( 0 );
@@ -261,8 +261,8 @@ static int fill_logref( const struct fixup *fixup, logref *lr )
             lr->target_datum = GetSegIdx( sym->segment );
         }
 
-        if( fixup->frame != EMPTY ) {
-            lr->frame = (uint_8)fixup->frame;
+        if( fixup->frame_type != EMPTY ) {
+            lr->frame = (uint_8)fixup->frame_type;
         } else {
             lr->frame = FRAME_TARG;
         }
@@ -315,11 +315,8 @@ size_t OmfFixGenFix( struct fixup *fixup, uint_8 *buf, int type )
     case FIX_RELOFF8:
         self_relative = TRUE;
         /* no break */
-    case FIX_LOBYTE:
+    case FIX_OFF8:
         locat1 = ( LOC_OFFSET_LO << 2 );
-        break;
-    case FIX_HIBYTE:
-        locat1 = ( LOC_OFFSET_HI << 2 );
         break;
     case FIX_RELOFF16:
         self_relative = TRUE;
@@ -340,6 +337,9 @@ size_t OmfFixGenFix( struct fixup *fixup, uint_8 *buf, int type )
         } else {
             locat1 = ( LOC_MS_OFFSET_32 << 2 );
         }
+        break;
+    case FIX_HIBYTE:
+        locat1 = ( LOC_OFFSET_HI << 2 );
         break;
     case FIX_SEG:
         locat1 = ( LOC_BASE << 2 );

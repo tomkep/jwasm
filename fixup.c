@@ -37,7 +37,7 @@
 
 #define GNURELOCS 1
 
-extern int_8           Frame;          /* Frame of current fixup */
+extern int_8           Frame_Type;     /* Frame of current fixup */
 extern uint_16         Frame_Datum;    /* Frame datum of current fixup */
 extern struct format_options formatoptions[];
 
@@ -56,7 +56,8 @@ struct fixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixup_o
  * creates a new fixup item and initializes it using symbol <sym>.
  * put the correct target offset into the link list when forward reference of
  * relocatable is resolved;
- * Global vars Frame and Frame_Datum must be set.
+ * Global vars Frame_Type and Frame_Datum must be set. For code,
+ * their values have been set in
  */
 {
 #ifdef DEBUG_OUT
@@ -99,7 +100,7 @@ struct fixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixup_o
     fixup->type = type;
     fixup->option = option;
     fixup->flags = 0;
-    fixup->frame = Frame;               /* this is just a guess */
+    fixup->frame_type = Frame_Type;     /* this is just a guess */
     fixup->frame_datum = Frame_Datum;
     fixup->def_seg = CurrSeg;           /* may be NULL (END directive) */
     fixup->sym = sym;

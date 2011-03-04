@@ -19,11 +19,6 @@
 "-C<p|u|x>\0"       "Set OPTION CASEMAP: p=NONE, u=ALL,\0"
 "\0"                "x=NOTPUBLIC (default).\0"
 "-D<name>[=text]\0" "Define text macro\0"
-#ifdef DEBUG_OUT
-"-d6\0"             "DBG: Display debug trace on stdout\0"
-"-d7\0"             "DBG: Do full second pass\0"
-"-d8\0"             "DBG: Disable backpatching\0"
-#endif
 #if COFF_SUPPORT && DJGPP_SUPPORT
 "-djgpp\0"          "Generate Djgpp's COFF variant\0"
 #endif
@@ -35,6 +30,7 @@
 #endif
 #endif
 "-EP\0"             "Output preprocessed listing to stdout\0"
+"-eq\0"             "don't display error messages\0"
 "-Fi<file_name>\0"  "Force <file_name> to be included\0"
 "-Fl[=<file_name>]\0" "Write listing file\0"
 "-Fo<file_name>\0"  "Set object file name\0"
@@ -45,9 +41,6 @@
 "-fp<n>\0"          "Set FPU, <n> is: 0=8087 (default), 2=80287, 3=80387\0"
 "-G<c|d|z>\0"       "Use Pascal, C or Stdcall calling convention\0"
 "-I<directory>\0"   "Add directory to list of include directories\0"
-#ifdef DEBUG_OUT
-"-ls\0"             "DBG: Display preprocessed line storage on stdout\0"
-#endif
 "-m<t|s|c|m|l|h|f>\0" "Set memory model:\0"
 "\0"                "(Tiny, Small, Compact, Medium, Large, Huge, Flat)\0"
 #if BIN_SUPPORT
@@ -61,9 +54,6 @@
 "-o\0"              "Allow C form of octal constants\0"
 #endif
 "-omf\0"            "Generate OMF format object file (default)\0"
-#ifdef DEBUG_OUT
-"-pm=<n>\0"         "DBG: Stop assembly after <n> passes\0"
-#endif
 "-q, -nologo\0"     "Don't display version and copyright information\0"
 "-Sa\0"             "Maximize source listing\0"
 #if COFF_SUPPORT
@@ -83,12 +73,14 @@
 "-zcw\0"            "No name decoration for C symbols\0"
 "-Zd\0"             "Add line number debug info (OMF & COFF only)\0"
 "-Zf\0"             "Make all symbols public\0"
+#if OWFC_SUPPORT
 "-zf<0|1>\0"        "Set FASTCALL type: 0=MS VC style (default),\0"
 "\0"                "1=OW register calling convention\0"
+#endif
 "-Zg\0"             "Generated code is to exactly match Masm's one\0"
 "-Zi\0"             "Add symbolic debug info (OMF & COFF only)\0"
 "-zlc\0"            "No OMF records about data in code\0"
-//"-zld\0"            "No OMF records about file dependencies\0"
+"-zld\0"            "No OMF records about far call optimization\0"
 #if COFF_SUPPORT
 "-zlf\0"            "No COFF .file entry in symbol table\0"
 "-zls\0"            "No COFF auxiliary entries for sections in symbol table\0"
@@ -105,4 +97,12 @@
 "-zzs\0"            "Store decorated name of start address (COFF only)\0"
 #endif
 "@env_var\0"        "Environment variable or file containing further commands\0"
+#ifdef DEBUG_OUT
+"Debug options:\0\0"
+"-d6\0"             "Display debug trace on stdout\0"
+"-d7\0"             "Do full second pass\0"
+"-d8\0"             "Disable backpatching\0"
+"-ls\0"             "Display preprocessed line storage on stdout\0"
+"-pm=<n>\0"         "Stop assembly after <n> passes\0"
+#endif
 "\n"

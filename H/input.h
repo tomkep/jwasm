@@ -32,8 +32,9 @@
 #ifndef _INPUT_H_INCLUDED
 #define _INPUT_H_INCLUDED
 
-extern uint_32 GetLineNumber( asm_sym * );
-#define LineNumber GetLineNumber( NULL )
+extern void     UpdateLineNumber( asm_sym * );
+extern uint_32  GetLineNumber( void );
+#define LineNumber GetLineNumber()
 
 extern void     PushLineQueue( void );
 //extern void     PopLineQueue( void );
@@ -41,13 +42,12 @@ extern void     AddLineQueue( const char *line );
 extern void     AddLineQueueX( const char *fmt, ... );
 extern ret_code InputQueueFile( const char *path, FILE * *pfile );
 extern char     *GetTextLine( char *buffer, int max );
-extern void     PushMacro( struct asm_sym *sym );
-extern void     PushMacroGoto( struct asm_sym *sym, int lineno );
+extern void     PushMacro( struct asm_sym *sym, int lineno );
 extern void     AddStringToIncludePath( const char *string );
 extern void     InputInit( void );
 extern void     InputPassInit( void );
 extern void     InputFini( void );
-extern int      GetPreprocessedLine( char * );
+extern int      GetPreprocessedLine( char *, int );
 extern int      GetCurrSrcPos( char * );
 extern void     ClearFileStack( void );
 extern uint     get_curr_srcfile( void );
@@ -57,13 +57,13 @@ extern const FNAME  *GetFName( uint );
 extern char     *GetTopLine( char * );
 #endif
 
-typedef struct line_list {
-    struct line_list    *next;
+struct line_list {
+    struct line_list *next;
 #ifdef DEBUG_OUT
     char lineno;
 #endif
-    char line[];
-} line_list;
+    char line[1];
+};
 
 typedef struct input_queue {
     struct line_list    *head;

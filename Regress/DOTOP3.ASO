@@ -1,0 +1,24 @@
+
+;--- dot operator errors
+;--- most will work with OPTION OLDSTRUCTS
+
+	.386
+	.model flat
+
+S1 struct
+f1	dd ?
+S1 ends
+
+	.code
+
+xxx S1 <>
+
+	mov eax, [eax].f1		;undefined symbol f1
+	mov eax, [eax].[ebx] 	;structure field expected
+	mov eax, ds:[0].S1		;operand must be memory expression
+	mov eax, [eax].4		;structure field expected
+	mov eax, [eax].DWORD	;structure field expected
+	mov eax, eax.S1			;invalid use of register
+	mov eax, [eax].xxx		;structure field expected
+
+END

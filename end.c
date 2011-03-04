@@ -42,7 +42,6 @@
 #include "tokenize.h"
 #include "expreval.h"
 #include "types.h"
-#include "fastpass.h"
 #include "listing.h"
 #include "omf.h"
 
@@ -50,6 +49,7 @@
 
 /* prototypes */
 extern ret_code      process_address( struct code_info *, expr_list * );
+extern unsigned int  Opnd_Count;     /* operand count of current instr */
 
 struct code_line {
     const char *src;
@@ -115,12 +115,6 @@ ret_code StartupExitDirective( int i )
     const struct code_line *p;
     expr_list   opndx;
 
-#if FASTPASS
-    /* make sure the directive is stored */
-    if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
-        SaveState();
-    }
-#endif
     if ( ModuleInfo.list )
         LstWriteSrcLine();
 
@@ -175,14 +169,14 @@ ret_code StartupExitDirective( int i )
         i++;
         if ( AsmBuffer[i]->token != T_FINAL ) {
             if( ModuleInfo.ostype == OPSYS_OS2 ) {
-                AddLineQueueX( "mov %r,%s", T_AX, AsmBuffer[j]->pos + 5 );
+                AddLineQueueX( "mov %r,%s", T_AX, AsmBuffer[j]->tokpos + 5 );
             } else {
-                if ( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR )
+                if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
                     return( ERROR );
                 if ( opndx.kind == EXPR_CONST && opndx.value < 0x100 && AsmBuffer[i]->token == T_FINAL ) {
                     AddLineQueueX( "mov %r,4C00h + %u", T_AX, opndx.value );
                 } else {
-                    AddLineQueueX( "mov %r,%s", T_AL, AsmBuffer[j]->pos + 5 );
+                    AddLineQueueX( "mov %r,%s", T_AL, AsmBuffer[j]->tokpos + 5 );
                     AddLineQueueX( "mov %r,4Ch", T_AH );
                 }
             }
@@ -202,31 +196,21 @@ ret_code StartupExitDirective( int i )
 
 /* END directive */
 
-ret_code EndDirective( int i, struct code_info *CodeInfo )
-/********************************************************/
+ret_code EndDirective( int i )
+/****************************/
 {
     expr_list           opndx;
     struct fixup        *fix;
     asm_sym             *sym;
+    struct code_info    CodeInfo;
 
-    DebugMsg(("EndDirective enter\n"));
-#if FASTPASS
-    /* if there's no code or data emitted, init the line store now */
-    if ( StoreState == FALSE && Parse_Pass == PASS_1 ) {
-        SaveState();
-    }
-#endif
-    if ( CurrStruct ) {
-        while ( CurrStruct->next )
-            CurrStruct = CurrStruct->next;
-        AsmErr( UNMATCHED_BLOCK_NESTING, CurrStruct->sym.name );
-    }
+    DebugMsg1(("EndDirective enter\n"));
 
-    /* close open segments */
-    SegmentModuleExit();
+    i++; /* skip directive */
 
-    i++; /* skip END directive */
-
+    /* v2.05: first parse the arguments. this allows
+     * SegmentModuleExit() later to run generated code.
+     */
     if( ModuleInfo.StartupDirectiveFound ) {
         /* start label behind END ignored if .STARTUP has been found */
         if( i < Token_Count && Parse_Pass == PASS_1 ) {
@@ -238,16 +222,30 @@ ret_code EndDirective( int i, struct code_info *CodeInfo )
         AsmBuffer[i+1]->string_ptr = "";
         Token_Count = i+1;
     }
-
-    ModuleInfo.EndDirFound = TRUE;
-
-    if( EvalOperand( &i, Token_Count, &opndx, TRUE ) == ERROR ) {
+    Opnd_Count = 0;
+    if( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR ) {
         return( ERROR );
     }
     if( AsmBuffer[i]->token != T_FINAL ) {
         AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
         return( ERROR );
     }
+
+    if ( CurrStruct ) {
+        while ( CurrStruct->next )
+            CurrStruct = CurrStruct->next;
+        AsmErr( UNMATCHED_BLOCK_NESTING, CurrStruct->sym.name );
+    }
+
+    /* close open segments */
+    SegmentModuleExit();
+
+    ModuleInfo.EndDirFound = TRUE;
+    CodeInfo.token = T_NULL;
+    CodeInfo.pcurr = &InstrTable[IndexFromToken( T_NULL )];
+    CodeInfo.InsFixup[0] = NULL;
+    CodeInfo.flags = 0;
+    CodeInfo.mem_type = MT_EMPTY;
 
     if( opndx.kind == EXPR_EMPTY ) {
         ;
@@ -257,9 +255,8 @@ ret_code EndDirective( int i, struct code_info *CodeInfo )
     } else {
         char error = TRUE;
         if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE ) {
-            CodeInfo->pcurr = &InstrTable[IndexFromToken( CodeInfo->token )];
-            process_address( CodeInfo, &opndx );
-            fix = CodeInfo->InsFixup[0];
+            process_address( &CodeInfo, &opndx );
+            fix = CodeInfo.InsFixup[0];
             if ( fix )
                 sym = fix->sym;
             if ( fix == NULL || sym == NULL ) {
@@ -283,7 +280,7 @@ ret_code EndDirective( int i, struct code_info *CodeInfo )
     }
 
     if ( Options.output_format == OFORMAT_OMF ) {
-        ModuleInfo.start_fixup = CodeInfo->InsFixup[0];
+        ModuleInfo.start_fixup = CodeInfo.InsFixup[0];
         ModuleInfo.start_displ = opndx.value;
     } else {
         /* Masm silently ignores start for -coff if an offset was given */

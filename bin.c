@@ -26,7 +26,7 @@
 
 #define SECTORMAP 1 /* 1=print sector map in listing file */
 
-extern struct asm_sym   symPC; /* '$' symbol */
+//extern struct asm_sym   symPC; /* '$' symbol */
 
 #if MZ_SUPPORT
 struct MZDATA mzdata = {0x1E, 0x10, 0, 0xFFFF };
@@ -158,8 +158,20 @@ static void CalcOffset( dir_node *curr, bool firstseg )
     }
 
     /* v2.04: added */
-    if ( firstseg == FALSE )
-        curr->e.seginfo->start_loc = 0;
+    /* v2.05: this addition did mess sample Win32_5.asm, because the
+     * "empty" alignment sections are now added to <fileoffset>.
+     * todo: VA in binary map is displayed wrong.
+     */
+    if ( firstseg == FALSE ) {
+        /* v2.05: do the reset more carefully.
+         * Do reset start_loc only if
+         * - segment is in a group and
+         * - group isn't FLAT or segment's name contains '$'
+         */
+        if ( grp && ( grp != ModuleInfo.flat_grp ||
+                     strchr( curr->sym.name, '$' ) ) )
+            curr->e.seginfo->start_loc = 0;
+    }
 
     curr->e.seginfo->fileoffset = fileoffset;
     //if ( firstseg && Options.header_format == HFORMAT_NONE ) {
@@ -168,8 +180,10 @@ static void CalcOffset( dir_node *curr, bool firstseg )
         if ( firstseg )
             imagestart = curr->e.seginfo->start_loc;
     } else {
-        curr->e.seginfo->fileoffset += curr->e.seginfo->start_loc;
-        fileoffset += curr->sym.max_offset;
+        /* v2.05: changed, removed */
+        //curr->e.seginfo->fileoffset += curr->e.seginfo->start_loc;
+        //fileoffset += curr->sym.max_offset;
+        fileoffset += curr->sym.max_offset - curr->e.seginfo->start_loc;
     }
 
     curr->e.seginfo->start_offset = offset;
@@ -186,8 +200,8 @@ static void CalcOffset( dir_node *curr, bool firstseg )
         //grp->sym.total_size = offset + curr->e.seginfo->start_loc;
         grp->sym.total_size = offset;
     }
-    DebugMsg(("CalcOffset(%s): seg.fileofs=%" FX32 "h, seg.start_offset=%" FX32 "h, endofs=%" FX32 "h\n",
-              curr->sym.name, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset, offset ));
+    DebugMsg(("CalcOffset(%s) exit: seg.fileofs=%" FX32 "h, seg.start_offset=%" FX32 "h, endofs=%" FX32 "h fileoffset=%" FX32 "h\n",
+              curr->sym.name, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset, offset, fileoffset ));
 
     return;
 }
@@ -267,9 +281,11 @@ static uint_32 GetImageSize( bool memimage )
 /******************************************/
 {
     dir_node *curr;
+    bool first;
+    uint_32 vsize = 0;
     uint_32 size = 0;
 
-    for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+    for( curr = Tables[TAB_SEG].head, first = TRUE; curr; curr = curr->next ) {
         uint_32 tmp;
         if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
             continue;
@@ -283,10 +299,16 @@ static uint_32 GetImageSize( bool memimage )
                     break; /* done, skip rest of segments! */
             }
         }
-        DebugMsg(("GetImageSize(%s): fileofs=%" FX32 "h, max_offs=%" FX32 "h\n", curr->sym.name, curr->e.seginfo->fileoffset, curr->sym.max_offset ));
         tmp = curr->e.seginfo->fileoffset + (curr->sym.max_offset - curr->e.seginfo->start_loc );
+        if ( first == FALSE )
+            vsize += curr->e.seginfo->start_loc;
+        if ( memimage )
+            tmp += vsize;
+        DebugMsg(("GetImageSize(%s): fileofs=%" FX32 "h, max_offs=%" FX32 "h start=%" FX32 "h\n",
+                  curr->sym.name, curr->e.seginfo->fileoffset, curr->sym.max_offset, curr->e.seginfo->start_loc ));
         if ( size < tmp )
             size = tmp;
+        first = FALSE;
     }
     DebugMsg(("GetImageSize(%u)=%" FX32 "h\n", memimage, size ));
     return( size );
@@ -358,7 +380,7 @@ static ret_code DoFixup( dir_node *curr )
                 DebugMsg(("DoFixup(%s): SECREL, loc=%" FX32 ", value=%" FX32 "\n", curr->sym.name, fixup->location, value ));
             /* v2.01: don't use group if fixup explicitely refers the segment! */
             //} else if ( seg->e.seginfo->group ) {
-            } else if ( seg->e.seginfo->group && fixup->frame != FRAME_SEG ) {
+            } else if ( seg->e.seginfo->group && fixup->frame_type != FRAME_SEG ) {
                 value = (seg->e.seginfo->group->offset & 0xF) + seg->e.seginfo->start_offset + fixup->offset + fixup->sym->offset;
             } else if ( fixup->type >= FIX_RELOFF8 && fixup->type <= FIX_RELOFF32 ) {
                 /* v1.96: special handling for "relative" fixups */
@@ -398,13 +420,9 @@ static ret_code DoFixup( dir_node *curr )
             *codeptr.dd += (value - (fixup->location + curr->e.seginfo->start_offset) - 4);
             DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_RELOFF32, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
             break;
-        case FIX_LOBYTE:
+        case FIX_OFF8:
             *codeptr.db = value & 0xff;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_LOBYTE, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
-            break;
-        case FIX_HIBYTE:
-            *codeptr.db = (value >> 8) & 0xff;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_HIBYTE, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF8, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
             break;
         case FIX_OFF16:
             *codeptr.dw = value & 0xffff;
@@ -428,6 +446,10 @@ static ret_code DoFixup( dir_node *curr )
             DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF64, value=%" FX32 "h, *target=%I64Xh\n", curr->sym.name, fixup->location, value, *codeptr.dq ));
             break;
 #endif
+        case FIX_HIBYTE:
+            *codeptr.db = (value >> 8) & 0xff;
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_HIBYTE, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
+            break;
         case FIX_SEG:
             /* absolute segments are ok */
             if ( fixup->sym &&
@@ -438,7 +460,7 @@ static ret_code DoFixup( dir_node *curr )
             }
 #if MZ_SUPPORT
             if ( Options.header_format == HFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_SEG frame=%u, ", curr->sym.name, fixup->location, fixup->frame ));
+                DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_SEG frame=%u, ", curr->sym.name, fixup->location, fixup->frame_type ));
                 if ( fixup->sym->state == SYM_GRP ) {
                     seg = (dir_node *)fixup->sym;
                     *codeptr.dw = seg->sym.offset >> 4;
@@ -449,7 +471,7 @@ static ret_code DoFixup( dir_node *curr )
                     *codeptr.dw = ( seg->e.seginfo->start_offset + ( seg->e.seginfo->group ? seg->e.seginfo->group->offset : 0 ) ) >> 4;
                     DebugMsg(("SEGMENT symbol, start_offset=%" FX32 "h\n", seg->e.seginfo->start_offset ));
                 //} else if ( seg->e.seginfo->group ) {
-                } else if ( fixup->frame == FRAME_GRP ) {
+                } else if ( fixup->frame_type == FRAME_GRP ) {
                     /* v2.04: changed */
                     //*codeptr.dw = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
                     *codeptr.dw = seg->e.seginfo->group->offset >> 4;
@@ -468,12 +490,14 @@ static ret_code DoFixup( dir_node *curr )
                 *codeptr.dw = value & 0xffff;
                 codeptr.dw++;
                 //if ( seg->e.seginfo->group ) { /* v2.04: changed */
-                if ( fixup->frame == FRAME_GRP ) {
+                if ( fixup->frame_type == FRAME_GRP ) {
                     /* v2.04: changed */
                     //*codeptr.dw = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
                     *codeptr.dw = seg->e.seginfo->group->offset >> 4;
                 } else {
-                    *codeptr.dw = seg->e.seginfo->start_offset >> 4;
+                    /* v2.05: changed */
+                    //*codeptr.dw = seg->e.seginfo->start_offset >> 4;
+                    *codeptr.dw = ( seg->e.seginfo->start_offset + ( seg->e.seginfo->group ? seg->e.seginfo->group->offset : 0 ) ) >> 4;
                 }
                 break;
             }
@@ -485,12 +509,14 @@ static ret_code DoFixup( dir_node *curr )
                 *codeptr.dd = value;
                 codeptr.dd++;
                 //if (seg->e.seginfo->group ) { /* v2.04: changed */
-                if ( fixup->frame == FRAME_GRP ) {
+                if ( fixup->frame_type == FRAME_GRP ) {
                     /* v2.04: changed */
                     //*codeptr.dw = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
                     *codeptr.dw = seg->e.seginfo->group->offset >> 4;
                 } else {
-                    *codeptr.dw = seg->e.seginfo->start_offset >> 4;
+                    /* v2.05: changed */
+                    //*codeptr.dw = seg->e.seginfo->start_offset >> 4;
+                    *codeptr.dw = ( seg->e.seginfo->start_offset + ( seg->e.seginfo->group ? seg->e.seginfo->group->offset : 0 ) ) >> 4;
                 }
                 break;
             }
@@ -513,6 +539,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
 {
     dir_node *curr;
     uint_32 size;
+    uint_32 sizetotal;
     const seg_type *segtype;
     bool first = TRUE;
 #if MZ_SUPPORT
@@ -520,7 +547,6 @@ ret_code bin_write_data( module_info *ModuleInfo )
     uint_32 sizemem;
     dir_node *stack = NULL;
     uint_16 *pReloc;
-    uint_32 sizetotal;
     uint_32 sizeheap;
     uint_8  *hdrbuf;
 #endif
@@ -619,7 +645,6 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
     if ( Options.header_format == HFORMAT_MZ ) {
         /* set fields in MZ header */
-        DebugMsg(( "bin_write_data: MZ, sizetotal=%Xh\n", sizetotal ));
         pReloc = (uint_16 *)(hdrbuf);
         *(pReloc+0) = 'M' + ('Z' << 8);
         *(pReloc+1) = sizetotal % 512; /* bytes last page */
@@ -627,6 +652,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
         *(pReloc+3) = reloccnt;
         *(pReloc+4) = sizehdr >> 4; /* size header in paras */
         sizeheap = GetImageSize( TRUE ) - sizetotal;
+        DebugMsg(( "bin_write_data: MZ, sizetotal=%" FX32 "h sizeheap=%" FX32 "h\n", sizetotal, sizeheap ));
         *(pReloc+5) = sizeheap / 16 + ((sizeheap % 16) ? 1 : 0); /* heap min */
         if (*(pReloc+5) < mzdata.heapmin )
             *(pReloc+5) = mzdata.heapmin;
@@ -677,8 +703,8 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
 #if SECTORMAP
     /* go to EOF */
-    if( FileInfo.file[LST] ) {
-        fseek( FileInfo.file[LST], 0, SEEK_END );
+    if( AsmFile[LST] ) {
+        fseek( AsmFile[LST], 0, SEEK_END );
         LstNL();
         LstNL();
         LstPrintf( szCaption );
@@ -692,7 +718,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
 #endif
 
     if ( Options.header_format == HFORMAT_MZ ) {
-        if ( fwrite( hdrbuf, 1, sizehdr, FileInfo.file[OBJ] ) != sizehdr )
+        if ( fwrite( hdrbuf, 1, sizehdr, AsmFile[OBJ] ) != sizehdr )
             WriteError();
 #if SECTORMAP
         LstPrintf( szSegLine, szHeader, 0, 0, sizehdr, 0 );
@@ -702,11 +728,12 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
 #ifdef DEBUG_OUT
     for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
-        DebugMsg(("bin_write_data(%s): type=%u written=%" FX32 " max=%" FX32 " start=%" FX32 "\n",
+        DebugMsg(("bin_write_data(%s): type=%u written=%" FX32 " max=%" FX32 " start=%" FX32 " fileofs=%" FX32 "\n",
                 curr->sym.name, curr->e.seginfo->segtype,
                 curr->e.seginfo->bytes_written,
                 curr->sym.max_offset,
-                curr->e.seginfo->start_loc ));
+                curr->e.seginfo->start_loc,
+                curr->e.seginfo->fileoffset ));
     }
 #endif
 
@@ -716,8 +743,10 @@ ret_code bin_write_data( module_info *ModuleInfo )
             DebugMsg(("bin_write_data(%s): ABS segment not written\n", curr->sym.name ));
             continue;
         }
-        sizemem = curr->sym.max_offset - curr->e.seginfo->start_loc;
-        size = sizemem;
+        /* v2.05: changed */
+        size = curr->sym.max_offset - curr->e.seginfo->start_loc;
+        //size = sizemem;
+        sizemem = first ? size : curr->sym.max_offset;
         /* if no bytes have been written to the segment, check if there's
          * any further segments with bytes set. If no, skip write! */
         if ( curr->e.seginfo->bytes_written == 0 ) {
@@ -732,22 +761,27 @@ ret_code bin_write_data( module_info *ModuleInfo )
             }
         }
 #if SECTORMAP
-        LstPrintf( szSegLine, curr->sym.name, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset + curr->e.seginfo->start_loc, size, sizemem );
+        /* v2.05: changed */
+        //LstPrintf( szSegLine, curr->sym.name, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset + curr->e.seginfo->start_loc, size, sizemem );
+        LstPrintf( szSegLine, curr->sym.name, curr->e.seginfo->fileoffset, first ? curr->e.seginfo->start_offset + curr->e.seginfo->start_loc : curr->e.seginfo->start_offset, size, sizemem );
         LstNL();
 #endif
-        first = FALSE;
         if (size != 0 && curr->e.seginfo->CodeBuffer ) {
             DebugMsg(("bin_write_data(%s): write %" FX32 "h bytes at offset %" FX32 "h, initialized bytes=%lu, buffer=%p\n",
                       curr->sym.name, size, curr->e.seginfo->fileoffset, curr->e.seginfo->bytes_written, curr->e.seginfo->CodeBuffer ));
-            fseek( FileInfo.file[OBJ], curr->e.seginfo->fileoffset, SEEK_SET );
+            fseek( AsmFile[OBJ], curr->e.seginfo->fileoffset, SEEK_SET );
 #ifdef __I86__
-            if ( hfwrite( curr->e.seginfo->CodeBuffer, 1, size, FileInfo.file[OBJ] ) != size )
+            if ( hfwrite( curr->e.seginfo->CodeBuffer, 1, size, AsmFile[OBJ] ) != size )
                 WriteError();
 #else
-            if ( fwrite( curr->e.seginfo->CodeBuffer, 1, size, FileInfo.file[OBJ] ) != size )
+            if ( fwrite( curr->e.seginfo->CodeBuffer, 1, size, AsmFile[OBJ] ) != size )
                 WriteError();
 #endif
         }
+#ifdef DEBUG_OUT
+        else DebugMsg(("bin_write_data(%s): nothing written\n", curr->sym.name ));
+#endif
+        first = FALSE;
     }
 #if SECTORMAP
     LstPrintf( szLine );

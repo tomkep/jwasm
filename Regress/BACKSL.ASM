@@ -22,7 +22,7 @@ N2	equ 2
 E1	textequ <abc\
 	def>
 
-E2	equ abc  \
+E2	equ abc \
 	def()
 
 E3	equ N1 or\
@@ -45,6 +45,6 @@ E5	equ OFN_EXPLORER or OFN_HIDEREADONLY\
 
 ;--- this works for both JWasm and Masm. A white space is inserted.
 	db OFN_EXPLORER or OFN_HIDEREADONLY\
-or OFN_ENABLEHOOK or OFN_PATHMUSTEXIST or OFN_ENABLESIZING
+	or OFN_ENABLEHOOK or OFN_PATHMUSTEXIST or OFN_ENABLESIZING
 
 	END

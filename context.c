@@ -38,8 +38,9 @@ static char *contextnames[] = {
 #endif
 
 typedef struct _assumes_context {
-    assume_info SegAssumeTable[NUM_SEGREGS];
-    assume_info StdAssumeTable[NUM_STDREGS];
+    struct assume_info SegAssumeTable[NUM_SEGREGS];
+    struct assume_info StdAssumeTable[NUM_STDREGS];
+    struct stdassume_typeinfo type_content[NUM_STDREGS];
 } assumes_context;
 
 typedef struct _listing_context {
@@ -92,11 +93,13 @@ static int GetContextSize( uint_8 flags )
     return( sizeof( context ) - sizeof ( assumes_context ) );
 }
 
-ret_code ContextDirective( int directive, int i )
-/***********************************************/
+ret_code ContextDirective( int i )
+/********************************/
 {
     int type;
     int start = i;
+    int directive = AsmBuffer[i]->value;
+
     uint_8 flags = 0;
     uint_8 all;
     context *pcontext;
@@ -148,7 +151,7 @@ ret_code ContextDirective( int directive, int i )
         /* restore the values */
         if ( flags & CONT_ASSUMES ) {
             SetSegAssumeTable( pcontext->ac.SegAssumeTable );
-            SetStdAssumeTable( pcontext->ac.StdAssumeTable );
+            SetStdAssumeTable( pcontext->ac.StdAssumeTable, pcontext->ac.type_content );
         }
         if ( flags & CONT_RADIX ) {
             ModuleInfo.radix = pcontext->rc.radix;
@@ -181,7 +184,7 @@ ret_code ContextDirective( int directive, int i )
 
         if ( flags & CONT_ASSUMES ) {
             GetSegAssumeTable( pcontext->ac.SegAssumeTable );
-            GetStdAssumeTable( pcontext->ac.StdAssumeTable );
+            GetStdAssumeTable( pcontext->ac.StdAssumeTable, pcontext->ac.type_content );
         }
         if ( flags & CONT_RADIX ) {
             pcontext->rc.radix = ModuleInfo.radix;

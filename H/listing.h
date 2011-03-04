@@ -29,6 +29,5 @@ extern void LstNL( void );
 extern ret_code ListingDirective( int i );
 
 extern uint_32 list_pos;        /* current LST file position */
-extern uint_32 list_pos_start;  /* position of current line */
 
 #endif

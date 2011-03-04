@@ -96,9 +96,8 @@ static const typeinfo ModelAttr[] = {
 static asm_sym *sym_CodeSize  ; /* numeric. requires model */
 static asm_sym *sym_DataSize  ; /* numeric. requires model */
 static asm_sym *sym_Model     ; /* numeric. requires model */
-       asm_sym *sym_Interface ; /* numeric. requires model */
-       asm_sym *sym_Cpu       ; /* numeric. This is ALWAYS set */
-
+asm_sym *sym_Interface ; /* numeric. requires model */
+asm_sym *sym_Cpu       ; /* numeric. This is ALWAYS set */
 
 static asm_sym * AddPredefinedConstant( const char *name, int value )
 /*******************************************************************/
@@ -221,7 +220,7 @@ ret_code ModelDirective( int i )
 {
     const typeinfo *type;           /* type of option */
     mod_type model;
-    lang_type language;
+    enum lang_type language;
     dist_type distance;
     os_type ostype;
     uint_16 init;
@@ -482,7 +481,7 @@ ret_code cpu_directive( int i )
 
     //newcpu = comp_opt( AsmBuffer[i]->value );
     //newcpu = SpecialTable[AsmBuffer[i]->value].opnd_type[0];
-    newcpu = GetValueSp( AsmBuffer[i]->value );
+    newcpu = GetSflagsSp( AsmBuffer[i]->value );
 
     if ( SetCPU( newcpu ) == NOT_ERROR )
         i++;

@@ -164,12 +164,6 @@ pick( SYNTAX_ERROR,
 pick( PREFIX_MUST_BE_FOLLOWED_BY_AN_INSTRUCTION,
       "Prefix must be followed by an instruction" ,
       "プレフィックスの後には命令がなければなりません" )
-pick( INVALID_SHLD_SHRD_FORMAT,
-      "Invalid SHLD/SHRD format" ,
-      "SHLD/SHRD命令の使用形式が不適切です" )
-pick( TOO_MANY_COMMAS,
-      "Too many commas" ,
-      "コンマ(,)が多すぎます" )
 pick( SYNTAX_ERROR_UNEXPECTED_COLON,
       "Syntax error: Unexpected colon" ,
       "構文エラー: 不適切なコロン(:)があります" )
@@ -230,18 +224,14 @@ pick( CONSTANT_EXPECTED,
 pick( CONSTANT_OPERAND_EXPECTED,
       "Constant operand is expected" ,
       "定数オペランドでなければなりません" )
-pick( POSITIVE_SIGN_CONSTANT_EXPECTED,
-      "A constant operand is expected after a positive sign" ,
-      "正の符号(+)の後には定数オペランドがなければなりません" )
-pick( NEGATIVE_SIGN_CONSTANT_EXPECTED,
-      "A constant operand is expected after a negative sign" ,
-      "負の符号(-)の後には定数オペランドがなければなりません" )
 pick( LABEL_EXPECTED,
       "Label is expected" ,
       "ラベルがなければなりません" )
+#if 0 /* obsolete */
 pick( LABEL_NOT_DEFINED,
       "Label is not defined: %s" ,
       "ラベルは定義されていません" )
+#endif
 pick( MULTIPLE_OVERRIDES,
       "Multiple overrides, ignored: %s" ,
       "Multiple overrides, ignored: %s" )
@@ -294,8 +284,8 @@ pick( COLON_EXPECTED,
       "Colon is expected" ,
       "コロン(:)が必要です" )
 pick( INVALID_QUALIFIED_TYPE,
-      "Invalid qualified type" ,
-      "無効な修飾タイプです" )
+      "Invalid qualified type: %s" ,
+      "Invalid qualified type: %s" )
 pick( QUALIFIED_TYPE_EXPECTED,
       "Qualified type is expected" ,
       "修飾タイプが必要です" )
@@ -366,8 +356,8 @@ pick( FILE_WRITE_ERROR,
       "File write error: %s [%u]",
       "File write error: %s [%u]" )
 pick( INVALID_CMDLINE_OPTION,
-      "Invalid command-line option: -%s" ,
-      "Invalid command-line option: -%s" )
+      "Invalid command-line option: %s" ,
+      "Invalid command-line option: %s" )
 pick( INTERNAL_ERROR,
       "Internal error in %s(%u)\n" ,
       "Internal error in %s(%u)\n" )
@@ -380,23 +370,15 @@ pick( EXPECTED_FILE_NAME,
 pick( TOO_MANY_ERRORS,
       "Too many errors" ,
       "エラーが多すぎます" )
-#if INVWC_SUPPORT
-pick( TBYTE_NOT_SUPPORTED,
-      "Ten byte variables not supported in register calling convention" ,
-      "10バイト変数はレジスタ呼出規約では、サポートされていません" )
-#endif
 pick( FORCED_ERR,
-      "forced error" ,
-      "forced error")
-pick( FORCED_ARBITRARY,
-      "forced error: %s" ,
-      "強制エラー" )
+      "forced error%s" ,
+      "forced error%s")
 pick( FORCED_NOT_ZERO,
-      "forced error: Value not equal to 0: %d " ,
-      "強制エラー: 値が0ではありません : %d " )
+      "forced error: Value not equal to 0: %d%s" ,
+      "forced error: Value not equal to 0: %d%s" )
 pick( FORCED_EQUAL,
-      "forced error: Value equal to 0: %d " ,
-      "強制エラー: 値が0です: %d " )
+      "forced error: Value equal to 0: %d%s" ,
+      "forced error: Value equal to 0: %d%s" )
 pick( FORCED_DEF,
       "forced error: symbol defined: %s" ,
       "強制エラー: シンボルが定義されています: %s " )
@@ -404,17 +386,17 @@ pick( FORCED_NOT_DEF,
       "forced error: symbol not defined: %s" ,
       "強制エラー: シンボルが定義されていません: %s " )
 pick( FORCED_BLANK,
-      "forced error: string blank : <%s>" ,
-      "強制エラー: 文字列が空白です: <%s>" )
+      "forced error: string blank : <%s>%s" ,
+      "forced error: string blank : <%s>%s" )
 pick( FORCED_NOT_BLANK,
-      "forced error: string not blank : <%s>" ,
-      "強制エラー: 文字列が空白ではありません: <%s>" )
+      "forced error: string not blank : <%s>%s" ,
+      "forced error: string not blank : <%s>%s" )
 pick( FORCED_DIF,
-      "forced error: strings not equal : <%s> : <%s>" ,
-      "強制エラー: 文字列が等しくありません: <%s> : <%s>" )
+      "forced error: strings not equal : <%s> : <%s>%s" ,
+      "forced error: strings not equal : <%s> : <%s>%s" )
 pick( FORCED_IDN,
-      "forced error: strings equal : <%s> : <%s> " ,
-      "強制エラー: 文字列が等しい: <%s> : <%s>" )
+      "forced error: strings equal : <%s> : <%s>%s" ,
+      "forced error: strings equal : <%s> : <%s>%s" )
 pick( NOTE_INCLUDED_BY,
       "%*s%s(%u): Included by" ,
       "%*s%s(%u): Included by" )
@@ -563,7 +545,7 @@ pick( DIVIDE_BY_ZERO_IN_EXPR,
 pick( GENERAL_FAILURE,
       "General Failure" ,
       "General Failure" )
-pick( NO_FAR_JUMP_TO_NEAR_LABEL,
+pick( CANNOT_HAVE_IMPLICIT_FAR_JUMP_OR_CALL_TO_NEAR_LABEL,
       "Cannot have implicit far jump or call to near label",
       "Cannot have implicit far jump or call to near label" )
 pick( INVALID_USE_OF_REGISTER,
@@ -575,7 +557,7 @@ pick( DISTANCE_INVALID,
 pick( INITIALIZER_MAGNITUDE_TOO_LARGE,
       "Initializer magnitude too large",
       "Initializer magnitude too large" )
-pick( CANNOT_ADD_TWO_RELOC_LABELS,
+pick( CANNOT_ADD_TWO_RELOCATABLE_LABELS,
       "Cannot add two relocatable labels",
       "Cannot add two relocatable labels" )
 pick( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL,
@@ -614,9 +596,11 @@ pick( INITIALIZED_DATA_NOT_SUPPORTED_IN_SEGMENT,
 pick( LITERAL_EXPECTED_AFTER_EQ,
       "Literal expected after '='" ,
       "Literal expected after '='" )
+#if 0
 pick( FASTCALL_VARIANT_NOT_SUPPORTED,
       "FASTCALL variant not supported by INVOKE" ,
       "FASTCALL variant not supported by INVOKE" )
+#endif
 pick( NO_4KPAGE_ALIGNED_SEGMENTS,
       "No 4k Page-aligned segments in MS386 OMF" ,
       "MS386 OMFには4Kページ整列セグメントがありません" )
@@ -646,12 +630,12 @@ pick( LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL,
       "For -coff leading underscore required for start label: %s" ,
       "For -coff leading underscore required for start label: %s" )
 #endif
-pick( UNKNOWN_FIXUP_TYPE,
-      "Unknown fixup type: %u at %lX" ,
-      "Unknown fixup type: %u at %lX" )
 pick( INVALID_CMDLINE_VALUE,
       "Invalid command-line value, default is used: %s" ,
       "Invalid command-line value, default is used: %s" )
+pick( UNKNOWN_FIXUP_TYPE,
+      "Unknown fixup type: %u at %s.%lX" ,
+      "Unknown fixup type: %u at %s.%lX" )
 pick( UNSUPPORTED_FIXUP_TYPE,
       "Unsupported fixup type for %s: %s" ,
       "Unsupported fixup type for %s: %s" )
@@ -725,9 +709,9 @@ pick( WORD_FIXUP_FOR_32BIT_LABEL,
 pick( TOO_MANY_MACRO_PLACEHOLDERS,
       "Too many macro placeholders" ,
       "Too many macro placeholders" )
-pick( REQUIRED_PARAMETER_MISSING,
-      "%s - parameter %s is missing" ,
-      "%s - parameter %s is missing" )
+pick( MISSING_MACRO_ARGUMENT,
+      "Missing macro argument: %s, parameter %u" ,
+      "Missing macro argument: %s, parameter %u" )
 pick( DOES_NOT_WORK_WITH_32BIT_SEGMENTS,
       "%s does not work with 32-bit segments" ,
       "%s does not work with 32-bit segments" )
@@ -771,8 +755,8 @@ pick( N_OPTION_NEEDS_A_NAME_PARAMETER,
       "-n Option needs a valid name parameter" ,
       "-n Option needs a valid name parameter" )
 pick( CONSTANT_VALUE_TOO_LARGE,
-      "Constant value too large" ,
-      "Constant value too large" )
+      "Constant value too large: %I64Xh" ,
+      "Constant value too large: %I64Xh" )
 pick( TEXT_MACRO_USED_PRIOR_TO_DEFINITION,
       "Text macro used prior to definition: %s" ,
       "Text macro used prior to definition: %s" )
@@ -881,3 +865,12 @@ pick( COMM_VAR_EXCEEDS_64K,
 pick( MUST_BE_PUBLIC_OR_EXTERNAL,
       "Must be public or external: %s",
       "Must be public or external: %s" )
+pick( PARAM_IS_RESERVED_WORD,
+      "parameter/local name is reserved word: %s",
+      "parameter/local name is reserved word: %s" )
+pick( REAL_OR_BCD_NUMBER_NOT_ALLOWED,
+      "real or BCD number not allowed",
+      "real or BCD number not allowed" )
+pick( STRUCTURE_FIELD_EXPECTED,
+      "structure field expected",
+      "structure field expected" )

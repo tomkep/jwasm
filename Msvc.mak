@@ -20,7 +20,7 @@ WIN=1
 #          libs DKRNL32S.LIB + IMPHLP.LIB and tool PATCHPE.EXE.
 
 VCDIR  = \msvc71
-W32LIB = \Win32Inc\Lib
+W32LIB = \WinInc\Lib
 HXDIR  = \HX
 
 !ifndef DEBUG
@@ -40,6 +40,7 @@ inc_dirs  = -IH -I"$(VCDIR)\include"
 TRMEM=0
 
 linker = $(VCDIR)\Bin\link.exe
+lib = $(VCDIR)\Bin\lib.exe
 
 !if $(DEBUG)
 !if $(TRMEM)
@@ -89,6 +90,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
            $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj \
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
+           $(OUTD)/cmdline.obj  \
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
 !endif
@@ -108,24 +110,27 @@ ALL: $(OUTD) $(TARGET1) $(TARGET2)
 $(OUTD):
 	@mkdir $(OUTD)
 
-$(OUTD)\$(name).exe : $(proj_obj)
+$(OUTD)\$(name).exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
 	$(linker) @<<
-$(lflagsw) $(proj_obj)
+$(lflagsw) $(OUTD)/main.obj $(OUTD)/$(name).lib
 /LIBPATH:"$(VCDIR)\Lib" /LIBPATH:"$(W32LIB)" kernel32.lib /OUT:$@
 <<
 
-$(OUTD)\$(name)d.exe : $(proj_obj)
+$(OUTD)\$(name)d.exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
 	$(linker) @<<
-$(lflagsd) /NODEFAULTLIB initw32.obj $(proj_obj) /LIBPATH:$(VCDIR)\Lib
+$(lflagsd) /NODEFAULTLIB initw32.obj $(OUTD)/main.obj $(OUTD)/$(name).lib /LIBPATH:$(VCDIR)\Lib
 libc.lib oldnames.lib /LIBPATH:$(HXDIR)\Lib dkrnl32s.lib imphlp.lib /STUB:$(HXDIR)\Bin\LOADPEX.BIN
 /OUT:$@ /FIXED:NO
 <<
 	@$(HXDIR)\bin\patchpe $@
 
+$(OUTD)\$(name).lib : $(proj_obj)
+	@$(lib) /out:$(OUTD)\$(name).lib $(proj_obj)
+
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) -Fo$* msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h
+$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h H/directve.h
 	$(CC) -Fo$* parser.c
 
 ######

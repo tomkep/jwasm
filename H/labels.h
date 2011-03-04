@@ -31,10 +31,12 @@
 #ifndef _LABELS_H_
 #define _LABELS_H_
 
+struct qualified_type;
+
 extern void             LabelsInit( void );
 extern ret_code         LabelDirective( int );
 extern char *           GetCurrAnonLabel( char * );
 extern char *           GetNextAnonLabel( char * );
-extern asm_sym *        LabelCreate( const char *, memtype, struct asm_sym * vartype, bool);
+extern asm_sym *        LabelCreate( const char *, memtype, struct qualified_type *, bool );
 
 #endif

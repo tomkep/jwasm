@@ -68,15 +68,15 @@
 //#define STRCMP( x, y, z ) ( ModuleInfo.case_sensitive ? strcmp( x, y ) : _stricmp( x, y ) )
 #define STRCMP( x, y, z ) ( ModuleInfo.case_sensitive ? memcmp( x, y, z ) : _memicmp( x, y, z ) )
 #else
-#define STRCMP( x, y, z ) SymCmpFunc( x, y )
+#define STRCMP( x, y, z ) SymCmpFunc( x, y, z )
 #endif
 
-extern struct asm_sym FileCur;  /* @FileCur symbol */
-extern struct asm_sym LineCur;  /* @Line symbol    */
-extern uint_32 GetLineNumber( struct asm_sym * );
+#define DUMPSYMBOLS 0 /* for debug version only*/
 
-struct asm_sym *sym_CurSeg;  /* the @CurSeg symbol */
-struct asm_sym symPC;        /* the '$' symbol     */
+extern struct asm_sym LineCur;   /* @Line symbol       */
+extern struct asm_sym symPC;     /* the '$' symbol     */
+extern struct asm_sym *FileCur;  /* @FileCur symbol    */
+extern struct asm_sym *symCurSeg;/* the @CurSeg symbol */
 
 StrCmpFunc SymCmpFunc;
 
@@ -96,6 +96,22 @@ static const char szDateFmt[] = "%x"; /* locale's date */
 static const char szTimeFmt[] = "%X"; /* locale's time */
 #endif
 
+struct tmitem {
+    const char *name;
+    char *value;
+    struct asm_sym **store;
+};
+
+/* table of predefined text macros */
+static const struct tmitem tmtab[] = {
+    /* @Version contains the Masm compatible version */
+    {"@Version",  "615", NULL },
+    {"@Date",     szDate, NULL },
+    {"@Time",     szTime, NULL },
+    {"@FileName", ModuleInfo.name, NULL },
+    {"@FileCur",  NULL, &FileCur },
+    {"@CurSeg",   NULL, &symCurSeg }
+};
 
 static unsigned int hashpjw( const char *s )
 /******************************************/
@@ -125,9 +141,9 @@ void SymSetCmpFunc( void )
 /************************/
 {
     if ( ModuleInfo.case_sensitive == TRUE )
-        SymCmpFunc = strcmp;
+        SymCmpFunc = memcmp;
     else
-        SymCmpFunc = _stricmp;
+        SymCmpFunc = _memicmp;
     return;
 }
 
@@ -233,19 +249,6 @@ static struct asm_sym **SymFind( const char *name )
     return( gsym );
 }
 
-static void SymSetCurrPC( void )
-/******************************/
-{
-    if( CurrStruct ) {
-        //symPC.segment = NULL;
-        symPC.mem_type = MT_ABS;
-        symPC.offset = CurrStruct->sym.offset + (CurrStruct->next ? CurrStruct->next->sym.offset : 0);
-    } else {
-        symPC.mem_type = MT_NEAR;
-        symPC.offset = GetCurrOffset();
-    }
-}
-
 /* SymLookup() creates a global label if it isn't defined yet,
  */
 struct asm_sym *SymLookup( const char *name )
@@ -265,8 +268,8 @@ struct asm_sym *SymLookup( const char *name )
     }
 
     /* if the label is '$', update its value - which is the current offset */
-    if( sym == &symPC )
-        SymSetCurrPC();
+    //if( sym == &symPC )
+    //    SetCurPC();
 
     DebugMsg1(("SymLookup(%s): symbol found, state=%u, defined=%u\n", name, sym->state, sym->isdefined));
 
@@ -314,8 +317,8 @@ struct asm_sym *SymLookupLabel( const char *name, int bLocal )
         *lsym = sym;
         DebugMsg1(("SymLookupLabel(%s): label moved into %s's local namespace\n", sym->name, CurrProc->sym.name ));
     }
-    if( sym == &symPC )
-        SymSetCurrPC();
+    //if( sym == &symPC )
+    //    SetCurPC();
 
     DebugMsg1(("SymLookupLabel(%s): symbol found, state=%u, defined=%u\n", name, sym->state, sym->isdefined));
     return( sym );
@@ -324,15 +327,18 @@ struct asm_sym *SymLookupLabel( const char *name, int bLocal )
 static void FreeASym( struct asm_sym *sym )
 /*****************************************/
 {
+    //DebugMsg(("FreeASym: delete %s, state=%X\n", sym->name, sym->state));
+#if FASTPASS==0
     struct fixup     *curr;
     struct fixup     *next;
 
-    //DebugMsg(("FreeASym: delete %s, state=%X\n", sym->name, sym->state));
-    for( curr = sym->fixup ; curr; ) {
-        next = curr->nextbp;
-        AsmFree( curr );
-        curr = next;
-    }
+    if ( Parse_Pass == PASS_1 )
+        for( curr = sym->fixup ; curr; ) {
+            next = curr->nextbp;
+            AsmFree( curr );
+            curr = next;
+        }
+#endif
     AsmFree( sym->name );
     AsmFree( sym );
 }
@@ -355,11 +361,21 @@ static void free_ext( struct asm_sym *sym )
         /* The altname field may contain a symbol (if weak == FALSE).
          * However, this is an independant item and must not be released here
          */
+#if 1 /* this still happens! */
+        if ( sym->mem_type == MT_TYPE && *sym->type->name == NULLC ) {
+            printf( "free_ext: external with private type: %s\n", sym->name );
+            SymFree( sym->type );
+        }
+#endif
         break;
     case SYM_STACK:
-        if ( sym->mem_type == MT_TYPE && *sym->type->name == NULLC )
+#if 1 /* to be removed, this can't happen anymore! */
+        if ( sym->mem_type == MT_TYPE && *sym->type->name == NULLC ) {
+            printf( "free_ext: stack var with private type: %s\n", sym->name );
             /* symbol has a "private" type */
             SymFree( sym->type );
+        }
+#endif
         break;
     case SYM_SEG:
         AsmFree( ((dir_node *)sym)->e.seginfo );
@@ -427,8 +443,8 @@ void SymSetName( struct asm_sym *sym, const char * name )
 
 /* add a symbol to the global symbol table */
 
-static struct asm_sym *SymAddToTable( struct asm_sym *sym )
-/*********************************************************/
+struct asm_sym *SymAddToTable( struct asm_sym *sym )
+/**************************************************/
 {
     struct asm_sym  **location;
 
@@ -487,8 +503,8 @@ struct asm_sym *SymSearch( const char *name )
 
     sym_ptr = SymFind( name );
 
-    if( *sym_ptr == &symPC )
-        SymSetCurrPC();
+    //if( *sym_ptr == &symPC )
+    //    SetCurPC();
 
     return( *sym_ptr );
 }
@@ -561,6 +577,7 @@ void SymInit( )
 /*************/
 {
     asm_sym * sym;
+    int i;
     time_t    time_of_day;
     struct tm *now;
 
@@ -569,6 +586,22 @@ void SymInit( )
 
     memset( gsym_table, 0, sizeof(gsym_table) );
 
+    time_of_day = time( NULL );
+    now = localtime( &time_of_day );
+    strftime( szDate, 9, szDateFmt, now );
+    strftime( szTime, 9, szTimeFmt, now );
+
+    for( i = 0; i < sizeof(tmtab) / sizeof(tmtab[0]); i++ ) {
+        sym = SymCreate( tmtab[i].name, TRUE );
+        sym->state = SYM_TMACRO;
+        sym->isdefined = TRUE;
+        sym->predefined = TRUE;
+        sym->string_ptr = tmtab[i].value;
+        if ( tmtab[i].store )
+            *tmtab[i].store = sym;
+    }
+
+    /* add __JWASM__ numeric equate */
     sym = SymCreate( "__JWASM__", TRUE );
     sym->state = SYM_INTERNAL;
     sym->mem_type = MT_ABS;
@@ -576,65 +609,8 @@ void SymInit( )
     sym->predefined = TRUE;
     sym->offset = _JWASM_VERSION_INT_;
 
-    /* @Version contains the Masm compatible version */
-    sym = SymCreate( "@Version", TRUE );
-    sym->state = SYM_TMACRO;
-    sym->isdefined = TRUE;
-    sym->predefined = TRUE;
-    sym->string_ptr = "615";
-
-    /* @Date and @Time */
-    time_of_day = time( NULL );
-    now = localtime( &time_of_day );
-    sym = SymCreate( "@Date", TRUE );
-    sym->state = SYM_TMACRO;
-    sym->isdefined = TRUE;
-    sym->predefined = TRUE;
-    strftime( szDate, 9, szDateFmt, now );
-    sym->string_ptr = szDate;
-    sym = SymCreate( "@Time", TRUE );
-    sym->state = SYM_TMACRO;
-    sym->isdefined = TRUE;
-    sym->predefined = TRUE;
-    strftime( szTime, 9, szTimeFmt, now );
-    sym->string_ptr = szTime;
-
-    /* @FileName */
-    sym = SymCreate( "@FileName", TRUE );
-    sym->state = SYM_TMACRO;
-    sym->isdefined = TRUE;
-    sym->predefined = TRUE;
-    sym->string_ptr = ModuleInfo.name;
-
-    /* @FileCur */
-    //filecur = SymCreate( "@FileCur", TRUE );
-    FileCur.state = SYM_TMACRO;
-    FileCur.isdefined = TRUE;
-    FileCur.predefined = TRUE;
-#if FASTMEM==0
-    FileCur.staticmem = TRUE;
-#endif
-    FileCur.mem_type = MT_EMPTY;
-    FileCur.string_ptr = ModuleInfo.name;
-    FileCur.name_size = 8; /* sizeof("@FileCur") */
-    SymAddToTable( &FileCur );
-
-    /* add $ symbol */
-    symPC.name = "$";
-    symPC.state = SYM_INTERNAL;
-    symPC.isdefined = TRUE;
-    symPC.predefined = TRUE;
-    symPC.variable = TRUE; /* added v1.96. Important for fixup creation */
-#if FASTMEM==0
-    symPC.staticmem = TRUE;
-#endif
-    symPC.mem_type = MT_NEAR;
-    symPC.name_size = 1;
-    symPC.list = FALSE; /* don't display the '$' symbol in symbol list */
-    SymAddToTable(&symPC);
-
     /* add @Line numeric equate */
-    LineCur.sfunc_ptr = &GetLineNumber;
+    LineCur.sfunc_ptr = &UpdateLineNumber;
     LineCur.mem_type = MT_ABS;
     LineCur.state = SYM_INTERNAL;
     LineCur.isdefined = TRUE;
@@ -643,7 +619,7 @@ void SymInit( )
     LineCur.staticmem = TRUE;
 #endif
     LineCur.variable = TRUE; /* ??? */
-    LineCur.name_size = strlen( LineCur.name ); /* sizeof @Line */
+    LineCur.name_size = 5; /* sizeof("@Line") */
     SymAddToTable( &LineCur );
 
     /* add @WordSize numeric equate */
@@ -655,13 +631,8 @@ void SymInit( )
     WordSize.staticmem = TRUE;
 #endif
     WordSize.variable = TRUE; /* ??? */
-    WordSize.name_size = strlen( WordSize.name );
+    WordSize.name_size = 9; /* sizeof( "@WordSize" ) */
     SymAddToTable( &WordSize );
-
-    sym_CurSeg = SymCreate("@CurSeg", TRUE );
-    sym_CurSeg->state = SYM_TMACRO;
-    sym_CurSeg->isdefined = TRUE;
-    sym_CurSeg->predefined = TRUE;
 
     DebugMsg(("SymInit() exit\n"));
     return;
@@ -769,7 +740,7 @@ int SymEnum( struct asm_sym * *psym, int *pi )
 
 #if defined( DEBUG_OUT )
 
-#ifdef TRMEM
+#if DUMPSYMBOLS
 static void DumpSymbol( struct asm_sym *sym )
 /*******************************************/
 {
@@ -807,7 +778,7 @@ static void DumpSymbol( struct asm_sym *sym )
         type = "GROUP";
         break;
     case SYM_STACK: /* should never be found in global table */
-        type = "STACK FIELD";
+        type = "STACK VAR";
         break;
     case SYM_STRUCT_FIELD: /* should never be found in global table */
         type = "STRUCT FIELD";
@@ -862,7 +833,7 @@ static void DumpSymbols( void )
     for( i = 0; i < GHASH_TABLE_SIZE; i++ ) {
         for( sym = gsym_table[i], curr = 0; sym; sym = sym->next ) {
             curr++;
-#ifdef TRMEM
+#if DUMPSYMBOLS
             DumpSymbol( sym );
 #endif
         }
