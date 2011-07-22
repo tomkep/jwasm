@@ -9,17 +9,11 @@
 
 /*---------------------------------------------------------------------------*/
 
-extern struct asm_sym   *MakeExtern( const char *name, memtype type, struct asm_sym * vartype, struct asm_sym *, unsigned char );
-//extern struct asm_sym   *CreateProto( int, const char * );
+extern struct asym   *MakeExtern( const char *name, enum memtype type, struct asym * vartype, struct asym *, unsigned char );
+//extern struct asym   *CreateProto( int, const char * );
 
-extern ret_code CommDirective( int );
-extern ret_code ExterndefDirective( int i );
-extern ret_code ProtoDirective( int );
-extern ret_code ExternDirective( int i );
-extern ret_code PublicDirective( int i );
-
-extern void     AddPublicData( asm_sym *sym );
-extern asm_sym  *GetPublicData( void ** );
+extern void     AddPublicData( struct asym *sym );
+extern struct asym  *GetPublicData( void ** );
 extern void     FreePubQueue( void );
 
 #endif

@@ -74,9 +74,7 @@
 
 static _trmem_hdl   memHandle;
 static int          memFile;     /* file handle we'll write() to */
-#ifdef DEBUG_OUT
-static int memcalls;
-#endif
+static int          memcalls;
 #endif
 
 #ifdef TRMEM
@@ -107,16 +105,16 @@ uint_32 sys_call2( uint_32 func, uint_32 r_ebx, uint_32 r_ecx );
     parm [eax] [ebx] [ecx]                      \
     value [eax];
 
-typedef struct mmap {
+struct mmap {
     uint_32 base;   /* linear base (or 0) */
     uint_32 size;   /* size in bytes */
     uint_32 access; /* prot_read + prot_write = 3 */
     uint_32 flags;  /* 0x22 = map_anonymous + map_private */
     uint_32 fd;     /* should be -1 */
     uint_32 offset; /* ignored */
-} mmap;
+};
 /* 0x22 = MAP_PRIVATE | MAP_ANON */
-static mmap mymmap = {0, 0, 3, 0x22, -1, 0};
+static struct mmap mymmap = {0, 0, 3, 0x22, -1, 0};
 #endif
 #if defined(__GNUC__)
 uint_32 mymmap_size = 0;   /* size in bytes */
@@ -145,9 +143,7 @@ void MemInit( void )
     if( memHandle == NULL ) {
         exit( EXIT_FAILURE );
     }
-#ifdef DEBUG_OUT
     memcalls = 0;
-#endif
 #endif
 #if FASTMEM
     pBase = NULL;

@@ -9,9 +9,9 @@ struct qditem {
     uint_16 size;
 };
 
-ret_code coff_write_header( module_info * );
-ret_code coff_write_section_table( module_info * );
-ret_code coff_write_data( module_info * );
-ret_code coff_write_symbols( module_info * );
+ret_code coff_write_header( struct module_info * );
+ret_code coff_write_section_table( struct module_info * );
+ret_code coff_write_data( struct module_info * );
+ret_code coff_write_symbols( struct module_info * );
 
 #endif

@@ -31,9 +31,7 @@
 #ifndef _EQUATE_H_INCLUDED
 #define _EQUATE_H_INCLUDED
 
-extern ret_code EquDirective( int );
-extern void     MakeConstantUnderscored( int token );
-extern asm_sym  *CreateConstant( void );
-extern asm_sym  *CreateVariable( const char *, int );
+extern struct asym *CreateConstant( struct asm_tok[] );
+extern struct asym *CreateVariable( const char *, int );
 
 #endif

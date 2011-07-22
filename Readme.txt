@@ -3,11 +3,10 @@ JWasm Readme
 
     1. About JWasm
 
-    JWasm is intended to be a free MASM compatible assembler. It's a fork
-    of Open Watcom's WASM and released under the Sybase Open Watcom Public
-    License (see license.txt for details).
+    JWasm is intended to be a free Masm-compatible assembler. It supports
+    16-, 32- and 64-bit code generation and instructions up to AVX.
 
-    JWasm supports various output formats:
+    Various output formats are supported:
 
     format     option     comment
     -----------------------------------------------------------------------
@@ -24,6 +23,9 @@ JWasm Readme
     there are some which contain precompiled binaries for Windows, DOS and
     Linux. Other OSes like OS/2 and FreeBSD are also supported, but no binary
     is supplied, it must be created from the sources.
+
+    JWasm has its roots in Open Watcom's Wasm. The source is released under
+    the Sybase Open Watcom Public License (see license.txt for details).
 
 
     2. Requirements
@@ -42,7 +44,8 @@ JWasm Readme
       - doesn't support long filenames
       - doesn't support Open Watcom fastcall register convention
       - supports OMF, BIN and MZ output formats only
-      - no support for 64-bit and SSE4.
+      - no support for 64-bit, SSE4 and AVX.
+      - no support for OPTION DLLIMPORT.
 
     Memory requirements depend on the source which is assembled. The source
     itself is not kept in memory, but the symbol table is, and this table
@@ -107,6 +110,7 @@ JWasm Readme
     GccDos.MAK   GCC, DGPJJ                    DOS (32-bit)
     GccUnix.MAK  GCC, FreeBSD/Linux            FreeBSD [, Linux]
     TCC.MAK      Tiny C                        Win32
+    OC.MAK       Orange C                      Win32
     ---------------------------------------------------------------
     OWWinDll.MAK OW v1.7a-v1.9                 Win32 (JWasm.dll)
     MsvcDll.MAK  VC++ TK 2003                  Win32 (JWasm.dll)

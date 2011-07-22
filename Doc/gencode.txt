@@ -6,7 +6,7 @@
   lines will be marked with a '*'.
 
   2. Where is generated code used?
-  
+
   - invoke directive
   - hll directives (.if, .else, .while, .repeat, ...)
   - .model directive
@@ -15,10 +15,3 @@
   - default PROC prologue and epilogue (when a RET/IRET is detected)
   - STRUCT data initialization (slightly peculiar)
 
-  the following cases are handled internally inside the parser:
-
-  - short jump extension
-  - far call optimization
-
-  Prior to v1.94 this was also done by generated code. This caused problems
-  with the listing file.

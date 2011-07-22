@@ -32,10 +32,6 @@
 #ifndef OMFINT_H
 #define OMFINT_H    1
 
-typedef struct obj_rec      obj_rec;
-typedef struct linnum_data  linnum_data;
-typedef struct pubdef_data  pubdef_data;
-
 #define WriteU16(p,n)   (*(uint_16*)(p) = (uint_16)(n))
 #define WriteU32(p,n)   (*(uint_32*)(p) = (uint_32)(n))
 //#define WriteS16(p,n)   (*(int_16*)(p) = (int_16)(n))
@@ -43,7 +39,7 @@ typedef struct pubdef_data  pubdef_data;
 
 #pragma pack( push, 1 )
 
-typedef struct {
+struct omf_wfile {
     FILE        *file;      /* file                                         */
     size_t      in_buf;     /* number of bytes in buffer                    */
     struct {
@@ -52,7 +48,7 @@ typedef struct {
         uint_16     reclen;   /* record length                              */
         uint_8      buffer[1];/* for writing                                */
     };
-} OBJ_WFILE;
+};
 
 #define OBJ_BUFFER_SIZE 0x1000      /* 4k (must be less than 64k) */
 #define OBJ_MAX_REC     0x1000      /* maximum record size (<64k) */
@@ -80,12 +76,12 @@ struct coment_info {
 */
 
 
-typedef struct {
+struct physref {
     uint_16 frame;          /* frame number of physical reference       */
     uint_32 offset;         /* offset into reference                    */
-} physref;
+};
 
-typedef struct {
+struct logref {
     uint_8  frame       :3; /* F_ types from omfpc.h                    */
     uint_8  target      :3; /* T_ types from omfpc.h (only T0-T3)       */
     uint_8  is_secondary:1; /* can write target in a secondary manner   */
@@ -93,18 +89,18 @@ typedef struct {
     uint_16 frame_datum;    /* datum for different frame methods        */
     uint_16 target_datum;   /* datum for different target methods       */
     int_32  target_offset;  /* offset of target for target method       */
-} logref;
+};
 
-typedef union {
-    logref  log;
-    physref phys;
-} logphys;
+union logphys {
+    struct logref  log;
+    struct physref phys;
+};
 
 struct modend_info {
     uint_8  main_module :1; /* module is a main module                  */
     uint_8  start_addrs :1; /* module has start address                 */
     uint_8  is_logical  :1; /* is logical or physical reference         */
-    logphys ref;            /* a logical or physical reference          */
+    union logphys ref;      /* a logical or physical reference          */
 };
 /*
     A MODEND is described completely by the above information; no data
@@ -148,7 +144,7 @@ struct segdef_info {
     uint_8  combine     :4; /* combine field (values in omfpc.h)        */
     //uint_8  access_valid:1; /* does next field have valid value         */
     //uint_8  access_attr :2; /* easy omf access attributes (see omfpc.h) */
-    physref abs;            /* (conditional) absolute physical reference*/
+    struct physref abs;     /* (conditional) absolute physical reference*/
     uint_32 seg_length;     /* length of this segment                   */
     uint_16 seg_name_idx;   /* name index of this segment               */
     uint_16 class_name_idx; /* class name index of this segment         */
@@ -196,7 +192,7 @@ struct comdat_info {
 
 
 struct fixup_info {
-    //obj_rec *data_rec;   /* ptr to the data record this belongs to   */
+    //struct omf_rec *data_rec;   /* ptr to the data record this belongs to   */
     struct fixup *fixup;   /* linked list of processed fixups          */
 };
 /*
@@ -243,7 +239,7 @@ struct pubdef_info {
 */
 
 
-union objrec_info {
+union omfrec_info {
     struct coment_info  coment;
     struct modend_info  modend;
     struct lnames_info  lnames;
@@ -263,22 +259,20 @@ union objrec_info {
     struct comdat_info  comdat;
 };
 
-struct obj_rec {
+struct omf_rec {
     uint_16     length;  /* the length field for this record  (PRIVATE)  */
     uint_16     curoff;  /* offset of next read within record (PRIVATE)  */
     uint_8      *data;   /* data for this record              (PRIVATE)  */
     uint_8      command; /* the command field for this record            */
     uint_8      is_32:1; /* is this a Microsoft 32bit record             */
-    union objrec_info d; /* data depending on record type                */
+    union omfrec_info d; /* data depending on record type                */
 };
 
 #pragma pack( pop )
 
-extern void   omf_write_record( obj_rec *objr );
-extern void   omf_intInit( void );
-extern void   omf_intFini( void );
+extern void   omf_write_record( struct omf_rec * );
 
 extern size_t OmfFixGenFix( struct fixup *fix, uint_8 *buf, int type );
-extern size_t OmfFixGenRef( logphys *lp, int is_logical, uint_8 *buf, int type );
+extern size_t OmfFixGenRef( union logphys *lp, int is_logical, uint_8 *buf, int type );
 
 #endif

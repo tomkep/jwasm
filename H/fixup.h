@@ -31,8 +31,6 @@
 #ifndef FIXUP_H
 #define FIXUP_H
 
-#include "operands.h"
-
 /* RELOFF8 - RELOFF32 must be consecutive */
 
 enum fixup_types {
@@ -47,9 +45,9 @@ enum fixup_types {
         FIX_OFF64,          /*  7, 8 byte, COFF64, ELF64 + BIN only */
 #endif
         FIX_SEG = 8,        /*  8, 2 byte */
-        FIX_PTR16,          /*  9, 4 byte, OMF only */
-        FIX_PTR32,          /* 10, 6 byte, OMF only */
-        FIX_HIBYTE,         /* 11, 1 byte, OMF only */
+        FIX_PTR16,          /*  9, 4 byte, OMF+BIN-MZ only */
+        FIX_PTR32,          /* 10, 6 byte, OMF+BIN-MZ only */
+        FIX_HIBYTE,         /* 11, 1 byte, OMF+BIN-MZ only */
         FIX_OFF32_IMGREL,   /* 12, 4 byte, COFF+ELF only */
         FIX_OFF32_SECREL,   /* 13, 4 byte, COFF+ELF only */
 };
@@ -109,16 +107,16 @@ struct fixup {
             int_8           frame_type;     /* frame specifier (GRP,SEG,...) */
             uint_16         frame_datum;    /* additional data, usually index */
         };
-        asm_sym             *segment;       /* symbol's segment if assembly time var */
+        struct asym         *segment;       /* symbol's segment if assembly time var */
     };
-    struct dir_node         *def_seg;       /* segment the fixup is in */
-    struct asm_sym          *sym;
+    struct dsym             *def_seg;       /* segment the fixup is in */
+    struct asym             *sym;
 };
 
-extern struct fixup  *AddFixup( struct asm_sym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
+extern struct fixup  *CreateFixup( struct asym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
 extern void          FreeFixup( struct fixup * );
 extern ret_code      store_fixup( struct fixup *, int_32 * );
 
-extern ret_code      BackPatch( struct asm_sym *sym );
+extern ret_code      BackPatch( struct asym *sym );
 
 #endif

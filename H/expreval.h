@@ -52,6 +52,7 @@ enum oparg_types {
     AT_NUM   = 0x20, /* number */
     AT_BF    = 0x40, /* bitfield and record types */
     AT_UNDEF = 0x80, /* undefined label */
+    AT_FLOAT = 0x100,/* float constant */
     AT_CONST = AT_TYPE | AT_NUM,
     AT_TL    = AT_TYPE | AT_LABEL,
     AT_TLN   = AT_TYPE | AT_LABEL | AT_NUM,
@@ -62,61 +63,59 @@ enum oparg_types {
     AT_LIF   = AT_LABEL| AT_IND | AT_FIELD,
     AT_LFN   = AT_LABEL| AT_FIELD | AT_NUM,
     AT_TLR   = AT_TYPE | AT_LABEL | AT_REG,
-    AT_ALL   = AT_TYPE | AT_LABEL | AT_IND | AT_REG | AT_FIELD | AT_NUM | AT_UNDEF | AT_BF
+    AT_ALL   = AT_TYPE | AT_LABEL | AT_IND | AT_REG | AT_FIELD | AT_NUM | AT_UNDEF | AT_BF | AT_FLOAT
 };
 
-typedef struct expr_list {
+struct expr {
     union {
         struct {
-            union {
-                int_32      value;  // For constant, may also be a label offset
-                uint_32     uvalue; // For constant, may also be a label offset
-                float       fvalue; // For constant
-            };
-            int_32          hvalue; // high 32bit of 64bit number
-            union {
-                int_32      value6495; // bits 64-95 of 128bit number
-                int_16      value6479; // bits 64-79 of 80bit number
-            };
-            int_32          value96127; // bits 96-127 of 128bit number
+            int_32  value;
+            int_32  hvalue;
         };
         struct {
-            union {
-            uint_64         llvalue;
-            int_64          value64;
-            };
-            uint_64         hlvalue;
+            uint_64 llvalue;
+            uint_64 hlvalue;
         };
+        uint_32     uvalue;
+        int_64      value64;
+        float       fvalue;
+        uint_8      chararray[16];
     };
-    char            *string;        // for strings only -- NULL otherwise
-    int             base_reg;       // position of token for base register
-                                    // if type is EXPR_REG, it holds register
-                                    // if type is EXPR_FLOAT, it holds float pos
-    int             idx_reg;        // position of token for index register
-    int             label;          // position of token holding the label
-    int             override;       // position of token holding the override label
-                                    //   or register
-    enum asm_token  instr;          // operator token
+    union {
+        char        *string;        /* for EXPR_CONST + strings only */
+        char        *floatstr;      /* for EXPR_FLOAT only */
+    };
+    struct asm_tok  *base_reg;      /* token holding base register */
+                                    /* if type is EXPR_REG, it holds register */
+    struct asm_tok  *idx_reg;       /* token holding index register */
+    struct asm_tok  *label;         /* token holding the label */
+    struct asm_tok  *override;      /* token holding the override label */
+                                    /* or register */
+    enum special_token instr;       /* operator token */
 
-    enum exprtype   kind;           // Type of expression
-    memtype         mem_type;       // Whether expr is BYTE, WORD, DWORD, etc.
-    uint_8          scale;          // scaling factor 1, 2, 4, or 8 - 386 code only
-    uint_8          Ofssize;        // for MT_NEAR | MT_FAR
+    enum exprtype   kind;           /* Type of expression */
+    enum memtype    mem_type;       /* memory type if expr is a memory ref. */
+    union {
+        uint_8      scale;          /* scaling factor 1, 2, 4, or 8 - 386 code only */
+        uint_8      st_idx;         /* index if base_reg is a ST register */
+    };
+    uint_8          Ofssize;        /* 16,32,64 bit if MT_NEAR, MT_FAR */
     union {
         uint_8      flags1;
         struct {
-            unsigned indirect : 1;   // Whether inside [] or not
-            unsigned explicit : 1;   // Whether expression type explicitly given
-            unsigned abs      : 1;   // external ABS
-            unsigned is_type : 1;    // constant is a type
-            unsigned is_opattr : 1;  // current operator is OPATTR
-            unsigned negative : 1;   // for EXPR_FLOAT only
+            unsigned indirect : 1;  /* Whether inside [] or not */
+            unsigned explicit : 1;  /* Whether expression type explicitly given */
+            unsigned abs      : 1;  /* external ABS */
+            unsigned is_type  : 1;  /* constant is a type */
+            unsigned is_opattr: 1;  /* current operator is OPATTR */
+            unsigned negative : 1;  /* for EXPR_FLOAT only */
+            unsigned ftype    : 1;  /* for EXPR_FLOAT only (float type) */
         };
     };
-    struct asm_sym  *sym;   // label used
-    struct asm_sym  *mbr;   // struct member
-    struct asm_sym  *type;  // for DOT operator. Must be last (see TokenAssign)!
-} expr_list;
+    struct asym     *sym;   /* label used */
+    struct asym     *mbr;   /* struct member */
+    struct asym     *type;  /* for DOT operator. Must be last (see TokenAssign)! */
+};
 
 /* flags for last argument of EvalOperand() */
 enum expr_flags {
@@ -124,7 +123,8 @@ enum expr_flags {
     EXPF_NOLCREATE = 2   /* don't create label if it isn't defined yet */
 };
 
-extern ret_code     EvalOperand( int *, int, expr_list *, uint_8 );
+extern void         EmitConstError( const struct expr * );
+extern ret_code     EvalOperand( int *, struct asm_tok[], int, struct expr *, uint_8 );
 extern void         ExprEvalInit( void );
 
 #endif

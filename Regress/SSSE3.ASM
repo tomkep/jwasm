@@ -2,11 +2,11 @@
 ;--- SSSE3 instructions
 
 	.686
-	.model small
+	.model flat
 	.xmm
 
 	.data
-    
+
 var1	oword 0
 var2	qword 0
 
@@ -32,6 +32,12 @@ var2	qword 0
 	pabsb mm1, [esp]
 	pabsd mm1, [esp+10]
 	pabsw mm1, [esp+1000]
+
+	palignr mm0, mm1, 1
+	palignr mm0, var2, 2
+	palignr xmm0, xmm1, 3
+	palignr xmm0, var1, 4
+
 	ret
 
 end

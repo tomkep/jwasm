@@ -31,7 +31,7 @@
 * - CreateMacro      create a macro item
 * - ReleaseMacroData used to redefine/purge a macro
 * - StoreMacro       store a macro's parameter/local/line list
-* - MacroDef         handle MACRO directive
+* - MacroDir         handle MACRO directive
 * - PurgeDirective   handle PURGE directive
 * - MacroInit        global macro initialization, set predefined macros
 *
@@ -42,7 +42,6 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
 #include "input.h"
 #include "tokenize.h"
 #include "macro.h"
@@ -78,6 +77,63 @@ struct mname_list {
     uint_8              len;
     char                label[1];         /* name of param/local */
 };
+
+#ifdef __WATCOMC__
+static _inline char HexDigit( char x )
+#elif defined(_MSC_VER)
+static _inline char HexDigit( char x )
+#else
+static char HexDigit( char x )
+#endif
+{
+    x &= 0xF;
+    return((x > 9) ? (x - 10 + 'A') : (x + '0'));
+}
+
+/* Replace placeholders in a stored macro source line with values of actual
+ * parameters and locals. A placeholder consists of escape char 0x0a,
+ * followed by a one-byte index field.
+ */
+void fill_placeholders( char *dst, const char *src, uint argc, uint localstart, char *argv[] )
+/********************************************************************************************/
+{
+    uint_32 i;
+    const char *p;
+    uint parmno;
+
+    /* scan the string, replace the placeholders #nn */
+    for( p = src ;*p != NULLC; ) {
+        if (*p == PLACEHOLDER_CHAR ) {
+            p++;
+            /* we found a placeholder, get the index part! */
+            parmno = *(unsigned char *)p - 1; /* index is one-based! */
+            p++;
+            /* if parmno > argc, then it's a macro local */
+            if ( parmno >= argc ) {
+                *dst++ = '?';
+                *dst++ = '?';
+                i = localstart + parmno - argc;
+                if ( i > 0xFFFF ) {
+                    i = sprintf( dst, "%X", i );
+                    dst += i;
+                } else {
+                    *dst++ = HexDigit( i >> 12 );
+                    *dst++ = HexDigit( i >> 8 );
+                    *dst++ = HexDigit( i >> 4 );
+                    *dst++ = HexDigit( i );
+                }
+            } else if ( argv[parmno] ) {  /* actual parameter might be empty (=NULL) */
+                i = strlen( argv[parmno] );
+                memcpy( dst, argv[parmno], i );
+                dst += i;
+            }
+        } else {
+            *dst++ = *p++;
+        }
+    }
+    *dst = NULLC;
+    return;
+}
 
 static int replace_parm( const char *line, char *start, int len, struct mname_list *mnames )
 /******************************************************************************************/
@@ -209,28 +265,28 @@ static int store_placeholders( char *line, struct mname_list *mnames )
 
 /*
  * store a macro's parameter, local and content list.
- * i = start index of macro params in AsmBuffer[].
- * this function destroys contents of AsmBuffer!
+ * i = start index of macro params in token buffer.
  */
 
-ret_code StoreMacro( dir_node * macro, int i, bool store_data )
-/*************************************************************/
+ret_code StoreMacro( int i, struct asm_tok tokenarray[], struct dsym *macro, bool store_data )
+/********************************************************************************************/
 {
-    macro_info          *info;
+    struct macro_info   *info;
     char                *string;
     char                *token;
+    char                *oldcurrsource;
     struct mparm_list   *paranode;
     struct mname_list   *mname_head = NULL;
     struct mname_list   *mname_tail;
     struct mname_list   *mname_node;
-    struct asmlines     **nextline;
+    struct srcline      **nextline;
 #ifdef DEBUG_OUT
     int lineno = 0;
 #endif
     uint                nesting_depth = 0;
     bool                locals_done;
     struct line_status  ls;
-    char                buffer[ MAX_LINE_LEN ];
+    struct asm_tok      tok[2];
 
     DebugMsg1(("StoreMacro(%s, i=%u, store_data=%u) enter\n", macro->sym.name, i, store_data ));
     info = macro->e.macroinfo;
@@ -240,7 +296,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 
         if ( i < Token_Count ) {
             for ( j = i, info->parmcnt = 1; j < Token_Count; j++ )
-                if ( AsmBuffer[j]->token == T_COMMA )
+                if ( tokenarray[j].token == T_COMMA )
                     info->parmcnt++;
             info->parmlist = AsmAlloc( info->parmcnt * sizeof(struct mparm_list));
         } else {
@@ -250,22 +306,22 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 
         for( paranode = info->parmlist ; i < Token_Count ; paranode++ ) {
 
-            token = AsmBuffer[i]->string_ptr;
+            token = tokenarray[i].string_ptr;
             /* Masm accepts reserved words and instructions as parameter
              * names! So just check that the token is a valid id.
              */
             if ( !is_valid_id_first_char( *token ) ) {
                 AsmErr( SYNTAX_ERROR_EX, token );
                 break;
-            } else if ( AsmBuffer[i]->token != T_ID )
-                AsmWarn( 4, PARAM_IS_RESERVED_WORD, AsmBuffer[i]->string_ptr );
+            } else if ( tokenarray[i].token != T_ID )
+                AsmWarn( 4, PARAM_IS_RESERVED_WORD, tokenarray[i].string_ptr );
 
             paranode->deflt = NULL;
             paranode->required = FALSE;
 
             /* first get the parm. name */
             j = strlen( token );
-            mname_node = AsmTmpAlloc( sizeof( struct mname_list ) + j );
+            mname_node = myalloca( sizeof( struct mname_list ) + j );
             memcpy( (char *)mname_node->label, token, j+1 );
             mname_node->next = NULL;
             mname_node->len = j;
@@ -277,33 +333,33 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
             i++;
 
             /* now see if it has a default value or is required */
-            if( AsmBuffer[i]->token == T_COLON ) {
+            if( tokenarray[i].token == T_COLON ) {
                 i++;
-                if( *AsmBuffer[i]->string_ptr == '=' ) {
+                if( tokenarray[i].token == T_DIRECTIVE && tokenarray[i].dirtype == DRT_EQUALSGN ) {
                     i++;
                     /* allowed syntax is parm:=<literal> */
-                    if( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
+                    if( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
                         AsmError( LITERAL_EXPECTED_AFTER_EQ );
                         break; // return( ERROR );
                     }
-                    paranode->deflt = AsmAlloc( AsmBuffer[i]->value + 1 );
-                    memcpy( paranode->deflt, AsmBuffer[i]->string_ptr, AsmBuffer[i]->value + 1 );
+                    paranode->deflt = AsmAlloc( tokenarray[i].stringlen + 1 );
+                    memcpy( paranode->deflt, tokenarray[i].string_ptr, tokenarray[i].stringlen + 1 );
                     i++;
-                } else if( _stricmp( AsmBuffer[i]->string_ptr, "REQ" ) == 0 ) {
+                } else if( _stricmp( tokenarray[i].string_ptr, "REQ" ) == 0 ) {
                     /* required parameter */
                     paranode->required = TRUE;
                     i++;
-                } else if( ( AsmBuffer[i]->token == T_RES_ID ) && ( AsmBuffer[i]->value == T_VARARG )) {
+                } else if( tokenarray[i].token == T_RES_ID && tokenarray[i].tokval == T_VARARG ) {
                     /* more parameters can follow */
                     macro->sym.mac_vararg = TRUE;
-                    if ( AsmBuffer[i+1]->token != T_FINAL ) {
+                    if ( tokenarray[i+1].token != T_FINAL ) {
                         AsmError( VARARG_PARAMETER_MUST_BE_LAST );
                         break;
                     }
                     i++;
 #if MACROLABEL
-                } else if( AsmBuffer[i]->token == T_DIRECTIVE &&
-                          AsmBuffer[i]->value == T_LABEL &&
+                } else if( tokenarray[i].token == T_DIRECTIVE &&
+                          tokenarray[i].tokval == T_LABEL &&
                           Options.strict_masm_compat == FALSE ) { /* parm:LABEL? */
                     /* LABEL attribute for first param only! */
                     if ( paranode != info->parmlist ) {
@@ -314,13 +370,13 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                     i++;
 #endif
                 } else {
-                    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+                    AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
                     break;
                 }
             }
             DebugMsg1(("StoreMacro(%s): param=>%s< found\n", macro->sym.name, mname_node->label));
-            if( i < Token_Count && AsmBuffer[i]->token != T_COMMA ) {
-                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->tokpos );
+            if( i < Token_Count && tokenarray[i].token != T_COMMA ) {
+                AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
                 break; // return( ERROR );
             }
             /* go past comma */
@@ -332,12 +388,15 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 
     locals_done = FALSE;
     nextline = &info->data;
+    oldcurrsource = CurrSource;
+    CurrSource = GetNewLineBuffer( CurrSource );
+
     /* now read in the lines of the macro, and store them */
     for( ; ; ) {
         char *ptr;
         char *ptr2;
 
-        string = GetTextLine( buffer, sizeof( buffer ) );
+        string = GetTextLine( CurrSource );
         if( string == NULL ) {
             AsmError( UNMATCHED_MACRO_NESTING );
             ModuleInfo.EndDirFound = TRUE; /* avoid error "END not found" */
@@ -346,10 +405,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 
         /* add the macro line to the listing file */
         if ( ModuleInfo.list && store_data ) {
-            char *oldsrc = CurrSource;
-            CurrSource = buffer;
             LstWrite( LSTTYPE_MACROLINE, 0, NULL );
-            CurrSource = oldsrc;
         }
 
         while ( isspace(*string) ) string++;
@@ -358,7 +414,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
         if ( *string == NULLC || *string == ';' ) {
 #if STORE_EMPTY_LINES
             if( store_data ) {
-                *nextline = AsmAlloc( sizeof( struct asmlines ) );
+                *nextline = AsmAlloc( sizeof( struct srcline ) );
                 (*nextline)->next = NULL;
                 (*nextline)->ph_count = 0;
                 (*nextline)->line[0] = NULLC;
@@ -374,13 +430,14 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
          */
         ls.input = string;
         ls.output = StringBufferEnd;
-        AsmBuffer[0]->token = T_FINAL;
-        GetToken( 0, &ls );
+        ls.last_token = T_FINAL;
+        tok[0].token = T_FINAL;
+        GetToken( &tok[0], &ls );
         if ( strchr( ls.input, '\\' ) ) {
             ptr = ls.input;
             while ( *ls.input && *ls.input != ';' ) {
                 ls.is_concat = FALSE;
-                GetToken( 1, &ls );
+                GetToken( &tok[1], &ls );
                 if ( ls.is_concat && ModuleInfo.list && store_data ) {
                     char *oldsrc = CurrSource;
                     CurrSource = CurrSource + strlen( CurrSource ) + 1;
@@ -392,22 +449,22 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
             ls.input = ptr;
         }
 
-        if( locals_done == FALSE && AsmBuffer[0]->token == T_DIRECTIVE && AsmBuffer[0]->value == T_LOCAL ) {
+        if( locals_done == FALSE && tok[0].token == T_DIRECTIVE && tok[0].tokval == T_LOCAL ) {
             if( !store_data )
                 continue;
             while( isspace( *ls.input ) ) ls.input++;
             for ( ;*ls.input && *ls.input != ';'; ) { /* "no" locals are ok */
                 int size;
                 ls.output = StringBufferEnd;
-                GetToken( 0, &ls );
+                GetToken( &tok[0], &ls );
                 if ( !is_valid_id_first_char( *StringBufferEnd ) ) {
                     AsmErr( SYNTAX_ERROR_EX, StringBufferEnd );
                     break;
-                } else if ( AsmBuffer[0]->token != T_ID )
+                } else if ( tok[0].token != T_ID )
                     AsmWarn( 4, PARAM_IS_RESERVED_WORD, StringBufferEnd );
 
                 size = strlen( StringBufferEnd );
-                mname_node = AsmTmpAlloc( sizeof( struct mname_list ) + size );
+                mname_node = myalloca( sizeof( struct mname_list ) + size );
                 memcpy( mname_node->label, StringBufferEnd, size + 1 );
                 mname_node->next = NULL;
                 mname_node->len = size;
@@ -433,10 +490,10 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
         locals_done = TRUE;
 
         /* macro label? */
-        if ( AsmBuffer[0]->token == T_COLON ) {
+        if ( tok[0].token == T_COLON ) {
             ;/* just store the line */
-        } else if( AsmBuffer[0]->token == T_DIRECTIVE ) {
-            if ( AsmBuffer[0]->value == T_EXITM ) {
+        } else if( tok[0].token == T_DIRECTIVE ) {
+            if ( tok[0].tokval == T_EXITM ) {
                 DebugMsg1(("StoreMacro(%s, %u): exitm found, >%s<\n", macro->sym.name, nesting_depth, string+5 ));
                 if ( nesting_depth == 0 ) {
                     ptr = ls.input;
@@ -445,14 +502,14 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                         macro->sym.isfunc = TRUE;
                     //macro->sym.runsync = TRUE;
                 }
-            } else if( AsmBuffer[0]->value == T_ENDM ) {
+            } else if( tok[0].tokval == T_ENDM ) {
                 DebugMsg1(("StoreMacro(%s, %u): endm found\n", macro->sym.name, nesting_depth ));
                 if( nesting_depth ) {
                     nesting_depth--;
                 } else {
                     break; /* exit the for() loop */
                 }
-            } else if( AsmBuffer[0]->dirtype == DRT_LOOPDIR ) {
+            } else if( tok[0].dirtype == DRT_LOOPDIR ) {
                 nesting_depth++; /* FOR[C], IRP[C], REP[EA]T, WHILE */
             }
         } else {
@@ -494,14 +551,14 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
                     }
                     /* MACRO directive? */
                     ls.input = ptr2;
-                    if( GetToken( 0, &ls ) == NOT_ERROR && AsmBuffer[0]->token == T_DIRECTIVE && AsmBuffer[0]->value == T_MACRO ) {
+                    if( GetToken( &tok[0], &ls ) == NOT_ERROR && tok[0].token == T_DIRECTIVE && tok[0].tokval == T_MACRO ) {
                         nesting_depth++;
                         goto check_done;
                     }
                 }
             }
             ls.input = ptr;
-            if ( GetToken( 0, &ls ) == NOT_ERROR && AsmBuffer[0]->token == T_DIRECTIVE && AsmBuffer[0]->dirtype == DRT_LOOPDIR )
+            if ( GetToken( &tok[0], &ls ) == NOT_ERROR && tok[0].token == T_DIRECTIVE && tok[0].dirtype == DRT_LOOPDIR )
                 nesting_depth++;
         }
     check_done:
@@ -511,7 +568,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
             if ( mname_head )
                 phs = store_placeholders( string, mname_head );
             j = strlen( string );
-            *nextline = AsmAlloc( sizeof( struct asmlines ) + j );
+            *nextline = AsmAlloc( sizeof( struct srcline ) + j );
             (*nextline)->next = NULL;
             (*nextline)->ph_count = phs;
             memcpy( (*nextline)->line, string, j + 1 );
@@ -544,6 +601,7 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 #endif
         }
     } /* end for */
+    CurrSource = oldcurrsource;
     macro->sym.isdefined = TRUE;
     DebugMsg1(("StoreMacro(%s): exit, no error, isfunc=%u\n", macro->sym.name, macro->sym.isfunc));
     return( NOT_ERROR );
@@ -551,13 +609,13 @@ ret_code StoreMacro( dir_node * macro, int i, bool store_data )
 
 /* create a macro symbol */
 
-dir_node *CreateMacro( const char *name )
-/***************************************/
+struct dsym *CreateMacro( const char *name )
+/******************************************/
 {
-    dir_node *macro;
-    if ( macro = (dir_node *)SymCreate( name, *name != NULLC )) {
+    struct dsym *macro;
+    if ( macro = (struct dsym *)SymCreate( name, *name != NULLC )) {
         macro->sym.state = SYM_MACRO;
-        macro->e.macroinfo = AsmAlloc( sizeof( macro_info ) );
+        macro->e.macroinfo = AsmAlloc( sizeof( struct macro_info ) );
         macro->e.macroinfo->parmcnt  = 0;
         macro->e.macroinfo->localcnt = 0;
         macro->e.macroinfo->parmlist = NULL;
@@ -574,12 +632,12 @@ dir_node *CreateMacro( const char *name )
 
 /* clear macro data */
 
-void ReleaseMacroData( dir_node *macro )
-/**************************************/
+void ReleaseMacroData( struct dsym *macro )
+/*****************************************/
 {
     int             i;
-    struct asmlines *datacurr;
-    struct asmlines *datanext;
+    struct srcline  *datacurr;
+    struct srcline  *datanext;
 
     DebugMsg1(("ReleaseMacroData(%s) enter\n", macro->sym.name));
     /* free the parm list */
@@ -617,17 +675,17 @@ void ReleaseMacroData( dir_node *macro )
 /* MACRO directive: define a macro
  * i: directive token ( is to be 1 )
  */
-ret_code MacroDef( int i )
-/************************/
+ret_code MacroDir( int i, struct asm_tok tokenarray[] )
+/*****************************************************/
 {
     char                *name;
     bool                store_data;
-    dir_node            *macro;
+    struct dsym         *macro;
 
-    name = AsmBuffer[0]->string_ptr;
-    DebugMsg1(("MacroDef(%s) enter, i=%u\n", name, i ));
+    name = tokenarray[0].string_ptr;
+    DebugMsg1(("MacroDir(%s) enter, i=%u\n", name, i ));
 
-    macro = (dir_node *)SymSearch( name );
+    macro = (struct dsym *)SymSearch( name );
     /* no need to care about SYM_UNDEFINED, a macro must always be
      defined BEFORE it's used. */
     if( macro == NULL ) {
@@ -635,10 +693,10 @@ ret_code MacroDef( int i )
         macro->e.macroinfo->srcfile = get_curr_srcfile();
 #if 0 /* a macro MUST be defined before it's used! */
     } else if( macro->sym.state == SYM_UNDEFINED ) {
-        dir_remove_table( &Tables[TAB_UNDEF], macro );
+        sym_remove_table( &Tables[TAB_UNDEF], macro );
         macro->sym.state = SYM_MACRO;
-        macro->e.macroinfo = AsmAlloc( sizeof( macro_info ) );
-        memset( macro->e.macroinfo, 0, sizeof ( macro_info ) );
+        macro->e.macroinfo = AsmAlloc( sizeof( struct macro_info ) );
+        memset( macro->e.macroinfo, 0, sizeof ( struct macro_info ) );
         macro->e.macroinfo->srcfile = get_curr_srcfile();
 #endif
     } else if( macro->sym.state != SYM_MACRO ) {
@@ -646,10 +704,15 @@ ret_code MacroDef( int i )
         return( ERROR );
     }
 
-    if (( Parse_Pass == PASS_1 ) || (macro->sym.variable) ) {
+    if ( ( Parse_Pass == PASS_1 ) || ( macro->sym.variable ) ) {
         /* is the macro redefined? */
         if ( macro->e.macroinfo->data != NULL ) {
-            DebugMsg(("MacroDef(%s): macro already defined\n", name));
+            DebugMsg(("MacroDir(%s): macro already defined\n", name));
+#if FASTMEM==0
+            /* don't free memory of macro data lines if macro is in use */
+            if ( MacroInUse( macro ) )
+                macro->e.macroinfo->data = NULL;
+#endif
             ReleaseMacroData( macro );
             macro->sym.variable = TRUE;
         }
@@ -660,7 +723,7 @@ ret_code MacroDef( int i )
     if ( ModuleInfo.list )
         LstWriteSrcLine();
 
-    return( StoreMacro( macro, ++i, store_data ) );
+    return( StoreMacro( ++i, tokenarray, macro, store_data ) );
 }
 
 /*
@@ -669,20 +732,20 @@ ret_code MacroDef( int i )
  * and cannot be used for something else.
  * Text macros cannot be purged, because the PURGE arguments are expanded.
  */
-ret_code PurgeDirective( int i )
-/******************************/
+ret_code PurgeDirective( int i, struct asm_tok tokenarray[] )
+/***********************************************************/
 {
-    dir_node *dir;
+    struct dsym *dir;
 
     i++; /* skip directive */
     do {
-        if ( AsmBuffer[i]->token != T_ID ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        if ( tokenarray[i].token != T_ID ) {
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
-        dir = (dir_node *)SymSearch( AsmBuffer[i]->string_ptr );
+        dir = (struct dsym *)SymSearch( tokenarray[i].string_ptr );
         if ( dir == NULL ) {
-            AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
+            AsmErr( SYMBOL_NOT_DEFINED, tokenarray[i].string_ptr );
             return( ERROR );
         }
         if ( dir->sym.state != SYM_MACRO ) {
@@ -692,12 +755,20 @@ ret_code PurgeDirective( int i )
 #if TRUEPURGE
         dir->sym.defined = FALSE;
 #else
+#if FASTMEM==0
+        /* don't free memory of macro data lines if macro is in use */
+        if ( MacroInUse( dir ) ) {
+            DebugMsg1(("PurgeDirective(%s): macro is in use\n", dir->sym.name ));
+            dir->e.macroinfo->data = NULL;
+        }
+#endif
         ReleaseMacroData( dir );
+        dir->sym.variable = TRUE;
 #endif
         i++;
         if ( i < Token_Count ) {
-            if ( AsmBuffer[i]->token != T_COMMA || AsmBuffer[i+1]->token == T_FINAL ) {
-                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->tokpos );
+            if ( tokenarray[i].token != T_COMMA || tokenarray[i+1].token == T_FINAL ) {
+                AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
                 return( ERROR );
             }
             i++;
@@ -709,10 +780,10 @@ ret_code PurgeDirective( int i )
 
 /* internal @Environ macro function */
 
-static ret_code EnvironFunc( char * buffer, char * *params )
-/**********************************************************/
+static ret_code EnvironFunc( char *buffer, char * *params )
+/*********************************************************/
 {
-    char * p = getenv( *params );
+    char *p = getenv( *params );
     /* todo: ensure that variable isn't > MAX_LINE_LENGTH */
     if ( p )
         strcpy( buffer, p );
@@ -727,7 +798,7 @@ static ret_code EnvironFunc( char * buffer, char * *params )
 ret_code MacroInit( int pass )
 /****************************/
 {
-    dir_node *macro;
+    struct dsym *macro;
 
     DebugMsg(( "MacroInit(%u)\n", pass ));
 

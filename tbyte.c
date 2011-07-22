@@ -48,19 +48,20 @@
 #define MAXUI64    0xffffffffffffffffui64
 #endif
 
-typedef union {
+union u192 {
     uint_64 m64[3];
     uint_32 m32[6];
-} u192;
+};
 
-typedef union {
+union u96 {
     uint_32 m32[3];
-} u96;
+};
 
-typedef struct {
+/* extended (112-bit, 96+16) long double */
+struct ELD {
     uint_32 m32[3];
     unsigned short e;
-} ELD;
+};
 
 #define EXPONENT_BIAS 0x3FFF
 
@@ -69,7 +70,7 @@ typedef struct {
 
 #define MAX_EXP_INDEX 13
 
-static const ELD tab_plus_exp[MAX_EXP_INDEX] = {
+static const struct ELD tab_plus_exp[MAX_EXP_INDEX] = {
     { { 0x00000000UL, 0x00000000UL, 0xA0000000UL }, 0x4002 }, /* 1e1L   */
     { { 0x00000000UL, 0x00000000UL, 0xC8000000UL }, 0x4005 }, /* 1e2L   */
     { { 0x00000000UL, 0x00000000UL, 0x9C400000UL }, 0x400C }, /* 1e4L   */
@@ -85,7 +86,7 @@ static const ELD tab_plus_exp[MAX_EXP_INDEX] = {
     { { 0xC94C14F7UL, 0x8A20979AUL, 0xC4605202UL }, 0x7525 }  /* 1e4096L*/
 };
 
-static const ELD tab_minus_exp[MAX_EXP_INDEX] = {
+static const struct ELD tab_minus_exp[MAX_EXP_INDEX] = {
     { { 0xCCCCCCCDUL, 0xCCCCCCCCUL, 0xCCCCCCCCUL }, 0x3FFB }, /* 1e-1L   */
     { { 0x3D70A3D7UL, 0x70A3D70AUL, 0xA3D70A3DUL }, 0x3FF8 }, /* 1e-2L   */
     { { 0xD3C36113UL, 0xE219652BUL, 0xD1B71758UL }, 0x3FF1 }, /* 1e-4L   */
@@ -101,8 +102,8 @@ static const ELD tab_minus_exp[MAX_EXP_INDEX] = {
     { { 0x2DE37E46UL, 0xD2CE9FDEUL, 0xA6DD04C8UL }, 0x0AD8 }  /* 1e-4096L*/
 };
 
-static int cmp_u96_max( const u96 *x )
-/*************************************
+static int cmp_u96_max( const union u96 *x )
+/*******************************************
     compare u96 with maximum value before u96
     overflow after multiply by 10
 */
@@ -124,8 +125,8 @@ static int cmp_u96_max( const u96 *x )
     }
 }
 
-static int add_check_u96_overflow( u96 *x, unsigned int c )
-/**********************************************************
+static int add_check_u96_overflow( union u96 *x, unsigned int c )
+/****************************************************************
     test u96 overflow after multiply by 10
     add one decimal digit to u96
 */
@@ -174,15 +175,15 @@ static int bitsize64( uint_64 x )
     return( i );
 }
 
-static int U96LD( const u96 *op, ELD *res )
-/******************************************
+static int U96LD( const union u96 *op, struct ELD *res )
+/*******************************************************
     convert u96 into internal extended long double
 */
 {
     int bs;
     int shft;
 
-    memcpy( res, op, sizeof(u96) );
+    memcpy( res, op, sizeof( union u96 ) );
     bs = bitsize32(res->m32[2]) + 64;
     if( bs == 64 ) {
         res->m32[2] = res->m32[1];
@@ -213,8 +214,8 @@ static int U96LD( const u96 *op, ELD *res )
     return( 0 );
 }
 
-static int normalize( u192 *res )
-/********************************
+static int normalize( union u192 *res )
+/**************************************
     normalize internal extended long double u192
     return exponent shift
 */
@@ -251,8 +252,8 @@ static int normalize( u192 *res )
     return( bs - 192 );
 }
 
-static int add192( u192 *res, const uint_64 x, int pos )
-/*******************************************************
+static int add192( union u192 *res, const uint_64 x, int pos )
+/*************************************************************
     add uint_64 to u192 on uint_32 position
 */
 {
@@ -274,14 +275,14 @@ static int add192( u192 *res, const uint_64 x, int pos )
     return( 0 );
 }
 
-static int multiply( const ELD *op1, const ELD *op2, ELD *res )
-/**************************************************************
+static int multiply( const struct ELD *op1, const struct ELD *op2, struct ELD *res )
+/***********************************************************************************
     multiply u96 by u96 into u96
     normalize and round result
 */
 {
     uint_64 x1;
-    u192 r1;
+    union u192 r1;
     long exp;
 
     exp = (long)(op1->e & 0x7fff) + (long)(op2->e & 0x7fff) - EXPONENT_BIAS + 1;
@@ -320,15 +321,15 @@ static int multiply( const ELD *op1, const ELD *op2, ELD *res )
     return( 0 );
 }
 
-static int TB_create(u96 *value, long exponent, TB_LD *ld)
-/*********************************************************
+static int TB_create( union u96 *value, long exponent, struct TB_LD *ld)
+/***********************************************************************
     create tbyte/long double from u96 value and
     decimal exponent, round result
 */
 {
-    const ELD *tabExp;
+    const struct ELD *tabExp;
     int i;
-    ELD res;
+    struct ELD res;
 
     if( exponent < 0 ) {
         exponent = -exponent;
@@ -361,8 +362,8 @@ static int TB_create(u96 *value, long exponent, TB_LD *ld)
     return( 0 );
 }
 
-TB_LD * strtotb( const char *p, TB_LD * ld, char negative )
-/**********************************************************
+struct TB_LD *strtotb( const char *p, struct TB_LD *ld, char negative )
+/**********************************************************************
     convert string into tbyte/long double
     set result sign
 */
@@ -374,10 +375,10 @@ TB_LD * strtotb( const char *p, TB_LD * ld, char negative )
     long             exp1;
     long             exponent;
     long             exponent_tmp;
-    u96              value;
-    u96              value_tmp;
+    union u96        value;
+    union u96        value_tmp;
 
-    while ( isspace(*p) ) p++;
+    while ( isspace( *p ) ) p++;
     switch (*p) {
     case '-':
         sign = -1;
@@ -389,8 +390,8 @@ TB_LD * strtotb( const char *p, TB_LD * ld, char negative )
     if( negative ) {
         sign = (sign > 0) ? -1 : +1;
     }
-    memset(&value, 0, sizeof(value));
-    memset(&value_tmp, 0, sizeof(value_tmp));
+    memset( &value, 0, sizeof( value ) );
+    memset( &value_tmp, 0, sizeof( value_tmp ) );
     //exponent = 0;
     exp1 = 0;
     exponent_tmp = 0;
@@ -400,12 +401,12 @@ TB_LD * strtotb( const char *p, TB_LD * ld, char negative )
             exponent_tmp++;
             exp1++;
         } else {
-            if( add_check_u96_overflow(&value_tmp, *p - '0') ) {
+            if( add_check_u96_overflow( &value_tmp, *p - '0' ) ) {
                 overflow = 1;
                 exponent_tmp++;
                 exp1++;
             } else if( *p != '0' ) {
-                memcpy(&value, &value_tmp, sizeof(value));
+                memcpy( &value, &value_tmp, sizeof( value ) );
                 exp1 = 0;
             } else if( U96ISNOTZERO(value) ) {
                 exp1++;
@@ -418,12 +419,12 @@ TB_LD * strtotb( const char *p, TB_LD * ld, char negative )
         p++;
         while ( (unsigned int)(*p - '0') < 10u ) {
             if( overflow == 0 ) {
-                if( add_check_u96_overflow(&value_tmp, *p - '0') ) {
+                if( add_check_u96_overflow( &value_tmp, *p - '0' ) ) {
                     overflow = 1;
                 } else {
                     exponent_tmp--;
                     if( *p != '0' ) {
-                        memcpy(&value, &value_tmp, sizeof(value));
+                        memcpy( &value, &value_tmp, sizeof( value ) );
                         exponent = exponent_tmp;
                     }
                 }
@@ -433,7 +434,7 @@ TB_LD * strtotb( const char *p, TB_LD * ld, char negative )
     }
     exp_value   = 0;
     if ( (*p | 0x20) == 'e' ) {
-        switch (*++p) {
+        switch ( *++p ) {
         case '-':
             exp_sign = -1;
         case '+': p++;
@@ -452,7 +453,7 @@ TB_LD * strtotb( const char *p, TB_LD * ld, char negative )
         default :
             ld->m = 0;
             ld->e = 0;
-            SET_SIGN(ld, sign);
+            SET_SIGN( ld, sign );
             return( ld );
         }
         while ( (unsigned int)(*p - '0') < 10u )
@@ -461,7 +462,7 @@ TB_LD * strtotb( const char *p, TB_LD * ld, char negative )
             exp_value = -exp_value;
     }
     exp_value += exponent;
-    TB_create(&value, exp_value, ld);
-    SET_SIGN(ld, sign);
+    TB_create( &value, exp_value, ld );
+    SET_SIGN( ld, sign );
     return( ld );
 }

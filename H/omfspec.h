@@ -37,19 +37,19 @@
 /*
  * Library stuff
  */
-typedef struct hash_entry {
+struct hash_entry {
     uint_16     minor_class;
     uint_16     minor_inc;
     uint_16     major_class;
     uint_16     major_inc;
-} hash_entry;
+};
 
-typedef struct lib_header {
+struct lib_header {
     uint_8      cmd;
     uint_16     length;
     uint_32     dict_start;
     uint_16     dict_size;
-} lib_header;
+};
 
 enum {
     LIB_FULL_PAGE       = 0xff,
@@ -67,7 +67,7 @@ enum {
 /*
  *  INTEL Segment Alignment Specifiers - A field
  */
- enum {
+enum {
     ALIGN_ABS           = 0,        /* absolute segment - no alignment  */
     ALIGN_BYTE          = 1,        /* relocatable seg - byte aligned   */
     ALIGN_WORD          = 2,        /* relocatable seg - word aligned   */
@@ -99,8 +99,8 @@ enum {
 #define SEGATTR_A( a )  (ALIGN_##a << 5)
 #define SEGATTR_C( a )  (COMB_##a << 2)
 enum {
-      SEGATTR_BIG  =   1<< 1,   /* exactly 64k or 2**32 */
-      SEGATTR_P    =   1,       /* use 32 */
+    SEGATTR_BIG  =   1<< 1,   /* exactly 64k or 2**32 */
+    SEGATTR_P    =   1,       /* use 32 */
 };
 /*  Bits in FIXUPP records */
 
@@ -155,7 +155,7 @@ enum {
  *  INTEL Object Record Types
  */
 
-typedef enum {
+enum cmd_omf {
 #if 0 /* these cmds aren't used (and ignored by MS link) */
     CMD_MIN_CMD         = 0x6e,     /* minimum cmd enum                  */
     CMD_RHEADR          = 0x6e,     /* R-Module Header                   */
@@ -227,7 +227,7 @@ typedef enum {
     CMD_VENDEXT         = 0xce,     /* TIS vendor extension record      */
     CMD_MAX_CMD         = 0xce      /* maximum cmd enum                 */
 #endif
-} cmd_omf;
+};
 
 enum {
     LOC_OFFSET_LO       = 0,        /* relocate lo byte of offset       */
@@ -244,19 +244,19 @@ enum {
 };
 
 #if 0
-typedef struct obj_record {
+struct omf_record {
     uint_8      command;
     uint_16     length;
-} obj_record;
+};
 #endif
 
-typedef struct obj_name {
+struct omf_name {
     uint_8      len;
     char        name[ 1 ];
-} obj_name;
-/*
-    Comment Type
-*/
+};
+
+/* Comment Type */
+
 enum {
     CMT_TNP = 0x80,   /* no purge bit */
     CMT_TNL = 0x40,   /* no list bit */
@@ -312,16 +312,16 @@ enum {
 //#define EASY_OMF_SIGNATURE  "80386"
 
 /*
-    this is the data that is given in the object file to determine the
-    target processor.
-*/
+ *  this is the data that is given in the object file to determine the
+ *  target processor.
+ */
 
-typedef struct {
+struct cpu_data {
     char    processor;
     char    mem_model;
     char    unknown;
     char    emulation;
-} cpu_data;
+};
 
 /*
  *  Linker directives (mostly WLINK directives)
@@ -341,8 +341,8 @@ enum {
 };
 
 /*
-    Microsoft coment class A0 extensions
-*/
+ *  Microsoft coment class A0 extensions
+ */
 enum {
     MOMF_IMPDEF = 1,
     MOMF_EXPDEF = 2,
@@ -353,25 +353,25 @@ enum {
 };
 
 /*
-    Disasm directives
-*/
+ *  Disasm directives
+ */
 enum {
 /*
-    DDIR_SCAN_TABLE is used by the code generator to indicate data in a
-    code segment.  i.e., scan tables generated for switch()s, floating point
-    constants and string constants.  The 'S' is followed by a segment index,
-    then the start and end+1 offsets into the segment which are words in
-    regular object files, and longs in EasyOMF and Microsoft 386.
-    If the segment index is zero, then it is followed by a LNAME index which
-    identifies the COMDAT symbol that the scan table belongs to.
-*/
+ *  DDIR_SCAN_TABLE is used by the code generator to indicate data in a
+ *  code segment.  i.e., scan tables generated for switch()s, floating point
+ *  constants and string constants.  The 'S' is followed by a segment index,
+ *  then the start and end+1 offsets into the segment which are words in
+ *  regular object files, and longs in EasyOMF and Microsoft 386.
+ *  If the segment index is zero, then it is followed by a LNAME index which
+ *  identifies the COMDAT symbol that the scan table belongs to.
+ */
     DDIR_SCAN_TABLE_32  = 'S',
     DDIR_SCAN_TABLE     = 's'
 };
 
 /*
-    COMDEF types
-*/
+ *  COMDEF types
+ */
 enum {
     COMDEF_FAR          = 0x61, /* FAR variable                         */
     COMDEF_NEAR         = 0x62, /* NEAR variable                        */
@@ -383,14 +383,14 @@ enum {
 
 enum {
 /*
-    COMDAT flags
-*/
+ *  COMDAT flags
+ */
     COMDAT_CONTINUE     = 0x01, /* continuation of previous COMDAT */
     COMDAT_ITERATED     = 0x02, /* LIDATA form of COMDAT */
     COMDAT_LOCAL        = 0x04, /* COMDAT is local to this module */
 /*
-    COMDAT allocation type
-*/
+ *  COMDAT allocation type
+ */
     COMDAT_ALLOC_MASK   = 0x0f,
     COMDAT_EXPLICIT     = 0x00, /* in given segment */
     COMDAT_FAR_CODE     = 0x01, /* allocate CODE use16 segment */
@@ -398,16 +398,16 @@ enum {
     COMDAT_CODE32       = 0x03, /* allocate CODE use32 segment */
     COMDAT_DATA32       = 0x04, /* allocate DATA use32 segment */
 /*
-    COMDAT selection criteria
-*/
+ *  COMDAT selection criteria
+ */
     COMDAT_MATCH_MASK   = 0xf0,
     COMDAT_MATCH_NONE   = 0x00, /* don't match anyone */
     COMDAT_MATCH_ANY    = 0x10, /* pick any instance */
     COMDAT_MATCH_SAME   = 0x20, /* must be same size */
     COMDAT_MATCH_EXACT  = 0x30, /* must be exact match */
 /*
-    COMDAT alignment
-*/
+ *  COMDAT alignment
+ */
     COMDAT_ALIGN_SEG    = 0x00, /* align from SEGDEF */
     COMDAT_ALIGN_BYTE   = 0x01,
     COMDAT_ALIGN_WORD   = 0x02,

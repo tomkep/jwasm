@@ -33,9 +33,7 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "segment.h"
 #include "mangle.h"
 #include "extern.h"
@@ -47,6 +45,7 @@
 #include "myassert.h"
 #include "tokenize.h" /* needed because of StringBufferEnd usage */
 #include "input.h"
+#include "linnum.h"
 
 #define SEPARATE_FIXUPP_16_32
 #define TRUNCATE 1
@@ -81,26 +80,26 @@ enum {
     DATE_YEAR_F = 0xfe00
 };
 
-typedef union {
+union DOS_DATETIME {
     struct {
         unsigned short time;
         unsigned short date;
     } dos;
     time_t timet;
-} DOS_DATETIME;
+};
 
-extern void cv_write_debug_tables( dir_node *, dir_node *);
+extern void cv_write_debug_tables( struct dsym *, struct dsym *);
 
 //extern struct format_options formatoptions[];
-extern qdesc            LinnumQueue;    /* queue of line_num_info items */
+extern struct qdesc LinnumQueue;    /* queue of line_num_info items */
 
-extern FNAME      *FNames;
+extern struct fname_list *FNames;
 extern uint       cnt_fnames;
 
 extern const char szNull[];
-extern OBJ_WFILE  *file_out;
 
-uint_32                 LastCodeBufSize;
+struct omf_wfile *file_out;
+uint_32       LastCodeBufSize;
 
 static unsigned long    seg_pos;        /* file pos of SEGDEF record(s) */
 static unsigned long    public_pos;     /* file pos of PUBDEF record(s) */
@@ -111,8 +110,8 @@ static const char szCVTypes[]    = { "$$TYPES"};
 static const char szCVSymClass[] = { "DEBSYM" };
 static const char szCVTypClass[] = { "DEBTYP" };
 
-static void InitRec( obj_rec *obj, uint_8 command )
-/*************************************************/
+static void InitRec( struct omf_rec *obj, uint_8 command )
+/********************************************************/
 {
     obj->command = command;
     obj->data = NULL;
@@ -123,11 +122,11 @@ static void InitRec( obj_rec *obj, uint_8 command )
     return;
 }
 
-static time_t timet2dostime(time_t x)
-/***********************************/
+static time_t timet2dostime( time_t x )
+/*************************************/
 {
     struct tm *    ltime;
-    DOS_DATETIME   dt;
+    union DOS_DATETIME dt;
 
     ltime = localtime( &x );
     dt.dos.date = (( ltime->tm_year - 80 ) << DATE_YEAR_B )
@@ -139,15 +138,15 @@ static time_t timet2dostime(time_t x)
     return( dt.timet );
 }
 
-static void Put8( obj_rec *objr, uint_8 byte )
-/********************************************/
+static void Put8( struct omf_rec *objr, uint_8 byte )
+/***************************************************/
 {
 /**/myassert( objr != NULL && objr->data != NULL );
     objr->data[ objr->curoff++ ] = byte;
 }
 
-static void Put16( obj_rec *objr, uint_16 word )
-/**********************************************/
+static void Put16( struct omf_rec *objr, uint_16 word )
+/*****************************************************/
 {
 /**/myassert( objr != NULL && objr->data != NULL );
 
@@ -155,8 +154,8 @@ static void Put16( obj_rec *objr, uint_16 word )
     objr->curoff += sizeof( uint_16 );
 }
 
-static void Put32( obj_rec *objr, uint_32 dword )
-/***********************************************/
+static void Put32( struct omf_rec *objr, uint_32 dword )
+/******************************************************/
 {
 /**/myassert( objr != NULL && objr->data != NULL );
 
@@ -165,8 +164,8 @@ static void Put32( obj_rec *objr, uint_32 dword )
 }
 
 #if 0
-static void PutEither( obj_rec *objr, uint_32 data )
-/**************************************************/
+static void PutEither( struct omf_rec *objr, uint_32 data )
+/*********************************************************/
 {
 /**/myassert( objr != NULL && objr->data != NULL );
     if( objr->is_32 ) {
@@ -179,8 +178,8 @@ static void PutEither( obj_rec *objr, uint_32 data )
 }
 #endif
 
-static void PutIndex( obj_rec *objr, size_t idx )
-/***********************************************/
+static void PutIndex( struct omf_rec *objr, size_t idx )
+/******************************************************/
 {
 /**/myassert( objr != NULL && objr->data != NULL );
     if( idx > 0x7f ) {
@@ -189,16 +188,16 @@ static void PutIndex( obj_rec *objr, size_t idx )
     objr->data[objr->curoff++] = idx & 0xff;
 }
 
-static void PutData( obj_rec *objr, const uint_8 *data, size_t len )
-/******************************************************************/
+static void PutData( struct omf_rec *objr, const uint_8 *data, size_t len )
+/*************************************************************************/
 {
     /**/myassert( objr != NULL && objr->data != NULL );
     memcpy( objr->data + objr->curoff, data, len );
     objr->curoff += len;
 }
 
-static void PutName( obj_rec *objr, const char *name, size_t len )
-/****************************************************************/
+static void PutName( struct omf_rec *objr, const char *name, size_t len )
+/***********************************************************************/
 {
     /**/myassert( objr != NULL && objr->data != NULL );
 #if MAX_ID_LEN > MAX_ID_LEN_OMF
@@ -211,8 +210,8 @@ static void PutName( obj_rec *objr, const char *name, size_t len )
     PutData( objr, (uint_8 *)name, len );
 }
 
-static void AttachData( obj_rec *objr, uint_8 *data, size_t len )
-/***************************************************************/
+static void AttachData( struct omf_rec *objr, uint_8 *data, size_t len )
+/**********************************************************************/
 {
 /**/myassert( objr->data == NULL );
     objr->data = data;
@@ -220,8 +219,8 @@ static void AttachData( obj_rec *objr, uint_8 *data, size_t len )
 }
 
 #if 0
-static void AllocData( obj_rec *objr, size_t len )
-/************************************************/
+static void AllocData( struct omf_rec *objr, size_t len )
+/*******************************************************/
 {
 /**/myassert( objr->data == NULL );
     objr->data = AsmAlloc( len );
@@ -231,12 +230,12 @@ static void AllocData( obj_rec *objr, size_t len )
 
 /* return a group's index */
 
-uint GetGrpIdx( struct asm_sym *sym )
-/***********************************/
+uint GetGrpIdx( struct asym *sym )
+/********************************/
 {
     if( sym == NULL )
         return( 0 );
-    return( ((dir_node *)sym)->e.grpinfo->grp_idx );
+    return( ((struct dsym *)sym)->e.grpinfo->grp_idx );
 }
 
 /*
@@ -246,7 +245,7 @@ uint GetGrpIdx( struct asm_sym *sym )
 void omf_OutSelect( bool is_data )
 /********************************/
 {
-    obj_rec             obj;
+    struct omf_rec      obj;
     char                buffer[12];
     uint_32             currofs;
     int                 sel_idx;
@@ -323,7 +322,7 @@ void omf_write_linnum( void )
 /***************************/
 {
     int                 count;
-    obj_rec             obj;
+    struct omf_rec      obj;
     bool                need_32;
 
     count = GetLinnumData( (struct linnum_data *)StringBufferEnd, &need_32 );
@@ -342,8 +341,8 @@ void omf_write_linnum( void )
 
 #ifdef SEPARATE_FIXUPP_16_32
 
-static void split_fixup_list( dir_node *seg, struct fixup **fl16, struct fixup **fl32 )
-/*************************************************************************************/
+static void split_fixup_list( struct dsym *seg, struct fixup **fl16, struct fixup **fl32 )
+/****************************************************************************************/
 {
 /* divide fixup record list to the 16-bit or 32-bit list of a fixup record */
 
@@ -398,8 +397,8 @@ static void split_fixup_list( dir_node *seg, struct fixup **fl16, struct fixup *
 
 #else
 
-static int check_need_32bit( dir_node *seg )
-/******************************************/
+static int check_need_32bit( struct dsym *seg )
+/*********************************************/
 {
 /* figure out if we need the 16-bit or 32-bit form of a fixup record */
 
@@ -436,10 +435,10 @@ static void free_fixup( struct fixup *cur )
 
 /* write an LEDATA record, optionally write fixups */
 
-void omf_write_ledata( dir_node *seg )
-/************************************/
+void omf_write_ledata( struct dsym *seg )
+/***************************************/
 {
-    obj_rec         obj;
+    struct omf_rec  obj;
     uint_32         size;
 #ifdef SEPARATE_FIXUPP_16_32
     struct fixup *fl16 = NULL;
@@ -521,7 +520,7 @@ void omf_FlushCurrSeg( void )
 void omf_end_of_pass1( void )
 /***************************/
 {
-    obj_rec     obj;
+    struct omf_rec obj;
 
     InitRec( &obj, CMD_COMENT );
     obj.d.coment.attr = 0x00;
@@ -541,7 +540,7 @@ void omf_set_filepos( void )
 void omf_write_dosseg( void )
 /***************************/
 {
-    obj_rec     obj;
+    struct omf_rec obj;
 
     InitRec( &obj, CMD_COMENT );
     obj.d.coment.attr = CMT_TNP;
@@ -553,15 +552,15 @@ void omf_write_dosseg( void )
 void omf_write_lib( void )
 /************************/
 {
-    obj_rec             obj;
-    qnode               *curr;
-    qnode               *next;
+    struct omf_rec      obj;
+    struct qnode        *curr;
+    struct qnode        *next;
     char                *name;
 
     DebugMsg(("omf_write_lib() enter\n"));
     for( curr = ModuleInfo.g.LibQueue.head; curr; curr = next ) {
         next = curr->next;
-        name = curr->elmt;
+        name = (char *)curr->elmt;
         InitRec( &obj, CMD_COMENT );
         obj.d.coment.attr = CMT_TNP;
         obj.d.coment.class = CMT_DEFAULT_LIBRARY;
@@ -571,18 +570,29 @@ void omf_write_lib( void )
     DebugMsg(("omf_write_lib() exit\n"));
 }
 
+/* subtypes for CMD_COMENT, comment class 0xA0 (CMT_DLL_ENTRY) */
+enum omf_ext_subtype {
+    CMT_EXT_IMPDEF = 0x01, /* imported names, MS ext for OS/2 and Windows */
+    CMT_EXT_EXPDEF = 0x02, /* exported names, MS ext */
+    CMT_EXT_INCDEF = 0x03,
+    CMT_EXT_PMLIB  = 0x04,
+    CMT_EXT_LNKDIR = 0x05,
+    CMT_EXT_BIGEND = 0x06,
+    CMT_EXT_PRECOMP = 0x07,
+};
+
 void omf_write_export( void )
 /***************************/
 {
     uint_8      parmcnt;
-    dir_node    *dir;
-    dir_node    *parm;
-    obj_rec     obj;
+    struct dsym *dir;
+    struct dsym *parm;
+    struct omf_rec obj;
     int         len;
     //char        *name;
     char        buffer[MAX_ID_LEN + MANGLE_BYTES + 1 + 4];
 
-    for( dir = Tables[TAB_PROC].head; dir != NULL; dir = dir->nextproc ) {
+    for( dir = SymTables[TAB_PROC].head; dir != NULL; dir = dir->nextproc ) {
         if( dir->e.procinfo->export ) {
 
             InitRec( &obj, CMD_COMENT );
@@ -595,8 +605,12 @@ void omf_write_export( void )
                 strcpy( buffer+3, dir->sym.name );
                 len = dir->sym.name_size;
             }
+#if MAX_ID_LEN > 255
+            if ( len > 255 )
+                len = 255; /* restrict name to 255 chars */
+#endif
             AttachData( &obj, buffer, len + 4 );
-            Put8( &obj, 2 ); /* subtype 02 is EXPDEF */
+            Put8( &obj, CMT_EXT_EXPDEF );
             /* write the "Exported Flag" byte:
              * bits 0-4: parameter count
              * bit 5: no data (entry doesn't use initialized data )
@@ -620,17 +634,17 @@ void omf_write_export( void )
 void omf_write_grp( void )
 /************************/
 {
-    dir_node        *curr;
-    dir_node        *segminfo;
-    seg_item        *seg;
-    obj_rec         grp;
+    struct dsym     *curr;
+    struct dsym     *segminfo;
+    struct seg_item *seg;
+    struct omf_rec  grp;
     //char            writeseg;
 
     DebugMsg(("omf_write_grp enter\n"));
     //line_num = LineNumber;
 
     /* size of group records may exceed 1024! */
-    for( curr = Tables[TAB_GRP].head; curr; curr = curr->next ) {
+    for( curr = SymTables[TAB_GRP].head; curr; curr = curr->next ) {
 
         InitRec( &grp, CMD_GRPDEF );
 
@@ -647,7 +661,7 @@ void omf_write_grp( void )
 
         for( seg = curr->e.grpinfo->seglist; seg; seg = seg->next ) {
             //writeseg = TRUE;
-            segminfo = (dir_node *)(seg->seg);
+            segminfo = (struct dsym *)(seg->seg);
             Put8( &grp, GRP_SEGIDX );
             PutIndex( &grp, segminfo->e.seginfo->idx );
             /* truncate the group record if it comes near 4096! */
@@ -671,8 +685,8 @@ void omf_write_grp( void )
 void omf_write_seg( bool initial )
 /********************************/
 {
-    dir_node    *curr;
-    obj_rec     obj;
+    struct dsym    *curr;
+    struct omf_rec obj;
     uint        seg_index;
     uint_8      buffer[4];
 
@@ -685,7 +699,7 @@ void omf_write_seg( bool initial )
         fseek( file_out->file , seg_pos, SEEK_SET );
     }
 
-    for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+    for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
 
         seg_index = GetSegIdx( &curr->sym );
         InitRec( &obj, CMD_SEGDEF );
@@ -762,10 +776,10 @@ void omf_write_seg( bool initial )
     DebugMsg(("omf_write_seg exit\n"));
 }
 
-static asm_sym * GetLnameData( void **pq )
-/****************************************/
+static struct asym * GetLnameData( void **pq )
+/********************************************/
 {
-    qnode *curr = *pq;
+    struct qnode *curr = *pq;
 
     if ( curr == NULL ) {
         curr = ModuleInfo.g.LnameQueue.head;
@@ -774,7 +788,7 @@ static asm_sym * GetLnameData( void **pq )
     }
     *pq = curr;
     if ( curr )
-        return( (asm_sym *)(curr->elmt) );
+        return( (struct asym *)(curr->elmt) );
     return( NULL );
 }
 
@@ -788,13 +802,13 @@ static asm_sym * GetLnameData( void **pq )
 void omf_write_lnames( void )
 /***************************/
 {
-    obj_rec     obj;
+    struct omf_rec obj;
     int         size;
     int         items;
     int         startitem;
     char        *p;
     void        *pv = NULL;
-    asm_sym     *sym;
+    struct asym *sym;
     char        buffer[MAX_LNAME_SIZE];
 
     DebugMsg(("omf_write_lnames() enter\n"));
@@ -840,7 +854,7 @@ void omf_write_lnames( void )
 }
 
 struct readext {
-    dir_node *p;
+    struct dsym *p;
     uint_16 index;
     uint_8 method;
 };
@@ -851,13 +865,13 @@ struct readext {
  * - the AltQueue of weak externals
  */
 
-static asm_sym *GetExt( struct readext *r )
-/*****************************************/
+static struct asym *GetExt( struct readext *r )
+/*********************************************/
 {
     if ( r->method == 0 ) {
         do {
             if ( r->p == NULL )
-                r->p = Tables[TAB_EXT].head;
+                r->p = SymTables[TAB_EXT].head;
             else
                 r->p = r->p->next;
             if ( r->p ) {
@@ -866,7 +880,7 @@ static asm_sym *GetExt( struct readext *r )
                     continue;
                 r->p->sym.included = TRUE;
                 r->index++;
-                return( (asm_sym *)r->p );
+                return( (struct asym *)r->p );
             }
         } while ( r->p );
         r->method++;
@@ -890,12 +904,12 @@ static asm_sym *GetExt( struct readext *r )
 
 /* write EXTDEF records */
 
-void omf_write_extdef( )
-/**********************/
+void omf_write_extdef( void )
+/***************************/
 {
-    obj_rec     obj;
-    asm_sym     *sym;
-    dir_node    *dir;
+    struct omf_rec obj;
+    struct asym *sym;
+    struct dsym *dir;
     uint        rec_size;
     uint        len;
     struct readext r;
@@ -920,6 +934,10 @@ void omf_write_extdef( )
         //DebugMsg(("omf_write_extdef: %s, weak=%u, used=%u\n", curr->sym.name, curr->sym.weak, curr->sym.used ));
         DebugMsg(("omf_write_extdef: %s\n", sym->name));
         len = Mangle( sym, buffer );
+#if MAX_ID_LEN > 255
+        if ( len > 255 )
+            len = 255; /* length is 1 byte only */
+#endif
         if ( ModuleInfo.convert_uppercase )
             _strupr( buffer );
 
@@ -1011,11 +1029,11 @@ static uint put_comdef_number( uint_8 *buffer, uint_32 value )
 
 /* write OMF COMDEF records */
 
-ret_code omf_write_comdef( )
-/**************************/
+ret_code omf_write_comdef( void )
+/*******************************/
 {
-    obj_rec     obj;
-    dir_node    *curr;
+    struct omf_rec obj;
+    struct dsym    *curr;
     uint        num;
     uint        recsize;
     uint        numsize;
@@ -1027,12 +1045,16 @@ ret_code omf_write_comdef( )
     char        number[16];
 
     DebugMsg(("omf_write_comdef enter\n"));
-    curr = Tables[TAB_EXT].head;
+    curr = SymTables[TAB_EXT].head;
     while ( curr ) {
         for( num = 0, recsize = 0; curr != NULL ; curr = curr->next ) {
             if ( curr->sym.comm == FALSE )
                 continue;
             symsize = Mangle( &curr->sym, buffer );
+#if MAX_ID_LEN > 255
+            if ( symsize > 255 )
+                symsize = 255; /* length is 1 byte only */
+#endif
             varsize = SizeFromMemtype( curr->sym.mem_type, ModuleInfo.Ofssize, curr->sym.type );
 
             DebugMsg(("omf_write_comdef: %s, size=%u, sym.total_size=%u, sym.total_length=%u, sym.isfar=%u\n",
@@ -1090,10 +1112,10 @@ ret_code omf_write_comdef( )
 void omf_write_header( void )
 /***************************/
 {
-    obj_rec     obj;
+    struct omf_rec obj;
     unsigned    len;
     char        *name;
-    const FNAME *fn;
+    const struct fname_list *fn;
 
     DebugMsg(("omf_write_header() enter\n"));
 
@@ -1123,8 +1145,8 @@ void omf_write_header( void )
 ret_code omf_write_autodep( void )
 /********************************/
 {
-    obj_rec         obj;
-    FNAME           *curr;
+    struct omf_rec  obj;
+    struct fname_list *curr;
     char            *p = StringBufferEnd;
     unsigned int    len;
     unsigned        idx;
@@ -1134,9 +1156,13 @@ ret_code omf_write_autodep( void )
         DebugMsg(("omf_write_autodep(): write record for %s\n", curr->name ));
         InitRec( &obj, CMD_COMENT );
         obj.d.coment.attr = CMT_TNP;
-        obj.d.coment.class = CMT_DEPENDENCY;
+        obj.d.coment.class = CMT_DEPENDENCY; /* 0xE9 */
 
         len = strlen( curr->name );
+#if MAX_STRING_LEN > 255
+        if ( len > 255 )
+            len = 255; /* length is 1 byte only */
+#endif
         *((time_t *)p) = timet2dostime( curr->mtime );
         *(p + 4) = (unsigned char)len;
         memcpy( p + 5, curr->name, len );
@@ -1156,19 +1182,25 @@ ret_code omf_write_autodep( void )
 void omf_write_alias( void )
 /**************************/
 {
-    obj_rec             obj;
+    struct omf_rec      obj;
     char                *p;
     uint_8              len1;
     uint_8              len2;
     //bool                first = TRUE;
-    dir_node            *curr;
+    struct dsym         *curr;
     char                buff[2*MAX_ID_LEN_OMF + 2];
 
-    for( curr = Tables[TAB_ALIAS].head; curr; curr = curr->next ) {
+    for( curr = SymTables[TAB_ALIAS].head; curr; curr = curr->next ) {
 
         /* output an alias record for this alias */
         len1 = curr->sym.name_size;
         len2 = curr->sym.substitute->name_size;
+#if MAX_ID_LEN > MAX_ID_LEN_OMF
+        if ( len1 > MAX_ID_LEN_OMF )
+            len1 = MAX_ID_LEN_OMF;
+        if ( len2 > MAX_ID_LEN_OMF )
+            len2 = MAX_ID_LEN_OMF;
+#endif
 
         p = buff;
         *p++ = len1;
@@ -1184,10 +1216,10 @@ void omf_write_alias( void )
     }
 }
 
-static void WritePubRec( uint_8 cmd, asm_sym *curr_seg, uint count, bool need32, struct pubdef_data * data)
-/*********************************************************************************************************/
+static void WritePubRec( uint_8 cmd, struct asym *curr_seg, uint count, bool need32, struct pubdef_data *data)
+/************************************************************************************************************/
 {
-    obj_rec             obj;
+    struct omf_rec      obj;
     uint                seg;
     uint                grp;
     //uint                i;
@@ -1224,8 +1256,8 @@ static void WritePubRec( uint_8 cmd, asm_sym *curr_seg, uint count, bool need32,
 ret_code omf_write_public( bool initial )
 /***************************************/
 {
-    struct asm_sym      *sym;
-    struct asm_sym      *curr_seg;
+    struct asym         *sym;
+    struct asym         *curr_seg;
     struct pubdef_data  *d;
     void                *vp;
     uint                count;
@@ -1249,7 +1281,7 @@ ret_code omf_write_public( bool initial )
     size = 10; /* =size of an empty PUBDEF record */
     count = 0;
     need32 = FALSE;
-    while ( sym = (asm_sym *)GetPublicData( &vp ) ) {
+    while ( sym = (struct asym *)GetPublicData( &vp ) ) {
         symsize = Mangle( sym, pbuf );
         d->name = pbuf;
         /* if segment changes of record becomes too big, write record */
@@ -1288,8 +1320,8 @@ ret_code omf_write_public( bool initial )
 void omf_write_modend( struct fixup *fixup, uint_32 displ )
 /*********************************************************/
 {
-    obj_rec obj;
-    struct asm_sym  *sym;
+    struct omf_rec  obj;
+    struct asym     *sym;
 #if TRUNCATE
     int fh;
     uint_32 size;
@@ -1312,14 +1344,14 @@ void omf_write_modend( struct fixup *fixup, uint_32 displ )
         sym = fixup->sym;
 
         /* fill the logref part for MODEND:
-        typedef struct {
+        struct logref {
           uint_8  frame       :3;
           uint_8  target      :3;
           uint_8  is_secondary:1;
           uint_16 frame_datum;
           uint_16 target_datum;
           int_32  target_offset;
-        } logref;
+        };
         */
         obj.d.modend.ref.log.is_secondary = FALSE;
         obj.d.modend.ref.log.target_offset = fixup->sym->offset + displ;
@@ -1385,9 +1417,9 @@ void omf_write_modend( struct fixup *fixup, uint_32 displ )
 void omf_write_header_dbgcv( void )
 /*********************************/
 {
-    obj_rec obj;
-    asm_sym *symbols;
-    asm_sym *types;
+    struct omf_rec obj;
+    struct asym    *symbols;
+    struct asym    *types;
 
     InitRec( &obj, CMD_COMENT );
     obj.d.coment.attr = 0x00;
@@ -1395,9 +1427,9 @@ void omf_write_header_dbgcv( void )
     AttachData( &obj, "\001CV", 3 );
     omf_write_record( &obj );
     if ( symbols = CreateIntSegment( szCVSymbols, szCVSymClass, 0, USE32, TRUE ) ) {
-        ((dir_node *)symbols)->e.seginfo->force32 = TRUE;
+        ((struct dsym *)symbols)->e.seginfo->force32 = TRUE;
         if ( types = CreateIntSegment( szCVTypes, szCVTypClass, 0, USE32, TRUE ) ) {
-            ((dir_node *)types)->e.seginfo->force32 = TRUE;
+            ((struct dsym *)types)->e.seginfo->force32 = TRUE;
         }
     }
     return;
@@ -1408,26 +1440,31 @@ void omf_write_header_dbgcv( void )
 void omf_write_debug_tables( void )
 /*********************************/
 {
-    dir_node *types = (dir_node *)SymSearch( szCVTypes );
-    dir_node *symbols = (dir_node *)SymSearch( szCVSymbols );
+    struct dsym *types = (struct dsym *)SymSearch( szCVTypes );
+    struct dsym *symbols = (struct dsym *)SymSearch( szCVSymbols );
     cv_write_debug_tables( symbols, types );
 }
 
 /* init. called once per module */
 
-void omf_init( module_info *ModuleInfo )
-/**************************************/
+void omf_init( struct module_info *ModuleInfo, FILE *objfile )
+/************************************************************/
 {
     DebugMsg(("omf_init enter\n"));
-    omf_intInit();
+    file_out = AsmAlloc( sizeof( struct omf_wfile ) + OBJ_BUFFER_SIZE );
+    file_out->file = objfile;
+    file_out->cmd = 0;
     return;
 }
 
 void omf_fini( void )
 /*******************/
 {
-    DebugMsg(("omf_fini enter\n"));
-    omf_intFini();
+    DebugMsg(("omf_fini enter, file_out=%X\n", file_out ));
+    if ( file_out ) {
+        AsmFree( file_out );
+        file_out = NULL;
+    }
     return;
 }
 

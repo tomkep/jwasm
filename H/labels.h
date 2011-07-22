@@ -33,10 +33,8 @@
 
 struct qualified_type;
 
-extern void             LabelsInit( void );
-extern ret_code         LabelDirective( int );
-extern char *           GetCurrAnonLabel( char * );
-extern char *           GetNextAnonLabel( char * );
-extern asm_sym *        LabelCreate( const char *, memtype, struct qualified_type *, bool );
+extern void         LabelsInit( void );
+extern char         *GetAnonymousLabel( char *, int );
+extern ret_code     CreateLabel( const char *, enum memtype, struct qualified_type *, bool );
 
 #endif

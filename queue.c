@@ -35,16 +35,16 @@
 #include "myassert.h"
 
 #if 0 /* v2.04: not needed */
-void QInit( qdesc *q )
-/********************/
+void QInit( struct qdesc *q )
+/***************************/
 {
     q->head = NULL;
     q->tail = NULL;
 }
 #endif
 
-void QEnqueue( qdesc *q, void *item )
-/***********************************/
+void QEnqueue( struct qdesc *q, void *item )
+/******************************************/
 {
     if( q->head == NULL ) {
         q->head = q->tail = item;
@@ -58,19 +58,19 @@ void QEnqueue( qdesc *q, void *item )
 
 /* add a new node to a queue */
 
-void QAddItem( qdesc *q, void *data )
-/***********************************/
+void QAddItem( struct qdesc *q, const void *data )
+/************************************************/
 {
     struct qnode    *node;
 
-    node = AsmAlloc( sizeof( qnode ) );
+    node = AsmAlloc( sizeof( struct qnode ) );
     node->elmt = data;
     QEnqueue( q, node );
 }
 
 #if 0
-void QJoinQueue( qdesc *dest, qdesc *src )
-/****************************************/
+void QJoinQueue( struct qdesc *dest, struct qdesc *src )
+/******************************************************/
 {
     if( dest->head == NULL ) {
         dest->head = src->head;
@@ -87,8 +87,8 @@ void QJoinQueue( qdesc *dest, qdesc *src )
 
 #if 0 /* v2.04: not needed anymore */
 
-void *QDequeue( qdesc *q )
-/************************/
+void *QDequeue( struct qdesc *q )
+/*******************************/
 {
     void *item;
 

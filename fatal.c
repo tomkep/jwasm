@@ -32,9 +32,7 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "fatal.h"
 #include "input.h"
 #include "msgtext.h"
@@ -47,14 +45,14 @@ extern jmp_buf jmpenv;
 
 typedef void (*err_act)( void );
 
-typedef struct {
+struct Msg_Struct {
     short     message;        /* message displayed */
     uint_8    num;            /* arguments         */
     uint_8    ret;            /* exit code         */
     err_act   action;         /* function to call, if any */
-} Msg_Struct;
+};
 
-static const Msg_Struct Fatal_Msg[] = {
+static const struct Msg_Struct Fatal_Msg[] = {
 #undef fix
 #define fix( cmd, argc, act, ret )     { cmd, argc, ret, act },
 #include "fatalmsg.h"
@@ -105,7 +103,7 @@ void SeekError( void )
 /********************/
 {
     DebugMsg(("SeekError occured\n"));
-    Fatal( FATAL_FILE_SEEK_ERROR, AsmFName[OBJ], errno );
+    Fatal( FATAL_FILE_SEEK_ERROR, CurrFName[OBJ], errno );
 };
 #endif
 
@@ -113,6 +111,6 @@ void WriteError( void )
 /*********************/
 {
     DebugMsg(("WriteError occured\n"));
-    Fatal( FATAL_FILE_WRITE_ERROR, AsmFName[OBJ], errno );
+    Fatal( FATAL_FILE_WRITE_ERROR, CurrFName[OBJ], errno );
 };
 

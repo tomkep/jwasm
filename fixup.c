@@ -31,7 +31,6 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
 #include "fixup.h"
 #include "segment.h"
 
@@ -43,7 +42,7 @@ extern struct format_options formatoptions[];
 
 const char szNull[] = {"<NULL>"};
 
-struct fixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixup_options option )
+struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_options option )
 /*********************************************************************************************/
 /*
  * called when an instruction operand or a data item is relocatable:
@@ -56,8 +55,7 @@ struct fixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixup_o
  * creates a new fixup item and initializes it using symbol <sym>.
  * put the correct target offset into the link list when forward reference of
  * relocatable is resolved;
- * Global vars Frame_Type and Frame_Datum must be set. For code,
- * their values have been set in
+ * Global vars Frame_Type and Frame_Datum "should" be set.
  */
 {
 #ifdef DEBUG_OUT
@@ -105,8 +103,8 @@ struct fixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixup_o
     fixup->def_seg = CurrSeg;           /* may be NULL (END directive) */
     fixup->sym = sym;
 
-    DebugMsg1(("AddFixup(sym=%s type=%X, opt=%X) cnt=%" FX32 ": loc=%" FX32 "h\n", sym ? sym->name : "NULL", type, option, ++cnt, fixup->location ));
-    //CodeInfo->InsFixup[Opnd_Count] = fixup; /* changed in v1.96 */
+    DebugMsg1(("CreateFixup(sym=%s type=%u, opt=%u) cnt=%" FX32 ", loc=%" FX32 "h\n",
+        sym ? sym->name : "NULL", type, option, ++cnt, fixup->location ));
     return( fixup );
 }
 
@@ -115,7 +113,7 @@ struct fixup *AddFixup( struct asm_sym *sym, enum fixup_types type, enum fixup_o
 void FreeFixup( struct fixup *fixup )
 /***********************************/
 {
-    dir_node *dir;
+    struct dsym *dir;
     struct fixup *fixup2;
 
     if ( Parse_Pass == PASS_1 ) {
@@ -142,8 +140,8 @@ void FreeFixup( struct fixup *fixup )
  * they no longer exist when store_fixup() is called.
  */
 
-ret_code store_fixup( struct fixup *fixup, int_32 * pdata )
-/*********************************************************/
+ret_code store_fixup( struct fixup *fixup, int_32 *pdata )
+/********************************************************/
 {
     //struct fixup     *fixup;
 
@@ -156,10 +154,10 @@ ret_code store_fixup( struct fixup *fixup, int_32 * pdata )
 #ifdef DEBUG_OUT
     if ( fixup->sym )
         DebugMsg1(("store_fixup: type=%u, loc=%s.%" FX32 ", target=%s(%" FX32 "+% "FX32 ")\n",
-                  fixup->type, CurrSeg->sym.name, fixup->location, fixup->sym->name, fixup->sym->offset, fixup->offset ));
+                fixup->type, CurrSeg->sym.name, fixup->location, fixup->sym->name, fixup->sym->offset, fixup->offset ));
     else
         DebugMsg1(("store_fixup: type=%u, loc=%s.%" FX32 ", target=%" FX32 "\n",
-                  fixup->type, CurrSeg->sym.name, fixup->location, fixup->offset));
+                fixup->type, CurrSeg->sym.name, fixup->location, fixup->offset));
 #endif
 
     fixup->nextrlc = NULL;
@@ -180,6 +178,9 @@ ret_code store_fixup( struct fixup *fixup, int_32 * pdata )
 
 #if ELF_SUPPORT
         if ( Options.output_format == OFORMAT_ELF ) {
+            if ( ModuleInfo.header_format == HFORMAT_ELF64 )
+                ; /* v2.06e: not for ELF64 */
+            else
             if ( fixup->type == FIX_RELOFF32 )
                 *pdata = -4;
 #if GNURELOCS /* v2.04: added */
@@ -194,7 +195,7 @@ ret_code store_fixup( struct fixup *fixup, int_32 * pdata )
         /* Djgpp's COFF variant needs special handling for
          * - at least - relative and direct 32-bit offsets.
          */
-        if ( fixup->sym && Options.header_format == HFORMAT_DJGPP ) {
+        if ( fixup->sym && ModuleInfo.header_format == HFORMAT_DJGPP ) {
             if ( fixup->type == FIX_RELOFF32 ) { /* probably also for 16-bit */
                 *pdata -= ( fixup->location + 4 );
             } else if ( fixup->type == FIX_OFF32 ) {

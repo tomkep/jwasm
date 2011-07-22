@@ -12,9 +12,7 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "segment.h"
 #include "input.h"
 #include "expreval.h"
@@ -80,8 +78,10 @@ static void AddToDgroup( enum sim_seg segm, const char *name )
 /************************************************************/
 {
     /* no DGROUP for FLAT or COFF/ELF */
-    if( ModuleInfo.model == MOD_FLAT ||
-       Options.output_format == OFORMAT_COFF
+    if( ModuleInfo.model == MOD_FLAT
+#if COFF_SUPPORT
+       || Options.output_format == OFORMAT_COFF
+#endif
 #if ELF_SUPPORT
        || Options.output_format == OFORMAT_ELF
 #endif
@@ -109,13 +109,13 @@ static void close_currseg( void )
  * a standard segment directive line
  */
 
-static void SetSimSeg( enum sim_seg segm, const char * name )
-/***********************************************************/
+static void SetSimSeg( enum sim_seg segm, const char *name )
+/**********************************************************/
 {
     char *pAlign = "WORD";
     char *pAlignSt = "PARA";
     char *pUse = "";
-    asm_sym *sym;
+    struct asym *sym;
     const char *pFmt;
     const char *pClass;
 
@@ -152,7 +152,7 @@ static void SetSimSeg( enum sim_seg segm, const char * name )
              * of the simplified segment directives have highest priority.
              */
             sym = SymSearch( name );
-            if ( sym && sym->state == SYM_SEG && ((dir_node *)sym)->e.seginfo->lname_idx != 0 )
+            if ( sym && sym->state == SYM_SEG && ((struct dsym *)sym)->e.seginfo->lname_idx != 0 )
                 pFmt = "%s %r";
         }
     } else {
@@ -162,7 +162,7 @@ static void SetSimSeg( enum sim_seg segm, const char * name )
          * check for segment's lname index is needed.
          */
         //if ( sym && sym->state == SYM_SEG )
-        if ( sym && sym->state == SYM_SEG && ((dir_node *)sym)->e.seginfo->lname_idx != 0 )
+        if ( sym && sym->state == SYM_SEG && ((struct dsym *)sym)->e.seginfo->lname_idx != 0 )
             pFmt = "%s %r";
     }
     AddLineQueueX( pFmt, name, T_SEGMENT, pAlign, pUse, SegmCombine[segm], pClass );
@@ -176,8 +176,8 @@ static void EndSimSeg( enum sim_seg segm )
     return;
 }
 
-ret_code SimplifiedSegDir( int i )
-/********************************/
+ret_code SimplifiedSegDir( int i, struct asm_tok tokenarray[] )
+/*************************************************************/
 /*
  Handles simplified segment directives:
  .CODE, .STACK, .DATA, .DATA?, .FARDATA, .FARDATA?, .CONST
@@ -186,9 +186,9 @@ ret_code SimplifiedSegDir( int i )
     const char  *name = NULL;
     char        init;
     int         type;
-    expr_list   opndx;
+    struct expr opndx;
 
-    DebugMsg1(("SimplifiedSegDir(%s) enter\n", AsmBuffer[i]->string_ptr ));
+    DebugMsg1(("SimplifiedSegDir(%s) enter\n", tokenarray[i].string_ptr ));
 
     LstWrite( LSTTYPE_DIRECTIVE, 0, NULL );
 
@@ -197,12 +197,12 @@ ret_code SimplifiedSegDir( int i )
         return( ERROR );
     }
 
-    //type = AsmBuffer[i]->value;
-    type = GetSflagsSp( AsmBuffer[i]->value );
+    //type = tokenarray[i].value;
+    type = GetSflagsSp( tokenarray[i].tokval );
     i++; /* get past the directive token */
 
     if( type == SIM_STACK ) {
-        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
             return( ERROR );
         if( opndx.kind == EXPR_EMPTY )
             opndx.value = DEFAULT_STACK_SIZE;
@@ -215,16 +215,16 @@ ret_code SimplifiedSegDir( int i )
          * JWasm also accepts this for .DATA[?] and .CONST unless
          * option -Zne is set.
          */
-        if( AsmBuffer[i]->token == T_ID &&
+        if( tokenarray[i].token == T_ID &&
            ( type == SIM_CODE || type == SIM_FARDATA || type == SIM_FARDATA_UN
             || ( Options.strict_masm_compat == FALSE &&
                 ( type == SIM_DATA || type == SIM_DATA_UN || type == SIM_CONST )))) {
-            name = AsmBuffer[i]->string_ptr;
+            name = tokenarray[i].string_ptr;
             i++;
         }
     }
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 

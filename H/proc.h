@@ -32,22 +32,19 @@
 #ifndef _PROC_H_
 #define _PROC_H_
 
-extern dir_node         *CurrProc;      /* current procedure */
+extern struct dsym     *CurrProc;      /* current procedure */
 
 /*---------------------------------------------------------------------------*/
 
-extern ret_code         ExamineProc( dir_node *, int , bool );  /* common for PROC/PROTO */
-extern ret_code         LocalDef( int );        /* LOCAL directive */
-extern asm_sym         *CreateProc( asm_sym *, const char *, unsigned char );
-extern void             DeleteProc( dir_node * );
-extern ret_code         ProcDef( int );         /* PROC directive */
-extern ret_code         CopyPrototype( dir_node *, dir_node * );
-extern ret_code         EndpDef( int );         /* ENDP directive */
-#if AMD64_SUPPORT
-extern ret_code         ExcFrameDirective( int );
-#endif
-extern ret_code         InvokeDirective( int );
-extern ret_code         RetInstr( int, int );   /* emit return statement from procedure */
+//extern void             pushitem( void *, void * );
+//extern void             *popitem( void * );
+
+extern ret_code         ExamineProc( int, struct asm_tok[], struct dsym *, bool );  /* common for PROC/PROTO */
+extern struct asym      *CreateProc( struct asym *, const char *, unsigned char );
+extern void             DeleteProc( struct dsym * );
+
+extern ret_code         CopyPrototype( struct dsym *, struct dsym * );
+extern ret_code         RetInstr( int, struct asm_tok[], int );   /* handle RET/IRET within procedures */
 extern void             write_prologue( void );
 extern void             ProcInit( void );
 

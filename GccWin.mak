@@ -49,7 +49,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   \
            $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/labels.obj  \
            $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    \
-           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   \
+           $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   \
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
            $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj\
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
@@ -57,7 +57,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
            $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj\
-           $(OUTD)/cmdline.obj
+           $(OUTD)/cmdline.obj  $(OUTD)/linnum.obj   $(OUTD)/fastpass.obj
 ######
 ifeq ($(CYGWIN),1)
 proj_obj += $(OUTD)/apiemu.obj
@@ -76,8 +76,8 @@ $(OUTD)/$(name).exe : $(proj_obj)
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h
 	$(CC) -o $(OUTD)/msgtext.obj msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h H/directve.h
-	$(CC) -o $(OUTD)/parser.obj parser.c
+$(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h
+	$(CC) -o $(OUTD)/reswords.obj reswords.c
 
 ######
 

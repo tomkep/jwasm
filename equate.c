@@ -14,17 +14,16 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "expreval.h"
 #include "equate.h"
-#include "labels.h"
 #include "tokenize.h"
 #include "macro.h"
 #include "fastpass.h"
 #include "listing.h"
 #include "input.h"
+
+extern void myatoi128( const char *, uint_64[], int, int );
 
 #if defined(LLONG_MAX) || defined(__GNUC__) || defined(__TINYC__)
 /* gcc needs suffixes if the constants won't fit in long type */
@@ -39,14 +38,15 @@ const int_64 minintvalues[] = { 0xffffffff00000000ULL, 0xffffffff00000000ULL,
 #endif
 };
 #else
-const int_64 maxintvalues[] = { 0x00000000ffffffff, 0x00000000ffffffff,
+/* the "i64" suffixes shouldn't be necessary, but sometimes it's needed (OCC) */
+const int_64 maxintvalues[] = { 0x00000000ffffffffi64, 0x00000000ffffffffi64,
 #if AMD64_SUPPORT
-0x7fffffffffffffff
+0x7fffffffffffffffi64
 #endif
 };
-const int_64 minintvalues[] = { 0xffffffff00000000, 0xffffffff00000000,
+const int_64 minintvalues[] = { 0xffffffff00000000i64, 0xffffffff00000000i64,
 #if AMD64_SUPPORT
-0x8000000000000000
+0x8000000000000000i64
 #endif
 };
 #endif
@@ -60,13 +60,13 @@ const int_64 minintvalues[] = { 0xffffffff00000000, 0xffffffff00000000,
  assembly time variables.
  */
 
-static void SaveVariableState(asm_sym *sym)
-/*****************************************/
+static void SaveVariableState( struct asym *sym )
+/***********************************************/
 {
-    equ_item *p;
+    struct equ_item *p;
     DebugMsg1(( "SaveVariableState(%s)=%d\n", sym->name, sym->value ));
     sym->saved = TRUE; /* don't try to save this symbol (anymore) */
-    p = AsmAlloc( sizeof(equ_item) );
+    p = AsmAlloc( sizeof( struct equ_item ) );
     p->next = NULL;
     p->sym = sym;
     p->lvalue   = sym->value;
@@ -82,8 +82,8 @@ static void SaveVariableState(asm_sym *sym)
 }
 #endif
 
-static void SetValue( asm_sym *sym, expr_list *opndx )
-/****************************************************/
+static void SetValue( struct asym *sym, struct expr *opndx )
+/**********************************************************/
 {
     sym->equate = TRUE;
     sym->state = SYM_INTERNAL;
@@ -98,8 +98,8 @@ static void SetValue( asm_sym *sym, expr_list *opndx )
         sym->isproc = opndx->sym->isproc;
         /* for a PROC alias, copy the procinfo extension! */
         if ( sym->isproc ) {
-            dir_node *dir = (dir_node *)sym;
-            dir->e.procinfo = ((dir_node *)opndx->sym)->e.procinfo;
+            struct dsym *dir = (struct dsym *)sym;
+            dir->e.procinfo = ((struct dsym *)opndx->sym)->e.procinfo;
         }
         sym->mem_type = opndx->mem_type;
         /* v2.01: allow equates of variables with arbitrary type.
@@ -118,26 +118,27 @@ static void SetValue( asm_sym *sym, expr_list *opndx )
     return;
 }
 
-static asm_sym * CreateAssemblyTimeVariable( void )
-/*************************************************/
+static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
+/***************************************************************************/
 {
-    struct asm_sym      *sym;
-    char                *name = AsmBuffer[0]->string_ptr;
+    struct asym         *sym;
+    const char          *name = tokenarray[0].string_ptr;
     int                 i = 2;
-    expr_list           opndx;
+    struct expr         opndx;
 
     DebugMsg1(( "CreateAssemblyTimeVariable(%s) enter\n", name ));
-    if (AsmBuffer[2]->token == T_NUM &&
-        AsmBuffer[3]->token == T_FINAL &&
-        AsmBuffer[2]->hvalue == 0 ) {
-        opndx.llvalue = AsmBuffer[2]->value64;
-        opndx.hlvalue = 0;
+    if ( tokenarray[2].token == T_NUM &&
+        tokenarray[3].token == T_FINAL &&
+        tokenarray[2].numlen <= 8 ) {
+        //opndx.llvalue = tokenarray[2].value64;
+        //opndx.llvalue = *(uint_64 *)(tokenarray[2].string_ptr - sizeof(uint_64) );
+        myatoi128( tokenarray[i].string_ptr, &opndx.llvalue, tokenarray[i].numbase, tokenarray[i].numlen );
         opndx.kind = EXPR_CONST;
     } else {
-        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
             return( NULL );
-        if( AsmBuffer[i]->token != T_FINAL ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        if( tokenarray[i].token != T_FINAL ) {
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( NULL );
         }
         if( opndx.kind != EXPR_CONST &&
@@ -151,7 +152,7 @@ static asm_sym * CreateAssemblyTimeVariable( void )
         if ( opndx.hlvalue != 0 ||
             opndx.value64 < minintvalues[ModuleInfo.Ofssize] ||
             opndx.value64 > maxintvalues[ModuleInfo.Ofssize] ) {
-            AsmErr( CONSTANT_VALUE_TOO_LARGE, opndx.value64 );
+            EmitConstError( &opndx );
             return( NULL );
         }
     }
@@ -161,11 +162,11 @@ static asm_sym * CreateAssemblyTimeVariable( void )
         if( sym == NULL ) {
             sym = SymCreate( name, TRUE );
         } else {
-            dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+            sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
         }
         sym->variable  = TRUE;
     } else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->mem_type == MT_ABS ) {
-        dir_ext2int( (dir_node *)sym );
+        sym_ext2int( sym );
         sym->variable  = TRUE;
     } else if ( sym->state != SYM_INTERNAL ||
                ( sym->variable == FALSE &&
@@ -191,10 +192,10 @@ static asm_sym * CreateAssemblyTimeVariable( void )
  * this is used for some internally generated variables.
  * NO listing is written!
  */
-asm_sym * CreateVariable( const char *name, int value )
-/*****************************************************/
+struct asym *CreateVariable( const char *name, int value )
+/********************************************************/
 {
-    struct asm_sym      *sym;
+    struct asym      *sym;
 
     DebugMsg1(( "CreateVariableEx(%s, %d ) enter\n", name, value ));
 
@@ -205,7 +206,7 @@ asm_sym * CreateVariable( const char *name, int value )
         sym->saved = FALSE;
 #endif
     } else if ( sym->state == SYM_UNDEFINED ) {
-        dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+        sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
     } else if ( sym->equate == FALSE ) {
         AsmErr( SYMBOL_REDEFINITION, name );
         return( NULL );
@@ -237,16 +238,16 @@ asm_sym * CreateVariable( const char *name, int value )
  * - anything. This will also become a text literal.
  */
 
-asm_sym * CreateConstant( void )
-/******************************/
+struct asym *CreateConstant( struct asm_tok tokenarray[] )
+/********************************************************/
 {
-    struct asm_sym      *sym;
-    char                *name = AsmBuffer[0]->string_ptr;
+    struct asym         *sym;
+    const char          *name = tokenarray[0].string_ptr;
     int                 i = 2;
     ret_code            rc;
     char                *p;
     bool                cmpvalue = FALSE;
-    expr_list           opndx;
+    struct expr         opndx;
     char                argbuffer[MAX_LINE_LEN];
 
     DebugMsg1(( "CreateConstant(%s) enter\n", name ));
@@ -261,7 +262,7 @@ asm_sym * CreateConstant( void )
          */
     } else if( sym->state == SYM_TMACRO ) {
 
-        return ( SetTextMacro( sym, name, AsmBuffer[2]->tokpos ) );
+        return ( SetTextMacro( tokenarray, sym, name, tokenarray[2].tokpos ) );
 
     } else if( sym->equate == FALSE ) {
 
@@ -277,27 +278,29 @@ asm_sym * CreateConstant( void )
 
     /* try to evalate the expression */
 
-    if ( AsmBuffer[2]->token == T_STRING && AsmBuffer[2]->string_delim == '<' ) {
-        if ( AsmBuffer[3]->token != T_FINAL ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[3]->string_ptr );
+    if ( tokenarray[2].token == T_STRING && tokenarray[2].string_delim == '<' ) {
+        if ( tokenarray[3].token != T_FINAL ) {
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[3].string_ptr );
             return( NULL );
         }
-        return ( SetTextMacro( sym, name, AsmBuffer[2]->string_ptr ) );
-    } else if ( AsmBuffer[2]->token == T_NUM &&
-        AsmBuffer[3]->token == T_FINAL &&
-        AsmBuffer[2]->hivalflg == HV_NULL ) {
-        opndx.llvalue = AsmBuffer[2]->value64;
-        opndx.hlvalue = 0;
-        opndx.string = NULL;
+        return ( SetTextMacro( tokenarray, sym, name, tokenarray[2].string_ptr ) );
+    } else if ( tokenarray[2].token == T_NUM &&
+               tokenarray[3].token == T_FINAL &&
+               tokenarray[2].numlen <= 8 ) {
+        //opndx.llvalue = tokenarray[2].value64;
+        //opndx.llvalue = *(uint_64 *)(tokenarray[2].string_ptr - sizeof(uint_64));
+        myatoi128( tokenarray[i].string_ptr, &opndx.llvalue, tokenarray[i].numbase, tokenarray[i].numlen );
+        //opndx.hlvalue = 0;
+        //opndx.string = NULL;
         opndx.instr = EMPTY;
         opndx.kind = EXPR_CONST;
         opndx.flags1 = 0;
         rc = NOT_ERROR;
-        DebugMsg1(( "CreateConstant(%s): simple numeric value=%" FX32 "\n", name, AsmBuffer[2]->value64 ));
+        //DebugMsg1(( "CreateConstant(%s): simple numeric value=%" FX32 "\n", name, tokenarray[2].value64 ));
         i++;
     } else {
         if ( Parse_Pass == PASS_1 ) {
-            p = AsmBuffer[2]->tokpos;
+            p = tokenarray[2].tokpos;
             /* if the expression cannot be evaluated to a numeric value,
              * it's to become a text macro. The value of this macro will be
              * the original (unexpanded!) line - that's why it has to be
@@ -306,10 +309,10 @@ asm_sym * CreateConstant( void )
             strcpy( argbuffer, p );
             DebugMsg1(("CreateConstant(%s): before ExpandLinePart: >%s<\n", name, p ));
             /* expand EQU argument (macro functions won't be expanded!) */
-            ExpandLinePart( 2, p, FALSE, TRUE );
+            ExpandLinePart( 2, tokenarray, p, FALSE, TRUE );
             DebugMsg1(("CreateConstant(%s): after ExpandLinePart: >%s<\n", name, p ));
         }
-        rc = EvalOperand( &i, Token_Count, &opndx, EXPF_NOERRMSG | EXPF_NOLCREATE );
+        rc = EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOERRMSG | EXPF_NOLCREATE );
     }
     /* what is an acceptable 'number' for EQU?
      * 1. a constant value - if magnitude is <= 32.
@@ -319,10 +322,10 @@ asm_sym * CreateConstant( void )
      * v2.04: large parts rewritten.
      */
     if ( rc != ERROR &&
-        AsmBuffer[i]->token == T_FINAL &&
+        tokenarray[i].token == T_FINAL &&
 
-         /* CONSTs must be internal, and the magnitude must be <= 32 */
-        ( ( opndx.kind == EXPR_CONST && opndx.abs == FALSE &&
+         /* magnitude of CONSTs must be <= 32 */
+        ( ( opndx.kind == EXPR_CONST && // opndx.abs == FALSE && /* v2.06: always true */
            opndx.hlvalue == 0 && /* magnitude > 64 bits? */
            opndx.value64 >= minintvalues[ModuleInfo.Ofssize]  &&
            opndx.value64 <= maxintvalues[ModuleInfo.Ofssize] ) ||
@@ -337,9 +340,9 @@ asm_sym * CreateConstant( void )
             sym = SymCreate( name, TRUE );
             sym->asmpass = Parse_Pass;
         } else if ( sym->state == SYM_UNDEFINED ) {
-            dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+            sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
         } else if ( sym->state == SYM_EXTERNAL ) {
-            dir_ext2int( (dir_node *)sym );
+            sym_ext2int( sym );
         } else if ( cmpvalue ) {
             if ( opndx.kind == EXPR_CONST ) {
                 /* for 64bit, it may be necessary to check 64bit value! */
@@ -349,7 +352,7 @@ asm_sym * CreateConstant( void )
                     return( NULL );
                 }
             } else if ( opndx.kind == EXPR_ADDR ) {
-                if ((sym->offset != (opndx.sym->offset + opndx.value)) || (sym->segment != opndx.sym->segment)) {
+                if ( ( sym->offset != ( opndx.sym->offset + opndx.value ) ) || ( sym->segment != opndx.sym->segment ) ) {
                     DebugMsg(("CreateConstant(%s), ADDR value changed: old=%X, new ofs+val=%X+%X\n", name, sym->offset, opndx.sym->offset, opndx.value));
                     AsmErr( SYMBOL_REDEFINITION, name );
                     return( NULL );
@@ -371,21 +374,21 @@ asm_sym * CreateConstant( void )
         return( sym );
     }
     DebugMsg1(("CreateConstant(%s): value is NOT numeric, calling SetTextMacro()\n", name ));
-    return ( SetTextMacro( sym, name, argbuffer ) );
+    return ( SetTextMacro( tokenarray, sym, name, argbuffer ) );
 }
 
 /* EQU and '=' directives */
 
-ret_code EquDirective( int i )
-/****************************/
+ret_code EquDirective( int i, struct asm_tok tokenarray[] )
+/*********************************************************/
 {
-    asm_sym *sym;
+    struct asym *sym;
 
-    if( AsmBuffer[0]->token != T_ID ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
+    if( tokenarray[0].token != T_ID ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[0].string_ptr );
         return( ERROR );
     }
-    if ( sym = ( ( AsmBuffer[i]->dirtype == DRT_EQUALSGN ) ? CreateAssemblyTimeVariable() : CreateConstant() ) ) {
+    if ( sym = ( ( tokenarray[i].dirtype == DRT_EQUALSGN ) ? CreateAssemblyTimeVariable( tokenarray ) : CreateConstant( tokenarray ) ) ) {
         if ( ModuleInfo.list == TRUE ) {
             LstWrite( LSTTYPE_EQUATE, 0, sym );
         }

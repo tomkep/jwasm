@@ -32,9 +32,7 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "segment.h"
 #include "extern.h"
 #include "fixup.h"
@@ -48,8 +46,7 @@
 #include "myassert.h"
 
 /* prototypes */
-extern ret_code      process_address( struct code_info *, expr_list * );
-extern unsigned int  Opnd_Count;     /* operand count of current instr */
+extern ret_code      process_address( struct code_info *, unsigned, struct expr * );
 
 struct code_line {
     const char *src;
@@ -103,17 +100,17 @@ static const struct code_line ExitDos[] = {
     { "int 21h",     T_NULL,T_NULL  },
 };
 
-static const char StartAddr[] = {"@Startup"};
+static const char szStartAddr[] = {"@Startup"};
 
 /* .STARTUP and .EXIT directives */
 
-ret_code StartupExitDirective( int i )
-/************************************/
+ret_code StartupExitDirective( int i, struct asm_tok tokenarray[] )
+/*****************************************************************/
 {
     int         count;
     int         j;
     const struct code_line *p;
-    expr_list   opndx;
+    struct expr opndx;
 
     if ( ModuleInfo.list )
         LstWriteSrcLine();
@@ -123,39 +120,41 @@ ret_code StartupExitDirective( int i )
         return( ERROR );
     }
     if ( ModuleInfo.Ofssize > USE16 ) {
-        AsmErr( DOES_NOT_WORK_WITH_32BIT_SEGMENTS, AsmBuffer[i]->string_ptr );
+        AsmErr( DOES_NOT_WORK_WITH_32BIT_SEGMENTS, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
     PushLineQueue();
 
-    switch( AsmBuffer[i]->value ) {
+    switch( tokenarray[i].tokval ) {
     case T_DOT_STARTUP:
         count = 0;
+        /* for tiny model, set current PC to 100h. */
         if ( ModuleInfo.model == MOD_TINY )
             AddLineQueue( "org 100h" );
-        AddLineQueueX( "%s::", StartAddr );
+        AddLineQueueX( "%s::", szStartAddr );
         if( ModuleInfo.ostype == OPSYS_DOS ) {
-            if (ModuleInfo.model == MOD_TINY)
+            if ( ModuleInfo.model == MOD_TINY )
                 ;
             else {
                 if( ModuleInfo.distance == STACK_NEAR ) {
-                    if ( (ModuleInfo.cpu & 0x7F) <= 1) {
+                    if ( ( ModuleInfo.cpu & M_CPUMSK ) <= M_8086 ) {
                         p = StartupDosNear0;
-                        count = sizeof(StartupDosNear0) / sizeof(StartupDosNear0[0]);
+                        count = sizeof( StartupDosNear0 ) / sizeof( StartupDosNear0[0] );
                     } else {
                         p = StartupDosNear1;
-                        count = sizeof(StartupDosNear1) / sizeof(StartupDosNear1[0]);
+                        count = sizeof( StartupDosNear1 ) / sizeof( StartupDosNear1[0] );
                     }
                 } else {
                     p = StartupDosFar;
-                    count = sizeof(StartupDosFar) / sizeof(StartupDosFar[0]);
+                    count = sizeof( StartupDosFar ) / sizeof( StartupDosFar[0] );
                 }
                 for ( ; count ; count--, p++ )
                     AddLineQueueX( (char *)p->src, p->r1, p->r2 );
             }
         }
         ModuleInfo.StartupDirectiveFound = TRUE;
+        i++; /* skip directive token */
         break;
     case T_DOT_EXIT:
         if( ModuleInfo.ostype == OPSYS_DOS ) {
@@ -165,28 +164,35 @@ ret_code StartupExitDirective( int i )
             p = ExitOS2;
             count = sizeof( ExitOS2 ) / sizeof( ExitOS2[0] );
         }
-        j = i;
-        i++;
-        if ( AsmBuffer[i]->token != T_FINAL ) {
+        i++; /* skip directive token */
+        if ( tokenarray[i].token != T_FINAL ) {
             if( ModuleInfo.ostype == OPSYS_OS2 ) {
-                AddLineQueueX( "mov %r,%s", T_AX, AsmBuffer[j]->tokpos + 5 );
+                AddLineQueueX( "mov %r,%s", T_AX, tokenarray[i].tokpos );
+                i = Token_Count;
             } else {
-                if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+                j = i;
+                if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
                     return( ERROR );
-                if ( opndx.kind == EXPR_CONST && opndx.value < 0x100 && AsmBuffer[i]->token == T_FINAL ) {
+                if ( opndx.kind == EXPR_CONST && opndx.value < 0x100 ) {
                     AddLineQueueX( "mov %r,4C00h + %u", T_AX, opndx.value );
                 } else {
-                    AddLineQueueX( "mov %r,%s", T_AL, AsmBuffer[j]->tokpos + 5 );
+                    AddLineQueueX( "mov %r,%s", T_AL, tokenarray[j].tokpos );
                     AddLineQueueX( "mov %r,4Ch", T_AH );
                 }
             }
             p++;
             count--;
         }
+
         for( ; count ; count--, p++ ) {
             AddLineQueueX( (char *)p->src, p->r1, p->r2 );
         }
         break;
+    }
+
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        return( ERROR );
     }
 
     RunLineQueue();
@@ -196,12 +202,12 @@ ret_code StartupExitDirective( int i )
 
 /* END directive */
 
-ret_code EndDirective( int i )
-/****************************/
+ret_code EndDirective( int i, struct asm_tok tokenarray[] )
+/*********************************************************/
 {
-    expr_list           opndx;
+    struct expr         opndx;
     struct fixup        *fix;
-    asm_sym             *sym;
+    struct asym         *sym;
     struct code_info    CodeInfo;
 
     DebugMsg1(("EndDirective enter\n"));
@@ -216,18 +222,17 @@ ret_code EndDirective( int i )
         if( i < Token_Count && Parse_Pass == PASS_1 ) {
             AsmWarn( 2, START_ADDRESS_IGNORED );
         }
-        AsmBuffer[i]->token = T_ID;
-        AsmBuffer[i]->string_ptr = (char *)StartAddr;
-        AsmBuffer[i+1]->token = T_FINAL;
-        AsmBuffer[i+1]->string_ptr = "";
+        tokenarray[i].token = T_ID;
+        tokenarray[i].string_ptr = (char *)szStartAddr;
+        tokenarray[i+1].token = T_FINAL;
+        tokenarray[i+1].string_ptr = "";
         Token_Count = i+1;
     }
-    Opnd_Count = 0;
-    if( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR ) {
+    if( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR ) {
         return( ERROR );
     }
-    if( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
 
@@ -242,8 +247,8 @@ ret_code EndDirective( int i )
 
     ModuleInfo.EndDirFound = TRUE;
     CodeInfo.token = T_NULL;
-    CodeInfo.pcurr = &InstrTable[IndexFromToken( T_NULL )];
-    CodeInfo.InsFixup[0] = NULL;
+    CodeInfo.pinstr = &InstrTable[IndexFromToken( T_NULL )];
+    CodeInfo.opnd[0].InsFixup = NULL;
     CodeInfo.flags = 0;
     CodeInfo.mem_type = MT_EMPTY;
 
@@ -255,8 +260,8 @@ ret_code EndDirective( int i )
     } else {
         char error = TRUE;
         if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE ) {
-            process_address( &CodeInfo, &opndx );
-            fix = CodeInfo.InsFixup[0];
+            process_address( &CodeInfo, 0, &opndx );
+            fix = CodeInfo.opnd[0].InsFixup;
             if ( fix )
                 sym = fix->sym;
             if ( fix == NULL || sym == NULL ) {
@@ -280,7 +285,7 @@ ret_code EndDirective( int i )
     }
 
     if ( Options.output_format == OFORMAT_OMF ) {
-        ModuleInfo.start_fixup = CodeInfo.InsFixup[0];
+        ModuleInfo.start_fixup = CodeInfo.opnd[0].InsFixup;
         ModuleInfo.start_displ = opndx.value;
     } else {
         /* Masm silently ignores start for -coff if an offset was given */

@@ -29,12 +29,12 @@
 ****************************************************************************/
 
 #include <stdarg.h>
+#include <stddef.h>
 #include <ctype.h>
 
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
 #include "fatal.h"
 #include "msgtext.h"
 #include "dbgcv.h"
@@ -47,12 +47,12 @@
 #if defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__)
 
 #define HANDLECTRLZ 0
-#define HANDLESWITCHCHAR 0
+#define SWITCHCHAR 0
 
 #else
 
 #define HANDLECTRLZ 1
-#define HANDLESWITCHCHAR 1
+#define SWITCHCHAR 1
 
 #endif
 
@@ -61,12 +61,6 @@
 #else
 #define OPTQUAL
 #endif
-
-struct  cmdloption {
-    const char  *name;
-    unsigned    value;
-    void OPTQUAL (*function)( void );
-};
 
 extern char     banner_printed;
 
@@ -122,6 +116,7 @@ struct global_options Options = {
     /* list_generated_code   */     FALSE,
     /* list_macro            */     LM_LISTMACRO,
     /* no_symbol_listing     */     FALSE,
+    /* first_pass_listing    */     FALSE,
 
     /* all_symbols_public    */     FALSE,
     /* safeseh               */     FALSE,
@@ -139,7 +134,7 @@ struct global_options Options = {
 #endif
 };
 
-char                    *FileDir[NUM_FILE_TYPES] = { NULL, NULL, NULL, NULL };
+char                    *DefaultDir[NUM_FILE_TYPES] = { NULL, NULL, NULL, NULL };
 
 #define MAX_RSP_NESTING 15  /* nesting of response files */
 
@@ -148,13 +143,10 @@ static char             *OptName;  /* value of option's name argument     */
 static const char       *cmdsave[MAX_RSP_NESTING]; /* response files */
 static const char       *cmdbuffers[MAX_RSP_NESTING]; /* response files */
 static int              rspidx = 0; /* response file level */
-#if HANDLESWITCHCHAR
-static unsigned char    SwitchChar = '/';
-#endif
 
 /* array for options -0 ... -10 */
-static const unsigned cpuoption[] = {
-     P_86, P_186, P_286, P_386,  /* 0-3 */
+static const enum cpu_info cpuoption[] = {
+    P_86, P_186, P_286, P_386,  /* 0-3 */
     P_486, P_586, P_686, P_686 | P_MMX, /* 4-7 */
     P_686 | P_MMX | P_SSE1,  /* 8 */
     P_686 | P_MMX | P_SSE1 | P_SSE2,  /* 9 */
@@ -210,20 +202,20 @@ static void SetTargName( char *name, unsigned len )
 
 /* called by -0, -1, ... argument */
 
-static void SetCpuCmdline( unsigned value, const char *parm )
-/***********************************************************/
+static void SetCpuCmdline( enum cpu_info value, const char *parm )
+/****************************************************************/
 {
 
     Options.cpu &= ~(P_CPU_MASK | P_EXT_MASK | P_PM);
     Options.cpu |= value;
-#if 0 //AMD64_SUPPORT
+
     /* implicitely set model flat if cpu is set to x86-64 via
      * commandline. This is deactive, because it's intransparent.
      */
-    if ( Options.cpu == P_64 )
-        if ( Options.model == MOD_NONE )
-            Options.model = MOD_FLAT;
-#endif
+    //if ( Options.cpu == P_64 )
+    //    if ( Options.model == MOD_NONE )
+    //        Options.model = MOD_FLAT;
+
     for( ; *parm ; parm++ ) {
         if( *parm == 'p' && Options.cpu >= P_286 ) {
             Options.cpu |= P_PM;      /* set privileged mode */
@@ -275,7 +267,7 @@ static void queue_item( int i, const char *string )
 static void get_fname( int type, const char *token )
 /**************************************************/
 /*
- * called by -Fo, -Fr or -Fl (for .OBJ, .ERR or .LST filenames ).
+ * called by -Fo, -Fw or -Fl (for .OBJ, .ERR or .LST filenames ).
  */
 {
     char        *pExt;
@@ -286,6 +278,7 @@ static void get_fname( int type, const char *token )
     char        ext[_MAX_EXT];
     //char        msgbuf[MAXMSGSIZE];
 
+    DebugMsg(("get_fname( %u, %s ) enter\n", type, token ));
     _splitpath( token, drive, dir, fname, ext );
     /*
      * If name's ending with a '\' (or '/' in Unix), it's supposed
@@ -293,15 +286,15 @@ static void get_fname( int type, const char *token )
      */
     if( fname[0] == NULLC ) {
         DebugMsg(("get_fname(%s, %u) name is a directory\n", token, type ));
-        if ( FileDir[type] )
-            MemFree( FileDir[type]);
-        FileDir[type] = MemAlloc( strlen( token ) + 1 );
-        strcpy( FileDir[type], token );
+        if ( DefaultDir[type] )
+            MemFree( DefaultDir[type]);
+        DefaultDir[type] = MemAlloc( strlen( token ) + 1 );
+        strcpy( DefaultDir[type], token );
         return;
     }
-    if ( drive[0] == NULLC && dir[0] == NULLC && FileDir[type] ) {
+    if ( drive[0] == NULLC && dir[0] == NULLC && DefaultDir[type] ) {
         DebugMsg(("get_fname: default drive+dir used: %s\n" ));
-        _splitpath( FileDir[type], drive, dir, NULL, NULL );
+        _splitpath( DefaultDir[type], drive, dir, NULL, NULL );
     }
     pExt = ext;
     if( ext[0] == NULLC ) {
@@ -357,49 +350,6 @@ static void OPTQUAL Set_bt( void ) { SetTargName( OptName,  strlen(OptName) ); }
 
 static void OPTQUAL Set_c( void ) { }
 
-#if COFF_SUPPORT
-static void OPTQUAL Set_coff( void ) {
-    Options.output_format = OFORMAT_COFF;
-}
-#if DJGPP_SUPPORT
-static void OPTQUAL Set_djgpp( void ) {
-    Set_coff();
-    Options.header_format = HFORMAT_DJGPP;
-}
-#endif
-#endif
-#if ELF_SUPPORT
-static void OPTQUAL Set_elf( void ) {
-    Options.output_format = OFORMAT_ELF;
-}
-#if AMD64_SUPPORT
-static void OPTQUAL Set_elf64( void ) {
-    Options.output_format = OFORMAT_ELF;
-    Options.header_format = HFORMAT_ELF64;
-    if ( Options.model == MOD_NONE )  /* default to model FLAT */
-        Options.model = MOD_FLAT;
-    //if ( Options.langtype == LANG_NONE ) /* default to language SYSCALL */
-    //    Options.langtype = LANG_FASTCALL;
-    //Options.fastcall = FCT_WIN64;     /* FASTCALL is Win64 register ABI */
-    /* set CPU if output format is for 64bit */
-    if ( (Options.cpu & P_CPU_MASK) < P_64 ) {
-        SetCpuCmdline( P_64, "" );
-    }
-}
-#endif
-#endif
-#if BIN_SUPPORT
-static void OPTQUAL Set_bin( void ) {
-    Options.output_format = OFORMAT_BIN;
-    Options.header_format = HFORMAT_NONE;
-}
-#if MZ_SUPPORT
-static void OPTQUAL Set_mz( void ) {
-    Options.output_format = OFORMAT_BIN;
-    Options.header_format = HFORMAT_MZ;
-}
-#endif
-#endif
 static void OPTQUAL Set_Cp( void ) { Options.case_sensitive = TRUE;   Options.convert_uppercase = FALSE; }
 static void OPTQUAL Set_Cu( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = TRUE;  }
 static void OPTQUAL Set_Cx( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = FALSE; }
@@ -407,15 +357,9 @@ static void OPTQUAL Set_Cx( void ) { Options.case_sensitive = FALSE;  Options.co
 static void OPTQUAL Set_Zd( void ) { Options.line_numbers = TRUE; }
 static void OPTQUAL Set_Zi( void ) { Set_Zd(); Options.debug_symbols = CV4_SIGNATURE; }
 
-static void OPTQUAL Set_Zm( void ) { Options.masm51_compat = TRUE; }
-
-static void OPTQUAL Set_Zne( void ) { Options.strict_masm_compat = TRUE; }
-
-static void OPTQUAL Set_Zg( void ) { Options.masm_compat_gencode = TRUE; }
-
-static void OPTQUAL Set_Zf( void ) { Options.all_symbols_public = TRUE; }
-
-static void OPTQUAL Set_Zp( void ) {
+static void OPTQUAL Set_Zp( void )
+/********************************/
+{
     uint_8 power;
     for ( power = 0; (1 << power) <= MAX_STRUCT_ALIGN; power++ )
         if ( ( 1 << power ) == OptValue ) {
@@ -431,54 +375,50 @@ static void OPTQUAL Set_Fi( void ) { queue_item( OPTQ_FINCLUDE, GetAFileName() )
 static void OPTQUAL Set_I( void )  { queue_item( OPTQ_INCPATH,  GetAFileName() ); }
 
 static void OPTQUAL Set_e( void ) { Options.error_limit = OptValue; }
-static void OPTQUAL Set_eq( void ) { Options.no_error_disp = TRUE; }
 
 static void OPTQUAL Set_nologo( void ) { banner_printed = TRUE; }
 static void OPTQUAL Set_q( void )      { Set_nologo(); Options.quiet = TRUE; }
 static void OPTQUAL Set_EP( void ) { Options.preprocessor_stdout = TRUE; Set_q(); }
 
-
-static void OPTQUAL Set_Fr( void ) { get_fname( ERR, GetAFileName() ); }
-static void OPTQUAL Set_Fl( void ) { get_fname( LST, GetAFileName() ); Options.write_listing = TRUE;}
-static void OPTQUAL Set_Fo( void ) { get_fname( OBJ, GetAFileName() ); }
+#if DLLIMPORT
+static void OPTQUAL Set_Fd( void ) { get_fname( OPTN_LNKDEF_FN, GetAFileName() ); }
+#endif
+static void OPTQUAL Set_Fw( void ) { get_fname( OPTN_ERR_FN, GetAFileName() ); }
+static void OPTQUAL Set_Fl( void ) { get_fname( OPTN_LST_FN, GetAFileName() ); Options.write_listing = TRUE;}
+static void OPTQUAL Set_Fo( void ) { get_fname( OPTN_OBJ_FN, GetAFileName() ); }
 
 static void OPTQUAL Set_fp( void ) { Options.cpu &= ~P_FPU_MASK; Options.cpu = OptValue; }
 static void OPTQUAL Set_FPx( void ) { Options.floating_point = OptValue; }
 static void OPTQUAL Set_G( void ) { Options.langtype = OptValue; }
 
-
-#ifdef DEBUG_OUT
-static void OPTQUAL Set_ls( void ) { Options.print_linestore = TRUE; };
-#endif
-
 static void OPTQUAL Set_Sa( void )
+/********************************/
 {
     Options.listif = TRUE;
     Options.list_generated_code = TRUE;
     Options.list_macro = LM_LISTMACROALL;
 }
-static void OPTQUAL Set_Sg( void ) { Options.list_generated_code = TRUE; }
-static void OPTQUAL Set_Sn( void ) { Options.no_symbol_listing = TRUE; }
-static void OPTQUAL Set_Sx( void ) { Options.listif = TRUE; }
-#if COFF_SUPPORT
-static void OPTQUAL Set_safeseh( void ) { Options.safeseh = TRUE; }
-#endif
+
+static void OPTQUAL Set_True( void )
+/**********************************/
+{
+    char *p = ((char *)&Options) + OptValue;
+    *p = TRUE;
+}
+
 static void OPTQUAL Set_m( void ) { Options.model = OptValue; }
 static void OPTQUAL Set_n( void ) { set_option_n_name( OptValue, OptName ); }
 
-#if COCTALS
-static void OPTQUAL Set_o( void ) { Options.allow_c_octals = TRUE; }
-#endif
 #ifdef DEBUG_OUT
 static void OPTQUAL Set_pm( void ) { Options.max_passes = OptValue; };
 #endif
-static void OPTQUAL Set_omf( void ) { Options.output_format = OFORMAT_OMF;}
 
 static void OPTQUAL Set_WX( void ) { Options.warning_error = TRUE; }
 
 static void OPTQUAL Set_w( void ) { Set_WX(); Options.warning_level = 0; }
 
 static void OPTQUAL Set_W( void )
+/*******************************/
 {
     if ( OptValue <= 4 )
         Options.warning_level = OptValue;
@@ -486,68 +426,62 @@ static void OPTQUAL Set_W( void )
         AsmWarn( 1, INVALID_CMDLINE_VALUE, "/W" );
 }
 
-#if AMD64_SUPPORT
-static void OPTQUAL Set_win64( void )
+static void OPTQUAL Set_ofmt( void )
+/**********************************/
 {
-    Options.output_format = OFORMAT_COFF;
-    Options.header_format = HFORMAT_WIN64;
-    if ( Options.model == MOD_NONE )  /* default to model FLAT */
-        Options.model = MOD_FLAT;
-    if ( Options.langtype == LANG_NONE ) /* default to language SYSCALL */
-        Options.langtype = LANG_FASTCALL;
-    Options.fastcall = FCT_WIN64;     /* FASTCALL is Win64 register ABI */
-    /* set CPU if output format is for 64bit */
-    if ( (Options.cpu & P_CPU_MASK) < P_64 ) {
-        SetCpuCmdline( P_64, "" );
-    }
+    Options.output_format = OptValue & 0xff;
+    Options.header_format = OptValue >> 8;
 }
-#endif
-static void OPTQUAL Set_X( void )   { Options.ignore_include = TRUE; }
+
 static void OPTQUAL Set_zcm( void ) { Options.no_cdecl_decoration = FALSE; }
-static void OPTQUAL Set_zcw( void ) { Options.no_cdecl_decoration = TRUE; }
 #if OWFC_SUPPORT
-static void OPTQUAL Set_zf( void )  { Options.fastcall = OptValue; }
+static void OPTQUAL Set_zf( void )  { Options.fctype = OptValue; }
 #endif
 
-static void OPTQUAL Set_zlc( void ) { Options.no_comment_data_in_code_records = TRUE; }
-static void OPTQUAL Set_zld( void ) { Options.no_opt_farcall = TRUE; }
-#if COFF_SUPPORT
-static void OPTQUAL Set_zlf( void ) { Options.no_file_entry = TRUE; }
-static void OPTQUAL Set_zls( void ) { Options.no_section_aux_entry = TRUE; }
-#endif
-
-static void OPTQUAL Set_Zs( void ) { Options.syntax_check_only = TRUE; }
-static void OPTQUAL Set_Zv8( void ) { Options.masm8_proc_visibility = TRUE; }
 static void OPTQUAL Set_zt( void ) { Options.stdcall_decoration = OptValue; }
-static void OPTQUAL Set_zze( void ) { Options.no_export_decoration = TRUE; }
-#if COFF_SUPPORT
-static void OPTQUAL Set_zzs( void ) { Options.entry_decorated = TRUE; }
-#endif
-
 static void OPTQUAL Set_h( void ) { usagex_msg();}
 
 #ifdef DEBUG_OUT
 static void OPTQUAL Set_d6( void )
+/********************************/
 {
     Options.debug = TRUE;
+    ModuleInfo.cref = TRUE; /* enable debug displays */
     DebugMsg(( "debugging output on\n" ));
 }
 static void OPTQUAL Set_d7( void )
+/********************************/
 {
     Options.nofastpass = TRUE;
     DebugMsg(( "FASTPASS disabled\n" ));
 }
 static void OPTQUAL Set_d8( void )
+/********************************/
 {
     Options.nobackpatch = TRUE;
     DebugMsg(( "backpatching disabled\n" ));
 }
 #endif
 
+struct  cmdloption {
+    const char  *name;
+    unsigned    value;
+    void OPTQUAL (*function)( void );
+};
+
+#define optofs( x ) offsetof( struct global_options, x )
+
+/*
+ * '#': collect a number
+ * '$': collect an identifer[=value]
+ * '@': collect a filename
+ * '=': collect an optional '='
+ * '^': skip spaces before argument
+ */
 static struct cmdloption const cmdl_options[] = {
     { "?",      0,        Set_h },
 #if BIN_SUPPORT
-    { "bin",    0,        Set_bin },
+    { "bin",    OFORMAT_BIN | (HFORMAT_NONE << 8), Set_ofmt },
 #endif
 #if BUILD_TARGET
     { "bt=$",   0,        Set_bt },
@@ -556,27 +490,30 @@ static struct cmdloption const cmdl_options[] = {
     { "Cu",     0,        Set_Cu },
     { "Cx",     0,        Set_Cx },
 #if COFF_SUPPORT
-    { "coff",   0,        Set_coff },
+    { "coff",   OFORMAT_COFF | (HFORMAT_NONE << 8), Set_ofmt },
 #endif
     { "c",      0,        Set_c },
 #ifdef DEBUG_OUT
-    { "d6",     6,        Set_d6 },
-    { "d7",     7,        Set_d7 },
-    { "d8",     8,        Set_d8 },
+    { "d6",     0,        Set_d6 },
+    { "d7",     0,        Set_d7 },
+    { "d8",     0,        Set_d8 },
 #endif
 #if COFF_SUPPORT && DJGPP_SUPPORT
-    { "djgpp",  0,        Set_djgpp },
+    { "djgpp",  OFORMAT_COFF | (HFORMAT_DJGPP << 8), Set_ofmt },
 #endif
     { "D^$",    0,        Set_D },
 #if ELF_SUPPORT
 #if AMD64_SUPPORT
-    { "elf64",  0,        Set_elf64 },
+    { "elf64",  OFORMAT_ELF | (HFORMAT_ELF64 << 8), Set_ofmt },
 #endif
-    { "elf",    0,        Set_elf },
+    { "elf",    OFORMAT_ELF | (HFORMAT_NONE << 8), Set_ofmt },
 #endif
     { "EP",     0,        Set_EP },
-    { "eq",     0,        Set_eq },
+    { "eq",     optofs( no_error_disp ),        Set_True },
     { "e=#",    0,        Set_e },
+#if DLLIMPORT
+    { "Fd=^@",  0,        Set_Fd },
+#endif
     { "Fi=^@",  0,        Set_Fi },
     { "Fl=@",   0,        Set_Fl },
     { "Fo=^@",  0,        Set_Fo },
@@ -590,14 +527,14 @@ static struct cmdloption const cmdl_options[] = {
     { "fp6",    P_387,    Set_fp },
 #endif
     { "fpc",    P_NO87,   Set_fp },
-    { "Fr=^@",  0,        Set_Fr },
+    { "Fw=^@",  0,        Set_Fw },
     { "Gc",     LANG_PASCAL,  Set_G },
     { "Gd",     LANG_C,       Set_G },
     { "Gz",     LANG_STDCALL, Set_G },
     { "h",      0,        Set_h },
     { "I=^@",   0,        Set_I },
 #ifdef DEBUG_OUT
-    { "ls",     0,        Set_ls },
+    { "ls",     optofs( print_linestore ), Set_True },
 #endif
     { "mc",     MOD_COMPACT, Set_m },
     { "mf",     MOD_FLAT,    Set_m },
@@ -608,7 +545,7 @@ static struct cmdloption const cmdl_options[] = {
     { "mt",     MOD_TINY,    Set_m },
 #if BIN_SUPPORT
 #if MZ_SUPPORT
-    { "mz",     0,        Set_mz },
+    { "mz",     OFORMAT_BIN | (HFORMAT_MZ << 8), Set_ofmt },
 #endif
 #endif
     { "nc=$",   OPTN_CODE_CLASS,    Set_n },
@@ -616,77 +553,74 @@ static struct cmdloption const cmdl_options[] = {
     { "nm=$",   OPTN_MODULE_NAME,   Set_n },
     { "nt=$",   OPTN_TEXT_SEG,      Set_n },
     { "nologo", 0,        Set_nologo },
-    { "omf",    0,        Set_omf },
+    { "omf",    OFORMAT_OMF | (HFORMAT_NONE << 8), Set_ofmt },
 #if COCTALS
-    { "o",      0,        Set_o },
+    { "o",      optofs( allow_c_octals ),   Set_True },
+#endif
+#if PE_SUPPORT
+    { "pe32",   OFORMAT_COFF | (HFORMAT_PE32 << 8), Set_ofmt },
+#if AMD64_SUPPORT
+    { "pe64",   OFORMAT_COFF | (HFORMAT_PE64 << 8), Set_ofmt },
+#endif
 #endif
 #ifdef DEBUG_OUT
     { "pm=#",   0,        Set_pm },
 #endif
     { "q",      0,        Set_q },
     { "Sa",     0,        Set_Sa },
-    { "Sg",     0,        Set_Sg },
-    { "Sn",     0,        Set_Sn },
-    { "Sx",     0,        Set_Sx },
+    { "Sf",     optofs( first_pass_listing  ), Set_True },
+    { "Sg",     optofs( list_generated_code ), Set_True },
+    { "Sn",     optofs( no_symbol_listing   ), Set_True },
+    { "Sx",     optofs( listif              ), Set_True },
 #if COFF_SUPPORT
-    { "safeseh",0,        Set_safeseh },
+    { "safeseh",optofs( safeseh ),        Set_True },
 #endif
     { "WX",     0,        Set_WX },
     { "W=#",    0,        Set_W },
 #if AMD64_SUPPORT
-    { "win64",  0,        Set_win64 },
+    { "win64",  OFORMAT_COFF | (HFORMAT_WIN64 << 8), Set_ofmt },
 #endif
     { "w",      0,        Set_w },
-    { "X",      0,        Set_X },
+    { "X",      optofs( ignore_include ), Set_True },
     { "Zd",     0,        Set_Zd },
-    { "Zf",     0,        Set_Zf },
-    { "Zg",     0,        Set_Zg },
+    { "Zf",     optofs( all_symbols_public ),  Set_True },
+    { "Zg",     optofs( masm_compat_gencode ), Set_True },
     { "Zi",     0,        Set_Zi },
-    { "Zm",     0,        Set_Zm },
-    { "Zne",    0,        Set_Zne },
+    { "Zm",     optofs( masm51_compat ),      Set_True },
+    { "Zne",    optofs( strict_masm_compat ), Set_True },
     { "Zp=#",   0,        Set_Zp },
     { "zcm",    0,        Set_zcm },
-    { "zcw",    0,        Set_zcw },
+    { "zcw",    optofs( no_cdecl_decoration ), Set_True },
 #if OWFC_SUPPORT
     { "zf0",    FCT_MS32,    Set_zf },
     { "zf1",    FCT_WATCOMC, Set_zf },
 #endif
-    { "zlc",    0,        Set_zlc },
-    { "zld",    0,        Set_zld },
+    { "zlc",    optofs( no_comment_data_in_code_records ), Set_True },
+    { "zld",    optofs( no_opt_farcall ),       Set_True },
 #if COFF_SUPPORT
-    { "zlf",    0,        Set_zlf },
-    { "zls",    0,        Set_zls },
+    { "zlf",    optofs( no_file_entry ),        Set_True },
+    { "zls",    optofs( no_section_aux_entry ), Set_True },
 #endif
-    { "Zs",     0,        Set_Zs },
+    { "Zs",     optofs( syntax_check_only ), Set_True },
     { "zt0",    STDCALL_NONE, Set_zt },
     { "zt1",    STDCALL_HALF, Set_zt },
     { "zt2",    STDCALL_FULL, Set_zt },
-    { "Zv8",    0,        Set_Zv8 },
-    { "zze",    0,        Set_zze },
+    { "Zv8",    optofs( masm8_proc_visibility ), Set_True },
+    { "zze",    optofs( no_export_decoration ),  Set_True },
 #if COFF_SUPPORT
-    { "zzs",    0,        Set_zzs },
+    { "zzs",    optofs( entry_decorated ),       Set_True },
 #endif
-    { NULL,     0,        0 }
+//    { NULL,     0,        0 }
 };
 
-static int OptionDelimiter( char c )
-/**********************************/
-{
-#if HANDLESWITCHCHAR
-    if( c == ' ' || c == '-' || c == NULLC || c == '\t' || c == SwitchChar ) {
-#else
-    if( c == ' ' || c == '-' || c == NULLC || c == '\t' ) {
-#endif
-        return( 1 );
-    }
-    return( 0 );
-}
-
 /*
- * get a "filename" or "macro" name
+ * get a "name"
+ * type=@ : filename
+ * type=$ : (macro) identifier [=value]
+ * type=0 : something else
  */
-static const char *GetNameToken( char *dst, const char *str, int max, bool isequate )
-/***********************************************************************************/
+static const char *GetNameToken( char *dst, const char *str, int max, char type )
+/*******************************************************************************/
 {
     bool equatefound = FALSE;
 
@@ -694,13 +628,12 @@ static const char *GetNameToken( char *dst, const char *str, int max, bool isequ
 is_quote:
     if( *str == '"' ) {
         ++str;
-        for( ;max; max-- ) {
+        for( ; max && *str; max-- ) {
             if ( *str == '"' ) {
                 ++str;
                 break;
             }
-            if ( *str == NULLC )
-                break;
+            /* handle the \" case */
             if ( *str == '\\' && *(str+1) == '"' ) {
                 ++str;
             }
@@ -710,14 +643,14 @@ is_quote:
         for( ; max; max-- ) {
             if ( *str == NULLC || *str == ' ' || *str == '\t' )
                 break;
-#if HANDLESWITCHCHAR
-            if ( (*str == SwitchChar || *str == '-') && isequate == FALSE )
-                break;
-#else
-            if ( *str == '-' && isequate == FALSE )
-                break;
+            if ( type == 0 )
+                if ( *str == '-'
+#if SWITCHCHAR
+                    || *str == '/'
 #endif
-            if ( *str == '=' && isequate == TRUE && equatefound == FALSE ) {
+                   )
+                    break;
+            if ( *str == '=' && type == '$' && equatefound == FALSE ) {
                 equatefound = TRUE;
                 *dst++ = *str++;
                 if (*str == '"')
@@ -744,6 +677,7 @@ static char *ReadParamFile( const char *name )
     int         len;
     char        ch;
 
+    DebugMsg(("ReadParamFile(%s) enter\n"));
     env = NULL;
     file = fopen( name, "rb" );
     if( file == NULL ) {
@@ -805,14 +739,20 @@ static const char *getnextcmdstring( const char **cmdline )
     return( *cmdline );
 }
 
-static const char * GetNumber( const char * p )
-/*********************************************/
+static const char *GetNumber( const char *p )
+/*******************************************/
 {
     OptValue = 0;
     for( ;*p >= '0' && *p <= '9'; p++ )
         OptValue = OptValue * 10 + *p - '0';
     return( p );
 }
+
+#if SWITCHCHAR
+#define IsOptionDelimiter( x ) (x == ' ' || x == '-' || x == '/' || x == NULLC || x == '\t' )
+#else
+#define IsOptionDelimiter( x ) (x == ' ' || x == '-' || x == NULLC || x == '\t' )
+#endif
 
 /* scan option table and if option is known, process it */
 
@@ -833,13 +773,13 @@ static void ProcessOption( const char **cmdline, char *buffer )
     if ( *p >= '0' && *p <= '9' ) {
         p = GetNumber( p );
         if ( OptValue < sizeof(cpuoption)/sizeof(cpuoption[0]) ) {
-            p = GetNameToken( buffer, p, 16, FALSE ); /* get optional 'p' */
+            p = GetNameToken( buffer, p, 16, 0 ); /* get optional 'p' */
             *cmdline = p;
             SetCpuCmdline( cpuoption[OptValue], buffer );
             return;
         }
     }
-    for( i = 0; cmdl_options[i].name; i++ ) {
+    for( i = 0; i < ( sizeof(cmdl_options) / sizeof(cmdl_options[0]) ); i++ ) {
         opt = cmdl_options[i].name;
         //DebugMsg(("ProcessOption(%s): %s\n", p, opt ));
         if( *p == *opt ) {
@@ -854,7 +794,7 @@ static void ProcessOption( const char **cmdline, char *buffer )
                 switch ( *opt ) {
                 //case '*': /* don't know what this is supposed to do? */
                 case NULLC:
-                    if ( !OptionDelimiter( *p ) )
+                    if ( !IsOptionDelimiter( *p ) )
                         goto opt_error_exit;
                     *cmdline = p;
                     cmdl_options[i].function();
@@ -869,14 +809,14 @@ static void ProcessOption( const char **cmdline, char *buffer )
                     OptName = buffer;
 #if 0 /* v2.05: removed */
                     if ( rspidx )
-                        p = GetNameToken( buffer, p, _MAX_PATH - 1, *opt == '$' );
+                        p = GetNameToken( buffer, p, _MAX_PATH - 1, *opt );
                     else {
                         j = strlen( p );
                         memcpy( buffer, p, (j >= _MAX_PATH) ? _MAX_PATH : j+1 );
                         p += j;
                     }
 #else
-                    p = GetNameToken( buffer, p, _MAX_PATH - 1, *opt == '$' );
+                    p = GetNameToken( buffer, p, _MAX_PATH - 1, *opt );
 #endif
                     break;
                 case '=':    /* collect an optional '=' */
@@ -971,21 +911,37 @@ char * EXPQUAL ParseCmdline( const char **cmdline, int *pCntArgs )
         }
 
     for( ; str; ) {
-        while( *str == ' ' || *str == '\t' )
-            ++str;
-        if( *str == '@' ) {
+        switch( *str ) {
+        case ' ':
+        case '\t':
+            str++;
+            break;
+        case NULLC:
+            str = getnextcmdstring( cmdline );
+            break;
+        case '-':
+#if SWITCHCHAR
+        case '/':
+#endif
+            str++;
+            *cmdline = str;
+            ProcessOption( cmdline, paramfile );
+            (*pCntArgs)++;
+            str = *cmdline;
+            break;
+        case '@':
             if ( rspidx >= MAX_RSP_NESTING )
                 Fatal( FATAL_NESTING_LEVEL_TOO_DEEP );
             str++;
-#if 0 /* v2.05: removed */
+#if 1 /* v2.06: was '0' in v2.05, now '1' again since it didn't work with quoted names */
             if ( rspidx ) {
-                cmdsave[rspidx] = GetNameToken( paramfile, str, sizeof( paramfile ) - 1, FALSE );
+                cmdsave[rspidx] = GetNameToken( paramfile, str, sizeof( paramfile ) - 1, '@' );
             } else {
                 strcpy( paramfile, str );
                 cmdsave[rspidx] = str + strlen(str);
             }
 #else
-            cmdsave[rspidx] = GetNameToken( paramfile, str, sizeof( paramfile ) - 1, FALSE );
+            cmdsave[rspidx] = GetNameToken( paramfile, str, sizeof( paramfile ) - 1, '@' );
 #endif
             cmdbuffers[rspidx] = NULL;
             str = NULL;
@@ -996,45 +952,31 @@ char * EXPQUAL ParseCmdline( const char **cmdline, int *pCntArgs )
                 cmdbuffers[rspidx] = str;
                 if ( str == NULL ) {
                     str = cmdsave[rspidx];
-                    continue;
+                    break;
                 }
             }
             rspidx++;
-            continue;
-        }
-        if( *str == NULLC ) {
-            str = getnextcmdstring( cmdline );
-            continue;
-        }
-#if HANDLESWITCHCHAR
-        if( *str == '-'  ||  *str == SwitchChar ) {
-#else
-        if( *str == '-' ) {
-#endif
-            str++;
-            *cmdline = str;
-            ProcessOption( cmdline, paramfile );
-            (*pCntArgs)++;
-            str = *cmdline;
-        } else {  /* collect  file name */
-            //int len;
+            break;
+        default: /* collect  file name */
 #if BUILD_TARGET
             set_default_build_target();
 #endif
-#if 0 /* v2.05: removed */
+#if 1 /* v2.06: activated (was removed in v2.05). Needed for quoted filenames */
             if ( rspidx ) {
-                str = GetNameToken( paramfile, str, sizeof( paramfile ) - 1, FALSE );
-                get_fname( ASM, paramfile );
+                str = GetNameToken( paramfile, str, sizeof( paramfile ) - 1, '@' );
+                get_fname( OPTN_ASM_FN, paramfile );
             } else {
+                int len;
                 len = strlen( str );
-                get_fname( ASM, str );
+                get_fname( OPTN_ASM_FN, str );
                 str += len;
             }
 #else
-            str = GetNameToken( paramfile, str, sizeof( paramfile ) - 1, FALSE );
+            str = GetNameToken( paramfile, str, sizeof( paramfile ) - 1, '@' );
             Options.names[ASM] = MemAlloc( strlen( paramfile ) + 1 );
             strcpy( Options.names[ASM], paramfile );
 #endif
+            DebugMsg(("ParseCmdLine: file=>%s< rest=>%s<\n", Options.names[ASM], str ? str : "NULL" ));
             (*pCntArgs)++;
             *cmdline = str;
             return( Options.names[ASM] );
@@ -1051,9 +993,9 @@ void EXPQUAL CmdlineFini( void )
     int i;
     DebugMsg(("CmdLineFini enter\n" ));
     for ( i = 0; i < NUM_FILE_TYPES; i++ ) {
-        if ( FileDir[i] != NULL ) {
-            MemFree( FileDir[i] );
-            FileDir[i] = NULL;
+        if ( DefaultDir[i] != NULL ) {
+            MemFree( DefaultDir[i] );
+            DefaultDir[i] = NULL;
         }
     }
     for ( i = 0; i < OPTN_LAST; i++ )

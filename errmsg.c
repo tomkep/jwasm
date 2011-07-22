@@ -32,12 +32,10 @@
 #include <ctype.h>
 
 #include "globals.h"
-#include "symbols.h"
+#include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
 #include "input.h"
 #include "tokenize.h"
-#include "symbols.h"
 #include "macro.h"
 #include "fatal.h"
 #include "msgtext.h"
@@ -64,7 +62,7 @@ void DoDebugMsg( const char *format, ... )
     va_list args;
     if( !Options.debug ) return;
 
-    if( ModuleInfo.cref == FALSE && AsmFName[ASM] != NULL )
+    if( ModuleInfo.cref == FALSE && CurrFName[ASM] != NULL )
         return;
 
     va_start( args, format );
@@ -125,10 +123,10 @@ void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
         fwrite( "\n", 1, 1, fp );
 
         /* if in Pass 1, add the error msg to the listing */
-        if ( AsmFile[LST] &&
+        if ( CurrFile[LST] &&
              severity &&
              Parse_Pass == PASS_1 &&
-             fp == AsmFile[ERR] ) {
+             fp == CurrFile[ERR] ) {
             LstWrite( LSTTYPE_DIRECTIVE, GetCurrOffset(), 0 );
             LstPrintf( "                           %s", buffer );
             LstNL();
@@ -141,13 +139,19 @@ static void PrtMsg( int severity, int msgnum, va_list args1, va_list args2 )
 {
 #ifndef __SW_BD
     if( !banner_printed )
-        trademark();
+        write_logo();
 #endif
     /* open .err file if not already open and a name is given */
-    if( AsmFile[ERR] == NULL && AsmFName[ERR] != NULL ) {
-        AsmFile[ERR] = fopen( AsmFName[ERR], "w" );
-        if( AsmFile[ERR] == NULL )
-            Fatal( FATAL_CANNOT_OPEN_FILE, AsmFName[ERR], errno );
+    if( CurrFile[ERR] == NULL && CurrFName[ERR] != NULL ) {
+        CurrFile[ERR] = fopen( CurrFName[ERR], "w" );
+        if( CurrFile[ERR] == NULL ) {
+            /* v2.06: no fatal error anymore if error file cannot be written */
+            char *p = CurrFName[ERR];
+            CurrFName[ERR] = NULL; /* set to NULL before AsmErr()! */
+            Options.no_error_disp = FALSE; /* disable -eq! */
+            AsmErr( CANNOT_OPEN_FILE, p, errno );
+            AsmFree( p );
+        }
     }
 
     /* v2.05: new option -eq */
@@ -155,9 +159,9 @@ static void PrtMsg( int severity, int msgnum, va_list args1, va_list args2 )
         PutMsg( errout, severity, msgnum, args1 );
         fflush( errout );                       /* 27-feb-90 */
     }
-    if( AsmFile[ERR] ) {
+    if( CurrFile[ERR] ) {
         //Errfile_Written = TRUE;
-        PutMsg( AsmFile[ERR], severity, msgnum, args2 );
+        PutMsg( CurrFile[ERR], severity, msgnum, args2 );
     }
 }
 

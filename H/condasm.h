@@ -31,12 +31,12 @@
 #ifndef _CONDASM_H_
 #define _CONDASM_H_
 
-typedef enum  {
+enum if_state {
     BLOCK_ACTIVE,    /* current cond is true */
     BLOCK_INACTIVE,  /* current IF cond is false, looking for elseif */
     BLOCK_DONE       /* done TRUE section of current if, just nuke
                         everything until we see an endif */
-} if_state;
+};
 
 enum cond_class {
     CC_NULL,
@@ -48,11 +48,9 @@ enum cond_class {
     CC_PASS2,
 };
 
-extern if_state CurrIfState;
+extern enum if_state CurrIfState;
 
 extern void conditional_assembly_prepare( int );
-extern ret_code CondAsmDirective( int );
-extern ret_code ErrorDirective( int );
 extern void CondCheckOpen( void );
 extern void CondInit( void );
 

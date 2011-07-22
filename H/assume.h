@@ -41,7 +41,7 @@ enum err_flags {
 };
 
 struct assume_info {
-    struct asm_sym      *symbol;        /* segment, group or type that is to
+    struct asym         *symbol;        /* segment, group or type that is to
                                            be associated with the register */
     unsigned char       error;          /* register assumed to ERROR */
     unsigned char       flat;           /* register assumed to FLAT  */
@@ -49,9 +49,9 @@ struct assume_info {
 
 /* v2.05: introduced */
 struct stdassume_typeinfo {
-    struct asm_sym      *type;
-    struct asm_sym      *target_type;
-    memtype             mem_type;
+    struct asym         *type;
+    struct asym         *target_type;
+    enum memtype        mem_type;
     unsigned char       ptr_memtype;
     unsigned char       is_ptr;
 };
@@ -64,16 +64,13 @@ extern struct assume_info StdAssumeTable[];
 
 extern void AssumeInit( void );     /* init assume tables */
 
-extern enum assume_segreg search_assume( struct asm_sym *sym,
-                                         enum assume_segreg def, bool search_grps );
+extern enum assume_segreg search_assume( const struct asym *sym, enum assume_segreg def, bool search_grps );
+extern enum assume_segreg GetAssume( const struct asym *, const struct asym *, enum assume_segreg, struct asym * * );
 
-extern enum assume_segreg  GetAssume( struct asm_sym *, struct asm_sym*, enum assume_segreg, asm_sym * * );
-extern struct asm_sym   *GetOverrideAssume( enum assume_segreg );
+extern struct asym      *GetOverrideAssume( enum assume_segreg );
+extern struct asym      *GetStdAssume( int );
+extern struct asym      *GetStdAssumeEx( int );
 
-extern struct asm_sym   *GetStdAssume( int );
-extern struct asm_sym   *GetStdAssumeEx( int );
-
-extern ret_code         AssumeDirective( int );
 extern void             ModelAssumeInit( void );
 extern void             SetSegAssumeTable( void * );
 extern void             GetSegAssumeTable( void * );

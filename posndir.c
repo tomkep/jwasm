@@ -30,7 +30,6 @@
 
 #include "globals.h"
 #include "parser.h"
-#include "directiv.h"
 #include "segment.h"
 #include "expreval.h"
 #include "types.h"
@@ -38,7 +37,7 @@
 #include "posndir.h"
 #include "fastpass.h"
 #include "fixup.h"
-#include "tokenize.h"
+#include "input.h"
 
 #include "myassert.h"
 
@@ -88,19 +87,19 @@ static const uint_8 * const NopLists[] = { NopList16, NopList32, NopList64 };
 static const uint_8 * const NopLists[] = { NopList16, NopList32 };
 #endif
 
-ret_code OrgDirective( int i )
-/****************************/
+ret_code OrgDirective( int i, struct asm_tok tokenarray[] )
+/*********************************************************/
 {
-    //struct asm_sym  *sym;
-    //int_32          value = 0;
-    expr_list opndx;
+    //struct asym  *sym;
+    //int_32       value = 0;
+    struct expr opndx;
 
     DebugMsg1(("OrgDirective(%u) enter\n", i));
     i++;
-    if ( ( ERROR == EvalOperand( &i, Token_Count, &opndx, 0 ) ) )
+    if ( ( ERROR == EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) ) )
         return( ERROR );
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
     if ( CurrStruct ) {
@@ -188,21 +187,21 @@ void AlignCurrOffset( int value )
     }
 }
 
-ret_code AlignDirective( int i )
-/******************************/
+ret_code AlignDirective( int i, struct asm_tok tokenarray[] )
+/***********************************************************/
 {
     int_32 align_val;
     int seg_align;
-    expr_list opndx;
+    struct expr opndx;
     uint_32 CurrAddr;
     char buffer[32];
 
     DebugMsg1(("AlignDirective enter\n"));
 
-    switch( AsmBuffer[i]->value ) {
+    switch( tokenarray[i].tokval ) {
     case T_ALIGN:
         i++;
-        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
             return( ERROR );
         if ( opndx.kind == EXPR_CONST ) {
             int power;
@@ -229,8 +228,8 @@ ret_code AlignDirective( int i )
         i++;
         break;
     }
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -263,7 +262,7 @@ ret_code AlignDirective( int i )
         align_val -= seg_align;
         fill_in_objfile_space( align_val );
     }
-    if ( AsmFile[LST] ) {
+    if ( CurrFile[LST] ) {
         LstWrite( LSTTYPE_DATA, CurrAddr, NULL );
     }
     DebugMsg1(("AlignDirective exit\n"));

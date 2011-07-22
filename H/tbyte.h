@@ -31,11 +31,11 @@
 #ifndef _TBYTE_H
 #define _TBYTE_H
 
-typedef struct {
-        uint_64 m;
-        unsigned short e;
-} TB_LD;
+struct TB_LD {
+    uint_64 m;
+    unsigned short e;
+};
 
-TB_LD * strtotb( const char *bufptr, TB_LD *pld, char negative );
+struct TB_LD *strtotb( const char *bufptr, struct TB_LD *pld, char negative );
 
 #endif

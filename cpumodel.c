@@ -33,8 +33,6 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
-#include "symbols.h"
 #include "segment.h"
 #include "assume.h"
 #include "equate.h"
@@ -46,46 +44,35 @@
 
 #include "myassert.h"
 
-#define ONEXMM 1
+#define DOT_XMMARG 0 /* 1=optional argument for .XMM directive */
 
 extern const char szDgroup[];
 
 /* prototypes */
 
-#define INIT_MODEL      0x1
-#define INIT_LANG       0x2
-#define INIT_STACK      0x4
-#define INIT_OS         0x8
+/* must be sorted like MOD_xxx enum:
+ * TINY=1, SMALL=2, COMPACT=3, MEDIUM=4, LARGE=5, HUGE=6, FLAT=7
+ */
+const char * const ModelToken[] = {
+    "TINY", "SMALL", "COMPACT", "MEDIUM", "LARGE", "HUGE", "FLAT" };
 
-/* must be sorted against MOD_xxx enum, MOD_TINY = 1 ) */
-const typeinfo ModelInfo[] = {
-    { "TINY",         MOD_TINY,       INIT_MODEL      },
-    { "SMALL",        MOD_SMALL,      INIT_MODEL      },
-    { "COMPACT",      MOD_COMPACT,    INIT_MODEL      },
-    { "MEDIUM",       MOD_MEDIUM,     INIT_MODEL      },
-    { "LARGE",        MOD_LARGE,      INIT_MODEL      },
-    { "HUGE",         MOD_HUGE,       INIT_MODEL      },
-    { "FLAT",         MOD_FLAT,       INIT_MODEL      }
+#define INIT_LANG       0x1
+#define INIT_STACK      0x2
+#define INIT_OS         0x4
+
+struct typeinfo {
+    uint_8 value;  /* value assigned to the token */
+    uint_8 init;   /* kind of token */
 };
-#if 0
-/* not needed. see GetLangType() */
-static const typeinfo LangInfo[] = {
-    { "BASIC",        LANG_BASIC,     INIT_LANG       },
-    { "FORTRAN",      LANG_FORTRAN,   INIT_LANG       },
-    { "PASCAL",       LANG_PASCAL,    INIT_LANG       },
-    { "C",            LANG_C,         INIT_LANG       },
-    { "FASTCALL",     LANG_FASTCALL,  INIT_LANG       },
-    { "STDCALL",      LANG_STDCALL,   INIT_LANG       },
-    { "SYSCALL",      LANG_SYSCALL,   INIT_LANG       }
-};
-#else
-static const typeinfo dmyLang = { NULL, 0, INIT_LANG };
-#endif
-static const typeinfo ModelAttr[] = {
-    { "NEARSTACK",    STACK_NEAR,     INIT_STACK      },
-    { "FARSTACK",     STACK_FAR,      INIT_STACK      },
-    { "OS_OS2",       OPSYS_OS2,      INIT_OS         },
-    { "OS_DOS",       OPSYS_DOS,      INIT_OS         }
+
+static const char * const ModelAttr[] = {
+    "NEARSTACK", "FARSTACK", "OS_OS2", "OS_DOS" };
+
+static const struct typeinfo ModelAttrValue[] = {
+    { STACK_NEAR,     INIT_STACK      },
+    { STACK_FAR,      INIT_STACK      },
+    { OPSYS_DOS,      INIT_OS         },
+    { OPSYS_OS2,      INIT_OS         },
 };
 
 /* the following flags assume the MOD_xxx enumeration
@@ -93,16 +80,30 @@ static const typeinfo ModelAttr[] = {
  *  MOD_COMPACT = 3, MOD_MEDIUM = 4
  */
 
-static asm_sym *sym_CodeSize  ; /* numeric. requires model */
-static asm_sym *sym_DataSize  ; /* numeric. requires model */
-static asm_sym *sym_Model     ; /* numeric. requires model */
-asm_sym *sym_Interface ; /* numeric. requires model */
-asm_sym *sym_Cpu       ; /* numeric. This is ALWAYS set */
+static struct asym *sym_CodeSize  ; /* numeric. requires model */
+static struct asym *sym_DataSize  ; /* numeric. requires model */
+static struct asym *sym_Model     ; /* numeric. requires model */
+struct asym *sym_Interface ; /* numeric. requires model */
+struct asym *sym_Cpu       ; /* numeric. This is ALWAYS set */
 
-static asm_sym * AddPredefinedConstant( const char *name, int value )
-/*******************************************************************/
+/* find token in a string table */
+
+static int FindToken( const char *token, const char * const *table, int size )
+/****************************************************************************/
 {
-    asm_sym * sym = CreateVariable( name, value );
+    int i;
+    for( i = 0; i < size; i++, table++ ) {
+        if( _stricmp( *table, token ) == 0 ) {
+            return( i );
+        }
+    }
+    return( -1 );  /* Not found */
+}
+
+static struct asym *AddPredefinedConstant( const char *name, int value )
+/**********************************************************************/
+{
+    struct asym *sym = CreateVariable( name, value );
     if (sym)
         sym->predefined = TRUE;
     return(sym);
@@ -111,7 +112,7 @@ static asm_sym * AddPredefinedConstant( const char *name, int value )
 static void AddPredefinedText( const char *name, const char *value )
 /******************************************************************/
 {
-    asm_sym *sym;
+    struct asym *sym;
 
     sym = SymSearch( name );
     if (sym == NULL)
@@ -129,7 +130,7 @@ static void SetModel( void )
 {
     int         value;
     const char  *textvalue;
-    //asm_sym     *sym;
+    //struct asym     *sym;
 
     DebugMsg1(("SetModel() enter (model=%u)\n", ModuleInfo.model ));
     /* if model is set, it disables OT_SEGMENT of -Zm switch */
@@ -153,7 +154,8 @@ static void SetModel( void )
     /* Set @CodeSize */
     if ( SIZE_CODEPTR & ( 1 << ModuleInfo.model ) ) {
         value = 1;
-        SimpleType[ST_PROC].mem_type = MT_FAR;
+        /* v2.06: SimpleType[] is obsolete */
+        //SimpleType[ST_PROC].mem_type = MT_FAR;
     } else {
         value = 0;
         // SimpleType[ST_PROC].mem_type = MT_NEAR; /* this is default */
@@ -215,15 +217,16 @@ static ret_code SetDefaultOfssize( int size )
  * if model is FLAT, defines FLAT pseudo-group
  * set default segment names for code and data
  */
-ret_code ModelDirective( int i )
-/******************************/
+ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
+/***********************************************************/
 {
-    const typeinfo *type;           /* type of option */
-    mod_type model;
+    enum mod_type model;
     enum lang_type language;
-    dist_type distance;
-    os_type ostype;
-    uint_16 init;
+    enum dist_type distance;
+    enum os_type ostype;
+    int index;
+    uint_8 init;
+    uint_8 initv;
 
     DebugMsg1(("ModelDirective enter\n"));
     /* v2.03: it may occur that "code" is defined BEFORE the MODEL
@@ -243,55 +246,61 @@ ret_code ModelDirective( int i )
     }
 
     i++;
-    if ( AsmBuffer[i]->token == T_FINAL ) {
+    if ( tokenarray[i].token == T_FINAL ) {
         AsmError( EXPECTED_MEMORY_MODEL );
         return( ERROR );
     }
     /* get the model argument */
-    if( type = FindToken( AsmBuffer[i]->string_ptr, ModelInfo, sizeof(ModelInfo)/sizeof(typeinfo) )) {
+    index = FindToken( tokenarray[i].string_ptr, ModelToken, sizeof( ModelToken )/sizeof( ModelToken[0] ) );
+    if( index >= 0 ) {
         if( ModuleInfo.model != MOD_NONE ) {
             AsmWarn( 2, MODEL_DECLARED_ALREADY );
             return( NOT_ERROR );
         }
-        model = type->value;
+        model = index + 1;
         i++;
     } else {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
     /* get the optional arguments: language, stack distance, os */
     init = 0;
-    while ( i < ( Token_Count - 1 ) && AsmBuffer[i]->token == T_COMMA ) {
+    while ( i < ( Token_Count - 1 ) && tokenarray[i].token == T_COMMA ) {
         i++;
-        if ( AsmBuffer[i]->token != T_COMMA ) {
-            if ( GetLangType( &i, &language ) == NOT_ERROR ) {
-                type = &dmyLang;
-            } else if ( type = FindToken( AsmBuffer[i]->string_ptr, ModelAttr, sizeof(ModelAttr)/sizeof(ModelAttr[0]) ) ) {
-                if ( type->init & INIT_STACK ) {
+        if ( tokenarray[i].token != T_COMMA ) {
+            if ( GetLangType( &i, tokenarray, &language ) == NOT_ERROR ) {
+                initv = INIT_LANG;
+            } else {
+                index = FindToken( tokenarray[i].string_ptr, ModelAttr, sizeof( ModelAttr )/sizeof( ModelAttr[0] ) );
+                if ( index < 0 )
+                    break;
+                initv = ModelAttrValue[index].init;
+                switch ( initv ) {
+                case INIT_STACK:
                     if ( model == MOD_FLAT ) {
                         AsmError( INVALID_MODEL_PARAM_FOR_FLAT );
                         return( ERROR );
                     }
-                    distance = type->value;
-                } else {
-                    ostype = type->value;
+                    distance = ModelAttrValue[index].value;
+                    break;
+                case INIT_OS:
+                    ostype = ModelAttrValue[index].value;
+                    break;
                 }
                 i++;
-            } else {
-                break;
             }
             /* attribute set already? */
-            if ( type->init & init ) {
+            if ( initv & init ) {
                 i--;
                 break;
             }
-            init |= type->init;
+            init |= initv;
         }
     }
     /* everything parsed successfully? */
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
 
@@ -311,11 +320,15 @@ ret_code ModelDirective( int i )
     if ( init & INIT_LANG ) {
         ModuleInfo.langtype = language;
 #if AMD64_SUPPORT
-        /* v2.03: set the fastcall type if x64 is active */
+        /* v2.03: set header and fastcall type to win64 if x64 is active.
+         * This is rather hackish, but currently there's no other possibility
+         * to enable the win64 ABI from the source.
+         */
         if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_64 )
             if ( language == LANG_FASTCALL && Options.output_format != OFORMAT_ELF ) {
                 DebugMsg(("ModelDirective: FASTCALL type set to WIN64\n"));
-                Options.fastcall = FCT_WIN64;
+                ModuleInfo.header_format = HFORMAT_WIN64;
+                ModuleInfo.fctype = FCT_WIN64;
             }
 #endif
     }
@@ -330,22 +343,16 @@ ret_code ModelDirective( int i )
     return( NOT_ERROR );
 }
 
-/* handles
- .8086,
- .[1|2|3|4|5|6]86[p],
- .8087,
- .[2|3]87,
- .NO87, .MMX, .K3D, .XMM directives.
- set CPU and FPU parameter in ModuleInfo.cpu + ModuleInfo.curr_cpu.
- ModuleInfo.cpu is the value of Masm's @CPU symbol.
- ModuleInfo.curr_cpu is the old OW Wasm value.
- additional notes:
- .[1|2|3|4|5|6]86 will reset .MMX, .K3D and .XMM,
- OTOH, .MMX/.XMM won't automatically enable .586/.686
+/* set CPU and FPU parameter in ModuleInfo.cpu + ModuleInfo.curr_cpu.
+ * ModuleInfo.cpu is the value of Masm's @CPU symbol.
+ * ModuleInfo.curr_cpu is the old OW Wasm value.
+ * additional notes:
+ * .[1|2|3|4|5|6]86 will reset .MMX, .K3D and .XMM,
+ * OTOH, .MMX/.XMM won't automatically enable .586/.686
 */
 
-ret_code SetCPU( enum asm_cpu newcpu )
-/************************************/
+ret_code SetCPU( enum cpu_info newcpu )
+/*************************************/
 {
     int temp;
 
@@ -430,65 +437,47 @@ ret_code SetCPU( enum asm_cpu newcpu )
     return( NOT_ERROR );
 }
 
-#if 0
-static int comp_opt( uint direct )
-/********************************/
-/*
-  Compare function for CPU directive
+/* handles
+ .8086,
+ .[1|2|3|4|5|6]86[p],
+ .8087,
+ .[2|3]87,
+ .NO87, .MMX, .K3D, .XMM directives.
 */
+ret_code CpuDirective( int i, struct asm_tok tokenarray[] )
+/*********************************************************/
 {
-    switch( direct ) {
-    case T_DOT_NO87:        return( P_NO87 );
-    case T_DOT_8086:        return( P_86 );
-    case T_DOT_8087:        return( P_87 );
-    case T_DOT_186:         return( P_186 );
-    case T_DOT_286C:
-    case T_DOT_286:         return( P_286 );
-    case T_DOT_286P:        return( P_286p );
-    case T_DOT_287:         return( P_287 );
-    case T_DOT_386C:
-    case T_DOT_386:         return( P_386 );
-    case T_DOT_386P:        return( P_386p );
-    case T_DOT_387:         return( P_387 );
-    case T_DOT_486:         return( P_486 );
-    case T_DOT_486P:        return( P_486p );
-    case T_DOT_586:         return( P_586 );
-    case T_DOT_586P:        return( P_586p );
-    case T_DOT_686:         return( P_686 );
-    case T_DOT_686P:        return( P_686p );
-#if AMD64_SUPPORT
-    case T_DOT_X64:         return( P_64 );
-    case T_DOT_X64P:        return( P_64p );
-#endif
-    case T_DOT_MMX:         return( P_MMX );
-    case T_DOT_K3D:         return( P_MMX | P_K3D );
-#if ONEXMM
-    case T_DOT_XMM:         return( P_MMX | P_SSEALL );
-#else
-    case T_DOT_XMM:         return( P_MMX | P_SSE1 );
-    case T_DOT_XMM2:        return( P_MMX | P_SSE1 | P_SSE2 );
-    case T_DOT_XMM3:        return( P_MMX | P_SSE1 | P_SSE2 | P_SSE3 | P_SSSE3 );
-#endif
-    }
-    return( EMPTY );
-}
-#endif
+    enum cpu_info newcpu;
 
-ret_code cpu_directive( int i )
-/*****************************/
-{
-    enum asm_cpu newcpu;
+    //newcpu = comp_opt( tokenarray[i].tokval );
+    newcpu = GetSflagsSp( tokenarray[i].tokval );
 
-    //newcpu = comp_opt( AsmBuffer[i]->value );
-    //newcpu = SpecialTable[AsmBuffer[i]->value].opnd_type[0];
-    newcpu = GetSflagsSp( AsmBuffer[i]->value );
-
-    if ( SetCPU( newcpu ) == NOT_ERROR )
+#if DOT_XMMARG
+    .if ( tokenarray[i].tokval == T_DOT_XMM && tokenarray[i+1].token != T_FINAL ) {
+        struct expr opndx;
         i++;
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+            return( ERROR );
+        if ( opndx.kind != EXPR_CONST || opndx.value < 1 || opndx.value > 4 ) {
+            EmitConstError( &opndx );
+            return( ERROR );
+        }
+        newcpy &= ~P_SSEALL; 
+        switch ( opndx.value ) {
+        case 4: newcpy |= P_SSE4;
+        case 3: newcpy |= P_SSE3|P_SSSE3;
+        case 2: newcpy |= P_SSE2;
+        case 1: newcpy |= P_SSE1; break;
+        }
+    } else
+#endif
+    i++;
+
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
-    return( NOT_ERROR );
+
+    return( SetCPU( newcpu ) );
 }
 

@@ -7,8 +7,6 @@
 #ifndef _POSNDIR_H_
 #define _POSNDIR_H_
 
-extern ret_code         OrgDirective( int );
-extern ret_code         AlignDirective( int );
-extern void             AlignCurrOffset( int );
+extern void AlignCurrOffset( int );
 
 #endif

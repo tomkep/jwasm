@@ -4,14 +4,16 @@
 *
 *  ========================================================================
 *
-* Description:  processes directives:
-*               EchoDirective()     - ECHO
-*               IncludeLibDirective() - INCLUDELIB
-*               IncBinDirective()   - INCBIN
-*               AliasDirective()    - ALIAS
-*               NameDirective()     - NAME
-*               RadixDirective()    - .RADIX
-*               SegOrderDirective() - .DOSSEG, .SEQ, .ALPHA
+* Description:
+* function                directive
+*--------------------------------------------------
+* EchoDirective()         ECHO
+* IncludeLibDirective()   INCLUDELIB
+* IncBinDirective()       INCBIN
+* AliasDirective()        ALIAS
+* NameDirective()         NAME
+* RadixDirective()        .RADIX
+* SegOrderDirective()     .DOSSEG, .SEQ, .ALPHA
 *
 ****************************************************************************/
 
@@ -19,9 +21,7 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "segment.h"
 #include "input.h"
 #include "tokenize.h"
@@ -33,74 +33,94 @@
 
 #include "myassert.h"
 
+#define  res(token, function) extern ret_code function( int, struct asm_tok[] );
+#include "dirtype.h"
+#undef res
+
+/* table of function addresses for directives */
+#define  res(token, function) function ,
+ret_code (* const directive[])( int, struct asm_tok[] ) = {
+#include "dirtype.h"
+};
+#undef res
+
+/* should never be called */
+ret_code StubDir( int i, struct asm_tok tokenarray[] ){ return( ERROR ); }
+
 /* handle ECHO directive.
  * displays text on the console
  */
-ret_code EchoDirective( int i )
-/*****************************/
+ret_code EchoDirective( int i, struct asm_tok tokenarray[] )
+/**********************************************************/
 {
     if ( Parse_Pass == PASS_1 ) /* display in pass 1 only */
         if ( Options.preprocessor_stdout == FALSE ) { /* don't print to stdout if -EP is on! */
-            printf( "%s\n", AsmBuffer[i+1]->tokpos );
+            printf( "%s\n", tokenarray[i+1].tokpos );
         }
     return( NOT_ERROR );
 }
 
+char *IncludeLibrary( const char *name )
+/**************************************/
+{
+    struct qnode *q;
+    char *node;
+
+    /* old approach, <= 1.91: add lib name to global namespace */
+    /* new approach, >= 1.92: check lib table, if entry is missing, add it */
+    /* Masm doesn't map cases for the paths. So if there is
+     * includelib <kernel32.lib>
+     * includelib <KERNEL32.LIB>
+     * then 2 defaultlib entries are added. If this is to be changed for
+     * JWasm, activate the _stricmp() below.
+     */
+    for ( q = ModuleInfo.g.LibQueue.head; q ; q = q->next ) {
+        //if ( _stricmp( dir->sym.name, name) == 0)
+        if ( strcmp( q->elmt, name ) == 0 )
+            return( (char *)q->elmt );
+    }
+    node = AsmAlloc( strlen( name ) + 1 );
+    strcpy( node, name );
+    QAddItem( &ModuleInfo.g.LibQueue, node );
+    return( node );
+}
+
 /* directive INCLUDELIB */
 
-ret_code IncludeLibDirective( int i )
-/***********************************/
+ret_code IncludeLibDirective( int i, struct asm_tok tokenarray[] )
+/****************************************************************/
 {
     char *name;
-    char *node;
-    qnode *q;
-    //struct asm_sym *sym;
+    //struct asym *sym;
 
     if ( Parse_Pass != PASS_1 ) /* do all work in pass 1 */
         return( NOT_ERROR );
     i++; /* skip the directive */
     /* v2.03: library name may be just a "number" */
-    //if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_NUM ) {
-    if ( AsmBuffer[i]->token == T_FINAL ) {
+    //if ( tokenarray[i].token == T_FINAL || tokenarray[i].token == T_NUM ) {
+    if ( tokenarray[i].token == T_FINAL ) {
         /* v2.05: Masm doesn't complain if there's no name, so emit a warning only! */
         //AsmError( LIBRARY_NAME_MISSING );
         //return( ERROR );
         AsmWarn( 2, LIBRARY_NAME_MISSING );
     }
 
-    if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
-        if ( AsmBuffer[i+1]->token != T_FINAL ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i+1]->string_ptr );
+    if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
+        if ( tokenarray[i+1].token != T_FINAL ) {
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
             return( ERROR );
         }
-        name = AsmBuffer[i]->string_ptr;
+        name = tokenarray[i].string_ptr;
     } else {
         char *p;
-        /* regard "everything" behind the INCLUDELIB as the library name, */
-        name = AsmBuffer[i]->tokpos;
+        /* regard "everything" behind INCLUDELIB as the library name */
+        name = tokenarray[i].tokpos;
         for ( p = name; *p; p++ );
         /* remove trailing white spaces */
         for ( p--; p > name && isspace( *p ); *p = NULLC, p-- );
     }
 
-    /* old approach, <= 1.91: add lib name to global namespace */
-    /* new approach, >= 1.92: check lib table, if entry is missing, add it */
-
-    /* Masm doesn't map cases for the paths. So if there is
-     includelib <kernel32.lib>
-     includelib <KERNEL32.LIB>
-     then 2 defaultlib entries are added. If this is to be changed for
-     JWasm, activate the _stricmp() below.
-     */
-    for ( q = ModuleInfo.g.LibQueue.head; q ; q = q->next ) {
-        //if ( _stricmp( dir->sym.name, name) == 0)
-        if ( strcmp( q->elmt, name ) == 0 )
-            return( NOT_ERROR );
-    }
-    node = AsmAlloc( strlen( name ) + 1 );
-    strcpy( node, name );
-    QAddItem( &ModuleInfo.g.LibQueue, node );
-
+    IncludeLibrary( name );
     return( NOT_ERROR );
 }
 
@@ -108,33 +128,33 @@ ret_code IncludeLibDirective( int i )
 
 /* INCBIN directive */
 
-ret_code IncBinDirective( int i )
-/*******************************/
+ret_code IncBinDirective( int i, struct asm_tok tokenarray[] )
+/************************************************************/
 {
     FILE *file;
     //int size;
     uint fileoffset = 0;
     uint sizemax = -1;
-    expr_list opndx;
+    struct expr opndx;
     char filename[_MAX_PATH];
 
     DebugMsg(("IncBinDirective enter\n"));
 
     i++; /* skip the directive */
-    /* v2.03: library name may be just a "number" */
-    //if ( AsmBuffer[i]->token == T_FINAL || AsmBuffer[i]->token == T_NUM ) {
-    if ( AsmBuffer[i]->token == T_FINAL ) {
+    /* v2.03: file name may be just a "number" */
+    //if ( tokenarray[i].token == T_FINAL || tokenarray[i].token == T_NUM ) {
+    if ( tokenarray[i].token == T_FINAL ) {
         AsmError( EXPECTED_FILE_NAME );
         return( ERROR );
     }
 
-    if ( AsmBuffer[i]->token == T_STRING ) {
-        if ( AsmBuffer[i]->string_delim == '"' ||
-             AsmBuffer[i]->string_delim == '\'') {
-            strncpy( filename, AsmBuffer[i]->string_ptr+1, AsmBuffer[i]->value );
-            filename[ AsmBuffer[i]->value ] = NULLC;
-        } else if ( AsmBuffer[i]->string_delim == '<' ) {
-            strncpy( filename, AsmBuffer[i]->string_ptr, sizeof( filename ) );
+    if ( tokenarray[i].token == T_STRING ) {
+        if ( tokenarray[i].string_delim == '"' ||
+             tokenarray[i].string_delim == '\'') {
+            strncpy( filename, tokenarray[i].string_ptr+1, tokenarray[i].stringlen );
+            filename[ tokenarray[i].stringlen ] = NULLC;
+        } else if ( tokenarray[i].string_delim == '<' ) {
+            strncpy( filename, tokenarray[i].string_ptr, sizeof( filename ) );
         } else {
             AsmError( FILENAME_MUST_BE_ENCLOSED_IN_QUOTES_OR_BRACKETS );
             return( ERROR );
@@ -144,9 +164,9 @@ ret_code IncBinDirective( int i )
         return( ERROR );
     }
     i++;
-    if ( AsmBuffer[i]->token == T_COMMA ) {
+    if ( tokenarray[i].token == T_COMMA ) {
         i++;
-        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
             return( ERROR );
         if ( opndx.kind == EXPR_CONST ) {
             fileoffset = opndx.value;
@@ -154,9 +174,9 @@ ret_code IncBinDirective( int i )
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
-        if ( AsmBuffer[i]->token == T_COMMA ) {
+        if ( tokenarray[i].token == T_COMMA ) {
             i++;
-            if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+            if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
                 return( ERROR );
             if ( opndx.kind == EXPR_CONST ) {
                 sizemax = opndx.value;
@@ -166,8 +186,8 @@ ret_code IncBinDirective( int i )
             }
         }
     }
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -213,54 +233,54 @@ ret_code IncBinDirective( int i )
  * external or public!
  */
 
-ret_code AliasDirective( int i )
-/******************************/
+ret_code AliasDirective( int i, struct asm_tok tokenarray[] )
+/***********************************************************/
 {
     //char *tmp;
-    asm_sym *sym;
+    struct asym *sym;
     char *subst;
 
     i++; /* go past ALIAS */
 
-    if ( AsmBuffer[i]->token != T_STRING ||
-        AsmBuffer[i]->string_delim != '<' ) {
-        DebugMsg(("AliasDirective: first argument is not a literal: %s\n", AsmBuffer[i]->string_ptr ));
+    if ( tokenarray[i].token != T_STRING ||
+        tokenarray[i].string_delim != '<' ) {
+        DebugMsg(("AliasDirective: first argument is not a literal: %s\n", tokenarray[i].string_ptr ));
         AsmError( TEXT_ITEM_REQUIRED );
         return( ERROR );
     }
 
-    /* check syntax. note that '=' is T_DIRECTIVE && T_EQU && DRT_EQUALSGN */
-    if ( AsmBuffer[i+1]->token != T_DIRECTIVE ||
-        AsmBuffer[i+1]->value != T_EQU ||
-        AsmBuffer[i+1]->dirtype != DRT_EQUALSGN ) {
-        DebugMsg(("AliasDirective: syntax error: %s\n", AsmBuffer[i+1]->string_ptr ));
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i+1]->string_ptr );
+    /* check syntax. note that '=' is T_DIRECTIVE && DRT_EQUALSGN */
+    if ( tokenarray[i+1].token != T_DIRECTIVE ||
+        //tokenarray[i+1].tokval != T_EQU ||
+        tokenarray[i+1].dirtype != DRT_EQUALSGN ) {
+        DebugMsg(("AliasDirective: syntax error: %s\n", tokenarray[i+1].string_ptr ));
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
         return( ERROR );
     }
 
-    if ( AsmBuffer[i+2]->token != T_STRING ||
-        AsmBuffer[i+2]->string_delim != '<' )  {
-        DebugMsg(("AliasDirective: second argument is not a literal: %s\n", AsmBuffer[i+2]->string_ptr ));
+    if ( tokenarray[i+2].token != T_STRING ||
+        tokenarray[i+2].string_delim != '<' )  {
+        DebugMsg(("AliasDirective: second argument is not a literal: %s\n", tokenarray[i+2].string_ptr ));
         AsmError( TEXT_ITEM_REQUIRED );
         return( ERROR );
     }
-    subst = AsmBuffer[i+2]->string_ptr;
+    subst = tokenarray[i+2].string_ptr;
 
-    if ( AsmBuffer[i+3]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i+3]->string_ptr );
+    if ( tokenarray[i+3].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i+3].string_ptr );
         return( ERROR );
     }
 
     /* make sure <alias_name> isn't defined elsewhere */
-    sym = SymSearch( AsmBuffer[i]->string_ptr );
+    sym = SymSearch( tokenarray[i].string_ptr );
     if ( sym == NULL || sym->state == SYM_UNDEFINED ) {
-        asm_sym *sym2;
+        struct asym *sym2;
         /* v2.04b: adjusted to new field <substitute> */
         sym2 = SymSearch( subst );
         if ( sym2 == NULL ) {
             sym2 = SymCreate( subst, TRUE );
             sym2->state = SYM_UNDEFINED;
-            dir_add_table( &Tables[TAB_UNDEF], (dir_node *)sym2 );
+            sym_add_table( &SymTables[TAB_UNDEF], (struct dsym *)sym2 );
         } else if ( sym2->state != SYM_UNDEFINED &&
                    sym2->state != SYM_INTERNAL &&
                    sym2->state != SYM_EXTERNAL ) {
@@ -268,13 +288,13 @@ ret_code AliasDirective( int i )
             return( ERROR );
         }
         if ( sym == NULL )
-            sym = (asm_sym *)SymCreate( AsmBuffer[i]->string_ptr, TRUE );
+            sym = (struct asym *)SymCreate( tokenarray[i].string_ptr, TRUE );
         else
-            dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+            sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
 
         sym->state = SYM_ALIAS;
         sym->substitute = sym2;
-        dir_add_table( &Tables[TAB_ALIAS], (dir_node *)sym ); /* add ALIAS */
+        sym_add_table( &SymTables[TAB_ALIAS], (struct dsym *)sym ); /* add ALIAS */
         return( NOT_ERROR );
     }
     if ( sym->state != SYM_ALIAS || ( strcmp( sym->substitute->name, subst ) != 0 )) {
@@ -307,8 +327,8 @@ ret_code AliasDirective( int i )
 
 /* the NAME directive is ignored in Masm v6 */
 
-ret_code NameDirective( int i )
-/*****************************/
+ret_code NameDirective( int i, struct asm_tok tokenarray[] )
+/**********************************************************/
 {
     if( Parse_Pass != PASS_1 )
         return( NOT_ERROR );
@@ -326,21 +346,21 @@ ret_code NameDirective( int i )
      - no 'name:' label!
      */
     if ( CurrStruct != NULL ||
-        (AsmBuffer[i]->token == T_DIRECTIVE &&
-         (AsmBuffer[i]->value == T_SEGMENT ||
-          AsmBuffer[i]->value == T_STRUCT  ||
-          AsmBuffer[i]->value == T_STRUC   ||
-          AsmBuffer[i]->value == T_UNION   ||
-          AsmBuffer[i]->value == T_TYPEDEF ||
-          AsmBuffer[i]->value == T_RECORD)) ||
-         AsmBuffer[i]->token == T_COLON ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->tokpos );
+        ( tokenarray[i].token == T_DIRECTIVE &&
+         ( tokenarray[i].tokval == T_SEGMENT ||
+          tokenarray[i].tokval == T_STRUCT  ||
+          tokenarray[i].tokval == T_STRUC   ||
+          tokenarray[i].tokval == T_UNION   ||
+          tokenarray[i].tokval == T_TYPEDEF ||
+          tokenarray[i].tokval == T_RECORD)) ||
+         tokenarray[i].token == T_COLON ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i-1].tokpos );
         return( ERROR );
     }
 
 #if 0 /* don't touch Option fields! ( ModuleInfo.name probably? ) */
-    Options.module_name = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1 );
-    strcpy( Options.module_name, AsmBuffer[i]->string_ptr );
+    Options.module_name = AsmAlloc( strlen( tokenarray[i].string_ptr ) + 1 );
+    strcpy( Options.module_name, tokenarray[i].string_ptr );
     DebugMsg(("NameDirective: set name to >%s<\n", Options.module_name));
 #endif
     return( NOT_ERROR );
@@ -348,19 +368,19 @@ ret_code NameDirective( int i )
 
 /* .RADIX directive, value must be between 2 .. 16 */
 
-ret_code RadixDirective( int i )
-/******************************/
+ret_code RadixDirective( int i, struct asm_tok tokenarray[] )
+/***********************************************************/
 {
     uint_8          oldradix;
-    expr_list       opndx;
+    struct expr     opndx;
 
     /* to get the .radix parameter, enforce radix 10 and retokenize! */
     oldradix = ModuleInfo.radix;
     ModuleInfo.radix = 10;
-    Tokenize( AsmBuffer[i]->tokpos, i, FALSE );
+    i++; /* skip directive token */
+    Tokenize( tokenarray[i].tokpos, i, TRUE );
     ModuleInfo.radix = oldradix;
-    i++;
-    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR ) {
+    if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR ) {
         return( ERROR );
     }
 
@@ -368,12 +388,12 @@ ret_code RadixDirective( int i )
         AsmError( CONSTANT_EXPECTED );
         return( ERROR );
     }
-    if ( opndx.value > 16 || opndx.value < 2 || opndx.hvalue != 0 ) {
-        AsmError( INVALID_RADIX_TAG );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( opndx.value > 16 || opndx.value < 2 || opndx.hvalue != 0 ) {
+        AsmError( INVALID_RADIX_TAG );
         return( ERROR );
     }
 
@@ -385,23 +405,23 @@ ret_code RadixDirective( int i )
 
 /* DOSSEG, .DOSSEG, .ALPHA, .SEQ directives */
 
-ret_code SegOrderDirective( int i )
-/*********************************/
+ret_code SegOrderDirective( int i, struct asm_tok tokenarray[] )
+/**************************************************************/
 {
-    if ( AsmBuffer[i+1]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i+1]->string_ptr );
+    if ( tokenarray[i+1].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
         return( ERROR );
     }
 
     if ( Options.output_format != OFORMAT_OMF &&
         Options.output_format != OFORMAT_BIN ) {
         if ( Parse_Pass == PASS_1 )
-            AsmWarn( 2, DIRECTIVE_IGNORED_FOR_COFF, AsmBuffer[i]->string_ptr );
+            AsmWarn( 2, DIRECTIVE_IGNORED_FOR_COFF, tokenarray[i].string_ptr );
     } else {
 #if 1 /* v2.05 */
-        ModuleInfo.segorder = GetSflagsSp( AsmBuffer[i]->value );
+        ModuleInfo.segorder = GetSflagsSp( tokenarray[i].tokval );
 #else
-        switch( AsmBuffer[i]->value ) {
+        switch( tokenarray[i].tokval ) {
         case T_DOT_DOSSEG:
         case T_DOSSEG:    ModuleInfo.segorder = SEGORDER_DOSSEG;  break;
         case T_DOT_ALPHA: ModuleInfo.segorder = SEGORDER_ALPHA;   break;

@@ -31,7 +31,6 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
 #include "fixup.h"
 #include "segment.h"
 
@@ -50,15 +49,15 @@
 #else
 #define SkipFixup()
 #endif
-static ret_code DoPatch( struct asm_sym *sym, struct fixup *fixup )
-/*****************************************************************/
+static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
+/**************************************************************/
 {
     long                disp;
     long                max_disp;
     unsigned            size;
-    dir_node            *seg;
+    struct dsym         *seg;
 #if LABELOPT
-    asm_sym             *sym2;
+    struct asym         *sym2;
     struct fixup        *fixup2;
 #endif
 
@@ -74,7 +73,7 @@ static ret_code DoPatch( struct asm_sym *sym, struct fixup *fixup )
               fixup->location,
               fixup->option,
               fixup->def_seg ? fixup->def_seg->sym.name : "NULL" ));
-    seg = GetSeg( sym );
+    seg = GetSegm( sym );
     if( seg == NULL || fixup->def_seg != seg ) {
         /* if fixup location is in another segment, backpatch is possible, but
          * complicated and it's a pretty rare case, so nothing's done.
@@ -178,9 +177,9 @@ static ret_code DoPatch( struct asm_sym *sym, struct fixup *fixup )
                     /* scan the segment's label list and adjust all labels
                      * which are between the fixup loc and the current sym.
                      * ( PROCs are NOT contained in this list because they
-                     * use the <next>-field of dir_node already!)
+                     * use the <next>-field of dsym already!)
                      */
-                    for ( sym2 = seg->e.seginfo->labels; sym2; sym2 = (asm_sym *)((dir_node *)sym2)->next ) {
+                    for ( sym2 = seg->e.seginfo->labels; sym2; sym2 = (struct asym *)((struct dsym *)sym2)->next ) {
                         //if ( sym2 == sym )
                         //    continue;
                         /* v2.0: location is at least 1 byte too low, so
@@ -239,8 +238,8 @@ static ret_code DoPatch( struct asm_sym *sym, struct fixup *fixup )
     return( NOT_ERROR );
 }
 
-ret_code BackPatch( struct asm_sym *sym )
-/***************************************/
+ret_code BackPatch( struct asym *sym )
+/************************************/
 /*
  * patching for forward reference labels in Jmp/Call instructions;
  * called by LabelCreate(), ProcDef() and data_dir(), that is, whenever

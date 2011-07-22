@@ -16,32 +16,33 @@ JWasm Manual
      3.9  Directive OPTION WIN64
      3.10 Directive OPTION FRAME
      3.11 Directive OPTION RENAMEKEYWORD
-     3.12 Directives PUSHCONTEXT/POPCONTEXT ALIGNMENT
-     3.13 Directive .X64
-     3.14 Directive INVOKE in Win64
-     3.15 Attribute LABEL for first Macro Parameter
-     3.16 Masm v8 Extensions
-     3.17 Other Differences
+     3.12 Directive OPTION DLLIMPORT
+     3.13 Directives PUSHCONTEXT/POPCONTEXT ALIGNMENT
+     3.14 Directive .X64
+     3.15 Directive INVOKE in Win64
+     3.16 Attribute LABEL for first Macro Parameter
+     3.17 Masm v8 Extensions
+     3.18 Other Differences
        a) Numeric constant __JWASM__
        b) Operating System Argument for .MODEL
        c) Accepted Parameters for IF[N]DEF Directive
        d) Visibility of Procedures
     4.    Instruction Sets
     5.    Code Generation Differences
+     5.1  Forward References in Macro Expressions
     6.    Win64 Structured Exception Handling (SEH)
     7.    Errors and Warnings
     8.    Masm Bugs fixed in JWasm
     9.    Known Bugs and missing Features
-
 
     1. About
 
     This document lists the differences between JWasm and Masm, as far as
     the user interface is concerned.
 
-    When Masm is mentioned, then usually Masm v6.15 is meant, unless stated
-    otherwise. However, for 64-bit, Masm v8 is used for comparisons, which
-    was the first Masm version supporting 64-bit (ML64.EXE).
+    When Masm is mentioned, then usually Masm v8.00 is meant, unless stated
+    otherwise. Masm v8.00 also was the first Masm version supporting 64-bit
+    (ML64.EXE).
 
     The Masm documentation itself can be found on numerous places in the web,
     in plain text, HTML, PDF and Windows Help format.
@@ -77,10 +78,19 @@ JWasm Manual
 
     -elf64: Selects output format ELF64. JWasm will produce an object module
      in 64-bit Elf format. Additionally, this option will set cpu to x86-64
-     and model to flat.
+     and model to FLAT.
 
     -eq: suppress displaying error messages on the screen. They are still
      written into an error file.
+
+    -Fd file_name: makes JWasm write a definition file for WLink. This file
+     may be used as input for Wlink, thus replacing Windows import libraries.
+     This option is only useful in conjunction with OPTION DLLIMPORT.
+     See 3.12 for more details.
+
+    -Fw file_name: Set file name for warning and error messages. As default,
+     these messages are written to a file with a name equal to the assembly
+     source, but with extension .ERR.
 
     -FPi: "inline FP instructions with emulation". This will make JWasm
      to create fixups for floating-point instructions if code is 16bit.
@@ -89,6 +99,8 @@ JWasm Manual
 
     -m<t|s|m|c|l|h|f>: generates a line containing a .MODEL directive to
      select model tiny, small, medium, compact, large, huge or flat.
+     This option is ignored if a 64-bit output format (-win64 or -elf64)
+     is active.
 
     -mz: output format MZ will write a binary in DOS MZ format. The
      module's default file extension will be changed from .OBJ to .EXE. All
@@ -102,7 +114,7 @@ JWasm Manual
     -n<d|t>=<name>: -nt/-nd will set the name of the code/data segments
      if simplified segment directives are used (default:_TEXT/_DATA).
 
-    -nm=<name> sets the module name (default:filename without extension).
+    -nm=<name>: sets the module name (default:filename without extension).
 
     -win64: this option makes JWasm produce an object module for Win64.
      Additionally, the option will set cpu to x86-64, model to FLAT and
@@ -166,11 +178,14 @@ JWasm Manual
       - directive OPTION ELF
       - directive OPTION WIN64
       - directive OPTION RENAMEKEYWORD
+      - directive OPTION DLLIMPORT
       - directives PUSHCONTEXT/POPCONTEXT ALIGNMENT
       - attribute LABEL for first macro parameter
       - integer initializer values for items of type [X]MMWORD
       - parameters for IF[N]DEF directive
       - name argument for .DATA, .DATA? and .CONST directives
+      - forward references in arguments for INVOKEd procedures
+      - overrides inside square brackets for base/index registers
 
     -zt<n>: "Set name decoration for STDCALL symbols". Options "-zt0" will
      make object modules compatible to ALINK + Win32.lib.
@@ -232,14 +247,23 @@ JWasm Manual
     64-bit "double", although it's probably useful in 64-bit code only: 
     "mov rax, real8 ptr 1.0"
 
+    Additionally, operators LOW32 and HIGH32 accept a floating-point constant
+    as argument. In this case, the constant is assumed to have format
+    REAL8. Thus it's possible to pass a double constant directly as a
+    procedure argument in 32-bit code:
+ 
+       push HIGH32 1.0
+       push LOW32 1.0
+       call WorkWithReal8Value
+ 
 
     3.5 Directive OPTION FIELDALIGN
 
     OPTION FIELDALIGN sets the default value for structure alignment. The
     default value is 1 or the value set by cmdline switch -Zp. Syntax is:
-
+ 
       OPTION FIELDALIGN:<1|2|4|8|16|32>
-
+ 
     The current default value can be saved/restored with directives
     PUSHCONTEXT/POPCONTEXT ALIGNMENT,
 
@@ -248,18 +272,18 @@ JWasm Manual
 
     With OPTION PROCALIGN parameter it's possible to automatically
     align procedures. Syntax is:
-
+ 
       OPTION PROCALIGN:<1|2|4|8|16|32>
-
+ 
 
     3.7 Directive OPTION MZ
 
     Directive OPTION MZ allows to fine-tune the values written to the
     MZ header if output format MZ is selected. For other output formats,
     this option has no effect. The syntax for the directive is:
-
-      OPTION MZ:[start_fixups][,header_align][,heap_min][,heap_max]
-
+ 
+      OPTION MZ:[start_fixups][:header_align][:heap_min][:heap_max]
+ 
     The parameters are:
     - start_fixups: offset within the header where segment fixups will start.
       The size of the header will always be at least this value, even if there
@@ -278,22 +302,22 @@ JWasm Manual
     Directive OPTION ELF allows to fine-tune the values written to the
     ELF header if output format ELF is selected. For other output formats,
     this option has no effect. The syntax for the directive is:
-
+ 
       OPTION ELF:osabi
-
+ 
     The only argument, osabi, will be copied to the ELF header field EI_OSABI.
     It's a numeric constant, a list of valid values for this field can be found
     in the elf specs, the default value is 3 ( = ELFOSABI_LINUX ).
 
 
-    3.8 Directive OPTION WIN64
+    3.9 Directive OPTION WIN64
 
     Directive OPTION WIN64 allows to set parameters for the Win64 output
     format if this format is selected. For other output formats,
     this option has no effect. The syntax for the directive is:
-
+ 
       OPTION WIN64: store_register_params
-
+ 
     accepted values for store_register_params are:
      - 0: Nothing is done, the "home locations" (also sometimes called
           "shadow space") of the first 4 register  parameters are 
@@ -309,9 +333,9 @@ JWasm Manual
     generate prologues and epilogues for procedures with the FRAME attribute.
     Thus the code complies to the rules of Win64 SEH (Structured Exception
     Handling). Syntax is
-
+ 
         OPTION FRAME:<AUTO | NOAUTO>
-
+ 
     AUTO will enable this feature, NOAUTO (which is default) disables it.
 
     The unwind information which is generated is "complete", that is, it
@@ -325,23 +349,87 @@ JWasm Manual
 
     This option allows to rename a keyword, so it can be used under a
     different name. Syntax:
-
-       OPTION RENAMEKEYWORD:<current_name>, new_name
-
-     The current name must be enclosed in angle brackets, the new name
-    must be a valid identifier.
+ 
+       OPTION RENAMEKEYWORD:<current_name>=new_name
+ 
+     current_name is the current name of the keyword and must be
+    enclosed in angle brackets. new_name must be a valid identifier.
      If a keyword is to be renamed, it should be done at the beginning
     of the source, and a keyword shouldn't be renamed multiple times.
 
 
-    3.12 Directives PUSHCONTEXT/POPCONTEXT ALIGNMENT
+    3.12 Directive OPTION DLLIMPORT
+
+    a) Using OPTION DLLIMPORT
+
+    This option makes the assembler assume that all PROTOs that follow
+    this directive represent functions located in a dll. Syntax:
+ 
+       OPTION DLLIMPORT:<dll_name>|NONE
+ 
+     <dll_name> must be enclosed in angle brackets. Argument NONE
+     will switch back to the default mode.
+
+    The effects of setting this options are subtle and useful only for 
+    MS Windows applications: if the function described by the prototype is
+    called via INVOKE, slightly more efficient code than normal is generated,
+    because the function's address in the IAT is used. Example:
+ 
+        INVOKE GetModuleHandle, NULL
+ 
+    code generation with OPTION DLLIMPORT:
+ 
+        push NULL
+        call DWORD PTR [_imp__GetModuleHandle@4]
+ 
+    code generation without OPTION DLLIMPORT:
+ 
+        push NULL
+        call _GetModuleHandle@4
+        ...
+    _GetModuleHandle@4:
+        jmp DWORD PTR [_imp__GetModuleHandle@4]  ;stub added by the linker
+ 
+
+    b) Using Cmdline Switch -Fd and OPTION DLLIMPORT
+
+    Optionally, by using cmdline option -Fd, JWasm will write a file
+    containing all imported functions used by the module, including
+    their associated dll names. Example:
+ 
+        .386
+        .model flat,stdcall
+        option dllimport:<kernel32>
+    GetModuleHandleA proto :dword
+    ExitProcess proto :dword
+        option dllimport:none
+        .code
+        invoke GetModuleHandleA, 0
+        invoke ExitProcess, 0
+        end
+ 
+    JWasm -coff -Fd lnk.rsp test.asm
+
+    After the assembly step, file lnk.rsp will contain:
+ 
+    import '_ExitProcess@4'  kernel32.ExitProcess
+    import '_GetModuleHandleA@4'  kernel32.GetModuleHandleA
+ 
+    Open Watcom's WLink will be able to directly use this information and
+    hence, as a result, no further Windows import libraries are needed in 
+    the link step:
+
+    WLink format windows nt file test.obj @lnk.rsp
+
+
+    3.13 Directives PUSHCONTEXT/POPCONTEXT ALIGNMENT
 
     The PUSHCONTEXT/POPCONTEXT directives understand new qualifier
     ALIGNMENT, which saves/restores current values of FIELDALIGN and
     PROCALIGN options.
 
 
-    3.13 Directive .X64
+    3.14 Directive .X64
 
      This selects a 64-bit (x86-64) cpu. Usually this directive isn't needed,
     because the output formats WIN64 and ELF64 select this cpu as default,
@@ -354,54 +442,55 @@ JWasm Manual
     because there exists a SYSCALL instruction mnemonic in this mode.
 
 
-    3.14 Directive INVOKE in Win64
+    3.15 Directive INVOKE in Win64
 
     The 64-bit version of Masm doesn't support INVOKE anymore. JWasm still
     does, but please be aware of some restrictions:
 
     - in theory, using INVOKE requires the FRAME attribute for PROC. It will
       work without FRAME, but Win64 SEH won't be happy with it then.
-    - the implementation in 64-bit is very simple: for each INVOKE rsp is
-      reduced by the space required for the arguments, then the call is issued
-      and last rsp is increased again.
+    - the implementation in 64-bit is very simple: for each INVOKE register
+      RSP is reduced by the space required for the arguments, then the call 
+      is issued and finally register RSP is restored.
     - there is no additional check that the stack is aligned to 16 byte. The
       PROC's FRAME attribute ensures that the stack is correctly aligned after
       the prologue is done. However, it's the programmers responsibility that
       the stack is still aligned when the code generated by INVOKE starts.
 
 
-    3.15 Attribute LABEL for first Macro Parameter
+    3.16 Attribute LABEL for first Macro Parameter
 
     The LABEL attribute for the first macro parameter allows access to a
     label which is assigned to the macro. Syntax is:
-
+ 
     <macro_name> MACRO <param_name>:LABEL [,<param_name>[, ...]]
-
+ 
     The LABEL attribute is accepted for the first parameter only. A macro
     with such a parameter can be invoked in the following way:
-
+ 
     <label> <macro_name> [<argument>, ...]
-
+ 
     Example:
-
+ 
     foo macro lbl:LABEL, first, second
     lbl  db first
          dw second
     endm
 
-    usage of foo:
+    .data
 
     data1 foo 1,1000
     data2 foo 2,2000
+ 
 
+    3.17 Masm v8 Extensions
 
-    3.16 Masm v8 Extensions
-
-    Masm v8 introduced several extensions which are also supported by JWasm:
+    Masm v8 introduced several extensions that are also supported by JWasm:
 
     - directive .SAFESEH
     - types SQWORD and OWORD
     - operators IMAGEREL and SECTIONREL
+    - operators LOW32 and HIGH32
     - segment attribute ALIGN(n)
     - segment characteristics INFO, READ, WRITE, EXECUTE, SHARED, NOPAGE,
       NOCACHE, DISCARD.
@@ -414,14 +503,14 @@ JWasm Manual
     sizes != 4, 8 and 10 ).
 
 
-    3.17 Other Differences
+    3.18 Other Differences
 
     a) Numeric constant __JWASM__
 
     __JWASM__ is a predefined symbol, its value is the current JWasm
     version * 100, that is, for v1.9 the value is 190. The predefined text
     equate @Version won't contain JWasm's version, for compatibility reasons
-    it has value <615>.
+    it has value <800> (since v2.06, previously the value was <615&gr;).
 
     b) Operating System Argument for .MODEL
 
@@ -490,11 +579,13 @@ JWasm Manual
     - the Pentium and Pentium Pro instructions.
     - the MMX and K3D instruction set extensions.
     - the SSE, SSE2, SSE3 and SSSE3 instruction set extensions.
-    - the x86-64 64-bit instruction set (implemented by ML64.EXE).
+    - the x86-64 64-bit instruction set (implemented by ML64).
 
-    Additionally, the SSE4.1 and SSE4.2 instruction sets have been implemented
-    in JWasm v2.01. These instructions aren't supported by Masm v8, but 
-    require Masm v9.
+    Since Jwasm v2.01, instruction sets SSE4.1 and SSE4.2 are supported.
+    ( With Masm, these instructions require Masm v9 ).
+
+    Since Jwasm v2.06, instruction set AVX is supported.
+    ( With Masm, these instructions require Masm v10 ).
 
 
     5. Code Generation Differences
@@ -503,6 +594,27 @@ JWasm Manual
     Commandline option -Zg should eliminate most of these differences.
     However, some differences are due to fixed Masm bugs (see below), in
     which case option -Zg won't have any effect.
+
+    5.1 Forward References in Macro Expressions
+
+    Like Masm, JWasm usually evaluates expressions in preprocessor directives
+    during the first pass only. However, due to different jump optimization
+    strategies between Masm and JWasm, the results may differ. This is very
+    unlikely to impose a problem, but it is mentioned here for completeness.
+    An example (found in README.TXT of Masm v6.14):
+ 
+      Label1:
+           JMP Label2
+      Label2:
+
+      REPEAT Label2 - Label1
+           INC AX
+      ENDM
+ 
+    Masm will - incorrectly - repeat the loop 10 times, although the result
+    of expression Label2 - Label1 is 2 only, OTOH, JWasm will repeat the 
+    loop 2 times only, because it's using an "optimistic" strategy concerning
+    forward references.
 
 
     6. Win64 Structured Exception Handling (SEH)
@@ -537,9 +649,9 @@ JWasm Manual
     JWasm doesn't follow the Masm documentation in this point: the optional
     FRAME keyword is expected *before* the procedure parameters. The syntax
     in JWasm is:
-
+ 
     procname PROC [public] FRAME[:exc_handler] [USES <reglist>] [parameters]
-
+ 
     The SEH "primitives" will generate some additional data in segments
     .pdata and .xdata. This data is somewhat hidden, but JWasm will display
     the corresponding data definitions in the listing if option -Sg is set.
@@ -553,7 +665,7 @@ JWasm Manual
 
     - 'Text macro was used before definition': this is a warning only. 
     However, using text macros before they have been defined will force
-    JWasm to do a full second path, which increases assembly time.
+    JWasm to do a full second pass, which increases assembly time.
 
     - 'IF[n]DEF expects a plain symbol as argument': this is a warning.
     Masm accepts any expression as argument for these directives, but
@@ -624,7 +736,6 @@ JWasm Manual
       - EXPR16
       - READONLY
     - optional parameter NONUNIQUE for structures is ignored.
-    - operators LOW32, HIGH32 (Masm v8+).
     - commandline option -Zd for ELF output format.
     - commandline option -Zi for ELF output format.
 

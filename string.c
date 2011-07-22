@@ -24,7 +24,6 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
 #include "expreval.h"
 #include "equate.h"
 #include "input.h"
@@ -43,24 +42,26 @@ static uint_32 instrcnt;
 static uint_32 equcnt;
 #endif
 
+extern struct asm_tok   *tokenarray;  /* start token buffer */
+
 /* generic parameter names. In case the parameter name is
  * displayed in an error message ("required parameter %s missing")
  * v2.05: obsolete
  */
 //static const char * parmnames[] = {"p1","p2","p3"};
 
-void TextItemError( int i )
-/*************************/
+void TextItemError( struct asm_tok *item )
+/****************************************/
 {
-    if ( AsmBuffer[i]->token == T_STRING && *AsmBuffer[i]->string_ptr == '<' ) {
+    if ( item->token == T_STRING && *item->string_ptr == '<' ) {
         AsmError( MISSING_ANGLE_BRACKET_OR_BRACE_IN_LITERAL );
         return;
     }
     /* v2.05: better error msg if (text) symbol isn't defined */
-    if ( AsmBuffer[i]->token == T_ID ) {
-        asm_sym *sym = SymSearch( AsmBuffer[i]->string_ptr );
+    if ( item->token == T_ID ) {
+        struct asym *sym = SymSearch( item->string_ptr );
         if ( sym == NULL || sym->state == SYM_UNDEFINED ) {
-            AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
+            AsmErr( SYMBOL_NOT_DEFINED, item->string_ptr );
             return;
         }
     }
@@ -68,33 +69,33 @@ void TextItemError( int i )
     return;
 }
 
-/* CatStr()
+/* CATSTR directive.
  * defines a text equate
  * syntax <name> CATSTR [<string>,...]
  * TEXTEQU is an alias for CATSTR
  */
 
-ret_code CatStrDef( int i )
-/*************************/
+ret_code CatStrDir( int i, struct asm_tok tokenarray[] )
+/******************************************************/
 {
-    asm_sym *sym;
+    struct asym *sym;
     int count;
-    /* expr_list opndx; */
+    /* struct expr opndx; */
     char buffer[MAX_LINE_LEN];
 
 #ifdef DEBUG_OUT
     catstrcnt++;
 #endif
-    DebugMsg1(("CatStrDef(%u) enter\n", i ));
+    DebugMsg1(("CatStrDir(%u) enter\n", i ));
 
 #if 0 /* can't happen */
     /* syntax must be <id> CATSTR textitem[,textitem,...] */
     if ( i != 1 ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
-    if ( AsmBuffer[0]->token != T_ID ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
+    if ( tokenarray[0].token != T_ID ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[0].string_ptr );
         return( ERROR );
     }
 #endif
@@ -102,44 +103,44 @@ ret_code CatStrDef( int i )
 
     buffer[0] = NULLC;
     for ( count = 0; i < Token_Count; ) {
-        DebugMsg1(("CatStrDef(%s): item=%s\n", AsmBuffer[0]->string_ptr, AsmBuffer[i]->string_ptr));
-        if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-            DebugMsg(("CatStrDef: bad item: token=%u\n", AsmBuffer[i]->token));
-            TextItemError( i );
+        DebugMsg1(("CatStrDir(%s): item=%s\n", tokenarray[0].string_ptr, tokenarray[i].string_ptr));
+        if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+            DebugMsg(("CatStrDir: bad item\n"));
+            TextItemError( &tokenarray[i] );
             return( ERROR );
         }
-        if ( ( count + AsmBuffer[i]->value ) >= MAX_LINE_LEN ) {
+        if ( ( count + tokenarray[i].stringlen ) >= MAX_LINE_LEN ) {
             AsmError( STRING_OR_TEXT_LITERAL_TOO_LONG );
             return( ERROR );
         }
-        strcpy( buffer + count, AsmBuffer[i]->string_ptr );
-        count = count + AsmBuffer[i]->value;
+        strcpy( buffer + count, tokenarray[i].string_ptr );
+        count = count + tokenarray[i].stringlen;
         i++;
-        if ( ( AsmBuffer[i]->token != T_COMMA ) &&
-            ( AsmBuffer[i]->token != T_FINAL ) ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        if ( ( tokenarray[i].token != T_COMMA ) &&
+            ( tokenarray[i].token != T_FINAL ) ) {
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
         i++;
     }
 
-    sym = SymSearch( AsmBuffer[0]->string_ptr );
+    sym = SymSearch( tokenarray[0].string_ptr );
     if ( sym == NULL ) {
-        sym = SymCreate( AsmBuffer[0]->string_ptr, TRUE );
-        DebugMsg1(( "CatStrDef: new symbol %s created\n", sym->name));
+        sym = SymCreate( tokenarray[0].string_ptr, TRUE );
+        DebugMsg1(( "CatStrDir: new symbol %s created\n", sym->name));
     } else if( sym->state == SYM_UNDEFINED ) {
         /* v2.01: symbol has been used already. Using
          * a textmacro before it has been defined is
          * somewhat problematic.
          */
-        dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+        sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
 #if FASTPASS
         SkipSavedState(); /* further passes must be FULL! */
 #endif
         AsmWarn( 2, TEXT_MACRO_USED_PRIOR_TO_DEFINITION, sym->name );
     } else if( sym->state != SYM_TMACRO ) {
         /* it is defined as something else, get out */
-        DebugMsg(( "CatStrDef(%s) exit, symbol redefinition\n", sym->name));
+        DebugMsg(( "CatStrDir(%s) exit, symbol redefinition\n", sym->name));
         AsmErr( SYMBOL_REDEFINITION, sym->name );
         return( ERROR );
     }
@@ -152,7 +153,7 @@ ret_code CatStrDef( int i )
     sym->isdefined = TRUE;
     sym->string_ptr = (char *)AsmAlloc( count + 1 );
     memcpy( sym->string_ptr, buffer, count + 1 );
-    DebugMsg1(("CatStrDef(%s) (new) value: >%s<\n", sym->name, buffer));
+    DebugMsg1(("CatStrDir(%s) (new) value: >%s<\n", sym->name, buffer));
 
     if ( ModuleInfo.list )
         LstWrite( LSTTYPE_EQUATE, 0, sym );
@@ -163,8 +164,8 @@ ret_code CatStrDef( int i )
 /*
  * used by EQU if the value to be assigned to a symbol is text.
  */
-asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
-/*************************************************************************/
+struct asym *SetTextMacro( struct asm_tok tokenarray[], struct asym *sym, const char *name, const char *value )
+/*************************************************************************************************************/
 {
     int count;
     char buffer[MAX_LINE_LEN];
@@ -186,7 +187,7 @@ asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
     if ( sym == NULL )
         sym = SymCreate( name, TRUE );
     else if ( sym->state == SYM_UNDEFINED ) {
-        dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+        sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
 #if FASTPASS
         /* the text macro was referenced before being defined.
          * this is valid usage, but it requires a full second pass.
@@ -203,9 +204,9 @@ asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
     sym->state = SYM_TMACRO;
     sym->isdefined = TRUE;
 
-    if ( AsmBuffer[2]->token == T_STRING && AsmBuffer[2]->string_delim == '<' && AsmBuffer[3]->token == T_FINAL ) {
-        value = AsmBuffer[2]->string_ptr;
-        count = AsmBuffer[2]->value;
+    if ( tokenarray[2].token == T_STRING && tokenarray[2].string_delim == '<' && tokenarray[3].token == T_FINAL ) {
+        value = tokenarray[2].string_ptr;
+        count = tokenarray[2].stringlen;
     } else {
         char *p = buffer;
         /*
@@ -247,10 +248,10 @@ asm_sym * SetTextMacro( asm_sym *sym, const char *name, const char *value )
  * defines a text equate.
  * syntax: name SUBSTR <string>, pos [, size]
  */
-ret_code SubStrDef( int i )
-/*************************/
+ret_code SubStrDir( int i, struct asm_tok tokenarray[] )
+/******************************************************/
 {
-    struct asm_sym      *sym;
+    struct asym         *sym;
     char                *name;
     char                *p;
     char                *newvalue;
@@ -259,9 +260,9 @@ ret_code SubStrDef( int i )
     int                 cnt;
     bool                chksize;
     /* char                buffer[MAX_LINE_LEN]; */
-    expr_list           opndx;
+    struct expr         opndx;
 
-    DebugMsg1(("SubStrDef entry\n"));
+    DebugMsg1(("SubStrDir entry\n"));
 #ifdef DEBUG_OUT
     substrcnt++;
 #endif
@@ -272,30 +273,30 @@ ret_code SubStrDef( int i )
      */
 #if 0 /* can't happen */
     if ( i != 1 ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
-    if ( AsmBuffer[0]->token != T_ID ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
+    if ( tokenarray[0].token != T_ID ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[0].string_ptr );
         return( ERROR );
     }
 #endif
-    name = AsmBuffer[0]->string_ptr;
+    name = tokenarray[0].string_ptr;
 
     i++; /* go past SUBSTR */
 
     /* third item must be a string */
 
-    if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-        DebugMsg(("SubStrDef: error, no text item\n"));
-        TextItemError( i );
+    if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+        DebugMsg(("SubStrDir: error, no text item\n"));
+        TextItemError( &tokenarray[i] );
         return( ERROR );
     }
-    p = AsmBuffer[i]->string_ptr;
+    p = tokenarray[i].string_ptr;
     i++;
-    DebugMsg1(("SubStrDef(%s): src=>%s<\n", name, p));
+    DebugMsg1(("SubStrDir(%s): src=>%s<\n", name, p));
 
-    if ( AsmBuffer[i]->token != T_COMMA ) {
+    if ( tokenarray[i].token != T_COMMA ) {
         AsmError( EXPECTING_COMMA );
         return( ERROR );
     }
@@ -303,15 +304,15 @@ ret_code SubStrDef( int i )
 
     /* get pos, must be a numeric value and > 0 */
 
-    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR ) {
-        DebugMsg(("SubStrDef(%s): invalid pos value\n", name));
+    if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR ) {
+        DebugMsg(("SubStrDir(%s): invalid pos value\n", name));
         return( ERROR );
     }
 
     /* v2.04: "string" constant allowed as second argument */
     //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
     if ( opndx.kind != EXPR_CONST ) {
-        DebugMsg(("SubStrDef(%s): pos value is not a constant\n", name));
+        DebugMsg(("SubStrDir(%s): pos value is not a constant\n", name));
         AsmError( CONSTANT_EXPECTED );
         return( ERROR );
     }
@@ -322,28 +323,28 @@ ret_code SubStrDef( int i )
         AsmError( POSITIVE_VALUE_EXPECTED );
         return( ERROR );
     }
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        if ( AsmBuffer[i]->token != T_COMMA ) {
+    if ( tokenarray[i].token != T_FINAL ) {
+        if ( tokenarray[i].token != T_COMMA ) {
             AsmError( EXPECTING_COMMA );
             return( ERROR );
         }
         i++;
         /* get size, must be a constant */
-        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR ) {
-            DebugMsg(("SubStrDef(%s): invalid size value\n", name));
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR ) {
+            DebugMsg(("SubStrDir(%s): invalid size value\n", name));
             return( ERROR );
         }
         /* v2.04: string constant ok */
         //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
         if ( opndx.kind != EXPR_CONST ) {
-            DebugMsg(("SubStrDef(%s): size value is not a constant\n", name));
+            DebugMsg(("SubStrDir(%s): size value is not a constant\n", name));
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
         size = opndx.value;
-        if ( AsmBuffer[i]->token != T_FINAL ) {
-            DebugMsg(("SubStrDef(%s): additional items found\n", name));
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        if ( tokenarray[i].token != T_FINAL ) {
+            DebugMsg(("SubStrDir(%s): additional items found\n", name));
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
         if ( size < 0 ) {
@@ -390,14 +391,14 @@ ret_code SubStrDef( int i )
          * a bad idea for preprocessor text items, because it
          * will require a full second pass!
          */
-        dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+        sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
 #if FASTPASS
         SkipSavedState();
         AsmWarn( 2, TEXT_MACRO_USED_PRIOR_TO_DEFINITION, sym->name );
 #endif
     } else if( sym->state != SYM_TMACRO ) {
         /* it is defined as something incompatible, get out */
-        DebugMsg(( "SubStrDef(%s) error, incompatible type\n", sym->name));
+        DebugMsg(( "SubStrDir(%s) error, incompatible type\n", sym->name));
         AsmErr( SYMBOL_REDEFINITION, sym->name );
         return( ERROR );
     }
@@ -411,7 +412,7 @@ ret_code SubStrDef( int i )
     newvalue = AsmAlloc ( size + 1 );
     memcpy( newvalue, p, size );
     *(newvalue+size) = NULLC;
-    DebugMsg1(("SubStrDef(%s): result=>%s<\n", sym->name, newvalue));
+    DebugMsg1(("SubStrDir(%s): result=>%s<\n", sym->name, newvalue));
     AsmFree( sym->string_ptr );
     sym->string_ptr = newvalue;
 
@@ -423,42 +424,41 @@ ret_code SubStrDef( int i )
 /* SizeStr()
  * defines a numeric variable which contains size of a string
  */
-ret_code SizeStrDef( int i )
-/**************************/
+ret_code SizeStrDir( int i, struct asm_tok tokenarray[] )
+/*******************************************************/
 {
-    asm_sym *sym;
+    struct asym *sym;
     int sizestr;
-    char buffer[MAX_LINE_LEN];
 
-    DebugMsg(("SizeStrDef entry\n"));
+    DebugMsg(("SizeStrDir entry\n"));
 #ifdef DEBUG_OUT
     sizstrcnt++;
 #endif
 
     if ( i != 1 ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 #if 0 /* this is checked in ParseLine() */
-    if ( AsmBuffer[0]->token != T_ID ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
+    if ( tokenarray[0].token != T_ID ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[0].string_ptr );
         return( ERROR );
     }
 #endif
-    if ( AsmBuffer[2]->token != T_STRING || AsmBuffer[2]->string_delim != '<' ) {
-        TextItemError( 2 );
+    if ( tokenarray[2].token != T_STRING || tokenarray[2].string_delim != '<' ) {
+        TextItemError( &tokenarray[2] );
         return( ERROR );
     }
     if ( Token_Count > 3 ) {
-        DebugMsg(("SizeStrDef: syntax error, name=%s, Token_Count=%u\n", AsmBuffer[0]->string_ptr, Token_Count));
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[3]->string_ptr );
+        DebugMsg(("SizeStrDir: syntax error, name=%s, Token_Count=%u\n", tokenarray[0].string_ptr, Token_Count));
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[3].string_ptr );
         return( ERROR );
     }
 
-    sizestr = GetLiteralValue( buffer, AsmBuffer[2]->string_ptr );
+    sizestr = GetLiteralValue( StringBufferEnd, tokenarray[2].string_ptr );
 
-    if ( sym = CreateVariable( AsmBuffer[0]->string_ptr, sizestr ) ) {
-        DebugMsg(("SizeStrDef(%s) exit, value=%u\n", AsmBuffer[0]->string_ptr, sizestr));
+    if ( sym = CreateVariable( tokenarray[0].string_ptr, sizestr ) ) {
+        DebugMsg(("SizeStrDir(%s) exit, value=%u\n", tokenarray[0].string_ptr, sizestr));
         LstWrite( LSTTYPE_EQUATE, 0, sym );
         return( NOT_ERROR );
     }
@@ -471,40 +471,40 @@ ret_code SizeStrDef( int i )
  * syntax:
  * name INSTR [pos,]string, substr
  */
-ret_code InStrDef( int i )
-/************************/
+ret_code InStrDir( int i, struct asm_tok tokenarray[] )
+/*****************************************************/
 {
-    asm_sym *sym;
+    struct asym *sym;
     int sizestr;
     int j;
     /* int commas; */
     char *string1;
     char buffer1[MAX_LINE_LEN];
     char buffer2[MAX_LINE_LEN];
-    expr_list opndx;
+    struct expr opndx;
     int start = 1;
     int strpos;
 
-    DebugMsg(("InStrDef entry\n"));
+    DebugMsg(("InStrDir entry\n"));
 #ifdef DEBUG_OUT
     instrcnt++;
 #endif
 
     if ( i != 1) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 #if 0 /* this is checked in ParseLine() */
-    if ( AsmBuffer[0]->token != T_ID ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->string_ptr );
+    if ( tokenarray[0].token != T_ID ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[0].string_ptr );
         return( ERROR );
     }
 #endif
 
     i++; /* go past INSTR */
 
-    if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+    if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
             return( ERROR );
         if ( opndx.kind != EXPR_CONST ) {
             AsmError( CONSTANT_EXPECTED );
@@ -518,43 +518,43 @@ ret_code InStrDef( int i )
             //start = 1;
             AsmWarn( 3, POSITIVE_VALUE_EXPECTED );
         }
-        if ( AsmBuffer[i]->token != T_COMMA ) {
+        if ( tokenarray[i].token != T_COMMA ) {
             AsmError( EXPECTING_COMMA );
             return( ERROR );
         }
         i++; /* skip comma */
     }
 
-    if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-        TextItemError( i );
+    if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+        TextItemError( &tokenarray[i] );
         return( ERROR );
     }
-    sizestr = GetLiteralValue( buffer1, AsmBuffer[i]->string_ptr );
+    sizestr = GetLiteralValue( buffer1, tokenarray[i].string_ptr );
 #ifdef DEBUG_OUT
-    DebugMsg(("InStrDef: first string >%s< \n", buffer1));
+    DebugMsg(("InStrDir: first string >%s< \n", buffer1));
 #endif
     if ( start > sizestr ) {
         AsmErr( INDEX_PAST_END_OF_STRING, start );
         return( ERROR );
     }
     i++;
-    if ( AsmBuffer[i]->token != T_COMMA ) {
+    if ( tokenarray[i].token != T_COMMA ) {
         AsmError( EXPECTING_COMMA );
         return( ERROR );
     }
     i++;
 
-    if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-        TextItemError( i );
+    if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+        TextItemError( &tokenarray[i] );
         return( ERROR );
     }
-    j = GetLiteralValue( buffer2, AsmBuffer[i]->string_ptr );
+    j = GetLiteralValue( buffer2, tokenarray[i].string_ptr );
 #ifdef DEBUG_OUT
-    DebugMsg(("InStrDef: second string >%s< \n", buffer2));
+    DebugMsg(("InStrDir: second string >%s< \n", buffer2));
 #endif
     i++;
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -563,8 +563,8 @@ ret_code InStrDef( int i )
     if ( ( start > 0 ) && ( sizestr >= j ) && ( string1 = strstr( buffer1 + start - 1, buffer2 ) ))
         strpos = string1 - buffer1 + 1;
 
-    if ( sym = CreateVariable( AsmBuffer[0]->string_ptr, strpos ) ) {
-        DebugMsg(("InStrDef(%s) exit, value=%u\n", AsmBuffer[0]->string_ptr, strpos));
+    if ( sym = CreateVariable( tokenarray[0].string_ptr, strpos ) ) {
+        DebugMsg(("InStrDir(%s) exit, value=%u\n", tokenarray[0].string_ptr, strpos));
         LstWrite( LSTTYPE_EQUATE, 0, sym );
         return ( NOT_ERROR );
     }
@@ -575,8 +575,8 @@ ret_code InStrDef( int i )
 
 /* internal @CatStr macro function */
 
-static ret_code CatStrFunc( char * buffer, char * *params )
-/*********************************************************/
+static ret_code CatStrFunc( char *buffer, char * *params )
+/********************************************************/
 {
     int i;
     char **end = params + CATSTRMAX;
@@ -599,19 +599,19 @@ static ret_code CatStrFunc( char * buffer, char * *params )
 
 /* convert string to a number */
 
-static ret_code GetNumber( char * string, int * pi )
-/**************************************************/
+static ret_code GetNumber( char *string, int *pi )
+/************************************************/
 {
-    expr_list opndx;
+    struct expr opndx;
     int i;
     int last;
 
-    last = Tokenize( string, Token_Count+1, FALSE );
+    last = Tokenize( string, Token_Count+1, TRUE );
     i = Token_Count+1;
-    if( EvalOperand( &i, last, &opndx, 0 ) == ERROR ) {
+    if( EvalOperand( &i, tokenarray, last, &opndx, 0 ) == ERROR ) {
         return( ERROR );
     }
-    if( opndx.kind != EXPR_CONST || opndx.string != NULL || AsmBuffer[i]->token != T_FINAL ) {
+    if( opndx.kind != EXPR_CONST || opndx.string != NULL || tokenarray[i].token != T_FINAL ) {
         AsmErr( SYNTAX_ERROR_EX, string );
         return( ERROR );
     }
@@ -622,8 +622,8 @@ static ret_code GetNumber( char * string, int * pi )
 /* internal @InStr macro function
  * the result is returned as string in current radix
  */
-static ret_code InStrFunc( char * buffer, char * *params )
-/********************************************************/
+static ret_code InStrFunc( char *buffer, char * *params )
+/*******************************************************/
 {
     int pos = 1;
     char *p;
@@ -663,8 +663,8 @@ static ret_code InStrFunc( char * buffer, char * *params )
 /* internal @SizeStr macro function
  * the result is returned as string in current radix
  */
-static ret_code SizeStrFunc( char * buffer, char * *params )
-/**********************************************************/
+static ret_code SizeStrFunc( char *buffer, char * *params )
+/*********************************************************/
 {
     DebugMsg(("@SizeStr(%s)\n", *params ? *params : "" ));
     if ( *params )
@@ -678,8 +678,8 @@ static ret_code SizeStrFunc( char * buffer, char * *params )
 
 /* internal @SubStr macro function */
 
-static ret_code SubStrFunc( char * buffer, char * *params )
-/*********************************************************/
+static ret_code SubStrFunc( char *buffer, char * *params )
+/********************************************************/
 {
     int pos;
     int size;
@@ -733,7 +733,7 @@ void StringInit( void )
 /*********************/
 {
     int i;
-    dir_node *macro;
+    struct dsym *macro;
 
     DebugMsg(( "StringInit() enter\n" ));
 

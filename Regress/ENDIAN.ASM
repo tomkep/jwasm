@@ -1,51 +1,49 @@
 
 ;--- test little-endian storage of string items
 
-	.286
-	.model tiny
-
-	.data
+_DATA segment para
 
 	db "a"
-	db 0
+	align 4
 	db "abc"
-	db 0
+	align 4
 	db "abcd"
-	db 0
+	align 4
 
 	dw "ab"
-	db 0
+	align 4
 	dw "cd"
-	db 0
+	align 4
 
 	dd "abcd"
-	db 0
+	align 4
 	dd "abc"
-	db 0
+	align 4
 
 ifdef __JWASM__ ;Masm rejects
 	df "abcdef"
-	db 0
+	align 4
 	df "abcde"
-	db 0
+	align 4
 endif
 
 	dq "abcdefgh"
-	db 0
+	align 4
 	dq "abcde"
-	db 0
+	align 4
 
 ;--- Masm 8/9 will define max 8 bytes for DT and OWORD
-;--- (Masm 10 doesn't accept .TINY)
 
 	dt "abcdefghij"
-	db 0
+	align 4
 	dt "abcdefg"
-	db 0
+	align 4
 
 	OWORD "abcdefghijklmnop"
-	db 0
+	align 4
 	OWORD "abcdefghijk"
-	db 0
+	align 4
+
+_DATA ends
 
 	end

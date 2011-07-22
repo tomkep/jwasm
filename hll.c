@@ -18,9 +18,7 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "equate.h"
 #include "labels.h"
 #include "input.h"
@@ -40,34 +38,30 @@
 #define LABELQUAL ":"
 #endif
 
-#define LABELFIRST 0
-#define LABELTEST  1
-#define LABELEXIT  2
+#define LSTART 0      /* loop start label         */
+#define LTEST  1      /* continue, test for exit  */
+#define LEXIT  2      /* loop exit label          */
 
-typedef enum {
-    HLL_UNDEF,
+enum hll_cmd {
     HLL_IF,
     HLL_WHILE,
     HLL_REPEAT,
     HLL_BREAK  /* .IF behind .BREAK or .CONTINUE */
-} hll_cmd;
+};
 
 /* item for .IF, .WHILE, .REPEAT, ... */
-
-typedef struct hll_list {
-    struct hll_list     *next;
-    char                *symfirst;      /* symbol first (local) label */
-    char                *symtest;       /* continue, test for exit    */
-    char                *symexit;       /* exit loop                  */
+struct hll_item {
+    struct hll_item     *next;
+    uint_32             labels[3];
     char                *condlines;     /* for .WHILE: lines to add after test */
-    hll_cmd             cmd;            /* start cmd (IF, WHILE, REPEAT) */
-} hll_list;
+    enum hll_cmd        cmd;            /* start cmd (IF, WHILE, REPEAT) */
+};
 
-static ret_code GetExpression( hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp, expr_list *opndx );
+static ret_code GetExpression( struct hll_item *hll, int *i, struct asm_tok[], int ilabel, bool is_true, char *buffer, char **lastjmp, struct expr *opndx );
 
 /* c binary ops */
 
-typedef enum {
+enum c_bop {
     COP_NONE,
     COP_EQ,   /* == */
     COP_NE,   /* != */
@@ -84,23 +78,31 @@ typedef enum {
     COP_SIGN, /* SIGN?   not really a valid C operator */
     COP_PARITY,  /* PARITY?   not really a valid C operator */
     COP_OVERFLOW /* OVERFLOW? not really a valid C operator */
-} c_bop;
+};
 
 /* must be in same order as in enum c_bop COP_ZERO .. COP_OVERFLOW */
-#define NUM_FLAGOPS 5
 static const char flaginstr[] = {
     'z',  'c',  's',  'p',  'o'
 };
 
-static hll_list     *HllStack; /* for .WHILE, .IF, .REPEAT */
+/* in Masm, there's a nesting level limit of 20. In JWasm, there's
+ * currently no limit.
+ */
+static struct hll_item     *HllStack; /* for .WHILE, .IF, .REPEAT */
+/* v2.06: <struct hll>-items made reuseable */
+static struct hll_item     *HllFree; /* stack of free <struct hll>-items */
 
-static char * MakeAnonymousLabel( void )
-/**************************************/
+#ifdef DEBUG_OUT
+static int cntAlloc = 0;
+static int cntReused = 0;
+static int cntCond = 0;
+static int cntCondBytes = 0;
+#endif
+
+static uint_32 GetHllLabel( void )
+/********************************/
 {
-    char *p = AsmAlloc( LABELSIZE );
-    sprintf( p, "@C%04X", ModuleInfo.hll_label );
-    ModuleInfo.hll_label++;
-    return ( p );
+    return ( ++ModuleInfo.hll_label );
 }
 
 /* get a C binary operator from the token stream.
@@ -110,15 +112,14 @@ static char * MakeAnonymousLabel( void )
  * '<' if .IF, .ELSEIF, .WHILE, .UNTIL, .UNTILCXZ or .BREAK/.CONTINUE has been
  * detected
  */
-static c_bop GetCOp( int * i )
-/****************************/
+static enum c_bop GetCOp( struct asm_tok *item )
+/**********************************************/
 {
-    int size = 0;
-    c_bop rc;
-    char *p = AsmBuffer[*i]->string_ptr;
+    int size;
+    enum c_bop rc;
+    char *p = item->string_ptr;
 
-    if ( AsmBuffer[*i]->token == T_STRING )
-        size = AsmBuffer[*i]->value;
+    size = ( item->token == T_STRING ? item->stringlen : 0 );
 
     if ( size == 2 ) {
         if ( *p == '=' && *(p+1) == '=' )
@@ -147,7 +148,7 @@ static c_bop GetCOp( int * i )
         else
             return( COP_NONE );
     } else {
-        if ( AsmBuffer[*i]->token != T_ID )
+        if ( item->token != T_ID )
             return( COP_NONE );
         /* a valid "flag" string must end with a question mark */
         size = strlen( p );
@@ -166,14 +167,13 @@ static c_bop GetCOp( int * i )
         else
             return( COP_NONE );
     }
-    *i += 1;
     return( rc );
 }
 
 /* render an instruction */
 
-static char *RenderInstr( char *p, char *instr, expr_list * op, int start1, int end1, int start2, int end2 )
-/**********************************************************************************************************/
+static char *RenderInstr( char *p, char *instr, struct expr *op, int start1, int end1, int start2, int end2, struct asm_tok tokenarray[] )
+/****************************************************************************************************************************************/
 {
     int i;
     i = strlen( instr );
@@ -181,19 +181,29 @@ static char *RenderInstr( char *p, char *instr, expr_list * op, int start1, int 
     memcpy( p, instr, i );
     p += i;
     /* copy the first operand's tokens */
-    for ( ; start1 < end1; start1++ ) {
-        *p++ = ' ';
-        strcpy( p, AsmBuffer[start1]->string_ptr );
-        p += strlen( p );
-    }
+    /* v2.06: use tokpos instead of string_ptr */
+    //for ( ; start1 < end1; start1++ ) {
+    //    *p++ = ' ';
+    //    strcpy( p, tokenarray[start1].string_ptr );
+    //    p += strlen( p );
+    //}
+    *p++ = ' ';
+    i = tokenarray[end1].tokpos - tokenarray[start1].tokpos;
+    memcpy( p, tokenarray[start1].tokpos, i );
+    p += i;
     if ( start2 != EMPTY ) {
         *p++ = ',';
         /* copy the second operand's tokens */
-        for ( ; start2 < end2; start2++ ) {
-            *p++ = ' ';
-            strcpy( p, AsmBuffer[start2]->string_ptr );
-            p += strlen( p );
-        }
+        /* v2.06: use tokpos instead of string_ptr */
+        //for ( ; start2 < end2; start2++ ) {
+        //    *p++ = ' ';
+        //    strcpy( p, tokenarray[start2].string_ptr );
+        //    p += strlen( p );
+        //}
+        *p++ = ' ';
+        i = tokenarray[end2].tokpos - tokenarray[start2].tokpos;
+        memcpy( p, tokenarray[start2].tokpos, i );
+        p += i;
     } else if ( end2 != EMPTY ) {
         p += sprintf( p, ", %d", end2 );
     }
@@ -225,8 +235,8 @@ static char *RenderJcc( char *p, char cc, int neg, char *label )
 
 /* a "token" in a C expression actually is a set of ASM tokens */
 
-static ret_code HllGetToken( hll_list * hll, int *i, bool is_true, expr_list * opndx )
-/************************************************************************************/
+static ret_code HllGetToken( struct hll_item *hll, int *i, struct asm_tok tokenarray[], bool is_true, struct expr *opndx )
+/************************************************************************************************************************/
 {
     int end_tok;
 
@@ -234,44 +244,33 @@ static ret_code HllGetToken( hll_list * hll, int *i, bool is_true, expr_list * o
      because the ASM evaluator will report an error if such a thing
      is found */
     for ( end_tok = *i; end_tok < Token_Count; end_tok++ ) {
-        int j = end_tok;
-        if ( ( GetCOp( &j ) ) != COP_NONE )
+        if ( ( GetCOp( &tokenarray[end_tok] ) ) != COP_NONE )
             break;
     }
     opndx->kind = EXPR_EMPTY;
     if ( end_tok > *i )
-        if ( ERROR == EvalOperand( i, end_tok, opndx, 0 ) )
+        if ( ERROR == EvalOperand( i, tokenarray, end_tok, opndx, 0 ) )
             return( ERROR );
     return( NOT_ERROR );
 }
 
-static char * GetLabel( hll_list *hll, int label )
-/************************************************/
+static char *GetLabelStr( int_32 label, char *buff )
+/**************************************************/
 {
-    if ( label == LABELFIRST )
-        return( hll->symfirst );
-    else if ( label == LABELTEST )
-        if ( hll->symtest )
-            return( hll->symtest );
-        else
-            return( hll->symfirst );
-    else
-        return( hll->symexit );
+    sprintf( buff, "@C%04X", label );
+    return( buff );
 }
 
-#if 0
-static void SetLabel( hll_list *hll, int label, char * labelname )
-/****************************************************************/
+static uint_32 GetLabel( struct hll_item *hll, int index )
+/********************************************************/
 {
-    DebugMsg(("SetLabel(%i, %s)\n", label, labelname ));
-    if ( label == LABELFIRST )
-        hll->symfirst = labelname;
-    else if ( label == LABELTEST )
-        hll->symtest = labelname;
-    else
-        hll->symexit = labelname;
+    if ( hll->labels[index] > 0 )
+        return( hll->labels[index] );
+    /* the test label may not exist due to optimization */
+    if ( index == LTEST )
+        return( hll->labels[LSTART] );
+    return( 0 ); /* shouldn't happen */
 }
-#endif
 
 /* a "simple" expression is
  * 1. two tokens, coupled with a <cmp> operator: == != >= <= > <
@@ -279,27 +278,27 @@ static void SetLabel( hll_list *hll, int label, char * labelname )
  * 3. unary operator "!" + one token
  * 4. one token (short form for "<token> != 0")
  */
-static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **jmp, expr_list *opndx )
-/**********************************************************************************************************************************/
+static ret_code GetSimpleExpression( struct hll_item *hll, int *i, struct asm_tok tokenarray[], int ilabel, bool is_true, char *buffer, char **jmp, struct expr *opndx )
+/**********************************************************************************************************************************************************************/
 {
-    //expr_list opndx;
-    expr_list op2;
-    c_bop op;
+    //struct expr opndx;
+    struct expr op2;
+    enum c_bop op;
     //int size;
     char instr;
     int op1_pos;
     int op1_end;
     int op2_pos;
     int op2_end;
-    char *label;
+    char label[16];
     char *p;
     bool issigned;
     bool neg;
 
-    DebugMsg(("GetSimpleExpression(buffer=%s) enter\n", buffer ));
+    DebugMsg1(("GetSimpleExpression(buffer=%s) enter\n", buffer ));
 
-    while ( AsmBuffer[*i]->string_ptr[0] == '!' && AsmBuffer[*i]->string_ptr[1] == '\0' ) {
-        GetCOp(i);
+    while ( tokenarray[*i].string_ptr[0] == '!' && tokenarray[*i].string_ptr[1] == '\0' ) {
+        (*i)++; //GetCOp( i );
         is_true = 1 - is_true;
     }
 
@@ -309,29 +308,29 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
      * entirely by the expression evaluator, while the latter case is to be
      * handled HERE!
      */
-    if ( AsmBuffer[*i]->token == T_OP_BRACKET ) {
+    if ( tokenarray[*i].token == T_OP_BRACKET ) {
         int brcnt;
         int j;
-        for ( brcnt = 1, j = *i + 1; AsmBuffer[j]->token != T_FINAL; j++ ) {
-            if ( AsmBuffer[j]->token == T_OP_BRACKET )
+        for ( brcnt = 1, j = *i + 1; tokenarray[j].token != T_FINAL; j++ ) {
+            if ( tokenarray[j].token == T_OP_BRACKET )
                 brcnt++;
-            else if ( AsmBuffer[j]->token == T_CL_BRACKET ) {
+            else if ( tokenarray[j].token == T_CL_BRACKET ) {
                 brcnt--;
                 if ( brcnt == 0 ) /* a standard Masm expression? */
                     break;
-            } else if ( ( GetCOp( &j )) != COP_NONE )
+            } else if ( ( GetCOp( &tokenarray[j] )) != COP_NONE )
                 break;
         }
         if ( brcnt ) {
             (*i)++;
             DebugMsg(("GetSimpleExpression: calling GetExpression, i=%u\n", *i));
-            if ( ERROR == GetExpression( hll, i, ilabel, is_true, buffer, jmp, opndx ) )
+            if ( ERROR == GetExpression( hll, i, tokenarray, ilabel, is_true, buffer, jmp, opndx ) )
                 return( ERROR );
             DebugMsg(("return from GetExpression, i=%u\n", *i));
 
-            if ( AsmBuffer[*i]->token != T_CL_BRACKET ) {
-                //if ((AsmBuffer[*i]->token == T_FINAL) || (AsmBuffer[*i]->token == T_CL_BRACKET))
-                DebugMsg(( "GetSimpleExpression: expected ')', found: %s\n", AsmBuffer[*i]->string_ptr ));
+            if ( tokenarray[*i].token != T_CL_BRACKET ) {
+                //if (( tokenarray[*i].token == T_FINAL ) || ( tokenarray[*i].token == T_CL_BRACKET ))
+                DebugMsg(( "GetSimpleExpression: expected ')', found: %s\n", tokenarray[*i].string_ptr ));
                 AsmError( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE );
                 return( ERROR );
             }
@@ -340,12 +339,13 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
         }
     }
 
-    if ( ERROR == HllGetToken( hll, i, is_true, opndx ) )
+    if ( ERROR == HllGetToken( hll, i, tokenarray, is_true, opndx ) )
         return ( ERROR );
 
     op1_end = *i;
 
-    op = GetCOp( i );
+    if ( ( op = GetCOp( &tokenarray[*i] ) ) != COP_NONE )
+        (*i)++;
 
     if ( op == COP_AND || op == COP_OR ) {
         *i = op1_end;
@@ -354,9 +354,9 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
         op = COP_NONE;
     }
 
-    label = GetLabel( hll, ilabel );
+    GetLabelStr( GetLabel( hll, ilabel ), label );
 
-    DebugMsg(("GetSimpleExpression: EvalOperand ok, kind=%X, i=%u\n", opndx->kind, *i));
+    DebugMsg1(("GetSimpleExpression: EvalOperand ok, kind=%X, i=%u [%s]\n", opndx->kind, *i, tokenarray[*i].tokpos ));
 
     if ( opndx->kind == EXPR_EMPTY ) {
         /* no valid ASM expression detected. check for some special ops */
@@ -380,10 +380,10 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
     op2_pos = *i;
 
     if ( op != COP_NONE ) {
-        if ( ERROR == HllGetToken( hll, i, is_true, &op2 ) ) {
+        if ( ERROR == HllGetToken( hll, i, tokenarray, is_true, &op2 ) ) {
             return( ERROR );
         }
-        DebugMsg(("GetSimpleExpression: EvalOperand 2 ok, type=%X, i=%u\n", op2.type, *i));
+        DebugMsg1(("GetSimpleExpression: EvalOperand 2 ok, type=%X, i=%u [%s]\n", op2.type, *i, tokenarray[*i].tokpos));
         if ( op2.kind != EXPR_CONST && op2.kind != EXPR_ADDR && op2.kind != EXPR_REG ) {
             DebugMsg(("GetSimpleExpression: syntax error, op2.kind=%u\n", op2.kind ));
             AsmError( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE );
@@ -409,9 +409,9 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
             opndx->indirect == FALSE &&
             op2.kind == EXPR_CONST &&
             op2.value == 0 ) {
-            p = RenderInstr( buffer, "or", opndx, op1_pos, op1_end, op1_pos, op1_end );
+            p = RenderInstr( buffer, "or", opndx, op1_pos, op1_end, op1_pos, op1_end, tokenarray );
         } else {
-            p = RenderInstr( buffer, "cmp", opndx, op1_pos, op1_end, op2_pos, op2_end );
+            p = RenderInstr( buffer, "cmp", opndx, op1_pos, op1_end, op2_pos, op2_end, tokenarray );
         }
 
         *jmp = p;
@@ -450,7 +450,7 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
         RenderJcc( p, instr, neg, label );
         break;
     case COP_ANDB:
-        p = RenderInstr( buffer, "test", opndx, op1_pos, op1_end, op2_pos, op2_end );
+        p = RenderInstr( buffer, "test", opndx, op1_pos, op1_end, op2_pos, op2_end, tokenarray );
         *jmp = p;
         RenderJcc( p, 'e', is_true, label );
         break;
@@ -458,14 +458,14 @@ static ret_code GetSimpleExpression( hll_list * hll, int *i, int ilabel, bool is
         switch ( opndx->kind ) {
         case EXPR_REG:
             if ( opndx->indirect == FALSE ) {
-                p = RenderInstr( buffer, "and", opndx, op1_pos, op1_end, op1_pos, op1_end );
+                p = RenderInstr( buffer, "and", opndx, op1_pos, op1_end, op1_pos, op1_end, tokenarray );
                 *jmp = p;
                 RenderJcc( p, 'z', is_true, label );
                 break;
             }
             /* no break */
         case EXPR_ADDR:
-            p = RenderInstr( buffer, "cmp", opndx, op1_pos, op1_end, EMPTY, 0 );
+            p = RenderInstr( buffer, "cmp", opndx, op1_pos, op1_end, EMPTY, 0, tokenarray );
             *jmp = p;
             RenderJcc( p, 'z', is_true, label );
             break;
@@ -518,61 +518,69 @@ static void InvertJmp( char *p )
     return;
 }
 
-static void ReplaceLabel( char * p, char * olabel, char * nlabel )
-/****************************************************************/
+static void ReplaceLabel( char *p, uint_32 olabel, uint_32 nlabel )
+/*****************************************************************/
 {
-    int i = strlen( nlabel );
+    char oldlbl[16];
+    char newlbl[16];
+    int i;
 
-    DebugMsg(("ReplaceLabel(%s, %s, %s)\n", p, olabel, nlabel ));
-    while ( p = strstr( p, olabel ) ) {
-        memcpy( p, nlabel, i );
+    GetLabelStr( olabel, oldlbl );
+    GetLabelStr( nlabel, newlbl );
+
+    i = strlen( newlbl );
+
+    DebugMsg1(("ReplaceLabel(%s, %s, %s)\n", p, oldlbl, newlbl ));
+    while ( p = strstr( p, oldlbl ) ) {
+        memcpy( p, newlbl, i );
         p = p  + i;
     }
 }
 
 /* operator &&, which has the second lowest precedence, is handled here */
 
-static ret_code GetAndExpression( hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp, expr_list *opndx )
-/***********************************************************************************************************************************/
+static ret_code GetAndExpression( struct hll_item *hll, int *i, struct asm_tok tokenarray[], int ilabel, bool is_true, char *buffer, char **lastjmp, struct expr *opndx )
+/***********************************************************************************************************************************************************************/
 {
-    c_bop op;
+    enum c_bop op;
     int cur_pos;
-    char * ptr = buffer;
-    char * truelabel = NULL;
-    //char * nlabel;
-    //char * olabel;
+    char *ptr = buffer;
+    uint_32 truelabel = 0;
+    char buff[16];
+    //char *nlabel;
+    //char *olabel;
 
-    DebugMsg(("GetAndExpression(buffer=%s) enter\n", buffer ));
+    DebugMsg1(("GetAndExpression(buffer=%s) enter\n", buffer ));
 
     while (1) {
         ptr = ptr + strlen( ptr );
         cur_pos = *i;
-        if ( ERROR == GetSimpleExpression( hll, i, ilabel, is_true, ptr, lastjmp, opndx ) )
+        if ( ERROR == GetSimpleExpression( hll, i, tokenarray, ilabel, is_true, ptr, lastjmp, opndx ) )
             return( ERROR );
         cur_pos = *i;
-        op = GetCOp(i);
-        if (op != COP_AND)
+        op = GetCOp( &tokenarray[*i] );
+        if ( op != COP_AND )
             break;
+        (*i)++;
         /* v2.02: query is_true var instead of cmd field!
          * this is important if the '!' operator was used.
          */
         //if ( hll->cmd == HLL_WHILE || hll->cmd == HLL_BREAK ) {
         if ( is_true ) {
             /* todo: please describe what's done here and why! */
-            if (*lastjmp) {
-                char * p = *lastjmp;
+            if ( *lastjmp ) {
+                char *p = *lastjmp;
                 InvertJmp( p+1 );         /* step 1 */
-                if ( truelabel == NULL )  /* step 2 */
-                    truelabel = MakeAnonymousLabel();
+                if ( truelabel == 0 )     /* step 2 */
+                    truelabel = GetHllLabel();
                 ReplaceLabel( buffer, GetLabel( hll, ilabel ), truelabel );
                 *lastjmp = NULL;
             }
         }
     };
 
-    if ( truelabel ) {
-        sprintf( ptr+strlen(ptr), "%s" LABELQUAL "\n", truelabel );
-        AsmFree( truelabel );
+    if ( truelabel > 0 ) {
+        sprintf( ptr+strlen(ptr), "%s" LABELQUAL "\n", GetLabelStr( truelabel, buff ) );
         *lastjmp = NULL;
     }
     *i = cur_pos;
@@ -581,35 +589,37 @@ static ret_code GetAndExpression( hll_list * hll, int *i, int ilabel, bool is_tr
 
 /* operator ||, which has the lowest precedence, is handled here */
 
-static ret_code GetExpression( hll_list * hll, int *i, int ilabel, bool is_true, char * buffer, char **lastjmp, expr_list *opndx )
-/********************************************************************************************************************************/
+static ret_code GetExpression( struct hll_item *hll, int *i, struct asm_tok tokenarray[], int ilabel, bool is_true, char *buffer, char **lastjmp, struct expr *opndx )
+/********************************************************************************************************************************************************************/
 {
-    c_bop op;
+    enum c_bop op;
     int cur_pos;
     //bool ordetected = FALSE;
-    char * ptr = buffer;
-    char * truelabel = NULL;
-    char * nlabel;
-    char * olabel;
+    char *ptr = buffer;
+    char buff[16];
+    uint_32 truelabel = 0;
+    uint_32 nlabel;
+    uint_32 olabel;
 
-    DebugMsg(("GetExpression(buffer=%s) enter\n", buffer ));
+    DebugMsg1(("GetExpression(buffer=%s) enter\n", buffer ));
 
     for ( ;; ) {
         ptr = ptr + strlen( ptr );
         cur_pos = *i;
-        if ( ERROR == GetAndExpression( hll, i, ilabel, is_true, ptr, lastjmp, opndx ) )
+        if ( ERROR == GetAndExpression( hll, i, tokenarray, ilabel, is_true, ptr, lastjmp, opndx ) )
             return( ERROR );
 
         cur_pos = *i;
-        op = GetCOp( i );
+        op = GetCOp( &tokenarray[*i] );
         if ( op != COP_OR ) {
-            *i = cur_pos;
-            if ( truelabel ) {
-                sprintf( ptr+strlen( ptr ), "%s" LABELQUAL "\n", truelabel );
-                AsmFree( truelabel );
+            //*i = cur_pos;
+            if ( truelabel > 0 ) {
+                sprintf( ptr+strlen( ptr ), "%s" LABELQUAL "\n", GetLabelStr( truelabel, buff ) );
+                truelabel = 0;
             }
             break;
         }
+        (*i)++;
         /* the generated code of last simple expression has to be modified
          1. the last jump must be inverted
          2. a "is_true" label must be created (it's used to jump "behind" the expr)
@@ -627,25 +637,25 @@ static ret_code GetExpression( hll_list * hll, int *i, int ilabel, bool is_true,
          */
         //if (*lastjmp && ( hll->cmd != HLL_BREAK ) && ( hll->cmd != HLL_WHILE ) ) {
         if ( *lastjmp && is_true == FALSE ) {
-            char * p = *lastjmp;
+            char *p = *lastjmp;
             InvertJmp(p+1);         /* step 1 */
             p += 4;
-            if ( truelabel == NULL )  /* step 2 */
-                truelabel = MakeAnonymousLabel();
-            strcpy( p, truelabel );
+            if ( truelabel == 0 )  /* step 2 */
+                truelabel = GetHllLabel();
+            strcpy( p, GetLabelStr( truelabel, buff ) );
             strcat( p, "\n" );
             *lastjmp = NULL;
-            nlabel = MakeAnonymousLabel();  /* step 3 */
+            nlabel = GetHllLabel();  /* step 3 */
             olabel = GetLabel( hll, ilabel );
             if ( hll->cmd == HLL_REPEAT ) {
                 ReplaceLabel( buffer, olabel, nlabel );
-                sprintf( ptr+strlen(ptr), "%s" LABELQUAL "\n", nlabel );
+                sprintf( ptr + strlen( ptr ), "%s" LABELQUAL "\n", GetLabelStr( nlabel, buff ) );
             } else {
 #if 0
-                sprintf( ptr+strlen(ptr), "%s" LABELQUAL "\n", olabel );
+                sprintf( ptr + strlen( ptr ), "%s" LABELQUAL "\n", GetLabelStr( olabel, buff ) );
                 SetLabel(hll, ilabel, nlabel);
 #else
-                sprintf( ptr+strlen(ptr), "%s" LABELQUAL "\n", olabel );
+                sprintf( ptr + strlen( ptr ), "%s" LABELQUAL "\n", GetLabelStr( olabel, buff ) );
                 ReplaceLabel( buffer, olabel, nlabel );
 #endif
             }
@@ -656,8 +666,8 @@ static ret_code GetExpression( hll_list * hll, int *i, int ilabel, bool is_true,
 
 /* update hll->condlines */
 
-static ret_code WriteExprSrc( hll_list * hll, char * buffer )
-/***********************************************************/
+static ret_code WriteExprSrc( struct hll_item *hll, char *buffer )
+/****************************************************************/
 {
     int size;
     char *p;
@@ -667,6 +677,10 @@ static ret_code WriteExprSrc( hll_list * hll, char * buffer )
         size += strlen( hll->condlines ) + 1;
     }
     p = AsmAlloc( size );
+#ifdef DEBUG_OUT
+    cntCond++;
+    cntCondBytes += size;
+#endif
     if ( hll->condlines ) {
         strcpy( p, hll->condlines );
         strcat( p, "\n" );
@@ -683,9 +697,9 @@ static ret_code WriteExprSrc( hll_list * hll, char * buffer )
  * evaluate the C like boolean expression found in HLL structs
  * like .IF, .ELSEIF, .WHILE, .UNTIL and .UNTILCXZ
  * might return multiple lines (strings separated by 0x0A)
- * i = index in AsmBuffer where expression starts. Is restricted
- * to one source line (till T_FINAL)
- * label: label to jump to if expression is <is_true>!
+ * - i = index for tokenarray[] where expression starts. Is restricted
+ *       to one source line (till T_FINAL)
+ * - label: label to jump to if expression is <is_true>!
  * is_true:
  *   .IF:       FALSE
  *   .ELSEIF:   FALSE
@@ -697,17 +711,17 @@ static ret_code WriteExprSrc( hll_list * hll, char * buffer )
  */
 
 
-static ret_code EvaluateHllExpression( hll_list * hll, int *i, int ilabel, bool is_true )
-/***************************************************************************************/
+static ret_code EvaluateHllExpression( struct hll_item *hll, int *i, struct asm_tok tokenarray[], int ilabel, bool is_true )
+/**************************************************************************************************************************/
 {
     char *lastjmp = NULL;
-    expr_list opndx;
+    struct expr opndx;
     char buffer[MAX_LINE_LEN*2];
 
-    DebugMsg(("EvaluateHllExpression enter\n"));
+    DebugMsg1(("EvaluateHllExpression enter\n"));
 
     buffer[0] = NULLC;
-    if ( ERROR == GetExpression( hll, i, ilabel, is_true, buffer, &lastjmp, &opndx ) )
+    if ( ERROR == GetExpression( hll, i, tokenarray, ilabel, is_true, buffer, &lastjmp, &opndx ) )
         return( ERROR );
     if ( buffer[0] )
         WriteExprSrc( hll, buffer );
@@ -720,14 +734,14 @@ static ret_code EvaluateHllExpression( hll_list * hll, int *i, int ilabel, bool 
 
 /* write ASM test lines */
 
-static ret_code HllPushTestLines( hll_list * hll )
-/************************************************/
+static ret_code HllPushTestLines( struct hll_item *hll )
+/******************************************************/
 {
     char *p = hll->condlines;
     char *p2;
     char buffer[MAX_LINE_LEN];
 
-    DebugMsg(("HllPushTestLines enter\n"));
+    DebugMsg1(("HllPushTestLines enter\n"));
     if ( !p )
         return( ERROR );
 
@@ -748,30 +762,45 @@ static ret_code HllPushTestLines( hll_list * hll )
     return( NOT_ERROR );
 }
 
-/* for .UNTILCXZ check if expression is simple enough */
+/* for .UNTILCXZ: check if expression is simple enough.
+ * what's acceptable is ONE condition, and just operators == and !=
+ * Constants (0 or != 0) are also accepted.
+ */
 
-static ret_code HllCheckTestLines( hll_list * hll )
-/*************************************************/
+static ret_code CheckCXZLines( struct hll_item *hll )
+/***************************************************/
 {
     int lines = 0;
     int i;
+    bool NL = TRUE;
     char *p = hll->condlines;
 
     for (; *p; p++ ) {
         if ( *p == 0x0a ) {
+            NL = TRUE;
             lines++;
-            if ( *(p+1) == 'j' ) {
+        } else if ( NL ) {
+            NL = FALSE;
+            if ( *p == 'j' ) {
                 p++;
-                if ( *(p+1) == 'z' || (*(p+1) == 'n' && *(p+2) == 'z') )
-                    if ( lines == 1 ) {
-                        i = strlen(p);
-                        while ( i ) {
-                            *(p+3+i) = *(p+i);
-                            i--;
-                        }
-                        memcpy( p,"loop",4 );
+                /* v2.06: rewritten. case ".untilcxz 1" still has problems */
+                if ( *p == 'm' && lines == 0 ) {
+                    p--;
+                    i = strlen( p );
+                    while ( i ) {
+                        *(p+2+i) = *(p+i);
+                        i--;
                     }
-                else
+                    memcpy( p,"loope",5 );
+                } else if ( lines == 1 && ( *p == 'z' || (*p == 'n' && *(p+1) == 'z') ) ) {
+                    p--;
+                    i = strlen( p );
+                    while ( i ) {
+                        *(p+3+i) = *(p+i);
+                        i--;
+                    }
+                    memcpy( p,"loop",4 );
+                } else
                     return( ERROR );
             }
         }
@@ -781,67 +810,67 @@ static ret_code HllCheckTestLines( hll_list * hll )
     return( NOT_ERROR );
 }
 
-static void FreeHllItem( struct hll_list *hll )
-/*********************************************/
-{
-    AsmFree( hll->symfirst );
-    AsmFree( hll->symtest );
-    AsmFree( hll->symexit );
-    AsmFree( hll->condlines );
-    AsmFree( hll );
-}
-
 /* Start a .IF, .WHILE, .REPEAT item */
 
-ret_code HllStartDef( int i )
-/***************************/
+ret_code HllStartDir( int i, struct asm_tok tokenarray[] )
+/********************************************************/
 {
-    struct hll_list      *hll;
-    int                  cmd = AsmBuffer[i]->value;
+    struct hll_item      *hll;
+    int                  cmd = tokenarray[i].tokval;
+    char buff[16];
 
-    DebugMsg1(("HllStartDef(%u [=%s]) enter\n", i, AsmBuffer[i]->string_ptr ));
+    DebugMsg1(("HllStartDir(%s) enter\n", tokenarray[i].string_ptr ));
 
     i++; /* skip directive */
 
-    hll = AsmAlloc( sizeof(hll_list) );
-
-    hll->cmd = HLL_UNDEF;
+    /* v2.06: is there an item on the free stack? */
+    if ( HllFree ) {
+        hll = HllFree;
+#ifdef DEBUG_OUT
+        cntReused++;
+#endif
+    } else {
+        hll = AsmAlloc( sizeof( struct hll_item ) );
+#ifdef DEBUG_OUT
+        cntAlloc++;
+#endif
+    }
 
     /* create labels which are always needed */
-    /* for .IF -.ENDIF without .ELSE no symexit label is needed. */
+    /* for .IF -.ENDIF without .ELSE no LEXIT-label is needed. */
 
-    hll->symfirst = NULL;
-    hll->symexit = NULL;
-    hll->symtest = MakeAnonymousLabel();
+    hll->labels[LSTART] = 0;
+    hll->labels[LTEST] = GetHllLabel();
+    hll->labels[LEXIT] = 0;
 
     hll->condlines = NULL;
 
     /* structure for .IF .ELSE .ENDIF
-     *    cond jump to symtest
+     *    cond jump to LTEST-label
      *    ...
-     *    jmp symexit
-     *  symtest:
+     *    jmp LEXIT
+     *  LTEST:
      *    ...
-     *  symexit:
+     *  LEXIT:
 
      * structure for .IF .ELSEIF
-     *    cond jump to symtest
+     *    cond jump to LTEST
      *    ...
-     *    jmp symexit
-     *  symtest:
-     *    cond jump to (new) symtest
+     *    jmp LEXIT
+     *  LTEST:
+     *    cond jump to (new) LTEST
      *    ...
-     *    jmp symexit
-     *  symtest:
+     *    jmp LEXIT
+     *  LTEST:
      *    ...
 
      * structure for .WHILE and .REPEAT:
-     *   jmp symtest (for .WHILE only)
-     * symfirst:
+     *   jmp LTEST (for .WHILE only)
+     * LSTART:
      *   ...
-     * symtest: (jumped to by .continue)
-     *   test end condition, cond jump to symfirst
-     * symexit: (jumped to by .break)
+     * LTEST: (jumped to by .continue)
+     *   test end condition, cond jump to LSTART label
+     * LEXIT: (jumped to by .break)
      */
     PushLineQueue();
 
@@ -849,27 +878,26 @@ ret_code HllStartDef( int i )
     case T_DOT_IF:
         hll->cmd = HLL_IF;
         /* get the C-style expression, convert to ASM code lines */
-        if ( ERROR == EvaluateHllExpression( hll, &i, LABELTEST, FALSE ) ) {
+        if ( ERROR == EvaluateHllExpression( hll, &i, tokenarray, LTEST, FALSE ) ) {
             return( ERROR );
         }
         HllPushTestLines( hll );
 #if 1
-        /* if no lines have been created, the symtest label isn't needed */
+        /* if no lines have been created, the LTEST label isn't needed */
         if ( line_queue == NULL ) {
-            AsmFree( hll->symtest );
-            hll->symtest = NULL;
+            hll->labels[LTEST] = 0;
         }
 #endif
         break;
     case T_DOT_WHILE:
     case T_DOT_REPEAT:
         /* create the label to loop start */
-        hll->symfirst = MakeAnonymousLabel();
-        hll->symexit = MakeAnonymousLabel();
+        hll->labels[LSTART] = GetHllLabel();
+        hll->labels[LEXIT] = GetHllLabel();
         if ( cmd == T_DOT_WHILE ) {
             hll->cmd = HLL_WHILE;
-            if ( AsmBuffer[i]->token != T_FINAL ) {
-                if ( ERROR == EvaluateHllExpression( hll, &i, LABELFIRST, TRUE ) ) {
+            if ( tokenarray[i].token != T_FINAL ) {
+                if ( ERROR == EvaluateHllExpression( hll, &i, tokenarray, LSTART, TRUE ) ) {
                     return( ERROR );
                 }
             } else
@@ -877,23 +905,25 @@ ret_code HllStartDef( int i )
             /* create a jump to second label */
             /* optimisation: if second label is just a jump, dont jump! */
             if ( hll->condlines && _memicmp( hll->condlines, "jmp", 3 ) ) {
-                AddLineQueueX( " jmp %s", hll->symtest );
+                AddLineQueueX( " jmp %s", GetLabelStr( hll->labels[LTEST], buff ) );
             } else {
-                AsmFree( hll->symtest );
-                hll->symtest = NULL;
+                hll->labels[LTEST] = 0;
             }
         } else {
             hll->cmd = HLL_REPEAT;
         }
-        AddLineQueueX( "%s" LABELQUAL, hll->symfirst );
+        AddLineQueueX( "%s" LABELQUAL, GetLabelStr( hll->labels[LSTART], buff ) );
         break;
     }
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        FreeHllItem( hll );
-        DebugMsg(("HllStartDef: unexpected token %u [%s]\n", AsmBuffer[i]->token, AsmBuffer[i]->string_ptr ));
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmFree( hll->condlines );
+        DebugMsg(("HllStartDir: unexpected token %u [%s]\n", tokenarray[i].token, tokenarray[i].string_ptr ));
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
+    /* v2.06: remove the item from the free stack */
+    if ( hll == HllFree )
+        HllFree = hll->next;
     hll->next = HllStack;
     HllStack = hll;
 
@@ -909,115 +939,118 @@ ret_code HllStartDef( int i )
 /* End a .IF, .WHILE, .REPEAT item
  * that is: .ENDIF, .ENDW, .UNTIL and .UNTILCXZ are handled here
  */
-ret_code HllEndDef( int i )
-/*************************/
+ret_code HllEndDir( int i, struct asm_tok tokenarray[] )
+/******************************************************/
 {
-    //struct asm_sym      *sym;
-    struct hll_list     *hll;
-    int                 cmd = AsmBuffer[i]->value;
+    //struct asym       *sym;
+    struct hll_item     *hll;
+    int                 cmd = tokenarray[i].tokval;
+    char buff[16];
 
-    DebugMsg1(("HllEndDef(%s) enter\n", AsmBuffer[i]->string_ptr ));
+    DebugMsg1(("HllEndDir(%s) enter\n", tokenarray[i].string_ptr ));
 
     if ( HllStack == NULL ) {
-        DebugMsg(("HllEndDef: hll stack is empty\n"));
+        DebugMsg(("HllEndDir: hll stack is empty\n"));
         AsmError( DIRECTIVE_MUST_BE_IN_CONTROL_BLOCK );
         return( ERROR );
     }
 
     hll = HllStack;
     HllStack = hll->next;
-
+    /* v2.06: move the item to the free stack */
+    hll->next = HllFree;
+    HllFree = hll;
 
     PushLineQueue();
 
-    switch (cmd) {
+    switch ( cmd ) {
     case T_DOT_ENDIF:
         if ( hll->cmd != HLL_IF ) {
-            DebugMsg(("HllEndDef no .IF on the hll stack\n"));
-            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
+            DebugMsg(("HllEndDir: no .IF on the hll stack\n"));
+            AsmErr( BLOCK_NESTING_ERROR, tokenarray[i].string_ptr );
             return( ERROR );
         }
         /* if a test label isn't created yet, create it */
-        if ( hll->symtest ) {
-            AddLineQueueX( "%s" LABELQUAL, hll->symtest );
+        if ( hll->labels[LTEST] > 0 ) {
+            AddLineQueueX( "%s" LABELQUAL, GetLabelStr( hll->labels[LTEST], buff ) );
         }
         /* create the exit label if it exists */
-        if ( hll->symexit ) {
-            AddLineQueueX( "%s" LABELQUAL, hll->symexit );
+        if ( hll->labels[LEXIT] > 0 ) {
+            AddLineQueueX( "%s" LABELQUAL, GetLabelStr( hll->labels[LEXIT], buff ) );
         }
         i++;
         break;
     case T_DOT_ENDW:
         if ( hll->cmd != HLL_WHILE ) {
-            DebugMsg(("HllEndDef no .WHILE on the hll stack\n"));
-            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
+            DebugMsg(("HllEndDir: no .WHILE on the hll stack\n"));
+            AsmErr( BLOCK_NESTING_ERROR, tokenarray[i].string_ptr );
             return( ERROR );
         }
         /* create test label  */
-        if ( hll->symtest ) {
-            AddLineQueueX( "%s" LABELQUAL, hll->symtest );
-            DebugMsg(("HllEndDef: created: %s" LABELQUAL "\n", hll->symtest));
+        if ( hll->labels[LTEST] > 0 ) {
+            AddLineQueueX( "%s" LABELQUAL, GetLabelStr( hll->labels[LTEST], buff ) );
+            DebugMsg(("HllEndDir: created: %s" LABELQUAL "\n", GetLabelStr( hll->labels[LTEST], buff ) ));
         }
         HllPushTestLines( hll );
 
-        AddLineQueueX( "%s" LABELQUAL, hll->symexit );
+        AddLineQueueX( "%s" LABELQUAL, GetLabelStr( hll->labels[LEXIT], buff ) );
         i++;
         break;
     case T_DOT_UNTILCXZ:
         if ( hll->cmd != HLL_REPEAT ) {
-            DebugMsg(("HllEndDef no .REPEAT on the hll stack\n"));
-            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
+            DebugMsg(("HllEndDir: no .REPEAT on the hll stack\n"));
+            AsmErr( BLOCK_NESTING_ERROR, tokenarray[i].string_ptr );
             return( ERROR );
         }
-        AddLineQueueX( "%s" LABELQUAL, hll->symtest );
+        AddLineQueueX( "%s" LABELQUAL, GetLabelStr( hll->labels[LTEST], buff ) );
 
         i++;
         /* read in optional (simple) expression */
-        if ( AsmBuffer[i]->token != T_FINAL ) {
-            if ( ERROR == EvaluateHllExpression( hll, &i, LABELFIRST, FALSE ) ) {
+        if ( tokenarray[i].token != T_FINAL ) {
+            if ( ERROR == EvaluateHllExpression( hll, &i, tokenarray, LSTART, FALSE ) ) {
                 return( ERROR );
             }
-            if ( HllCheckTestLines(hll) == ERROR ) {
+            if ( CheckCXZLines( hll ) == ERROR ) {
                 AsmError( EXPR_TOO_COMPLEX_FOR_UNTILCXZ );
                 return( ERROR );
             }
             /* write condition lines */
             HllPushTestLines( hll );
         } else {
-            AddLineQueueX( " loop %s", hll->symfirst );
+            AddLineQueueX( " loop %s", GetLabelStr( hll->labels[LSTART], buff ) );
         }
-        AddLineQueueX( "%s" LABELQUAL, hll->symexit );
+        AddLineQueueX( "%s" LABELQUAL, GetLabelStr( hll->labels[LEXIT], buff ) );
         break;
     case T_DOT_UNTIL:
         if ( hll->cmd != HLL_REPEAT ) {
-            DebugMsg(("HllEndDef no .REPEAT on the hll stack\n"));
-            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
+            DebugMsg(("HllEndDir: no .REPEAT on the hll stack\n"));
+            AsmErr( BLOCK_NESTING_ERROR, tokenarray[i].string_ptr );
             return( ERROR );
         }
-        AddLineQueueX( "%s" LABELQUAL, hll->symtest );
+        AddLineQueueX( "%s" LABELQUAL, GetLabelStr( hll->labels[LTEST], buff ) );
 
         i++;
         /* read in (optional) expression */
         /* if expression is missing, just generate nothing */
-        if ( AsmBuffer[i]->token != T_FINAL ) {
-            if ( ERROR == EvaluateHllExpression( hll, &i, LABELFIRST, FALSE ) ) {
+        if ( tokenarray[i].token != T_FINAL ) {
+            if ( ERROR == EvaluateHllExpression( hll, &i, tokenarray, LSTART, FALSE ) ) {
                 return( ERROR );
             }
             /* write condition lines */
             HllPushTestLines( hll );
         }
 #if 0
-        AddLineQueueX( " jmp %s", hll->symfirst );
+        AddLineQueueX( " jmp %s", GetLabelStr( hll->labels[LSTART], buff ) );
 #endif
 
-        AddLineQueueX( "%s" LABELQUAL, hll->symexit );
+        AddLineQueueX( "%s" LABELQUAL, GetLabelStr( hll->labels[LEXIT], buff ) );
         break;
     }
 
-    FreeHllItem( hll );
+    AsmFree( hll->condlines );
 
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -1033,53 +1066,53 @@ ret_code HllEndDef( int i )
 /* Exit current .IF, .WHILE, .REPEAT item
  * that is: .ELSE, .ELSEIF, .CONTINUE and .BREAK are handled here
  */
-ret_code HllExitDef( int i )
-/**************************/
+ret_code HllExitDir( int i, struct asm_tok tokenarray[] )
+/*******************************************************/
 {
-    //int                 level;
-    //struct asm_sym      *sym;
-    struct hll_list     *hll;
+    //int               level;
+    //struct asym       *sym;
+    struct hll_item     *hll;
     char                *savedlines;
-    hll_cmd             savedcmd;
-    int                 cmd = AsmBuffer[i]->value;
+    enum hll_cmd        savedcmd;
+    int                 cmd = tokenarray[i].tokval;
+    char buff[16];
 
-    DebugMsg1(("HllExitDef(%s) enter\n", AsmBuffer[i]->string_ptr ));
+    DebugMsg1(("HllExitDir(%s) enter\n", tokenarray[i].string_ptr ));
 
     hll = HllStack;
 
     if ( hll == NULL ) {
-        DebugMsg(("HllExitDef stack error\n"));
+        DebugMsg(("HllExitDir stack error\n"));
         AsmError( DIRECTIVE_MUST_BE_IN_CONTROL_BLOCK );
         return( ERROR );
     }
 
     PushLineQueue();
 
-    switch (cmd) {
+    switch ( cmd ) {
     case T_DOT_ELSE:
     case T_DOT_ELSEIF:
         if ( hll->cmd != HLL_IF ) {
-            DebugMsg(("HllExitDef(%s): symtest=%X\n", AsmBuffer[i]->string_ptr, hll->symtest));
-            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[i]->string_ptr );
+            DebugMsg(("HllExitDir(%s): labels[LTEST]=%X\n", tokenarray[i].string_ptr, hll->labels[LTEST]));
+            AsmErr( BLOCK_NESTING_ERROR, tokenarray[i].string_ptr );
             return( ERROR );
         }
-        /* the "symexit" label is only needed if an .ELSE branch exists.
+        /* the "labels[LEXIT]" label is only needed if an .ELSE branch exists.
          That's why it is created delayed.
          */
-        if ( hll->symexit == NULL )
-            hll->symexit = MakeAnonymousLabel();
+        if ( hll->labels[LEXIT] == 0 )
+            hll->labels[LEXIT] = GetHllLabel();
 
-        AddLineQueueX( " jmp %s", hll->symexit );
-        if ( hll->symtest ) {
-            AddLineQueueX( "%s" LABELQUAL, hll->symtest );
-            AsmFree( hll->symtest );
-            hll->symtest = NULL;
+        AddLineQueueX( " jmp %s", GetLabelStr( hll->labels[LEXIT], buff ) );
+        if ( hll->labels[LTEST] > 0 ) {
+            AddLineQueueX( "%s" LABELQUAL, GetLabelStr( hll->labels[LTEST], buff ) );
+            hll->labels[LTEST] = 0;
         }
         i++;
-        if (cmd == T_DOT_ELSEIF) {
-            /* create new symtest label */
-            hll->symtest = MakeAnonymousLabel();
-            if ( ERROR == EvaluateHllExpression( hll, &i, LABELTEST, FALSE ) ) {
+        if ( cmd == T_DOT_ELSEIF ) {
+            /* create new labels[LTEST] label */
+            hll->labels[LTEST] = GetHllLabel();
+            if ( ERROR == EvaluateHllExpression( hll, &i, tokenarray, LTEST, FALSE ) ) {
                 return( ERROR );
             }
             HllPushTestLines( hll );
@@ -1094,19 +1127,19 @@ ret_code HllExitDef( int i )
         }
         /* .BREAK .IF ... or .CONTINUE .IF ? */
         i++;
-        if ( AsmBuffer[i]->token != T_FINAL ) {
-            if ( AsmBuffer[i]->token == T_DIRECTIVE && AsmBuffer[i]->value == T_DOT_IF ) {
+        if ( tokenarray[i].token != T_FINAL ) {
+            if ( tokenarray[i].token == T_DIRECTIVE && tokenarray[i].tokval == T_DOT_IF ) {
                 savedlines = hll->condlines;
                 savedcmd = hll->cmd;
                 hll->condlines = NULL;
                 hll->cmd = HLL_BREAK;
                 i++;
                 if ( cmd == T_DOT_BREAK ) {
-                    if ( ERROR == EvaluateHllExpression( hll, &i, LABELEXIT, TRUE ) ) {
+                    if ( ERROR == EvaluateHllExpression( hll, &i, tokenarray, LEXIT, TRUE ) ) {
                         return( ERROR );
                     }
                 } else { /* T_DOT_CONTINUE */
-                    if ( ERROR == EvaluateHllExpression( hll, &i, LABELTEST, TRUE ) ) {
+                    if ( ERROR == EvaluateHllExpression( hll, &i, tokenarray, LTEST, TRUE ) ) {
                         return( ERROR );
                     }
                 }
@@ -1117,18 +1150,18 @@ ret_code HllExitDef( int i )
             }
         } else {
             if ( cmd == T_DOT_BREAK ) {
-                AddLineQueueX( " jmp %s", hll->symexit );
+                AddLineQueueX( " jmp %s", GetLabelStr( hll->labels[LEXIT], buff ) );
             } else {
-                if ( hll->symtest )
-                    AddLineQueueX( " jmp %s", hll->symtest );
+                if ( hll->labels[LTEST] > 0 )
+                    AddLineQueueX( " jmp %s", GetLabelStr( hll->labels[LTEST], buff ) );
                 else
-                    AddLineQueueX( " jmp %s", hll->symfirst );
+                    AddLineQueueX( " jmp %s", GetLabelStr( hll->labels[LSTART], buff ) );
             }
         }
         break;
     }
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -1149,15 +1182,17 @@ void HllCheckOpen( void )
         //AsmErr( BLOCK_NESTING_ERROR, ".if-.repeat-.while" );
         AsmErr( UNMATCHED_BLOCK_NESTING, ".if-.repeat-.while" );
     }
+    DebugMsg1(("HllCheckOpen: allocated items:%u, reused items:%u, cond-blocks/bytes:%u/%u\n", cntAlloc, cntReused, cntCond, cntCondBytes ));
 }
 
 /* HllInit() is called for each pass */
 
-void HllInit( void )
-/******************/
+void HllInit( int pass )
+/**********************/
 {
+    if ( pass == PASS_1 )
+        HllFree = NULL;
     HllStack = NULL; /* empty stack of open hll directives */
     ModuleInfo.hll_label = 0; /* init hll label counter */
     return;
 }
-

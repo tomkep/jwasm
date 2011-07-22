@@ -33,15 +33,13 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "symbols.h"
-#include "directiv.h"
 #include "segment.h"
 #include "assume.h"
+#include "types.h"
 #include "labels.h"
 #include "input.h"
 #include "expreval.h"
 #include "fastpass.h"
-#include "types.h"
 #include "tokenize.h"
 #include "listing.h"
 
@@ -63,7 +61,7 @@ struct assume_info SegAssumeTable[NUM_SEGREGS];
 
 struct assume_info StdAssumeTable[NUM_STDREGS];
 
-static struct asm_sym *stdsym[NUM_STDREGS];
+static struct asym *stdsym[NUM_STDREGS];
 
 #if FASTPASS
 static struct assume_info saved_SegAssumeTable[NUM_SEGREGS];
@@ -182,7 +180,7 @@ void ModelAssumeInit( void )
     switch( ModuleInfo.model ) {
     case MOD_FLAT:
 #if AMD64_SUPPORT
-        if ( Options.header_format == HFORMAT_WIN64 )
+        if ( ModuleInfo.header_format == HFORMAT_WIN64 )
             pGSassume = szNothing;
 #endif
         AddLineQueueX( "%r %r:%r,%r:%r,%r:%r,%r:%r,%r:%s,%r:%s",
@@ -195,13 +193,14 @@ void ModelAssumeInit( void )
     case MOD_LARGE:
     case MOD_HUGE:
         /* v2.03: no DGROUP for COFF/ELF */
+#if COFF_SUPPORT || ELF_SUPPORT
         if( Options.output_format == OFORMAT_COFF
 #if ELF_SUPPORT
            || Options.output_format == OFORMAT_ELF
 #endif
           )
             break;
-
+#endif
         if ( ModuleInfo.model == MOD_TINY )
             pCS = szDgroup;
         else
@@ -218,8 +217,8 @@ void ModelAssumeInit( void )
 
 /* used by INVOKE directive */
 
-struct asm_sym * GetStdAssume( int reg )
-/**************************************/
+struct asym *GetStdAssume( int reg )
+/**********************************/
 {
     if ( StdAssumeTable[reg].symbol )
         if ( StdAssumeTable[reg].symbol->mem_type == MT_TYPE )
@@ -233,14 +232,14 @@ struct asm_sym * GetStdAssume( int reg )
  * expression evaluator if a register is used for indirect addressing
  */
 
-struct asm_sym * GetStdAssumeEx( int reg )
-/****************************************/
+struct asym *GetStdAssumeEx( int reg )
+/************************************/
 {
     return( StdAssumeTable[reg].symbol );
 }
 
-ret_code AssumeDirective( int i )
-/*******************************/
+ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
+/************************************************************/
 /* Handles ASSUME
  * syntax is :
  * - ASSUME
@@ -255,7 +254,7 @@ ret_code AssumeDirective( int i )
     int             size;
     uint_32         flags;
     struct assume_info *info;
-    struct asm_sym  *sym;
+    struct asym     *sym;
     bool            segtable;
     struct qualified_type ti;
 
@@ -263,8 +262,8 @@ ret_code AssumeDirective( int i )
 
     for( i++; i < Token_Count; i++ ) {
 
-        if( ( AsmBuffer[i]->token == T_ID )
-            && (0 == _stricmp( AsmBuffer[i]->string_ptr, szNothing )) ) {
+        if( ( tokenarray[i].token == T_ID )
+            && (0 == _stricmp( tokenarray[i].string_ptr, szNothing )) ) {
             AssumeInit();
             i++;
             break;
@@ -273,8 +272,8 @@ ret_code AssumeDirective( int i )
         /*---- get the info ptr for the register ----*/
 
         info = NULL;
-        if ( AsmBuffer[i]->token == T_REG ) {
-            reg = AsmBuffer[i]->value;
+        if ( tokenarray[i].token == T_REG ) {
+            reg = tokenarray[i].tokval;
             j = GetRegNo( reg );
             flags = GetValueSp( reg );
             if ( flags & OP_SR ) {
@@ -286,7 +285,7 @@ ret_code AssumeDirective( int i )
             }
         }
         if ( info == NULL ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
 
@@ -297,20 +296,20 @@ ret_code AssumeDirective( int i )
 
         i++; /* go past register */
 
-        if( AsmBuffer[i]->token != T_COLON ) {
+        if( tokenarray[i].token != T_COLON ) {
             AsmError( COLON_EXPECTED );
             return( ERROR );
         }
         i++;
 
-        if( AsmBuffer[i]->token == T_FINAL ) {
+        if( tokenarray[i].token == T_FINAL ) {
             AsmError( SYNTAX_ERROR );
             return( ERROR );
         }
 
         /* check for ERROR and NOTHING */
 
-        if( 0 == _stricmp( AsmBuffer[i]->string_ptr, szError )) {
+        if( 0 == _stricmp( tokenarray[i].string_ptr, szError )) {
             if ( segtable ) {
                 info->flat = FALSE;
                 info->error = TRUE;
@@ -318,7 +317,7 @@ ret_code AssumeDirective( int i )
                 info->error |= (( reg >= T_AH && reg <= T_BH ) ? RH_ERROR : ( flags & OP_R ));
             info->symbol = NULL;
             i++;
-        } else if( 0 == _stricmp( AsmBuffer[i]->string_ptr, szNothing )) {
+        } else if( 0 == _stricmp( tokenarray[i].string_ptr, szNothing )) {
             if ( segtable ) {
                 info->flat = FALSE;
                 info->error = FALSE;
@@ -336,7 +335,7 @@ ret_code AssumeDirective( int i )
             ti.ptr_memtype = MT_EMPTY;
             ti.symtype = NULL;
             ti.Ofssize = ModuleInfo.Ofssize;
-            if ( GetQualifiedType( &i, &ti ) == ERROR )
+            if ( GetQualifiedType( &i, tokenarray, &ti ) == ERROR )
                 return( ERROR );
 
             /* v2.04: check size of argument! */
@@ -349,7 +348,7 @@ ret_code AssumeDirective( int i )
             info->error &= ~(( reg >= T_AH && reg <= T_BH ) ? RH_ERROR : ( flags & OP_R ));
             if ( stdsym[j] == NULL ) {
                 stdsym[j] = CreateTypeSymbol( NULL, "", FALSE );
-                ((dir_node *)stdsym[j])->e.structinfo->typekind = TYPE_TYPEDEF;
+                ((struct dsym *)stdsym[j])->e.structinfo->typekind = TYPE_TYPEDEF;
             }
 
             stdsym[j]->total_size = ti.size;
@@ -366,18 +365,18 @@ ret_code AssumeDirective( int i )
             info->symbol = stdsym[j];
 
         } else { /* segment register */
-            if( AsmBuffer[i]->token == T_UNARY_OPERATOR &&
-               AsmBuffer[i]->value == T_SEG ) {
+            if( tokenarray[i].token == T_UNARY_OPERATOR &&
+               tokenarray[i].tokval == T_SEG ) {
                 i++;
             }
             /* v2.04: check type of argument. Also allow argument
              * to be another segment register!
              */
-            if ( AsmBuffer[i]->token == T_ID ) {
-                sym = SymLookup( AsmBuffer[i]->string_ptr );
+            if ( tokenarray[i].token == T_ID ) {
+                sym = SymLookup( tokenarray[i].string_ptr );
                 if ( sym == NULL || sym->state == SYM_UNDEFINED ) {
                     if ( Parse_Pass != PASS_1 ) {
-                        AsmErr( SYMBOL_NOT_DEFINED, AsmBuffer[i]->string_ptr );
+                        AsmErr( SYMBOL_NOT_DEFINED, tokenarray[i].string_ptr );
                     }
                     /* ensure that directive is rerun in pass 2
                      * so an error msg can be emitted.
@@ -389,12 +388,12 @@ ret_code AssumeDirective( int i )
                     return( ERROR );
                 }
                 info->flat = FALSE;
-            } else if ( AsmBuffer[i]->token == T_REG &&
-                       ( GetValueSp( AsmBuffer[i]->value ) & OP_SR ) ) {
-                sym = SegAssumeTable[ GetRegNo( AsmBuffer[i]->value ) ].symbol;
-                info->flat = SegAssumeTable[ GetRegNo( AsmBuffer[i]->value ) ].flat;
-            } else if( AsmBuffer[i]->token == T_RES_ID &&
-                      AsmBuffer[i]->value == T_FLAT ) {
+            } else if ( tokenarray[i].token == T_REG &&
+                       ( GetValueSp( tokenarray[i].tokval ) & OP_SR ) ) {
+                sym = SegAssumeTable[ GetRegNo( tokenarray[i].tokval ) ].symbol;
+                info->flat = SegAssumeTable[ GetRegNo( tokenarray[i].tokval ) ].flat;
+            } else if( tokenarray[i].token == T_RES_ID &&
+                      tokenarray[i].tokval == T_FLAT ) {
                 if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
                     AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                     return( ERROR );
@@ -412,11 +411,11 @@ ret_code AssumeDirective( int i )
         }
 
         /* comma expected */
-        if( i < Token_Count && AsmBuffer[i]->token != T_COMMA )
+        if( i < Token_Count && tokenarray[i].token != T_COMMA )
             break;
     }
     if ( i < Token_Count ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->tokpos );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     return( NOT_ERROR );
@@ -432,11 +431,11 @@ ret_code AssumeDirective( int i )
  *   DS, SS, ES, FS, GS, CS
  */
 
-enum assume_segreg search_assume( struct asm_sym *sym,
+enum assume_segreg search_assume( const struct asym *sym,
                   enum assume_segreg def, bool search_grps )
 /**********************************************************/
 {
-    asm_sym *grp;
+    struct asym *grp;
 
     if( sym == NULL )
         return( ASSUME_NOTHING );
@@ -483,11 +482,11 @@ enum assume_segreg search_assume( struct asm_sym *sym,
  - override: segment register override (0,1,2,3,4,5)
 */
 
-asm_sym *GetOverrideAssume( enum assume_segreg override )
-/*******************************************************/
+struct asym *GetOverrideAssume( enum assume_segreg override )
+/***********************************************************/
 {
     if( SegAssumeTable[override].flat ) {
-        return( (asm_sym *)ModuleInfo.flat_grp );
+        return( (struct asym *)ModuleInfo.flat_grp );
     }
     return( SegAssumeTable[override].symbol);
 
@@ -500,13 +499,13 @@ asm_sym *GetOverrideAssume( enum assume_segreg override )
  * def: default segment assume value
  */
 
-enum assume_segreg GetAssume( struct asm_sym *override, struct asm_sym *sym, enum assume_segreg def, asm_sym * *passume )
-/***********************************************************************************************************************/
+enum assume_segreg GetAssume( const struct asym *override, const struct asym *sym, enum assume_segreg def, struct asym * *passume )
+/*********************************************************************************************************************/
 {
     enum assume_segreg  reg;
 
     if( ( def != ASSUME_NOTHING ) && SegAssumeTable[def].flat ) {
-        *passume = (asm_sym *)ModuleInfo.flat_grp;
+        *passume = (struct asym *)ModuleInfo.flat_grp;
         return( def );
     }
     if( override != NULL ) {

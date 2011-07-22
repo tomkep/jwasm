@@ -13,9 +13,7 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "fixup.h"
 #include "omfspec.h"
 #include "bin.h"
@@ -26,7 +24,7 @@
 
 #define SECTORMAP 1 /* 1=print sector map in listing file */
 
-//extern struct asm_sym   symPC; /* '$' symbol */
+//extern struct asym   symPC; /* '$' symbol */
 
 #if MZ_SUPPORT
 struct MZDATA mzdata = {0x1E, 0x10, 0, 0xFFFF };
@@ -34,7 +32,7 @@ struct MZDATA mzdata = {0x1E, 0x10, 0, 0xFFFF };
 
 static uint_32 fileoffset;
 static uint_32 entryoffset;
-static asm_sym *entryseg;
+static struct asym *entryseg;
 static uint_32 sizehdr;  /* size of MZ header, always 0 for BIN */
 static uint_32 imagestart;
 
@@ -55,7 +53,7 @@ static const char * const szTotal   = "%-42s %9X %9X";
  4. uninitialized data
  5. stack
  */
-static const seg_type typeorder[] = {
+static const enum seg_type typeorder[] = {
     SEGTYPE_CODE, SEGTYPE_UNDEF, SEGTYPE_DATA,
     SEGTYPE_BSS, SEGTYPE_STACK, SEGTYPE_ABS, SEGTYPE_ERROR
 };
@@ -88,13 +86,13 @@ void SortSegments( void )
 {
     bool changed = TRUE;
     bool swap;
-    dir_node *curr;
+    struct dsym *curr;
     int index = 1;
 
     while ( changed == TRUE ) {
-        dir_node *prev = NULL;
+        struct dsym *prev = NULL;
         changed = FALSE;
-        for( curr = Tables[TAB_SEG].head; curr && curr->next ; prev = curr, curr = curr->next ) {
+        for( curr = SymTables[TAB_SEG].head; curr && curr->next ; prev = curr, curr = curr->next ) {
             swap = FALSE;
             if ( ModuleInfo.segorder == SEGORDER_DOSSEG ) {
                 if ( curr->e.seginfo->fileoffset > curr->next->e.seginfo->fileoffset )
@@ -104,10 +102,10 @@ void SortSegments( void )
                     swap = TRUE;
             }
             if ( swap ) {
-                dir_node *tmp = curr->next;
+                struct dsym *tmp = curr->next;
                 changed = TRUE;
                 if (prev == NULL) {
-                    Tables[TAB_SEG].head = tmp;
+                    SymTables[TAB_SEG].head = tmp;
                 } else {
                     prev->next = tmp;
                 }
@@ -116,20 +114,20 @@ void SortSegments( void )
             }
         }
     }
-    for ( curr = Tables[TAB_SEG].head; curr ; curr = curr->next ) {
+    for ( curr = SymTables[TAB_SEG].head; curr ; curr = curr->next ) {
         curr->e.seginfo->idx = index++;
     }
 }
 
 /* calculate starting offset of segments and groups */
 
-static void CalcOffset( dir_node *curr, bool firstseg )
-/*****************************************************/
+static void CalcOffset( struct dsym *curr, bool firstseg )
+/********************************************************/
 {
     uint_32 align;
     uint_32 alignbytes;
     uint_32 offset;
-    dir_node *grp;
+    struct dsym *grp;
 
     if ( curr->e.seginfo->segtype == SEGTYPE_ABS ) {
         curr->e.seginfo->start_offset = curr->e.seginfo->abs_frame << 4;
@@ -138,7 +136,7 @@ static void CalcOffset( dir_node *curr, bool firstseg )
         return;
     }
 
-    grp = (dir_node *)curr->e.seginfo->group;
+    grp = (struct dsym *)curr->e.seginfo->group;
     align = 1 << curr->e.seginfo->alignment;
     //alignbytes = ((offset + (align - 1)) & (-align)) - offset;
     alignbytes = ((fileoffset + (align - 1)) & (-align)) - fileoffset;
@@ -174,8 +172,8 @@ static void CalcOffset( dir_node *curr, bool firstseg )
     }
 
     curr->e.seginfo->fileoffset = fileoffset;
-    //if ( firstseg && Options.header_format == HFORMAT_NONE ) {
-    if ( Options.header_format == HFORMAT_NONE ) {
+    //if ( firstseg && ModuleInfo.header_format == HFORMAT_NONE ) {
+    if ( ModuleInfo.header_format == HFORMAT_NONE ) {
         fileoffset += curr->sym.max_offset - curr->e.seginfo->start_loc;
         if ( firstseg )
             imagestart = curr->e.seginfo->start_loc;
@@ -192,7 +190,7 @@ static void CalcOffset( dir_node *curr, bool firstseg )
      start label must be at the very beginning of the file */
     if (entryoffset == -1) {
         entryoffset = offset;
-        entryseg = (asm_sym *)curr;
+        entryseg = (struct asym *)curr;
     }
     //offset += curr->sym.max_offset - curr->e.seginfo->start_loc;
     offset += curr->sym.max_offset;
@@ -216,7 +214,7 @@ static void CalcOffset( dir_node *curr, bool firstseg )
 static int GetSegRelocs( uint_16 *pDst )
 /**************************************/
 {
-    dir_node *curr;
+    struct dsym *curr;
     int count = 0;
     uint_16 valueofs;
     uint_16 valueseg;
@@ -224,7 +222,7 @@ static int GetSegRelocs( uint_16 *pDst )
     struct fixup *fixup;
 
     DebugMsg(("GetSegRelocs( %p ) enter\n", pDst ));
-    for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+    for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
             continue;
         for ( fixup = curr->e.seginfo->FixupListHead; fixup; fixup = fixup->nextrlc ) {
@@ -233,7 +231,7 @@ static int GetSegRelocs( uint_16 *pDst )
             case FIX_PTR16:
             case FIX_SEG:
                 /* ignore fixups for absolute segments */
-                if ( fixup->sym && fixup->sym->segment && ((dir_node *)fixup->sym->segment)->e.seginfo->segtype == SEGTYPE_ABS )
+                if ( fixup->sym && fixup->sym->segment && ((struct dsym *)fixup->sym->segment)->e.seginfo->segtype == SEGTYPE_ABS )
                     break;
                 DebugMsg(("GetSegRelocs: found seg-related fixup at %s.%" FX32 "\n", curr->sym.name, fixup->location ));
                 count++;
@@ -280,18 +278,18 @@ static int GetSegRelocs( uint_16 *pDst )
 static uint_32 GetImageSize( bool memimage )
 /******************************************/
 {
-    dir_node *curr;
+    struct dsym *curr;
     bool first;
     uint_32 vsize = 0;
     uint_32 size = 0;
 
-    for( curr = Tables[TAB_SEG].head, first = TRUE; curr; curr = curr->next ) {
+    for( curr = SymTables[TAB_SEG].head, first = TRUE; curr; curr = curr->next ) {
         uint_32 tmp;
         if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
             continue;
         if ( memimage == FALSE ) {
             if ( curr->e.seginfo->bytes_written == 0 ) {
-                dir_node *dir;
+                struct dsym *dir;
                 for ( dir = curr->next; dir; dir = dir->next )
                     if ( dir->e.seginfo->bytes_written )
                         break;
@@ -326,11 +324,11 @@ union genptr {
 #endif
 };
 
-static ret_code DoFixup( dir_node *curr )
-/***************************************/
+static ret_code DoFixup( struct dsym *curr )
+/******************************************/
 {
     union genptr codeptr;
-    dir_node *seg;
+    struct dsym *seg;
     uint_32 value;
     struct fixup *fixup;
 
@@ -343,12 +341,12 @@ static ret_code DoFixup( dir_node *curr )
             ( fixup->location - curr->e.seginfo->start_loc );
         /* assembly time variable (also $ symbol) in reloc? */
         if ( fixup->sym && fixup->sym->variable ) {
-            seg = (dir_node *)fixup->segment;
+            seg = (struct dsym *)fixup->segment;
             value = seg->e.seginfo->start_offset + fixup->offset;
             DebugMsg(("DoFixup(%s, %04" FX32 ", %s): variable, fixup->segment=%Xh fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
                       curr->sym.name, fixup->location, fixup->sym->name, seg, fixup->offset, fixup->sym->offset ));
         } else if ( fixup->sym && fixup->sym->segment ) {
-            seg = (dir_node *)fixup->sym->segment;
+            seg = (struct dsym *)fixup->sym->segment;
             /* the offset result consists of
              * - the symbol's offset
              * - the fixup's offset (usually the displacement )
@@ -366,8 +364,8 @@ static ret_code DoFixup( dir_node *curr )
                 value = ( fixup->offset + fixup->sym->offset ) - seg->e.seginfo->start_loc;
                 if ( tmp = strchr( seg->sym.name, '$' ) ) {
                     int namlen = tmp - seg->sym.name;
-                    dir_node *segfirst;
-                    for( segfirst = Tables[TAB_SEG].head; segfirst; segfirst = segfirst->next ) {
+                    struct dsym *segfirst;
+                    for( segfirst = SymTables[TAB_SEG].head; segfirst; segfirst = segfirst->next ) {
                         if ( segfirst->sym.name_size == namlen &&
                             ( memcmp( segfirst->sym.name, seg->sym.name, namlen ) == 0 ) ) {
                             value = ( fixup->offset + fixup->sym->offset + seg->e.seginfo->start_offset ) - segfirst->e.seginfo->start_offset;
@@ -390,7 +388,7 @@ static ret_code DoFixup( dir_node *curr )
             DebugMsg(("DoFixup(%s, %04" FX32 ", %s): target->start_offset=%" FX32 "h, fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
                       curr->sym.name, fixup->location, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, fixup->sym->offset ));
         } else {
-            seg = (dir_node *)fixup->segment;
+            seg = (struct dsym *)fixup->segment;
             DebugMsg(("DoFixup(%s, %04" FX32 ", %s): target segment=0, fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
                       curr->sym.name, fixup->location, fixup->sym ? fixup->sym->name : "", fixup->offset, fixup->sym ? fixup->sym->offset : 0 ));
             value = 0;
@@ -454,20 +452,20 @@ static ret_code DoFixup( dir_node *curr )
             /* absolute segments are ok */
             if ( fixup->sym &&
                 fixup->sym->state == SYM_SEG &&
-                ((dir_node *)fixup->sym)->e.seginfo->segtype == SEGTYPE_ABS ) {
-                *codeptr.dw = ((dir_node *)fixup->sym)->e.seginfo->abs_frame;
+                ((struct dsym *)fixup->sym)->e.seginfo->segtype == SEGTYPE_ABS ) {
+                *codeptr.dw = ((struct dsym *)fixup->sym)->e.seginfo->abs_frame;
                 break;
             }
 #if MZ_SUPPORT
-            if ( Options.header_format == HFORMAT_MZ ) {
+            if ( ModuleInfo.header_format == HFORMAT_MZ ) {
                 DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_SEG frame=%u, ", curr->sym.name, fixup->location, fixup->frame_type ));
                 if ( fixup->sym->state == SYM_GRP ) {
-                    seg = (dir_node *)fixup->sym;
+                    seg = (struct dsym *)fixup->sym;
                     *codeptr.dw = seg->sym.offset >> 4;
                     DebugMsg(("GROUP symbol, offset=%" FX32 "h codeptr=%p\n", seg->sym.offset, codeptr ));
                 } else if ( fixup->sym->state == SYM_SEG ) {
                     /* v2.04: added */
-                    seg = (dir_node *)fixup->sym;
+                    seg = (struct dsym *)fixup->sym;
                     *codeptr.dw = ( seg->e.seginfo->start_offset + ( seg->e.seginfo->group ? seg->e.seginfo->group->offset : 0 ) ) >> 4;
                     DebugMsg(("SEGMENT symbol, start_offset=%" FX32 "h\n", seg->e.seginfo->start_offset ));
                 //} else if ( seg->e.seginfo->group ) {
@@ -485,7 +483,7 @@ static ret_code DoFixup( dir_node *curr )
 #endif
         case FIX_PTR16:
 #if MZ_SUPPORT
-            if ( Options.header_format == HFORMAT_MZ ) {
+            if ( ModuleInfo.header_format == HFORMAT_MZ ) {
                 DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_PTR16, seg->start=%Xh\n", curr->sym.name, fixup->location, seg->e.seginfo->start_offset ));
                 *codeptr.dw = value & 0xffff;
                 codeptr.dw++;
@@ -504,7 +502,7 @@ static ret_code DoFixup( dir_node *curr )
 #endif
         case FIX_PTR32:
 #if MZ_SUPPORT
-            if ( Options.header_format == HFORMAT_MZ ) {
+            if ( ModuleInfo.header_format == HFORMAT_MZ ) {
                 DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_PTR32\n", curr->sym.name, fixup->location ));
                 *codeptr.dd = value;
                 codeptr.dd++;
@@ -534,18 +532,18 @@ static ret_code DoFixup( dir_node *curr )
  * this is done after the last step only!
  */
 
-ret_code bin_write_data( module_info *ModuleInfo )
-/************************************************/
+ret_code bin_write_data( struct module_info *ModuleInfo )
+/*************************************š*****************/
 {
-    dir_node *curr;
+    struct dsym *curr;
     uint_32 size;
     uint_32 sizetotal;
-    const seg_type *segtype;
+    const enum seg_type *segtype;
     bool first = TRUE;
 #if MZ_SUPPORT
     uint_16 reloccnt;
     uint_32 sizemem;
-    dir_node *stack = NULL;
+    struct dsym *stack = NULL;
     uint_16 *pReloc;
     uint_32 sizeheap;
     uint_8  *hdrbuf;
@@ -553,7 +551,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
     DebugMsg(("bin_write_data: enter\n" ));
 
-    for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+    for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         /* reset the offset fields of segments */
         /* it was used to store the size in there */
         curr->e.seginfo->start_offset = 0;
@@ -564,7 +562,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
     fileoffset = 0;
     sizehdr = 0;
 #if MZ_SUPPORT
-    if ( Options.header_format == HFORMAT_MZ ) {
+    if ( ModuleInfo->header_format == HFORMAT_MZ ) {
         reloccnt = GetSegRelocs( NULL );
         sizehdr = (reloccnt * 4 + mzdata.ofs_fixups + (mzdata.alignment - 1)) & ~(mzdata.alignment-1);
         hdrbuf = AsmAlloc( sizehdr );
@@ -583,7 +581,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
         /* for .DOSSEG, regroup segments (CODE, UNDEF, DATA, BSS) */
         for ( segtype = typeorder; *segtype != SEGTYPE_ERROR; segtype++ ) {
             DebugMsg(("bin_write_data: searching segment types %Xh\n", *segtype ));
-            for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+            for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
                 if (curr->e.seginfo->segtype != *segtype)
                     continue;
                 CalcOffset( curr, first );
@@ -599,7 +597,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
             DebugMsg(("bin_write_data: .ALPHA active\n" ));
             SortSegments();
         }
-        for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+        for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
             /* ignore absolute segments */
             CalcOffset( curr, first );
             if ( curr->e.seginfo->segtype != SEGTYPE_ABS )
@@ -611,7 +609,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
     DebugMsg(("bin_write_data: all CalcOffset() done\n" ));
 
     /* handle relocs */
-    for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+    for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         /* v2.04: scan ALL fixups! */
         //if ( DoFixup( curr ) == ERROR )
         //    return( ERROR );
@@ -628,7 +626,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
     /* for plain binaries make sure the start label is at
      * the beginning of the first segment */
-    if ( Options.header_format == HFORMAT_NONE ) {
+    if ( ModuleInfo->header_format == HFORMAT_NONE ) {
         if ( ModuleInfo->start_label ) {
             if ( entryoffset == -1 || entryseg != ModuleInfo->start_label->segment ) {
                 AsmError( START_LABEL_INVALID );
@@ -643,7 +641,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
     /* for MZ format, initialize the header */
 
-    if ( Options.header_format == HFORMAT_MZ ) {
+    if ( ModuleInfo->header_format == HFORMAT_MZ ) {
         /* set fields in MZ header */
         pReloc = (uint_16 *)(hdrbuf);
         *(pReloc+0) = 'M' + ('Z' << 8);
@@ -678,7 +676,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
         if ( ModuleInfo->start_label ) {
             uint_32 addr;
-            curr = (dir_node *)ModuleInfo->start_label->segment;
+            curr = (struct dsym *)ModuleInfo->start_label->segment;
             DebugMsg(("bin_write_data, start_label: offs=%" FX32 "h, seg.offs=%" FX32 "h, group.offs=%" FX32 "h\n",
                       ModuleInfo->start_label->offset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset : 0 ));
             if ( curr->e.seginfo->group ) {
@@ -703,8 +701,8 @@ ret_code bin_write_data( module_info *ModuleInfo )
 
 #if SECTORMAP
     /* go to EOF */
-    if( AsmFile[LST] ) {
-        fseek( AsmFile[LST], 0, SEEK_END );
+    if( CurrFile[LST] ) {
+        fseek( CurrFile[LST], 0, SEEK_END );
         LstNL();
         LstNL();
         LstPrintf( szCaption );
@@ -717,8 +715,8 @@ ret_code bin_write_data( module_info *ModuleInfo )
     }
 #endif
 
-    if ( Options.header_format == HFORMAT_MZ ) {
-        if ( fwrite( hdrbuf, 1, sizehdr, AsmFile[OBJ] ) != sizehdr )
+    if ( ModuleInfo->header_format == HFORMAT_MZ ) {
+        if ( fwrite( hdrbuf, 1, sizehdr, CurrFile[OBJ] ) != sizehdr )
             WriteError();
 #if SECTORMAP
         LstPrintf( szSegLine, szHeader, 0, 0, sizehdr, 0 );
@@ -727,7 +725,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
     }
 
 #ifdef DEBUG_OUT
-    for( curr = Tables[TAB_SEG].head; curr; curr = curr->next ) {
+    for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         DebugMsg(("bin_write_data(%s): type=%u written=%" FX32 " max=%" FX32 " start=%" FX32 " fileofs=%" FX32 "\n",
                 curr->sym.name, curr->e.seginfo->segtype,
                 curr->e.seginfo->bytes_written,
@@ -738,7 +736,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
 #endif
 
     /* write sections */
-    for( curr = Tables[TAB_SEG].head, first = TRUE; curr; curr = curr->next ) {
+    for( curr = SymTables[TAB_SEG].head, first = TRUE; curr; curr = curr->next ) {
         if ( curr->e.seginfo->segtype == SEGTYPE_ABS ) {
             DebugMsg(("bin_write_data(%s): ABS segment not written\n", curr->sym.name ));
             continue;
@@ -750,7 +748,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
         /* if no bytes have been written to the segment, check if there's
          * any further segments with bytes set. If no, skip write! */
         if ( curr->e.seginfo->bytes_written == 0 ) {
-            dir_node *dir;
+            struct dsym *dir;
             for ( dir = curr->next; dir; dir = dir->next )
                 if ( dir->e.seginfo->bytes_written )
                     break;
@@ -769,12 +767,12 @@ ret_code bin_write_data( module_info *ModuleInfo )
         if (size != 0 && curr->e.seginfo->CodeBuffer ) {
             DebugMsg(("bin_write_data(%s): write %" FX32 "h bytes at offset %" FX32 "h, initialized bytes=%lu, buffer=%p\n",
                       curr->sym.name, size, curr->e.seginfo->fileoffset, curr->e.seginfo->bytes_written, curr->e.seginfo->CodeBuffer ));
-            fseek( AsmFile[OBJ], curr->e.seginfo->fileoffset, SEEK_SET );
+            fseek( CurrFile[OBJ], curr->e.seginfo->fileoffset, SEEK_SET );
 #ifdef __I86__
-            if ( hfwrite( curr->e.seginfo->CodeBuffer, 1, size, AsmFile[OBJ] ) != size )
+            if ( hfwrite( curr->e.seginfo->CodeBuffer, 1, size, CurrFile[OBJ] ) != size )
                 WriteError();
 #else
-            if ( fwrite( curr->e.seginfo->CodeBuffer, 1, size, AsmFile[OBJ] ) != size )
+            if ( fwrite( curr->e.seginfo->CodeBuffer, 1, size, CurrFile[OBJ] ) != size )
                 WriteError();
 #endif
         }
@@ -787,7 +785,7 @@ ret_code bin_write_data( module_info *ModuleInfo )
     LstPrintf( szLine );
     LstNL();
 #if MZ_SUPPORT
-    if ( Options.header_format == HFORMAT_MZ )
+    if ( ModuleInfo->header_format == HFORMAT_MZ )
         sizeheap += sizetotal - sizehdr;
     else
 #endif

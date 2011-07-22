@@ -12,27 +12,25 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "segment.h"
 #include "fixup.h"
 #include "omf.h"
-#include "tokenize.h"
+#include "input.h"
 #include "coff.h"
 #include "dbgcv.h"
 
 #if COFF_SUPPORT
-extern qdesc DebugS;
-extern qdesc DebugT;
+extern struct qdesc DebugS;
+extern struct qdesc DebugT;
 #endif
 
 static uint_16 currtype; /* index user defined types */
 
-typedef union {
+union cv_typeref_u {
     struct cv_primitive_type s;
     uint_16 uvalue;
-} cv_typeref_u;
+};
 
 extern const char szCVCompiler[];
 
@@ -40,10 +38,10 @@ extern const char szCVCompiler[];
 
 /* translate symbol's mem_type to a codeview typeref */
 
-static uint_16 GetTyperef( struct asm_sym *sym, uint_8 Ofssize )
-/**************************************************************/
+static uint_16 GetTyperef( struct asym *sym, uint_8 Ofssize )
+/***********************************************************/
 {
-    cv_typeref_u value = { CV_PDS_SPECIAL_NO_TYPE, 0, CV_PDT_SPECIAL, CV_PDM_DIRECT, 0 };
+    union cv_typeref_u value = { CV_PDS_SPECIAL_NO_TYPE, 0, CV_PDT_SPECIAL, CV_PDM_DIRECT, 0 };
     int size = SizeFromMemtype( sym->mem_type, Ofssize, sym->type );
 
     if ( ( sym->mem_type & MT_SPECIAL ) == 0 && sym->mem_type != MT_FWORD ) {
@@ -91,8 +89,8 @@ static uint_16 GetTyperef( struct asm_sym *sym, uint_8 Ofssize )
 
 /* calc size of a codeview item in symbols segment */
 
-static uint_16 GetCVStructLen( struct asm_sym *sym, uint_8 Ofssize )
-/******************************************************************/
+static uint_16 GetCVStructLen( struct asym *sym, uint_8 Ofssize )
+/***************************************************************/
 {
     uint_16 len;
     switch ( sym->state ) {
@@ -134,8 +132,8 @@ static uint_16 GetCVStructLen( struct asm_sym *sym, uint_8 Ofssize )
  * later be written inside coff_write_header().
  */
 
-static uint_8 *checkflush( struct dir_node *seg, uint_8 *buffer, uint_8 *curr, int size )
-/***************************************************************************************/
+static uint_8 *checkflush( struct dsym *seg, uint_8 *buffer, uint_8 *curr, int size )
+/***********************************************************************************/
 {
 #if COFF_SUPPORT
     uint_8 *p;
@@ -186,10 +184,10 @@ static void PadBytes( uint_8 *curr, uint_8 *base )
         *curr++ = padtab[3-((curr - base) & 3)];
 }
 
-static unsigned GetFieldListSize( dir_node *type )
-/************************************************/
+static unsigned GetFieldListSize( struct dsym *type )
+/***************************************************/
 {
-    field_list  *curr;
+    struct field_item  *curr;
     unsigned    size = 0;
     unsigned    numsize;
     for ( curr = type->e.structinfo->head; curr; curr = curr->next ) {
@@ -204,8 +202,8 @@ static unsigned GetFieldListSize( dir_node *type )
 
 /* write a bitfield to $$TYPES */
 
-static uint_8 * cv_write_bitfield( dir_node *types, dir_node *type, struct asm_sym *sym, uint_8 *pt )
-/***************************************************************************************************/
+static uint_8 * cv_write_bitfield( struct dsym *types, struct dsym *type, struct asym *sym, uint_8 *pt )
+/******************************************************************************************************/
 {
     pt = checkflush( types, (uint_8 *)CurrSource, pt, sizeof( struct cv_typerec_bitfield ) );
     sym->cv_typeref = currtype++;
@@ -213,7 +211,7 @@ static uint_8 * cv_write_bitfield( dir_node *types, dir_node *type, struct asm_s
     ((struct cv_typerec_bitfield *)pt)->tr.leaf = LF_BITFIELD;
     ((struct cv_typerec_bitfield *)pt)->length = sym->total_size;
     ((struct cv_typerec_bitfield *)pt)->position = sym->offset;
-    ((struct cv_typerec_bitfield *)pt)->type = GetTyperef( (struct asm_sym *)type, USE16 );
+    ((struct cv_typerec_bitfield *)pt)->type = GetTyperef( (struct asym *)type, USE16 );
     pt += sizeof ( struct cv_typerec_bitfield );
     return( pt );
 }
@@ -224,12 +222,12 @@ static uint_8 * cv_write_bitfield( dir_node *types, dir_node *type, struct asm_s
 
 /* write a type to $$TYPES. Items are dword-aligned */
 
-static uint_8 * cv_write_type( dir_node *types, struct asm_sym *sym, uint_8 *pt )
+static uint_8 * cv_write_type( struct dsym *types, struct asym *sym, uint_8 *pt )
 /*******************************************************************************/
 {
-    dir_node    *type = (dir_node *)sym;
+    struct dsym *type = (struct dsym *)sym;
     uint_8      *tmp;
-    field_list  *curr;
+    struct field_item  *curr;
     int         typelen = 0;
     int         i;
     int         size;
@@ -348,7 +346,7 @@ static uint_8 * cv_write_type( dir_node *types, struct asm_sym *sym, uint_8 *pt 
 
 /* write a symbol to $$SYMBOLS */
 
-static uint_8 * cv_write_symbol( dir_node *symbols, struct asm_sym *sym, uint_8 *ps, uint_8 *sbuffer )
+static uint_8 * cv_write_symbol( struct dsym *symbols, struct asym *sym, uint_8 *ps, uint_8 *sbuffer )
 /****************************************************************************************************/
 {
     int        len;
@@ -364,7 +362,7 @@ static uint_8 * cv_write_symbol( dir_node *symbols, struct asm_sym *sym, uint_8 
     case SYM_TYPE:
         ((struct cv_symrec_udt *)ps)->sr.size = sizeof( struct cv_symrec_udt ) - sizeof(uint_16) + 1 + sym->name_size;
         ((struct cv_symrec_udt *)ps)->sr.type = S_UDT;
-        if ( ((dir_node *)sym)->e.structinfo->typekind != TYPE_TYPEDEF ) {
+        if ( ((struct dsym *)sym)->e.structinfo->typekind != TYPE_TYPEDEF ) {
             ((struct cv_symrec_udt *)ps)->typeref = sym->cv_typeref;
         } else {
             ((struct cv_symrec_udt *)ps)->typeref = GetTyperef( sym, Ofssize );
@@ -465,20 +463,24 @@ static uint_8 * cv_write_symbol( dir_node *symbols, struct asm_sym *sym, uint_8 
     if ( rectype != FIX_VOID ) {
         ps += ofs;
         symbols->e.seginfo->current_loc = symbols->e.seginfo->start_loc + (ps - sbuffer);
+#if COFF_SUPPORT
         if ( rectype == FIX_PTR32 && Options.output_format == OFORMAT_COFF ) {
             /* COFF has no "far" fixups. Instead Masm creates a
              * section-relative fixup + a section fixup.
              */
-            fixup = AddFixup( sym, FIX_OFF32_SECREL, OPTJ_NONE );
+            fixup = CreateFixup( sym, FIX_OFF32_SECREL, OPTJ_NONE );
             store_fixup( fixup, (int_32 *)ps );
-            fixup = AddFixup( sym, FIX_SEG, OPTJ_NONE );
+            fixup = CreateFixup( sym, FIX_SEG, OPTJ_NONE );
             fixup->location += sizeof (int_32 );
             store_fixup( fixup, (int_32 *)ps );
         } else {
-            fixup = AddFixup( sym, rectype, OPTJ_NONE );
+#endif
+            fixup = CreateFixup( sym, rectype, OPTJ_NONE );
             /* todo: for OMF, delay fixup store until checkflush has been called! */
             store_fixup( fixup, (int_32 *)ps );
+#if COFF_SUPPORT
         }
+#endif
         ps += len - ofs;
     } else
         ps += len;
@@ -493,11 +495,11 @@ static uint_8 * cv_write_symbol( dir_node *symbols, struct asm_sym *sym, uint_8 
      */
 
     if ( sym->isproc ) {
-        dir_node *proc = (dir_node *)sym;
-        dir_node  *lcl;
+        struct dsym *proc = (struct dsym *)sym;
+        struct dsym *lcl;
 
         /* scan local symbols */
-        for ( lcl = proc->e.procinfo->labellist; lcl; lcl = lcl->nextll ) {
+        for ( lcl = proc->e.procinfo->labellist; lcl; lcl = lcl->e.nextll ) {
             len = GetCVStructLen( &lcl->sym, Ofssize );
             ps = checkflush( symbols, sbuffer, ps, 1 + lcl->sym.name_size + len );
             switch ( lcl->sym.state ) {
@@ -536,10 +538,10 @@ static uint_8 * cv_write_symbol( dir_node *symbols, struct asm_sym *sym, uint_8 
  * which is to be generated (CV4_SIGNATURE, CV8_SIGNATURE)
  */
 
-void cv_write_debug_tables( dir_node *symbols, dir_node *types )
-/**************************************************************/
+void cv_write_debug_tables( struct dsym *symbols, struct dsym *types )
+/********************************************************************/
 {
-    struct asm_sym *sym;
+    struct asym *sym;
     int        i;
     int        len;
     uint_8     *pt;
@@ -586,7 +588,7 @@ void cv_write_debug_tables( dir_node *symbols, dir_node *types )
     ps += sizeof(uint_32);
 
     /* 1. record: object name */
-    objname = AsmFName[OBJ];
+    objname = CurrFName[OBJ];
     for ( i = strlen( objname ); i; i-- )
         if ( *(objname+i-1) == '/' || *(objname+i-1) == '\\' )
             break;

@@ -25,12 +25,22 @@
 *  ========================================================================
 *
 * Description:  Assembler message output interface.
+*               This file is included by globals.h.
 *
 ****************************************************************************/
 
 
 #ifndef _ERRMSG_H_INCLUDED
 #define _ERRMSG_H_INCLUDED
+
+/* error IDs */
+#undef pick
+#define pick( code, text )  code,
+enum msgno {
+#include "msgdef.h"
+    MSG_LAST
+};
+#undef pick
 
 #ifdef DEBUG_OUT
     extern void DoDebugMsg( const char *format, ... );
@@ -57,13 +67,6 @@ extern void AsmErr( int msgnum, ... );
 extern void AsmWarn( int level, int msgnum, ... );
 extern void PrintNote( int msgnum, ... );
 
-#undef pick
-#define pick( code, string_eng, string_jap )  code,
-
-enum msgno {
-#include "msgdef.h"
-    MSG_LAST
-};
 
 #define MAXMSGSIZE 128 /* size of buffer for MsgGet() */
 

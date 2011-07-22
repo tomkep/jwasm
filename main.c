@@ -38,8 +38,8 @@
 #endif
 #endif
 
-static void genfailure(int signo)
-/*******************************/
+static void genfailure( int signo )
+/*********************************/
 {
 #if CATCHBREAK
     if (signo != SIGBREAK)
@@ -48,7 +48,7 @@ static void genfailure(int signo)
 #endif
         AsmError( GENERAL_FAILURE );
     close_files();
-    exit ( EXIT_FAILURE );
+    exit( EXIT_FAILURE );
 }
 
 int main( int argc, char **argv )
@@ -68,7 +68,7 @@ int main( int argc, char **argv )
 
 #if 0 //def DEBUG_OUT    /* DebugMsg() cannot be used that early */
     int i;
-    for (i = 1; i < argc; i++ ) {
+    for ( i = 1; i < argc; i++ ) {
         printf("argv[%u]=>%s<\n", i, argv[i] );
     }
 #endif
@@ -94,7 +94,7 @@ int main( int argc, char **argv )
         if ( ParseCmdline( (const char **)argv, &numArgs ) == NULL )
             break;  /* exit if no source file name supplied */
         numFiles++;
-        trademark();
+        write_logo();
 #if WILDCARDS
         if ((fh = _findfirst( Options.names[ASM], &finfo )) == -1 ) {
             DebugMsg(("main: _findfirst(%s) failed\n", Options.names[ASM] ));
@@ -113,7 +113,7 @@ int main( int argc, char **argv )
     };
     CmdlineFini();
     if ( numArgs == 0 ) {
-        trademark();
+        write_logo();
         printf( MsgGetEx( MSG_USAGE ) );
     } else if ( numFiles == 0 )
         AsmError( NO_FILENAME_SPECIFIED );

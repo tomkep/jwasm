@@ -24,7 +24,8 @@
 *
 *  ========================================================================
 *
-* Description:  uint and int type declarations
+* Description:  uint and int type declarations.
+*               This file is included by globals.h
 *
 ****************************************************************************/
 
@@ -50,7 +51,11 @@ typedef unsigned long long uint_64;
 typedef   signed long long int_64;
 #else
 typedef unsigned __int64  uint_64;
+#ifdef __OCC__
+typedef          __int64  int_64;
+#else
 typedef   signed __int64  int_64;
+#endif
 #endif
 #endif
 

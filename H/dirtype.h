@@ -1,31 +1,35 @@
 /* DRT_ values ( directive types ) */
-/* group CONDDIR - INCLUDE must be first, INCLUDE the last of them. */
-res( CONDDIR,   CondAsmDirective ) /* pp conditional assembly directive (IF, ELSE, ...) */
-res( LOOPDIR,   LoopDirective )    /* pp loop directive (FOR, REPEAT, WHILE, ...) */
-res( PURGE,     PurgeDirective )   /* pp PURGE directive */
-res( INCLUDE,   IncludeDirective ) /* pp INCLUDE directive */
-res( MACRO,     NULL ) /* pp MACRO directive */
-res( CATSTR,    NULL ) /* pp TEXTEQU, CATSTR directives */
-res( SUBSTR,    NULL ) /* pp SUBSTR directive */
-res( MACINT,    NULL ) /* "macro" directives EXITM, ENDM, GOTO */
-res( DATADIR,   NULL ) /* data definition directives DB, DW, DD, ... */
+/* items CONDDIR ... INCLUDE must be first, INCLUDE the last of them.
+ * DATADIR must be the first non-preprocessor directive!
+ */
+res( CONDDIR,   CondAsmDirective ) /* conditional assembly directive (IF, ELSE, ...) */
+res( LOOPDIR,   LoopDirective )    /* loop directive (FOR, REPEAT, WHILE, ...) */
+res( PURGE,     PurgeDirective )   /* PURGE directive */
+res( INCLUDE,   IncludeDirective ) /* INCLUDE directive */
+res( MACRO,     MacroDir )         /* MACRO directive */
+res( CATSTR,    CatStrDir )        /* TEXTEQU + CATSTR directives */
+res( SUBSTR,    SubStrDir )        /* SUBSTR directive */
+res( MACINT,    StubDir )          /* "internal macro" directives EXITM, ENDM, GOTO */
+/* non-preprocessor directives */
+res( DATADIR,   StubDir )          /* "data" directives DB, DW, DD, ... */
 res( END,       EndDirective )
-res( ERRDIR,    ErrorDirective ) /* v2.05: no longer preprocessor directives */
-res( CPU,       cpu_directive )
+res( ERRDIR,    ErrorDirective )   /* v2.05: no longer preprocessor directives */
+res( CPU,       CpuDirective )
 res( LISTING,   ListingDirective )
+res( LISTMAC,   ListMacroDirective )
 res( SEGORDER,  SegOrderDirective )
 res( SIMSEG,    SimplifiedSegDir )
-res( HLLSTART,  HllStartDef )
-res( HLLEXIT,   HllExitDef )
-res( HLLEND,    HllEndDef )
+res( HLLSTART,  HllStartDir )
+res( HLLEXIT,   HllExitDir )
+res( HLLEND,    HllEndDir )
 res( STARTEXIT, StartupExitDirective )
 res( MODEL,     ModelDirective )
 res( RADIX,     RadixDirective )
 #if COFF_SUPPORT
 res( SAFESEH,   SafeSEHDirective )
 #endif
-res( INSTR,     InStrDef )
-res( SIZESTR,   SizeStrDef )
+res( INSTR,     InStrDir )
+res( SIZESTR,   SizeStrDir )
 #if AMD64_SUPPORT
 res( EXCFRAME,  ExcFrameDirective )
 #endif
@@ -37,15 +41,15 @@ res( EXTERN,    ExternDirective )
 res( EXTERNDEF, ExterndefDirective )
 res( PROTO,     ProtoDirective )
 res( PUBLIC,    PublicDirective )
-res( PROC,      ProcDef )
-res( ENDP,      EndpDef )
-res( LOCAL,     LocalDef )
+res( PROC,      ProcDir )
+res( ENDP,      EndpDir )
+res( LOCAL,     LocalDir )
 res( INVOKE,    InvokeDirective )
 res( ORG,       OrgDirective )
 res( ALIGN,     AlignDirective )
 res( SEGMENT,   SegmentDir )
 res( ENDS,      EndsDir )
-res( GROUP,     GrpDef )
+res( GROUP,     GrpDir )
 res( ASSUME,    AssumeDirective )
 res( LABEL,     LabelDirective )
 res( ALIAS,     AliasDirective )

@@ -46,7 +46,7 @@ lib = $(VCDIR)\Bin\lib.exe
 !if $(TRMEM)
 extra_c_flags = -Zd -Od -DDEBUG_OUT -DTRMEM
 !else
-extra_c_flags = -Zd -Od -DDEBUG_OUT
+extra_c_flags = -Zd -Od -DDEBUG_OUT -FAa -Fa$* 
 !endif
 !else
 extra_c_flags = -O2 -Gs -DNDEBUG
@@ -84,13 +84,13 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   \
            $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/labels.obj  \
            $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    \
-           $(OUTD)/insthash.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   \
+           $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   \
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
            $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj\
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
            $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj \
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
-           $(OUTD)/cmdline.obj  \
+           $(OUTD)/cmdline.obj  $(OUTD)/linnum.obj   $(OUTD)/fastpass.obj\
 !if $(TRMEM)
            $(OUTD)/trmem.obj    \
 !endif
@@ -130,8 +130,8 @@ $(OUTD)\$(name).lib : $(proj_obj)
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
 	$(CC) -Fo$* msgtext.c
 
-$(OUTD)/parser.obj: parser.c H/instruct.h H/special.h H/directve.h
-	$(CC) -Fo$* parser.c
+$(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h
+	$(CC) -Fo$* reswords.c
 
 ######
 

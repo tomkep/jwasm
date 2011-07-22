@@ -9,32 +9,20 @@
 "\0"                "4=80486, 5=Pentium, 6=Pentium Pro.\0"
 "\0"                "<p> allows privileged instructions.\0"
 #endif
-#if BIN_SUPPORT
-"-bin\0"            "Generate plain binary file\0"
-#endif
 "-c\0"              "Assemble without linking (always set)\0"
-#if COFF_SUPPORT
-"-coff\0"           "Generate COFF format object file\0"
-#endif
 "-C<p|u|x>\0"       "Set OPTION CASEMAP: p=NONE, u=ALL,\0"
 "\0"                "x=NOTPUBLIC (default).\0"
 "-D<name>[=text]\0" "Define text macro\0"
-#if COFF_SUPPORT && DJGPP_SUPPORT
-"-djgpp\0"          "Generate Djgpp's COFF variant\0"
-#endif
 "-e<number>\0"      "Set error limit number (default=50)\0"
-#if ELF_SUPPORT
-"-elf\0"            "Generate 32-bit ELF format object file\0"
-#if AMD64_SUPPORT
-"-elf64\0"          "Generate 64-bit ELF format object file\0"
-#endif
-#endif
 "-EP\0"             "Output preprocessed listing to stdout\0"
 "-eq\0"             "don't display error messages\0"
+#if DLLIMPORT
+"-Fd<file_name>\0"  "Set linker import definition file name\0"
+#endif
 "-Fi<file_name>\0"  "Force <file_name> to be included\0"
 "-Fl[=<file_name>]\0" "Write listing file\0"
 "-Fo<file_name>\0"  "Set object file name\0"
-"-Fr<file_name>\0"  "Set error file name\0"
+"-Fw<file_name>\0"  "Set errors file name\0"
 "-FPi\0"            "80x87 instructions with emulation fixups\0"
 "-FPi87\0"          "80x87 instructions (default)\0"
 "-fpc\0"            "Disallow floating-point instructions (.NO87)\0"
@@ -43,30 +31,22 @@
 "-I<directory>\0"   "Add directory to list of include directories\0"
 "-m<t|s|c|m|l|h|f>\0" "Set memory model:\0"
 "\0"                "(Tiny, Small, Compact, Medium, Large, Huge, Flat)\0"
-#if BIN_SUPPORT
-#if MZ_SUPPORT
-"-mz\0"             "Generate binary in DOS MZ format\0"
-#endif
-#endif
 "-nc=<name>\0"       "Set class name of code segment\0"
 "-n<d|m|t>=<name>\0" "Set name of data segment, module or text segment\0"
 #if COCTALS
 "-o\0"              "Allow C form of octal constants\0"
 #endif
-"-omf\0"            "Generate OMF format object file (default)\0"
 "-q, -nologo\0"     "Don't display version and copyright information\0"
 "-Sa\0"             "Maximize source listing\0"
 #if COFF_SUPPORT
 "-safeseh\0"        "Assert all exception handlers are declared\0"
 #endif
+"-Sf\0"             "Generate first pass listing\0"
 "-Sg\0"             "Display generated code in listing\0"
 "-Sn\0"             "Suppress symbol-table listing\0"
 "-Sx\0"             "List false conditionals\0"
 "-w\0"              "Same as /W0 /WX\0"
 "-W<number>\0"      "Set warning level number (default=2, max=4)\0"
-#if AMD64_SUPPORT
-"-win64\0"          "Generate 64bit COFF format object file\0"
-#endif
 "-WX\0"             "Treat all warnings as errors\0"
 "-X\0"              "Ignore INCLUDE environment path\0"
 "-zcm\0"            "C names are decorated with '_' prefix (default)\0"
@@ -97,6 +77,35 @@
 "-zzs\0"            "Store decorated name of start address (COFF only)\0"
 #endif
 "@env_var\0"        "Environment variable or file containing further commands\0"
+"output formats:\0\0"
+#if BIN_SUPPORT
+"-bin\0"            "plain binary file\0"
+#endif
+#if COFF_SUPPORT
+"-coff\0"           "32-bit COFF format object file\0"
+#endif
+#if COFF_SUPPORT && DJGPP_SUPPORT
+"-djgpp\0"          "Djgpp's variant of 32-bit COFF object file\0"
+#endif
+#if ELF_SUPPORT
+"-elf\0"            "32-bit ELF format object file\0"
+#if AMD64_SUPPORT
+"-elf64\0"          "64-bit ELF format object file\0"
+#endif
+#endif
+#if BIN_SUPPORT && MZ_SUPPORT
+"-mz\0"             "DOS MZ binary file\0"
+#endif
+"-omf\0"            "OMF format object file (default)\0"
+#if PE_SUPPORT
+"-pe32\0"           "PE32 binary file\0"
+#if AMD64_SUPPORT
+"-pe64\0"           "PE64 binary file\0"
+#endif
+#endif
+#if AMD64_SUPPORT
+"-win64\0"          "64-bit COFF format object file\0"
+#endif
 #ifdef DEBUG_OUT
 "Debug options:\0\0"
 "-d6\0"             "Display debug trace on stdout\0"

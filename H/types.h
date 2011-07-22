@@ -7,27 +7,24 @@
 /* qualified_type us used for parsing a qualified type. */
 struct qualified_type {
     int             size;
-    struct asm_sym  *symtype;
-    memtype         mem_type;
+    struct asym     *symtype;
+    enum memtype    mem_type;
     uint_8          is_ptr; /* contains level of indirection */
     uint_8          is_far;
     uint_8          Ofssize;
-    memtype         ptr_memtype;
+    enum memtype    ptr_memtype;
 };
 
-extern dir_node  *CurrStruct; /* start of current STRUCT list */
+extern struct dsym *CurrStruct; /* start of current STRUCT list */
 
-extern asm_sym   *CreateTypeSymbol( struct asm_sym *, const char *, bool );
-extern asm_sym   *SearchNameInStruct(asm_sym *sym, const char *name, unsigned int *poffset, int level );
-extern ret_code  StructDirective( int );
-extern ret_code  EndstructDirective( int );
-extern ret_code  TypedefDirective( int );
-extern ret_code  RecordDirective( int );
-extern ret_code  GetQualifiedType( int *, struct qualified_type * );
-extern asm_sym   *AddFieldToStruct( int, int, memtype, dir_node *, int );
-extern void      UpdateStructSize( int );
-extern ret_code  SetStructCurrentOffset( int );
-extern ret_code  AlignInStruct( int );
-extern void      TypesInit( void );
-extern void      DeleteType( dir_node * );
+extern struct asym *CreateTypeSymbol( struct asym *, const char *, bool );
+extern struct asym *SearchNameInStruct( const struct asym *, const char *, uint_32 *, int level );
+//extern ret_code    EndstructDirective( int );
+extern ret_code    GetQualifiedType( int *, struct asm_tok[], struct qualified_type * );
+extern struct asym *AddFieldToStruct( int, struct asm_tok[], const char *, enum memtype, struct dsym *, uint_32 );
+extern void        UpdateStructSize( struct asym * );
+extern ret_code    SetStructCurrentOffset( int_32 );
+extern ret_code    AlignInStruct( int );
+extern void        TypesInit( void );
+extern void        DeleteType( struct dsym * );
 #endif

@@ -32,40 +32,32 @@
 #ifndef _SEGMENT_H_
 #define _SEGMENT_H_
 
-#define GetSeg( x )     (dir_node *)x->segment
+#define GetSegm( x )     (struct dsym *)x->segment
 
-extern dir_node         *CurrSeg;       // stack of open segments
+extern struct dsym      *CurrSeg;       /* stack of open segments */
 
-extern void             SetSymSegOfs( struct asm_sym * ); /* Store location information about a symbol */
-extern int              GetSymOfssize( struct asm_sym * );
-//extern direct_idx       GetLnameIdx( const char * );
-extern uint_32          GetCurrOffset( void );  // Get current segment's offset
-extern ret_code         SetCurrOffset( dir_node *, uint_32, bool, bool );
-//extern direct_idx       SetSegmentClass( struct asm_sym *, const char * );
-extern asm_sym          *CreateIntSegment( const char *, const char *, uint_8, uint_8, bool );
-//extern dir_node         *GetCurrSeg( void );  /* Get current segment; NULL means none */
-//extern int              GetCurrClass( void ); /* get curr segment's class index */
-//extern uint           GetGrpIdx( struct asm_sym * );/* get symbol's group index, from the symbol itself or from the symbol's segment */
-extern uint             GetSegIdx( struct asm_sym * );/* get symbol's segment index, from the symbol itself */
-extern ret_code         GrpDef( int );          // GROUP directive
-extern ret_code         SegmentDir( int );      // SEGMENT directive
-extern ret_code         EndsDir( int );         // ENDS directive
-extern ret_code         SetCurrSeg( int );      // SEGMENT directive if pass > 1
-extern void             SegmentInit( int );     // init segments
+extern void             SetSymSegOfs( struct asym * );
+extern int              GetSymOfssize( const struct asym * );
+/* Get current segment's offset */
+extern uint_32          GetCurrOffset( void );
+extern ret_code         SetCurrOffset( struct dsym *, uint_32, bool, bool );
+extern struct asym      *CreateIntSegment( const char *, const char *, uint_8, uint_8, bool );
+/* get symbol's segment index, from the symbol itself */
+extern uint             GetSegIdx( const struct asym * );
+extern void             SegmentInit( int );     /* init segments */
 extern void             SegmentFini( void );    /* exit segments */
-extern asm_sym          *GetGroup( struct asm_sym * );
+extern struct asym      *GetGroup( const struct asym * );
 extern uint_32          GetCurrSegAlign( void );
 extern ret_code         SetOfssize( void );
 extern void             DefineFlatGroup( void );
 extern ret_code         SegmentModuleExit( void );
-extern void             DeleteGroup( dir_node * );
+extern void             DeleteGroup( struct dsym * );
 extern char             *GetLname( direct_idx );
 extern void             FreeLnameQueue( void );
 
 /* simplified segment functions */
 extern char             *GetCodeSegName( void );
 extern const char       *GetCodeClass( void );
-extern ret_code         SimplifiedSegDir( int ); // .CODE, .DATA, ... directive
 extern ret_code         ModelSimSegmInit( int type );
 extern void             ModelSimSegmExit( void );
 extern void             SetModelDefaultSegNames( void );

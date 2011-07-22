@@ -37,6 +37,6 @@ extern char   * MsgGet( int, char * );
 extern char   * MsgGetEx( int ); /* doesn't need a buffer */
 extern void     MsgPrintUsage( void );
 extern char   * MsgGetJWasmName( char * buffer );
-extern int      trademark( void );
+extern int      write_logo( void );
 
 #endif

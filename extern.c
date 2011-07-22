@@ -34,9 +34,7 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "segment.h"
 #include "fastpass.h"
 #include "listing.h"
@@ -77,14 +75,14 @@ static const char szCOMM[] = "COMM";
  * COMM [ [ mangle_type, ] langtype] [NEAR|FAR] name: ...
  * mangle_type must be a 'string'.
  */
-static char *Check4Mangler( int *i )
-/**********************************/
+static char *Check4Mangler( int *i, struct asm_tok tokenarray[] )
+/***************************************************************/
 {
     char *mangle_type = NULL;
-    if( AsmBuffer[*i]->token == T_STRING ) {
-        mangle_type = AsmBuffer[*i]->string_ptr;
+    if( tokenarray[*i].token == T_STRING ) {
+        mangle_type = tokenarray[*i].string_ptr;
         (*i)++;
-        if( AsmBuffer[*i]->token != T_COMMA ) {
+        if( tokenarray[*i].token != T_COMMA ) {
             AsmWarn( 2, EXPECTING_COMMA );
         } else {
             (*i)++;
@@ -99,20 +97,20 @@ static char *Check4Mangler( int *i )
 /* create external.
  * sym must be NULL or of state SYM_UNDEFINED!
  */
-static asm_sym *CreateExternal( asm_sym *sym, const char *name, char weak )
-/*************************************************************************/
+static struct asym *CreateExternal( struct asym *sym, const char *name, char weak )
+/*********************************************************************************/
 {
     if ( sym == NULL )
         sym = SymCreate( name, *name != NULLC );
     else
-        dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+        sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
 
     if ( sym ) {
         sym->state = SYM_EXTERNAL;
         sym->seg_ofssize = ModuleInfo.Ofssize;
         sym->comm = FALSE;
         sym->weak = weak;
-        dir_add_table( &Tables[TAB_EXT], (dir_node *)sym ); /* add EXTERNAL */
+        sym_add_table( &SymTables[TAB_EXT], (struct dsym *)sym ); /* add EXTERNAL */
     }
     return( sym );
 }
@@ -120,13 +118,13 @@ static asm_sym *CreateExternal( asm_sym *sym, const char *name, char weak )
 /* create communal.
  * sym must be NULL or of state SYM_UNDEFINED!
  */
-static asm_sym *CreateComm( asm_sym *sym, const char *name )
-/**********************************************************/
+static struct asym *CreateComm( struct asym *sym, const char *name )
+/******************************************************************/
 {
     if ( sym == NULL )
         sym = SymCreate( name, *name != NULLC );
     else
-        dir_remove_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+        sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
 
     if ( sym ) {
         sym->state = SYM_EXTERNAL;
@@ -134,16 +132,16 @@ static asm_sym *CreateComm( asm_sym *sym, const char *name )
         sym->comm = TRUE;
         sym->weak = FALSE;
         sym->isfar = FALSE;
-        dir_add_table( &Tables[TAB_EXT], (dir_node *)sym ); /* add EXTERNAL */
+        sym_add_table( &SymTables[TAB_EXT], (struct dsym *)sym ); /* add EXTERNAL */
     }
     return( sym );
 }
 
-static struct asm_sym *CreateProto( int i, const char *name )
-/***********************************************************/
+static struct asym *CreateProto( int i, struct asm_tok tokenarray[], const char *name )
+/*************************************************************************************/
 {
-    struct asm_sym      *sym;
-    dir_node            *dir;
+    struct asym      *sym;
+    struct dsym      *dir;
 
     DebugMsg1(("CreateProto( %u, %s )\n", i, name ? name : "NULL" ));
     sym = SymSearch( name );
@@ -162,27 +160,30 @@ static struct asm_sym *CreateProto( int i, const char *name )
         AsmErr( SYMBOL_REDEFINITION, sym->name );
         return( NULL );
     }
-    dir = (dir_node *)sym;
+    dir = (struct dsym *)sym;
 
     /* a PROTO typedef may be used */
-    if ( AsmBuffer[i]->token == T_ID ) {
-        asm_sym * sym2;
-        sym2 = SymSearch( AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token == T_ID ) {
+        struct asym * sym2;
+        sym2 = SymSearch( tokenarray[i].string_ptr );
         if ( sym2 && sym2->state == SYM_TYPE && sym2->mem_type == MT_PROC ) {
             i++;
-            if ( AsmBuffer[i]->token != T_FINAL ) {
-                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            if ( tokenarray[i].token != T_FINAL ) {
+                AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
                 return( NULL );
             }
-            CopyPrototype( dir, (dir_node *)sym2->target_type );
+            CopyPrototype( dir, (struct dsym *)sym2->target_type );
             return( sym );
         }
     }
     sym->isproc = TRUE;
 
     if ( Parse_Pass == PASS_1 ) {
-        if ( ExamineProc( dir, i, FALSE ) == ERROR )
+        if ( ExamineProc( i, tokenarray, dir, FALSE ) == ERROR )
             return( NULL );
+#if DLLIMPORT
+        sym->dllname = ModuleInfo.CurrDll;
+#endif
     } else {
         sym->isdefined = TRUE;
     }
@@ -191,14 +192,14 @@ static struct asm_sym *CreateProto( int i, const char *name )
 
 /* externdef [ attr ] symbol:type [, symbol:type,...] */
 
-ret_code ExterndefDirective( int i )
-/**********************************/
+ret_code ExterndefDirective( int i, struct asm_tok tokenarray[] )
+/***************************************************************/
 {
     char                *token;
 #if MANGLERSUPP
     char                *mangle_type = NULL;
 #endif
-    struct asm_sym      *sym;
+    struct asym         *sym;
     enum lang_type      langtype;
     struct qualified_type ti;
 
@@ -206,7 +207,7 @@ ret_code ExterndefDirective( int i )
 
     i++; /* skip EXTERNDEF token */
 #if MANGLERSUPP
-    mangle_type = Check4Mangler( &i );
+    mangle_type = Check4Mangler( &i, tokenarray );
 #endif
     do {
 
@@ -214,24 +215,24 @@ ret_code ExterndefDirective( int i )
 
         /* get the symbol language type if present */
         langtype = ModuleInfo.langtype;
-        GetLangType( &i, &langtype );
+        GetLangType( &i, tokenarray, &langtype );
 
         /* get the symbol name */
-        if( AsmBuffer[i]->token != T_ID ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        if( tokenarray[i].token != T_ID ) {
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
-        token = AsmBuffer[i++]->string_ptr;
+        token = tokenarray[i++].string_ptr;
 
         /* go past the colon */
-        if( AsmBuffer[i]->token != T_COLON ) {
+        if( tokenarray[i].token != T_COLON ) {
             AsmError( COLON_EXPECTED );
             return( ERROR );
         }
         i++;
         sym = SymSearch( token );
 
-        //typetoken = AsmBuffer[i]->string_ptr;
+        //typetoken = tokenarray[i].string_ptr;
         ti.mem_type = MT_EMPTY;
         ti.size = 0;
         ti.is_ptr = 0;
@@ -240,22 +241,22 @@ ret_code ExterndefDirective( int i )
         ti.symtype = NULL;
         ti.Ofssize = ModuleInfo.Ofssize;
 
-        if ( AsmBuffer[i]->token == T_ID && ( 0 == _stricmp(AsmBuffer[i]->string_ptr, "ABS"))) {
+        if ( tokenarray[i].token == T_ID && ( 0 == _stricmp( tokenarray[i].string_ptr, "ABS" ) ) ) {
             ti.mem_type = MT_ABS;
             i++;
-        } else if ( AsmBuffer[i]->token == T_DIRECTIVE && AsmBuffer[i]->value == T_PROTO ) {
+        } else if ( tokenarray[i].token == T_DIRECTIVE && tokenarray[i].tokval == T_PROTO ) {
             /* dont scan this line further!
              * CreateProto() will either define a SYM_EXTERNAL or fail
              * if there's a syntax error or symbol redefinition.
              */
-            sym = CreateProto( i + 1, token );
+            sym = CreateProto( i + 1, tokenarray, token );
             if ( sym && sym->global == FALSE ) {
                 sym->global = TRUE;
                 QAddItem( &ModuleInfo.g.GlobalQueue, sym );
             }
             return( sym ? NOT_ERROR : ERROR );
-        } else if ( AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA ) {
-            if ( GetQualifiedType( &i, &ti ) == ERROR )
+        } else if ( tokenarray[i].token != T_FINAL && tokenarray[i].token != T_COMMA ) {
+            if ( GetQualifiedType( &i, tokenarray, &ti ) == ERROR )
                 return( ERROR );
         }
 
@@ -271,7 +272,7 @@ ret_code ExterndefDirective( int i )
             /* v2.05: added to accept type prototypes */
             if ( ti.is_ptr == 0 && ti.symtype && ti.symtype->isproc ) {
                 CreateProc( sym, NULL, FALSE );
-                CopyPrototype( (dir_node *)sym, (dir_node *)ti.symtype );
+                CopyPrototype( (struct dsym *)sym, (struct dsym *)ti.symtype );
                 ti.mem_type = ti.symtype->mem_type;
                 ti.symtype = NULL;
             }
@@ -296,7 +297,7 @@ ret_code ExterndefDirective( int i )
 
             if ( ti.is_ptr == 0 && ti.Ofssize != ModuleInfo.Ofssize ) {
                 sym->seg_ofssize = ti.Ofssize;
-                if ( sym->segment && ((dir_node *)sym->segment)->e.seginfo->Ofssize != sym->seg_ofssize )
+                if ( sym->segment && ((struct dsym *)sym->segment)->e.seginfo->Ofssize != sym->seg_ofssize )
                     sym->segment = NULL;
             }
 
@@ -328,7 +329,7 @@ ret_code ExterndefDirective( int i )
                 DebugMsg(("ExterndefDirective: type conflict for %s. mem_types old-new: %X-%X\n", sym->name, sym->mem_type, ti.mem_type));
                 AsmWarn( 1, SYMBOL_TYPE_CONFLICT, sym->name );
             } else if ( sym->mem_type == MT_TYPE && sym->type != ti.symtype ) {
-                asm_sym *sym2 = sym;
+                struct asym *sym2 = sym;
                 /* skip alias types and compare the base types */
                 DebugMsg(("ExterndefDirective(%s): types differ: %X (%s) - %X (%s)\n", sym->name, sym->type, sym->type->name, ti.symtype, ti.symtype->name));
                 while ( sym2->type )
@@ -358,8 +359,8 @@ ret_code ExterndefDirective( int i )
             QAddItem( &ModuleInfo.g.GlobalQueue, sym );
         }
 
-        if ( AsmBuffer[i]->token != T_FINAL )
-            if ( AsmBuffer[i]->token == T_COMMA ) {
+        if ( tokenarray[i].token != T_FINAL )
+            if ( tokenarray[i].token == T_COMMA ) {
                 if ( (i + 1) < Token_Count )
                     i++;
             } else {
@@ -377,22 +378,22 @@ ret_code ExterndefDirective( int i )
  * EXTERNDEF <name>: PROTO <params>
  */
 
-ret_code ProtoDirective( int i )
-/******************************/
+ret_code ProtoDirective( int i, struct asm_tok tokenarray[] )
+/***********************************************************/
 {
     if( Parse_Pass != PASS_1 ) {
-        struct asm_sym *sym;
+        struct asym *sym;
         /* v2.04: set the "defined" flag */
-        if ( ( sym = SymSearch( AsmBuffer[0]->string_ptr ) ) && sym->isproc == TRUE )
+        if ( ( sym = SymSearch( tokenarray[0].string_ptr ) ) && sym->isproc == TRUE )
             sym->isdefined = TRUE;
         return( NOT_ERROR );
     }
     if( i != 1 ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
-    return( CreateProto( i + 1, AsmBuffer[0]->string_ptr ) ? NOT_ERROR : ERROR );
+    return( CreateProto( i + 1, tokenarray, tokenarray[0].string_ptr ) ? NOT_ERROR : ERROR );
 }
 
 /* helper for EXTERN directive.
@@ -400,8 +401,8 @@ ret_code ProtoDirective( int i )
  * sym must be NULL or of state SYM_UNDEFINED!
  */
 
-asm_sym *MakeExtern( const char *name, memtype mem_type, struct asm_sym * vartype, asm_sym * sym, uint_8 Ofssize )
-/****************************************************************************************************************/
+struct asym *MakeExtern( const char *name, enum memtype mem_type, struct asym *vartype, struct asym *sym, uint_8 Ofssize )
+/************************************************************************************************************************/
 {
     sym = CreateExternal( sym, name, FALSE );
     if ( sym == NULL )
@@ -422,10 +423,10 @@ asm_sym *MakeExtern( const char *name, memtype mem_type, struct asm_sym * vartyp
 /* handle optional alternate names in EXTERN directive
  */
 
-static ret_code HandleAltname( char *altname, struct asm_sym *sym )
-/*****************************************************************/
+static ret_code HandleAltname( char *altname, struct asym *sym )
+/**************************************************************/
 {
-    struct asm_sym *symalt;
+    struct asym *symalt;
 
     if ( altname && sym->state == SYM_EXTERNAL ) {
 
@@ -468,7 +469,7 @@ static ret_code HandleAltname( char *altname, struct asm_sym *sym )
                 }
             } else {
                 symalt = SymCreate( altname, TRUE );
-                dir_add_table( &Tables[TAB_UNDEF], (dir_node *)symalt );
+                sym_add_table( &SymTables[TAB_UNDEF], (struct dsym *)symalt );
             }
             /* make sure the alt symbol becomes strong if it is an external */
             symalt->used = TRUE;
@@ -477,12 +478,12 @@ static ret_code HandleAltname( char *altname, struct asm_sym *sym )
              */
             if ( sym->altname == NULL ) {
                 sym->altname = symalt;
-                ((dir_node *)sym)->nextext = NULL;
+                ((struct dsym *)sym)->nextext = NULL;
                 if ( ModuleInfo.g.AltQueue.head == NULL )
-                    ModuleInfo.g.AltQueue.head = ModuleInfo.g.AltQueue.tail = (dir_node *)sym;
+                    ModuleInfo.g.AltQueue.head = ModuleInfo.g.AltQueue.tail = (struct dsym *)sym;
                 else {
-                    ModuleInfo.g.AltQueue.tail->nextext = (dir_node *)sym;
-                    ModuleInfo.g.AltQueue.tail = (dir_node *)sym;
+                    ((struct dsym *)ModuleInfo.g.AltQueue.tail)->nextext = (struct dsym *)sym;
+                    ModuleInfo.g.AltQueue.tail = (struct dsym *)sym;
                 }
             }
         }
@@ -492,22 +493,22 @@ static ret_code HandleAltname( char *altname, struct asm_sym *sym )
 
 /* syntax: EXT[E]RN [lang_type] name (altname) :type [, ...] */
 
-ret_code ExternDirective( int i )
-/*******************************/
+ret_code ExternDirective( int i, struct asm_tok tokenarray[] )
+/************************************************************/
 {
     char                *token;
 #if MANGLERSUPP
     char                *mangle_type = NULL;
 #endif
     char                *altname;
-    struct asm_sym      *sym;
+    struct asym         *sym;
     enum lang_type      langtype;
     struct qualified_type ti;
 
     DebugMsg1(("ExternDirective(%u) enter\n", i));
     i++; /* skip EXT[E]RN token */
 #if MANGLERSUPP
-    mangle_type = Check4Mangler( &i );
+    mangle_type = Check4Mangler( &i, tokenarray );
 #endif
     do {
 
@@ -515,25 +516,25 @@ ret_code ExternDirective( int i )
 
         /* get the symbol language type if present */
         langtype = ModuleInfo.langtype;
-        GetLangType( &i, &langtype );
+        GetLangType( &i, tokenarray, &langtype );
 
         /* get the symbol name */
-        if( AsmBuffer[i]->token != T_ID ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        if( tokenarray[i].token != T_ID ) {
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
-        token = AsmBuffer[i++]->string_ptr;
+        token = tokenarray[i++].string_ptr;
 
         /* go past the optional alternative name (weak ext, default resolution) */
-        if( AsmBuffer[i]->token == T_OP_BRACKET ) {
+        if( tokenarray[i].token == T_OP_BRACKET ) {
             i++;
-            if ( AsmBuffer[i]->token != T_ID ) {
-                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            if ( tokenarray[i].token != T_ID ) {
+                AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
                 return( ERROR );
             }
-            altname = AsmBuffer[i]->string_ptr;
+            altname = tokenarray[i].string_ptr;
             i++;
-            if( AsmBuffer[i]->token != T_CL_BRACKET ) {
+            if( tokenarray[i].token != T_CL_BRACKET ) {
                 AsmErr( EXPECTED, ")" );
                 return( ERROR );
             }
@@ -541,7 +542,7 @@ ret_code ExternDirective( int i )
         }
 
         /* go past the colon */
-        if( AsmBuffer[i]->token != T_COLON ) {
+        if( tokenarray[i].token != T_COLON ) {
             AsmError( COLON_EXPECTED );
             return( ERROR );
         }
@@ -556,13 +557,13 @@ ret_code ExternDirective( int i )
         ti.symtype = NULL;
         ti.Ofssize = ModuleInfo.Ofssize;
 
-        if ( AsmBuffer[i]->token == T_ID && ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "ABS" ) ) ) {
+        if ( tokenarray[i].token == T_ID && ( 0 == _stricmp( tokenarray[i].string_ptr, "ABS" ) ) ) {
             ti.mem_type = MT_ABS;
             i++;
-        } else if ( AsmBuffer[i]->token == T_DIRECTIVE && AsmBuffer[i]->value == T_PROTO ) {
+        } else if ( tokenarray[i].token == T_DIRECTIVE && tokenarray[i].tokval == T_PROTO ) {
             /* dont scan this line further */
             /* CreateProto() will define a SYM_EXTERNAL */
-            sym = CreateProto( i + 1, token );
+            sym = CreateProto( i + 1, tokenarray, token );
             DebugMsg1(("ExternDirective(%s): CreateProto()=%X\n", token, sym));
             if ( sym == NULL )
                 return( ERROR );
@@ -574,8 +575,8 @@ ret_code ExternDirective( int i )
                 AsmErr( SYMBOL_REDEFINITION, sym->name );
                 return( ERROR );
             }
-        } else if ( AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA ) {
-            if ( GetQualifiedType( &i, &ti ) == ERROR )
+        } else if ( tokenarray[i].token != T_FINAL && tokenarray[i].token != T_COMMA ) {
+            if ( GetQualifiedType( &i, tokenarray, &ti ) == ERROR )
                 return( ERROR );
         }
 
@@ -595,7 +596,7 @@ ret_code ExternDirective( int i )
             /* v2.05: added to accept type prototypes */
             if ( ti.is_ptr == 0 && ti.symtype && ti.symtype->isproc ) {
                 CreateProc( sym, NULL, FALSE );
-                CopyPrototype( (dir_node *)sym, (dir_node *)ti.symtype );
+                CopyPrototype( (struct dsym *)sym, (struct dsym *)ti.symtype );
                 ti.mem_type = ti.symtype->mem_type;
                 ti.symtype = NULL;
                 DebugMsg1(("ExternDirective(%s): prototype copied, memtype=%X\n", token, ti.mem_type ));
@@ -642,7 +643,7 @@ ret_code ExternDirective( int i )
 
         if ( ti.is_ptr == 0 && ti.Ofssize != ModuleInfo.Ofssize ) {
             sym->seg_ofssize = ti.Ofssize;
-            if ( sym->segment && ((dir_node *)sym->segment)->e.seginfo->Ofssize != sym->seg_ofssize )
+            if ( sym->segment && ((struct dsym *)sym->segment)->e.seginfo->Ofssize != sym->seg_ofssize )
                 sym->segment = NULL;
         }
 
@@ -659,11 +660,11 @@ ret_code ExternDirective( int i )
 
         SetMangler( sym, langtype, mangle_type );
 
-        if ( AsmBuffer[i]->token != T_FINAL )
-            if ( AsmBuffer[i]->token == T_COMMA &&  ( (i + 1) < Token_Count ) ) {
+        if ( tokenarray[i].token != T_FINAL )
+            if ( tokenarray[i].token == T_COMMA &&  ( (i + 1) < Token_Count ) ) {
                 i++;
             } else {
-                AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+                AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
                 return( ERROR );
             }
     }  while ( i < Token_Count );
@@ -673,8 +674,8 @@ ret_code ExternDirective( int i )
 
 /* helper for COMM directive */
 
-static asm_sym *MakeComm( char *name, asm_sym *sym, int size, int count, bool isfar )
-/***********************************************************************************/
+static struct asym *MakeComm( char *name, struct asym *sym, int size, int count, bool isfar )
+/*******************************************************************************************/
 {
     sym = CreateComm( sym, name );
     if( sym == NULL )
@@ -705,8 +706,8 @@ static asm_sym *MakeComm( char *name, asm_sym *sym, int size, int count, bool is
  * COMM [langtype] [NEAR|FAR] label:type[:count] [, ... ]
  */
 
-ret_code CommDirective( int i )
-/*****************************/
+ret_code CommDirective( int i, struct asm_tok tokenarray[] )
+/**********************************************************/
 {
     char            *token;
 #if MANGLERSUPP
@@ -717,23 +718,23 @@ ret_code CommDirective( int i )
     int             tmp;
     int             size;
     int             count;
-    struct asm_sym  *sym;
-    expr_list       opndx;
+    struct asym     *sym;
+    struct expr     opndx;
     enum lang_type  langtype;
 
     i++; /* skip COMM token */
     for( ; i < Token_Count; i++ ) {
 #if MANGLERSUPP
-        mangle_type = Check4Mangler( &i );
+        mangle_type = Check4Mangler( &i, tokenarray );
 #endif
         /* get the symbol language type if present */
         langtype = ModuleInfo.langtype;
-        GetLangType( &i, &langtype );
+        GetLangType( &i, tokenarray, &langtype );
 
         /* get the distance ( near or far ) */
         isfar = FALSE;
-        if ( AsmBuffer[i]->token == T_STYPE )
-            switch ( AsmBuffer[i]->value ) {
+        if ( tokenarray[i].token == T_STYPE )
+            switch ( tokenarray[i].tokval ) {
             case T_FAR:
             case T_FAR16:
             case T_FAR32:
@@ -749,19 +750,19 @@ ret_code CommDirective( int i )
             }
 
         /* get the symbol name */
-        token = AsmBuffer[i++]->string_ptr;
+        token = tokenarray[i++].string_ptr;
 
         /* go past the colon */
-        if( AsmBuffer[i]->token != T_COLON ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        if( tokenarray[i].token != T_COLON ) {
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
         i++;
         /* the evaluator cannot handle a ':' so scan for one first */
         for ( tmp = i; tmp < Token_Count;tmp++ )
-            if ( AsmBuffer[tmp]->token == T_COLON )
+            if ( tokenarray[tmp].token == T_COLON )
                 break;
-        if ( EvalOperand( &i, tmp, &opndx, 0 ) == ERROR )
+        if ( EvalOperand( &i, tokenarray, tmp, &opndx, 0 ) == ERROR )
             return( ERROR );
         /* v2.03: syntax COMM varname:<string>:<string> is accepted by Masm */
         //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
@@ -776,10 +777,10 @@ ret_code CommDirective( int i )
         size = opndx.value;
 
         count = 1;
-        if( AsmBuffer[i]->token == T_COLON ) {
+        if( tokenarray[i].token == T_COLON ) {
             i++;
             /* get optional count argument */
-            if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+            if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
                 return( ERROR );
             /* v2.03: a string constant is acceptable! */
             //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
@@ -812,7 +813,7 @@ ret_code CommDirective( int i )
         sym->isdefined = TRUE;
         SetMangler( sym, langtype, mangle_type );
 
-        if ( AsmBuffer[i]->token != T_FINAL && AsmBuffer[i]->token != T_COMMA ) {
+        if ( tokenarray[i].token != T_FINAL && tokenarray[i].token != T_COMMA ) {
             AsmError( EXPECTING_COMMA );
             return( ERROR );
         }
@@ -820,8 +821,8 @@ ret_code CommDirective( int i )
     return( NOT_ERROR );
 }
 
-void AddPublicData( asm_sym *sym )
-/*********************************/
+void AddPublicData( struct asym *sym )
+/************************************/
 {
     DebugMsg1(("AddPublicData(%s)\n", sym->name ));
     QAddItem( &ModuleInfo.g.PubQueue, sym );
@@ -829,10 +830,10 @@ void AddPublicData( asm_sym *sym )
 
 /* get (next) PUBLIC item */
 
-asm_sym * GetPublicData( void * *vp )
-/***********************************/
+struct asym *GetPublicData( void * *vp )
+/**************************************/
 {
-    qnode * *curr = (qnode * *)vp;
+    struct qnode * *curr = (struct qnode * *)vp;
 
     if ( ModuleInfo.g.PubQueue.head == NULL )
         return( NULL );
@@ -843,7 +844,7 @@ asm_sym * GetPublicData( void * *vp )
         *curr = (*curr)->next;
 
     for ( ; *curr ; *curr = (*curr)->next ) {
-        asm_sym *sym = (*curr)->elmt;
+        struct asym *sym = (struct asym *)(*curr)->elmt;
         if ( sym->state == SYM_INTERNAL )
             return ( sym );
 #if 0 //FASTPASS  /* v2.04: this is now done in PassOneCheck() */
@@ -864,45 +865,47 @@ asm_sym * GetPublicData( void * *vp )
 void FreePubQueue( void )
 /***********************/
 {
-    qnode *curr;
-    qnode *next;
+#if FASTMEM==0
+    struct qnode *curr;
+    struct qnode *next;
     for( curr = ModuleInfo.g.PubQueue.head; curr; curr = next ) {
         next = curr->next;
         AsmFree( curr );
     }
+#endif
     ModuleInfo.g.PubQueue.head = NULL;
 }
 
 /* syntax: PUBLIC [lang_type] name [, ...] */
 
-ret_code PublicDirective( int i )
-/*******************************/
+ret_code PublicDirective( int i, struct asm_tok tokenarray[] )
+/************************************************************/
 {
 #if MANGLERSUPP
     char                *mangle_type = NULL;
 #endif
     char                *token;
-    struct asm_sym      *sym;
-    //dir_node            *dir;
+    struct asym         *sym;
+    //struct dsym       *dir;
     char                skipitem;
     enum lang_type      langtype;
 
     i++; /* skip PUBLIC directive */
 #if MANGLERSUPP
-    mangle_type = Check4Mangler( &i );
+    mangle_type = Check4Mangler( &i, tokenarray );
 #endif
     do {
 
         /* read the optional language type */
         langtype = ModuleInfo.langtype;
-        GetLangType( &i, &langtype );
+        GetLangType( &i, tokenarray, &langtype );
 
-        if ( AsmBuffer[i]->token != T_ID ) {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        if ( tokenarray[i].token != T_ID ) {
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
         /* get the symbol name */
-        token = AsmBuffer[i++]->string_ptr;
+        token = tokenarray[i++].string_ptr;
 
         DebugMsg1(("PublicDirective(%s)\n", token ));
 
@@ -911,7 +914,7 @@ ret_code PublicDirective( int i )
         if ( Parse_Pass == PASS_1 ) {
             if ( sym == NULL ) {
                 if ( sym = SymCreate( token, TRUE ) ) {
-                    dir_add_table( &Tables[TAB_UNDEF], (dir_node *)sym );
+                    sym_add_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
                     DebugMsg1(("PublicDirective(%s): new symbol\n", sym->name ));
                 } else
                     return( ERROR ); /* name was too long */
@@ -960,8 +963,8 @@ ret_code PublicDirective( int i )
             }
         }
 
-        if ( AsmBuffer[i]->token != T_FINAL )
-            if ( AsmBuffer[i]->token == T_COMMA ) {
+        if ( tokenarray[i].token != T_FINAL )
+            if ( tokenarray[i].token == T_COMMA ) {
                 if ( (i + 1) < Token_Count )
                     i++;
             } else {

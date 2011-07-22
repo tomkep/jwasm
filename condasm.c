@@ -42,9 +42,8 @@
 
 #include "globals.h"
 #include "parser.h"
-#include "directiv.h"
 #include "condasm.h"
-#include "insthash.h"
+#include "reswords.h"
 #include "expreval.h"
 #include "listing.h"
 #include "input.h"
@@ -52,32 +51,31 @@
 
 /*
  the current if-block can be in one of 3 states:
-  state              assembly     possible next states
- -----------------------------------------------------------------------
-  inactive           off          condition check, active
+  state              assembly     possible state change to
+ ---------------------------------------------------------
+  inactive           off          active
   active             on           done
   done               off          -
-  -----------------------------------------------------------------------
+  --------------------------------------------------------
   up to v2.04, there was a forth state:
   condition check    on           active, inactive
   it was necessary because lines may have been tokenized multiple times.
 */
 
-if_state CurrIfState;
+enum if_state CurrIfState;
 static int blocknestlevel;
 static int falseblocknestlevel;
+static unsigned long elseoccured; /* 2.06: bit field, magnitude must be >= MAX_IF_NESTING */
 
 #ifdef DEBUG_OUT
 static const char *GetCurrIfStatString( void )
 /********************************************/
 {
-    const char *p;
     switch ( CurrIfState ) {
-    case BLOCK_ACTIVE:   p = "BLOCK_ACTIVE";      break;
-    case BLOCK_INACTIVE: p = "BLOCK_INACTIVE";    break;
-    default:             p = "BLOCK_DONE";        break;
+    case BLOCK_ACTIVE:   return( "BLOCK_ACTIVE" );
+    case BLOCK_INACTIVE: return( "BLOCK_INACTIVE" );
+    default:             return( "BLOCK_DONE" );
     }
-    return( p );
 }
 #endif
 
@@ -113,6 +111,7 @@ void conditional_assembly_prepare( int directive )
             AsmError( NESTING_LEVEL_TOO_DEEP );
             break;
         }
+        elseoccured &= ~( 1 << blocknestlevel ); /* v2.06: added */
         blocknestlevel++;
         break;
     case T_ELSE:
@@ -132,13 +131,21 @@ void conditional_assembly_prepare( int directive )
             if ( falseblocknestlevel > 0 ) {
                 break;
             }
+            /* v2.06: check added to detect multiple ELSE branches */
+            if ( elseoccured & ( 1 << ( blocknestlevel - 1 ) ) ) {
+                AsmError( ELSE_CLAUSE_ALREADY_OCCURED_IN_THIS_IF_BLOCK );
+                break;
+            }
             /* status may change:
              * inactive -> active
              * active   -> done
              */
             CurrIfState = (( CurrIfState == BLOCK_INACTIVE ) ? BLOCK_ACTIVE : BLOCK_DONE );
+            /* v2.06: no further ELSEx once ELSE was detected */
+            if ( directive == T_ELSE )
+                elseoccured |= ( 1 << ( blocknestlevel - 1 ) );
         } else {
-            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[0]->tokpos );
+            AsmErr( BLOCK_NESTING_ERROR, GetResWName( directive, NULL ) );
         }
         break;
     case T_ENDIF:
@@ -150,12 +157,12 @@ void conditional_assembly_prepare( int directive )
             blocknestlevel--;
             CurrIfState = BLOCK_ACTIVE; /* v2.04: added */
         } else {
-            AsmErr( BLOCK_NESTING_ERROR, AsmBuffer[0]->tokpos );
+            AsmErr( BLOCK_NESTING_ERROR, GetResWName( directive, NULL ) );
         }
         break;
     }
     DebugMsg1(("condasm_prepare(%s), new status: %s, lvl=%u, falselvl=%u\n",
-               GetResWName( directive, NULL), GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
+               GetResWName( directive, NULL ), GetCurrIfStatString(), blocknestlevel, falseblocknestlevel));
     return;
 }
 
@@ -165,19 +172,19 @@ void conditional_assembly_prepare( int directive )
  * - "" (item is T_FINAL)
  */
 
-static bool check_defd( int i )
-/*****************************/
+static bool check_defd( const char *name )
+/****************************************/
 {
-    struct asm_sym      *sym;
-    if ( *AsmBuffer[i]->string_ptr ) {
-        sym = SymSearch( AsmBuffer[i]->string_ptr );
+    struct asym      *sym;
+    if ( *name ) {
+        sym = SymSearch( name );
         if( sym ) {
-            DebugMsg1(("check_defd(%s): state=%u defined=%u\n", AsmBuffer[i]->string_ptr, sym->state, sym->isdefined ));
+            DebugMsg1(("check_defd(%s): state=%u defined=%u\n", name, sym->state, sym->isdefined ));
             /* v2.04: changed. the "defined" flag is active for ALL symbols */
             //if ( sym->state == SYM_INTERNAL || sym->state == SYM_MACRO || sym->state == SYM_TMACRO || sym->state == SYM_UNDEFINED ) {
             return( sym->isdefined );
         }
-        DebugMsg1(("check_defd(%s): sym=NULL\n", AsmBuffer[i]->string_ptr ));
+        DebugMsg1(("check_defd(%s): sym=NULL\n", name ));
     }
     return( FALSE );
 }
@@ -221,14 +228,14 @@ static bool check_dif( const char *string1, const char *string2, bool sensitive 
 #endif
 }
 
-ret_code CondAsmDirective( int i )
-/********************************/
+ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
+/*************************************************************/
 {
-    int directive = AsmBuffer[i]->value;
-    char *string1;
-    char *string2;
-    if_state NextIfState;
-    expr_list opndx;
+    int directive = tokenarray[i].tokval;
+    const char *string1;
+    const char *string2;
+    enum if_state NextIfState;
+    struct expr opndx;
 
     if ( CurrIfState != BLOCK_ACTIVE ) {
         DebugMsg1(("CondAsmDirective(%s), CurrIfState=%u(%s), lvl=%u, falselvl=%u\n",
@@ -246,7 +253,7 @@ ret_code CondAsmDirective( int i )
             LstWriteSrcLine();
     }
 
-    DebugMsg1(("CondAsmDirective(%s), BLOCK_ACTIVE, lvl=%u, falselvl=%u [%s]\n", GetResWName(directive, NULL), blocknestlevel, falseblocknestlevel, AsmBuffer[i]->tokpos ));
+    DebugMsg1(("CondAsmDirective(%s), BLOCK_ACTIVE, lvl=%u, falselvl=%u [%s]\n", GetResWName(directive, NULL), blocknestlevel, falseblocknestlevel, tokenarray[i].tokpos ));
 
     i++; /* go past IFx, ELSEx, ENDIF */
 
@@ -255,7 +262,7 @@ ret_code CondAsmDirective( int i )
     switch( GetSflagsSp(directive) ) {
     case CC_NUMARG: /* [ELSE]IF[E] */
         /* no forward reference allowed, symbol must be defined */
-        if ( ( ERROR == EvalOperand( &i, Token_Count, &opndx, EXPF_NOLCREATE ) ) )
+        if ( ( ERROR == EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOLCREATE ) ) )
             return( ERROR );
 #if 0 /* v2.05: obsolete */
         if ( opndx.sym && opndx.sym->state == SYM_UNDEFINED ) {
@@ -276,23 +283,23 @@ ret_code CondAsmDirective( int i )
             NextIfState = ( !opndx.value ) ? BLOCK_ACTIVE : BLOCK_INACTIVE;
         break;
     case CC_LITARG: /*  [ELSE]IFDIF[I], [ELSE]IFIDN[I] */
-        string1 = AsmBuffer[i]->string_ptr;
-        if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-            if ( AsmBuffer[i]->token == T_ID && SymSearch( string1 ) == NULL )
+        string1 = tokenarray[i].string_ptr;
+        if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+            if ( tokenarray[i].token == T_ID && SymSearch( string1 ) == NULL )
                 AsmErr( SYMBOL_NOT_DEFINED, string1 );
             else
                 AsmError( TEXT_ITEM_REQUIRED );
             return( ERROR );
         }
         i++;
-        if ( AsmBuffer[i]->token != T_COMMA ) {
+        if ( tokenarray[i].token != T_COMMA ) {
             AsmError( EXPECTING_COMMA );
             return( ERROR );
         }
         i++;
-        string2 = AsmBuffer[i]->string_ptr;
-        if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-            if ( AsmBuffer[i]->token == T_ID && SymSearch( string2 ) == NULL )
+        string2 = tokenarray[i].string_ptr;
+        if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+            if ( tokenarray[i].token == T_ID && SymSearch( string2 ) == NULL )
                 AsmErr( SYMBOL_NOT_DEFINED, string2 );
             else
                 AsmError( TEXT_ITEM_REQUIRED );
@@ -318,10 +325,10 @@ ret_code CondAsmDirective( int i )
         }
         break;
     case CC_BLKARG: /* [ELSE]IF[N]B */
-        string1 = AsmBuffer[i]->string_ptr;
+        string1 = tokenarray[i].string_ptr;
 
-        if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-            if ( AsmBuffer[i]->token == T_ID && SymSearch( string1 ) == NULL )
+        if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+            if ( tokenarray[i].token == T_ID && SymSearch( string1 ) == NULL )
                 AsmErr( SYMBOL_NOT_DEFINED, string1 );
             else
                 AsmError( TEXT_ITEM_REQUIRED );
@@ -355,26 +362,26 @@ ret_code CondAsmDirective( int i )
          * a reserved word is defined or not.
          */
         /* v2.0: [ELSE]IF[N]DEF is valid *without* an argument! */
-        //if ( AsmBuffer[i]->token == T_ID && AsmBuffer[i+1]->token == T_FINAL) {
-        if ( ( AsmBuffer[i]->token == T_ID && AsmBuffer[i+1]->token == T_FINAL ) ||
-            AsmBuffer[i]->token == T_FINAL ) {
-            NextIfState = ( check_defd( i )  ? BLOCK_ACTIVE : BLOCK_INACTIVE );
-            if ( AsmBuffer[i]->token != T_FINAL )
+        //if ( tokenarray[i].token == T_ID && tokenarray[i+1].token == T_FINAL) {
+        if ( ( tokenarray[i].token == T_ID && tokenarray[i+1].token == T_FINAL ) ||
+            tokenarray[i].token == T_FINAL ) {
+            NextIfState = ( check_defd( tokenarray[i].string_ptr )  ? BLOCK_ACTIVE : BLOCK_INACTIVE );
+            if ( tokenarray[i].token != T_FINAL )
                 i++;
         } else if ( Options.strict_masm_compat == FALSE && (
-                    AsmBuffer[i]->token == T_RES_ID ||
-                    AsmBuffer[i]->token == T_STYPE ||
-                    AsmBuffer[i]->token == T_INSTRUCTION ||
-                    AsmBuffer[i]->token == T_DIRECTIVE ||
-                    //AsmBuffer[i]->token == T_UNARY_OP ||
-                    //AsmBuffer[i]->token == T_BINARY_OP ||
-                    AsmBuffer[i]->token == T_REG ) &&
-                   AsmBuffer[i+1]->token == T_FINAL ) {
+                    tokenarray[i].token == T_RES_ID ||
+                    tokenarray[i].token == T_STYPE ||
+                    tokenarray[i].token == T_INSTRUCTION ||
+                    tokenarray[i].token == T_DIRECTIVE ||
+                    //tokenarray[i].token == T_UNARY_OP ||
+                    //tokenarray[i].token == T_BINARY_OP ||
+                    tokenarray[i].token == T_REG ) &&
+                   tokenarray[i+1].token == T_FINAL ) {
             NextIfState = BLOCK_ACTIVE;
             i++;
         } else {
-            AsmWarn( 2, IFDEF_EXPECTS_SYMBOL_ARGUMENT, AsmBuffer[i-1]->tokpos );
-            while ( AsmBuffer[i]->token != T_FINAL ) i++;
+            AsmWarn( 2, IFDEF_EXPECTS_SYMBOL_ARGUMENT, tokenarray[i-1].tokpos );
+            while ( tokenarray[i].token != T_FINAL ) i++;
         }
         if ( directive == T_IFNDEF || directive == T_ELSEIFNDEF )
             NextIfState = ( ( NextIfState == BLOCK_ACTIVE ) ? BLOCK_INACTIVE : BLOCK_ACTIVE );
@@ -384,8 +391,8 @@ ret_code CondAsmDirective( int i )
         break;
     }
 
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -396,14 +403,14 @@ ret_code CondAsmDirective( int i )
     return( NOT_ERROR );
 }
 
-static char * GetErrText( int idx, char *buffer )
-/***********************************************/
+static char * GetErrText( struct asm_tok *text, char *buffer )
+/************************************************************/
 {
     *buffer = NULLC;
-    if ( idx != EMPTY ) {
+    if ( text ) {
         *(buffer+0) = ':';
         *(buffer+1) = ' ';
-        GetLiteralValue( buffer+2, AsmBuffer[idx]->string_ptr );
+        GetLiteralValue( buffer+2, text->string_ptr );
     }
     return( buffer );
 
@@ -412,18 +419,18 @@ static char * GetErrText( int idx, char *buffer )
 /* v2.05: the error directives are no longer handled in the
  * preprocessor, because the errors are displayed in pass 2 only
  */
-ret_code ErrorDirective( int i )
-/******************************/
+ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
+/***********************************************************/
 {
-    expr_list opndx;
+    struct expr opndx;
     uint direct;
-    char *string1;
-    char *string2;
+    const char *string1;
+    const char *string2;
     int errmsg = EMPTY;
-    int errtxt = EMPTY;
+    int errtxt = 0;
     char tmpbuffer[MAX_LINE_LEN];
 
-    direct = AsmBuffer[i]->value;
+    direct = tokenarray[i].tokval;
 
     i++; /* go past directive */
 
@@ -431,7 +438,7 @@ ret_code ErrorDirective( int i )
     switch( GetSflagsSp( direct) ) {
     case CC_NUMARG: /* .ERR[E|NZ] */
 
-        if (( ERROR == EvalOperand( &i, Token_Count, &opndx, 0 ) ))
+        if (( ERROR == EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) ))
             return( ERROR );
         if ( opndx.kind == EXPR_CONST )
             ;
@@ -441,9 +448,9 @@ ret_code ErrorDirective( int i )
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
-        if ( AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token != T_FINAL ) {
+        if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
             i++;
-            if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
+            if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
                 errtxt = i++;
             }
         }
@@ -456,26 +463,26 @@ ret_code ErrorDirective( int i )
         }
 
         if ( errmsg != EMPTY )
-            AsmErr( errmsg, opndx.value, GetErrText( errtxt, tmpbuffer ) );
+            AsmErr( errmsg, opndx.value, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
         break;
     case CC_SYMARG: /* .ERR[N]DEF */
         /* these directives are defined with flag DF_NOEXPAND,
          * so there's no preprocessor expansion!
          */
-        if ( AsmBuffer[i]->token == T_ID ) {
-            asm_sym * sym;
-            strcpy( tmpbuffer, AsmBuffer[i]->string_ptr );
+        if ( tokenarray[i].token == T_ID ) {
+            struct asym * sym;
+            strcpy( tmpbuffer, tokenarray[i].string_ptr );
             i++;
-            if ( AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token != T_FINAL ) {
+            if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
                 /* v2.05: added */
-                ExpandLinePart( i, AsmBuffer[i]->tokpos, TRUE, FALSE );
+                ExpandLinePart( i, tokenarray, tokenarray[i].tokpos, TRUE, FALSE );
                 i++;
-                if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
+                if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
                     errtxt = i++;
                 }
             }
 
-            //if ( AsmBuffer[i]->token != T_FINAL )
+            //if ( tokenarray[i].token != T_FINAL )
             //    break;
 
             /* should run on pass 2 only! */
@@ -493,23 +500,23 @@ ret_code ErrorDirective( int i )
             else if( direct == T_DOT_ERRNDEF && sym == NULL )
                 AsmErr( FORCED_NOT_DEF, tmpbuffer );
         } else {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
         break;
     case CC_BLKARG: /* .ERR[N]B */
-        string1 = AsmBuffer[i]->string_ptr;
-        if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-            if ( AsmBuffer[i]->token == T_ID && SymSearch( string1 ) == NULL )
+        string1 = tokenarray[i].string_ptr;
+        if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+            if ( tokenarray[i].token == T_ID && SymSearch( string1 ) == NULL )
                 AsmErr( SYMBOL_NOT_DEFINED, string1 );
             else
                 AsmError( TEXT_ITEM_REQUIRED );
             return( ERROR );
         }
         i++;
-        if ( AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token != T_FINAL ) {
+        if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
             i++;
-            if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
+            if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
                 errtxt = i++;
             }
         }
@@ -520,35 +527,35 @@ ret_code ErrorDirective( int i )
         else if ( direct == T_DOT_ERRNB && !check_blank( string1 ) )
             errmsg = FORCED_NOT_BLANK;
         if ( errmsg != EMPTY )
-            AsmErr( errmsg, string1, GetErrText( errtxt, tmpbuffer ) );
+            AsmErr( errmsg, string1, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
         break;
     case CC_LITARG: /* .ERRDIF[I], .ERRIDN[I] */
-        string1 = AsmBuffer[i]->string_ptr;
-        if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-            if ( AsmBuffer[i]->token == T_ID && SymSearch( string1 ) == NULL )
+        string1 = tokenarray[i].string_ptr;
+        if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+            if ( tokenarray[i].token == T_ID && SymSearch( string1 ) == NULL )
                 AsmErr( SYMBOL_NOT_DEFINED, string1 );
             else
                 AsmError( TEXT_ITEM_REQUIRED );
             return( ERROR );
         }
         i++;
-        if ( AsmBuffer[i]->token != T_COMMA ) {
+        if ( tokenarray[i].token != T_COMMA ) {
             AsmError( EXPECTING_COMMA );
             return( ERROR );
         }
         i++;
-        string2 = AsmBuffer[i]->string_ptr;
-        if ( AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' ) {
-            if ( AsmBuffer[i]->token == T_ID && SymSearch( string2 ) == NULL )
+        string2 = tokenarray[i].string_ptr;
+        if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+            if ( tokenarray[i].token == T_ID && SymSearch( string2 ) == NULL )
                 AsmErr( SYMBOL_NOT_DEFINED, string2 );
             else
                 AsmError( TEXT_ITEM_REQUIRED );
             return( ERROR );
         }
         i++;
-        if ( AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token != T_FINAL ) {
+        if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
             i++;
-            if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
+            if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
                 errtxt = i++;
             }
         }
@@ -573,7 +580,7 @@ ret_code ErrorDirective( int i )
                 errmsg = FORCED_IDN;
         }
         if ( errmsg != EMPTY )
-            AsmErr( errmsg, string1, string2, GetErrText( errtxt, tmpbuffer ) );
+            AsmErr( errmsg, string1, string2, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
         break;
     case CC_PASS2: /* .ERR2 */
         if ( ModuleInfo.setif2 == FALSE ) {
@@ -582,16 +589,16 @@ ret_code ErrorDirective( int i )
         }
     case CC_PASS1: /* .ERR1 */
     default: /* .ERR */
-        if ( AsmBuffer[i]->token == T_STRING && AsmBuffer[i]->string_delim == '<' ) {
+        if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
             errtxt = i++;
         }
         if ( Parse_Pass == PASS_1 )
             break;
-        AsmErr( FORCED_ERR, GetErrText( errtxt, tmpbuffer ) );
+        AsmErr( FORCED_ERR, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
         break;
     }
-    if ( AsmBuffer[i]->token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
     return( NOT_ERROR );

@@ -25,27 +25,28 @@
 *  ========================================================================
 *
 * Description:  interface for queue.c.
+*               This file is included by globals.h
 *
 ****************************************************************************/
 
 
 #ifndef QUEUE_H
 #define QUEUE_H 1
-typedef struct {
+struct qdesc {
     void *head;
     void *tail;
-} qdesc;
+};
 
-typedef struct qnode {
-    void    *next;
-    void    *elmt;
-} qnode;
+struct qnode {
+    void *next;
+    const void *elmt;
+};
 
-extern void QInit( qdesc * );
-extern void QEnqueue( qdesc *, void * );
-extern void QAddItem( qdesc *, void * );
-extern void *QDequeue( qdesc * );
-//extern void QJoinQueue( qdesc *dest, qdesc *src );
+extern void QInit( struct qdesc * );
+extern void QEnqueue( struct qdesc *, void * );
+extern void QAddItem( struct qdesc *, const void * );
+extern void *QDequeue( struct qdesc * );
+//extern void QJoinQueue( struct qdesc *dest, struct qdesc *src );
 
 #endif
 

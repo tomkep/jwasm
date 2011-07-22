@@ -26,8 +26,6 @@
 *
 * Description:  tokenizer.
 *
-*  The tokenizer is called rather early, with the result that it has to be
-*  called multiple times for a line if macro expansion occurs.
 ****************************************************************************/
 
 #include <ctype.h>
@@ -35,47 +33,40 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
 #include "condasm.h"
-#include "insthash.h"
+#include "reswords.h"
 #include "input.h"
 #include "segment.h"
 #include "listing.h"
 #include "tokenize.h"
 #include "fastpass.h"
+#include "myassert.h"
 
 #define CONCATID 0 /* 0=most compatible (see backsl.asm) */
 #define MASMNUMBER 1 /* 1=Masm-compatible number scanning */
-#define TOKSTRALIGN 1 /* 1=align token strings to uint_32 */
-
-#if 0
-typedef union {
-        float   f;
-        long    l;
-} NUMBERFL;
+#ifdef __I86__
+#define TOKSTRALIGN 0 /* 0=don't align token strings */
+#else
+#define TOKSTRALIGN 1 /* 1=align token strings to sizeof(uint_32) */
 #endif
+
+extern struct ReservedWord  ResWordTable[];
 
 #ifdef DEBUG_OUT
 extern int cnttok0;
 extern int cnttok1;
+static struct asm_tok *end_tokenarray;
+static char           *end_stringbuf;
 #endif
-extern char     CurrComment[];
+extern char    *CurrComment;
 
-char   *CurrSource;      /* Current Input Line */
-char   *StringBufferEnd; /* start free space in string buffer */
+static char    *token_stringbuf;  /* start token string buffer */
+char           *StringBufferEnd;  /* start free space in string buffer */
+struct asm_tok *tokenarray;       /* token buffer */
 
 /* string buffer - token strings and other stuff are stored here.
  * must be a multiple of MAX_LINE_LEN since it is used for string expansion.
  */
-#ifdef __I86__
-static char *token_stringbuf;
-#else
-static char token_stringbuf[MAX_LINE_LEN*MAX_SYNC_MACRO_NESTING];
-#endif
-
-//static struct asm_tok   tokens[MAX_TOKEN];      /* token buffer */
-static struct asm_tok   *tokens;      /* start token buffer */
-struct asm_tok          *AsmBuffer[MAX_TOKEN];  /* token array */
 
 static uint_8 g_flags; /* directive flags for current line */
 
@@ -86,28 +77,40 @@ char inside_comment;
 #define tolower(c) ((c >= 'A' && c <= 'Z') ? c | 0x20 : c )
 #endif
 
+/* strings for token 0x28 - 0x2F */
+static const short stokstr1[] = {
+    '(',')','*','+',',','-','.','/'};
+/* strings for token 0x5B - 0x5D */
+static const short stokstr2[] = {
+    '[',0,']'};
+
 /* initialize the token buffer array */
 
-void InitTokenBuffer( void )
-/**************************/
+void CreateTokenBuffer( void )
+/****************************/
 {
-    int  count;
-    struct asm_tok *curr;
 #ifdef __I86__
-    token_stringbuf = AsmAlloc( MAX_LINE_LEN*MAX_SYNC_MACRO_NESTING );
+    tokenarray = AsmAlloc( sizeof( struct asm_tok) * MAX_TOKEN );
+    token_stringbuf = AsmAlloc( MAX_LINE_LEN * 2 );
+#else
+    tokenarray = AsmAlloc( sizeof( struct asm_tok) * MAX_TOKEN * MAX_SYNC_MACRO_NESTING );
+    token_stringbuf = AsmAlloc( MAX_LINE_LEN * MAX_SYNC_MACRO_NESTING );
+#ifdef DEBUG_OUT
+    end_tokenarray = tokenarray + MAX_TOKEN * MAX_SYNC_MACRO_NESTING;
+    end_stringbuf = token_stringbuf + MAX_LINE_LEN * MAX_SYNC_MACRO_NESTING;
 #endif
-    tokens = AsmAlloc( sizeof( struct asm_tok) * MAX_TOKEN );
-    for( count = 0, curr = tokens; count < MAX_TOKEN; count ++ ) {
-        AsmBuffer[count] = curr++;
-    }
+#endif
 }
 
-void FreeTokenBuffer( void )
-/**************************/
+void DestroyTokenBuffer( void )
+/*****************************/
 {
-    AsmFree( tokens );
-#ifdef __I86__
+    AsmFree( tokenarray );
     AsmFree( token_stringbuf );
+#ifdef DEBUG_OUT
+    token_stringbuf = NULL;
+    StringBufferEnd = NULL;
+    tokenarray = NULL;
 #endif
 }
 
@@ -115,25 +118,24 @@ void FreeTokenBuffer( void )
  * dont concat EQU, macro invocations or ECHO [v2.0: + FORC/IRPC ] lines!
  * v2.05: don't concat if line's an instruction.
  */
-static bool IsMultiLine( struct asm_tok *tokbuf[] )
-/*************************************************/
+static bool IsMultiLine( struct asm_tok tokenarray[] )
+/****************************************************/
 {
-    asm_sym *sym;
-    int i = 0;
+    struct asym *sym;
+    int i;
 
-    if ( tokbuf[1]->token == T_DIRECTIVE && tokbuf[1]->value == T_EQU )
+    if ( tokenarray[1].token == T_DIRECTIVE && tokenarray[1].tokval == T_EQU )
         return( FALSE );
-    if ( tokbuf[1]->token == T_COLON )
-        i = 2;
-    if ( tokbuf[i]->token == T_ID ) {
-        sym = SymSearch( tokbuf[i]->string_ptr );
+    i = ( tokenarray[1].token == T_COLON ? 2 : 0 );
+    if ( tokenarray[i].token == T_ID ) {
+        sym = SymSearch( tokenarray[i].string_ptr );
         if ( sym && ( sym->state == SYM_MACRO ) )
             return( FALSE );
-    } else if ( tokbuf[i]->token == T_INSTRUCTION ||
-               ( tokbuf[i]->token == T_DIRECTIVE &&
-               ( tokbuf[i]->value == T_ECHO ||
-                tokbuf[i]->value == T_FORC ||
-                tokbuf[i]->value == T_IRPC ) ) ) {
+    } else if ( tokenarray[i].token == T_INSTRUCTION ||
+               ( tokenarray[i].token == T_DIRECTIVE &&
+               ( tokenarray[i].tokval == T_ECHO ||
+                tokenarray[i].tokval == T_FORC ||
+                tokenarray[i].tokval == T_IRPC ) ) ) {
         return( FALSE );
     }
     return( TRUE );
@@ -189,8 +191,8 @@ static ret_code ConcatLine( char *src, int cnt )
 
     while ( isspace(*p) ) p++;
     if ( *p == NULLC || *p == ';' ) {
-        char *buffer = CurrSource + strlen( CurrSource ) + 1;
-        if( GetTextLine( buffer, MAX_LINE_LEN ) ) {
+        char *buffer = GetNewLineBuffer( CurrSource );
+        if( GetTextLine( buffer ) ) {
             p = buffer;
             /* skip leading spaces */
             while ( isspace( *p ) ) p++;
@@ -264,7 +266,7 @@ static ret_code get_string( struct asm_tok *buf, struct line_status *p )
             return( ERROR );
         }
         *optr++ = NULLC;
-        buf->value = count;
+        buf->stringlen = count;
         p->input = iptr;
         p->output = optr;
         return( NOT_ERROR );
@@ -371,9 +373,8 @@ static ret_code get_string( struct asm_tok *buf, struct line_status *p )
                 char *tmp = optr-1;
                 while ( isspace(*tmp) ) tmp--;
                 if ( *tmp == ',' ) {
-                    /* use optr as temp buffer */
-                    tmp = optr;
-                    if( GetTextLine( tmp, MAX_LINE_LEN ) ) {
+                    tmp = GetNewLineBuffer( CurrSource );
+                    if( GetTextLine( tmp ) ) {
                         /* skip leading spaces */
                         while ( isspace( *tmp ) ) tmp++;
                         /* this size check isn't fool-proved yet */
@@ -406,7 +407,7 @@ static ret_code get_string( struct asm_tok *buf, struct line_status *p )
         return( ERROR );
     }
     *optr++ = NULLC;
-    buf->value = count;
+    buf->stringlen = count;
     p->input = iptr;
     p->output = optr;
     return( NOT_ERROR );
@@ -420,32 +421,62 @@ static ret_code get_special_symbol( struct asm_tok *buf, struct line_status *p )
 
     symbol = *p->input;
     switch( symbol ) {
-    case ':' : /* binary operator */
-        if ( *(p->input+1) == ':' ) {
-            p->input += 2;
+    case ':' : /* T_COLON binary operator (0x3A) */
+        p->input++;
+        if ( *p->input == ':' ) {
+            p->input++;
             buf->token = T_DBL_COLON;
-            *(p->output)++ = symbol;
-            *(p->output)++ = symbol;
+            buf->string_ptr = "::";
             break;
         }
-    case '.' : /* binary operator */
-    case ',' :
-    case '+' : /* unary|binary operator */
-    case '-' : /* unary|binary operator */
-    case '*' : /* binary operator */
-    case '/' : /* binary operator */
-    case '[' : /* operator - needs a matching ']' */
-    case ']' :
-    case '(' : /* operator - needs a matching ')' */
-    case ')' :
-    case '%' :
+        buf->token = T_COLON;
+        buf->string_ptr = ":";
+        break;
+    case '%' : /* T_PERCENT (0x25) */
+#if 0
+        /* if %OUT is to be supported, this is a good place
+         * to implement it.
+         */
+        if ( tolower( *(p->input+1) ) == 'o' &&
+            tolower( *(p->input+2) ) == 'u' &&
+            tolower( *(p->input+3) ) == 't' ) {
+            buf->token = T_DIRECTIVE;
+            buf->tokval = T_ECHO;
+            buf->dirtype = DRT_ECHO;
+            memcpy( p->output, p->input, 4 );
+            p->input += 4;
+            p->output += 4;
+            break;
+        }
+#endif
+        p->input++;
+        buf->token = T_PERCENT;
+        buf->string_ptr = "%";
+        break;
+    case '(' : /* 0x28: T_OP_BRACKET operator - needs a matching ')' */
+    case ')' : /* 0x29: T_CL_BRACKET */
+    case '*' : /* 0x2A: binary operator */
+    case '+' : /* 0x2B: unary|binary operator */
+    case ',' : /* 0x2C: T_COMMA */
+    case '-' : /* 0x2D: unary|binary operator */
+    case '.' : /* 0x2E: T_DOT binary operator */
+    case '/' : /* 0x2F: binary operator */
         /* all of these are themselves a token */
         p->input++;
         buf->token = symbol;
-        *(p->output)++ = symbol;
-        break;
+        buf->specval = 0; /* initialize, in case the token needs extra data */
+        /* v2.06: use constants for the token string */
+        buf->string_ptr = (char *)&stokstr1[symbol - '('];
+        return( NOT_ERROR );
+    case '[' : /* T_OP_SQ_BRACKET operator - needs a matching ']' (0x5B) */
+    case ']' : /* T_CL_SQ_BRACKET (0x5D) */
+        p->input++;
+        buf->token = symbol;
+        /* v2.06: use constants for the token string */
+        buf->string_ptr = (char *)&stokstr2[symbol - '['];
+        return( NOT_ERROR );
 #if 0 /* this case is filtered in Tokenize() */
-    case ';' :
+    case ';' : /* (0x3B) */
         /* a '<' in the source will prevent comments to be removed
          * so they might appear here. Remove!
          */
@@ -453,19 +484,18 @@ static ret_code get_special_symbol( struct asm_tok *buf, struct line_status *p )
         while (*p->input) p->input++;
         return( EMPTY );
 #endif
-    case '=' :
+    case '=' : /* (0x3D) */
         if ( *(p->input+1) != '=' ) {
             buf->token = T_DIRECTIVE;
-            buf->value = T_EQU;
+            buf->tokval = T_EQU;
             buf->dirtype = DRT_EQUALSGN; /* to make it differ from EQU directive */
-            //buf->flags = DF_LABEL;
-            *(p->output)++ = symbol;
+            buf->string_ptr = "=";
             p->input++;
             break;
         }
         /* fall through */
     default:
-        /* recognize C style operators.
+        /* detect C style operators.
          * DF_CEXPR is set if .IF, .WHILE, .ELSEIF or .UNTIL
          * has been detected in the current line.
          * will catch: '!', '<', '>', '&', '==', '!=', '<=', '>=', '&&', '||'
@@ -476,17 +506,17 @@ static ret_code get_special_symbol( struct asm_tok *buf, struct line_status *p )
         if ( ( g_flags & DF_CEXPR ) && strchr( "=!<>&|", symbol ) ) {
             *(p->output)++ = symbol;
             p->input++;
-            buf->value = 1;
+            buf->stringlen = 1;
             if ( symbol == '&' || symbol == '|' ) {
                 if ( *p->input == symbol ) {
                     *(p->output)++ = symbol;
                     p->input++;
-                    buf->value = 2;
+                    buf->stringlen = 2;
                 }
             } else if ( *p->input == '=' ) {
                 *(p->output)++ = '=';
                 p->input++;
-                buf->value = 2;
+                buf->stringlen = 2;
             }
             buf->token = T_STRING;
             buf->string_delim = NULLC;
@@ -513,7 +543,7 @@ static void array_mul_add( unsigned char *buf, unsigned base, unsigned num, unsi
 }
 #endif
 
-/* read in a number
+/* read in a number.
  * check the number suffix:
  * b or y: base 2
  * d or t: base 10
@@ -526,12 +556,10 @@ static ret_code get_number( struct asm_tok *buf, struct line_status *p )
     char                *ptr = p->input;
     char                *dig_start;
     char                *dig_end;
-    unsigned            len;
     unsigned            base = 0;
+    unsigned            len;
     uint_32             digits_seen;
-    uint_32             val;
     char                last_char;
-    uint_64             numval[2];
 
 #define VALID_BINARY    0x0003
 #define VALID_OCTAL     0x00ff
@@ -636,11 +664,6 @@ static ret_code get_number( struct asm_tok *buf, struct line_status *p )
         break;
     }
 
-    numval[0] = 0;
-    numval[1] = 0;
-    //buf->value64 = 0;
-    //buf->hivalue64 = 0;
-
 #if MASMNUMBER
     /* Masm doesn't swallow alphanum chars which may follow the
      * number!
@@ -650,44 +673,14 @@ static ret_code get_number( struct asm_tok *buf, struct line_status *p )
     if ( base != 0 && is_valid_id_char( *ptr ) == FALSE ) {
 #endif
         buf->token = T_NUM;
-        while( dig_start < dig_end ) {
-            uint_16 *px;
-            if( *dig_start <= '9' ) {
-                val = *dig_start - '0';
-            } else {
-                val = tolower( *dig_start ) - 'a' + 10;
-            }
-            /* v2: do the calculation inline and with 2 bytes at once */
-            //array_mul_add( buf->bytes, base, val, sizeof( buf->bytes ) );
-            px = (uint_16 *)&numval[0];
-            for ( len = sizeof( numval ) >> 1; len; len-- ) {
-                val += (uint_32)*px * base;
-                *(px++) = val;
-                val >>= 16;
-            };
-            ++dig_start;
-        }
-        buf->value64 = numval[0];
-        if ( numval[1] == 0 )
-            buf->hivalflg = HV_NULL;
-        else {
-            buf->hivalflg = HV_STORED;
-            /* store the upper 8 bytes in the token buffer */
-            *(uint_64 *)p->output = numval[1];
-            p->output += sizeof( uint_64 );
-            buf->string_ptr = p->output;
-        }
+        buf->numbase = base;
+        buf->numlen = dig_end - dig_start;
         //DebugMsg(("get_number: inp=%s, value=%" FX32 "\n", p->input, buf->value64 ));
     } else {
-        //buf->tokpos = p->input; /* restore input ptr for T_BAD_NUM */
         buf->token = T_BAD_NUM;
         DebugMsg(("get_number: BAD_NUMBER (%s), radix=%u, base=%u, ptr=>%s<, digits_seen=%Xh\n", dig_start, ModuleInfo.radix, base, ptr, digits_seen ));
         /* swallow remainder of token */
         while( is_valid_id_char( *ptr ) ) ++ptr;
-        /* don't display an error here, it will cause
-         * 'nondigit in number' later in expression evaluator
-         */
-        //AsmError( INVALID_NUMBER_DIGIT );
     }
 number_done:
     len = ptr - p->input;
@@ -706,7 +699,7 @@ static ret_code get_id_in_backquotes( struct asm_tok *buf, struct line_status *p
 {
     char *optr = p->output;
     buf->token = T_ID;
-    buf->value = 0;
+    buf->idarg = 0;
 
     p->input++;         /* strip off the backquotes */
     for( ; *p->input != '`'; ) {
@@ -729,13 +722,11 @@ static ret_code get_id_in_backquotes( struct asm_tok *buf, struct line_status *p
 static ret_code get_id( struct asm_tok *buf, struct line_status *p )
 /******************************************************************/
 {
-    struct ReservedWord *resw;
+    //struct ReservedWord *resw;
     char *iptr = p->input;
     char *optr = p->output;
     int  index;
-    int  size;
-
-    buf->value = 0;
+    uint size;
 
 #if CONCATID
 continue_scan:
@@ -770,31 +761,31 @@ continue_scan:
 
     if( size == 1 && *p->output == '?' ) {
         p->input = iptr;
-        p->output = optr;
         buf->token = T_QUESTION_MARK;
+        buf->string_ptr = "?";
         return( NOT_ERROR );
     }
-    resw = FindResWord( p->output );
-    if( resw == NULL ) {
+    index = FindResWord( p->output, size );
+    if( index == -1 ) {
         /* if ID begins with a DOT, check for OPTION DOTNAME.
          * if not set, skip the token and return a T_DOT instead!
          */
         if ( *p->output == '.' && ModuleInfo.dotname == FALSE ) {
            buf->token = T_DOT;
-           p->output++;
-           *p->output++ = NULLC;
+           buf->string_ptr = (char *)&stokstr1['.' - '('];
            p->input++;
            return( NOT_ERROR );
         }
         p->input = iptr;
         p->output = optr;
         buf->token = T_ID;
+        buf->idarg = 0;
         return( NOT_ERROR );
     }
     p->input = iptr;
     p->output = optr;
-    buf->value = resw - AsmResWord; /* is a enum asm_token value */
-    if ( ! ( resw->flags & RWF_SPECIAL ) ) {
+    buf->tokval = index; /* is a enum instr_token value */
+    if ( ! ( ResWordTable[index].flags & RWF_SPECIAL ) ) {
 
         //  DebugMsg(("found item >%s< in instruction table, rm=%X\n", buf->string_ptr, InstrTable[index].rm_byte));
 
@@ -818,33 +809,33 @@ continue_scan:
             /* checking the cpu won't give the expected results currently since
              * some instructions in the table (i.e. MOV) start with a 386 variant!
              */
-            index = IndexFromToken( buf->value );
+            index = IndexFromToken( buf->tokval );
 #if 0 /* changed for v1.96 */
             if (( InstrTable[index].cpu & P_EXT_MASK ) > ( ModuleInfo.curr_cpu & P_EXT_MASK )) {
 #else
             if (( InstrTable[index].cpu & P_CPU_MASK ) > ( ModuleInfo.curr_cpu & P_CPU_MASK ) ||
                 ( InstrTable[index].cpu & P_EXT_MASK ) > ( ModuleInfo.curr_cpu & P_EXT_MASK )) {
 #endif
-                buf->value = 0;
                 buf->token = T_ID;
+                buf->idarg = 0;
                 return( NOT_ERROR );
             }
         }
         buf->token = T_INSTRUCTION;
         return( NOT_ERROR );
     }
-    index = buf->value;
+    index = buf->tokval;
 
-    /* for RWT_SPECIAL, field <value8> contains further infos:
+    /* for RWT_SPECIAL, field <bytval> contains further infos:
      - RWT_REG:             register number (regnum)
      - RWT_DIRECTIVE:       type of directive (dirtype)
      - RWT_UNARY_OPERATOR:  operator precedence
      - RWT_BINARY_OPERATOR: operator precedence
-     - RWT_STYPE:           index into SimpleType table
+     - RWT_STYPE:           memtype
      - RWT_RES_ID:          for languages, LANG_xxx value
                             for the rest, unused.
      */
-    buf->value8 = SpecialTable[index].value8;
+    buf->bytval = SpecialTable[index].bytval;
 
     switch ( SpecialTable[index].type ) {
     case RWT_REG:
@@ -870,6 +861,7 @@ continue_scan:
     default:
         DebugMsg(("get_id: found unknown type=%u\n", SpecialTable[index].type ));
         buf->token = T_ID; /* shouldn't happen */
+        buf->idarg = 0;
         break;
     }
     return( NOT_ERROR );
@@ -892,33 +884,32 @@ continue_scan:
 
 #define is_valid_id_start( ch )  ( isalpha(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
-ret_code GetToken( unsigned int buf_index, struct line_status *p )
-/****************************************************************/
+ret_code GetToken( struct asm_tok *token, struct line_status *p )
+/***************************************************************/
 {
     if( isdigit( *p->input ) ) {
-        return( get_number( AsmBuffer[buf_index], p ) );
+        return( get_number( token, p ) );
     } else if( is_valid_id_start( *p->input ) ) {
-        return( get_id( AsmBuffer[buf_index], p ) );
+        return( get_id( token, p ) );
     } else if( *p->input == '.' &&
                is_valid_id_char(*(p->input+1)) &&
-               ( buf_index == 0 ||
-                (AsmBuffer[buf_index-1]->token != T_REG &&
-                 AsmBuffer[buf_index-1]->token != T_CL_BRACKET &&
-                 AsmBuffer[buf_index-1]->token != T_CL_SQ_BRACKET &&
-                 AsmBuffer[buf_index-1]->token != T_ID ) ) ) {
-        return( get_id( AsmBuffer[buf_index], p ) );
+              ( p->last_token != T_REG &&
+               p->last_token != T_CL_BRACKET &&
+               p->last_token != T_CL_SQ_BRACKET &&
+               p->last_token != T_ID ) ) {
+        return( get_id( token, p ) );
 #if BACKQUOTES
     } else if( *p->input == '`' && Options.strict_masm_compat == FALSE ) {
-        return( get_id_in_backquotes( AsmBuffer[buf_index], p ) );
+        return( get_id_in_backquotes( token, p ) );
 #endif
     }
-    return( get_special_symbol( AsmBuffer[buf_index], p ) );
+    return( get_special_symbol( token, p ) );
 }
 
 // fixme char *IfSymbol;        /* save symbols in IFDEF's so they don't get expanded */
 
-static void StartComment( const char * p )
-/****************************************/
+static void StartComment( const char *p )
+/***************************************/
 {
     while ( isspace( *p ) ) p++;
     if ( *p == NULLC ) {
@@ -935,25 +926,27 @@ int Tokenize( char *line, unsigned int start, int rescan )
 /********************************************************/
 /*
  * create tokens from a source line.
- * string: the line which is to tokenize
- * index: where to start in the token buffer. If index == 0,
+ * line:  the line which is to be tokenized
+ * start: where to start in the token buffer. If start == 0,
  *        then some variables are additionally initialized.
+ * rescan:TRUE if the line has been tokenized already.
  */
 {
     unsigned int                index = start;
     int                         rc;
     struct line_status          p;
 
+    p.input = line;
+    p.last_token = T_FINAL;
     if ( index == 0 ) {
 #ifdef DEBUG_OUT
         cnttok0++;
 #endif
-        ModuleInfo.line_listed = FALSE;
-        CurrSource = line;
+        /* v2.06: these flags are now initialized on a higher level */
+        //ModuleInfo.line_flags = 0;
         p.output = token_stringbuf;
         g_flags = 0;
         expansion = FALSE;
-        p.input = line;
         if( inside_comment ) {
             DebugMsg(("COMMENT active, delim is >%c<, line is >%s<\n", inside_comment, line));
             if( strchr( line, inside_comment ) != NULL ) {
@@ -963,7 +956,7 @@ int Tokenize( char *line, unsigned int start, int rescan )
             goto skipline;
         }
         while( isspace( *p.input )) p.input++;
-        if (*p.input == '%') {
+        if ( *p.input == '%' ) {
             *p.input++ = ' ';
             expansion = TRUE;
         }
@@ -972,7 +965,6 @@ int Tokenize( char *line, unsigned int start, int rescan )
         cnttok1++;
 #endif
         p.output = StringBufferEnd;
-        p.input = line;
     }
 
     for( ;; ) {
@@ -984,12 +976,14 @@ int Tokenize( char *line, unsigned int start, int rescan )
             p.output += sizeof(uint_32) - ( ( p.output - StringBufferEnd ) & (sizeof(uint_32)-1) );
 #endif
 
-        AsmBuffer[index]->string_ptr = p.output;
-        AsmBuffer[index]->tokpos = p.input;
+        tokenarray[index].tokpos = p.input;
 
         if( *p.input == NULLC || *p.input == ';' ) {
             if ( *p.input == ';' ) {
-                strcpy( CurrComment, p.input );
+                int size = strlen( p.input );
+                memcpy( p.output, p.input, size + 1 );
+                CurrComment = p.output;
+                p.output += ( ( size + 4 ) & ~3 );
                 *p.input = NULLC;
             }
             /* if a comma is last token, concat lines ... with some exceptions
@@ -997,16 +991,16 @@ int Tokenize( char *line, unsigned int start, int rescan )
              * concatenation may be triggered by a comma AFTER expansion.
              */
             if ( index > 1 &&
-                AsmBuffer[index-1]->token == T_COMMA &&
+                tokenarray[index-1].token == T_COMMA &&
 #if FASTPASS
                 ( Parse_Pass == PASS_1 || UseSavedState == FALSE ) && /* is it an already preprocessed line? */
 #endif
                 start == 0 ) {
                 DebugMsg1(("Tokenize: calling IsMultiLine()\n" ));
-                if ( IsMultiLine( AsmBuffer ) ) {
+                if ( IsMultiLine( tokenarray ) ) {
+                    char *ptr = GetNewLineBuffer( CurrSource );
                     DebugMsg1(("Tokenize: IsMultiLine(%s)=TRUE\n", line ));
-                    if ( GetTextLine( p.output, MAX_LINE_LEN - ( p.input - line ) ) ) {
-                        char *ptr = p.output;
+                    if ( GetTextLine( ptr ) ) {
                         while ( isspace( *ptr ) ) ptr++;
                         if ( *ptr ) {
                             strcpy( p.input, ptr );
@@ -1018,7 +1012,8 @@ int Tokenize( char *line, unsigned int start, int rescan )
             }
             break;
         }
-        rc = GetToken( index, &p );
+        tokenarray[index].string_ptr = p.output;
+        rc = GetToken( &tokenarray[index], &p );
         if ( rc == EMPTY )
             continue;
         if ( rc == ERROR ) {
@@ -1034,15 +1029,15 @@ int Tokenize( char *line, unsigned int start, int rescan )
          *    it probably is just a bug!
          */
         if ( rescan == FALSE )
-        if ( index == 0 || ( index == 2 && ( AsmBuffer[1]->token == T_COLON || AsmBuffer[1]->token == T_DBL_COLON) ) ) {
-            if ( AsmBuffer[index]->token == T_DIRECTIVE &&
-                AsmBuffer[index]->value8 == DRT_CONDDIR ) {
-                if ( AsmBuffer[index]->value == T_COMMENT ) {
+        if ( index == 0 || ( index == 2 && ( tokenarray[1].token == T_COLON || tokenarray[1].token == T_DBL_COLON) ) ) {
+            if ( tokenarray[index].token == T_DIRECTIVE &&
+                tokenarray[index].bytval == DRT_CONDDIR ) {
+                if ( tokenarray[index].tokval == T_COMMENT ) {
                     DebugMsg1(("tokenize: COMMENT starting, delim is >%c<\n", inside_comment));
                     StartComment( p.input );
                     break;
                 }
-                conditional_assembly_prepare( AsmBuffer[index]->value );
+                conditional_assembly_prepare( tokenarray[index].tokval );
                 if ( CurrIfState != BLOCK_ACTIVE ) {
                     index++;
                     break;
@@ -1052,6 +1047,7 @@ int Tokenize( char *line, unsigned int start, int rescan )
             }
         }
 
+        p.last_token = tokenarray[index].token;
         index++;
         if( index >= MAX_TOKEN ) {
             AsmError( TOO_MANY_TOKENS );
@@ -1062,68 +1058,57 @@ int Tokenize( char *line, unsigned int start, int rescan )
 
 skipline:
 
-    AsmBuffer[index]->token = T_FINAL;
-#if TOKSTRALIGN
-    *p.output = NULLC;
-    p.output += sizeof(uint_32);
-#else
-    *p.output++ = NULLC;
-#endif
+    tokenarray[index].token = T_FINAL;
+    tokenarray[index].string_ptr = "";
     StringBufferEnd = p.output;
     return( index );
 }
 
-/* get size of token buffer status */
-
-int GetTokenStateSize( void )
-/***************************/
+void PushInputStatus( struct input_status *oldstat )
+/**************************************************/
 {
-    return( sizeof( int ) +
-            (Token_Count+1) * sizeof( struct asm_tok ) +
-            sizeof( char * ) +
-            sizeof( int ) +
-            ( StringBufferEnd - token_stringbuf ) );
-}
-
-/* save the token buffer status.
- This is
- - variable Token_Count
- - variable AsmBuffer[0..Token_Count]
- - variable CurrSource
- - variable token_stringbuf (StringBufferEnd points to end of buffer)
- */
-
-void SaveTokenState( unsigned char * pSave )
-/******************************************/
-{
-    int i;
-    *(int *)pSave = Token_Count;
-    pSave += sizeof( int );
-    for (i = 0; i <= Token_Count; i++, pSave += sizeof( struct asm_tok ) )
-        memcpy( pSave, AsmBuffer[i], sizeof( struct asm_tok ) );
-    *(char * *)pSave = CurrSource;
-    pSave += sizeof( char * );
-    *(int *)pSave = StringBufferEnd - token_stringbuf;
-    pSave += sizeof( int );
-    memcpy( pSave, token_stringbuf, StringBufferEnd - token_stringbuf );
+    oldstat->token_stringbuf = token_stringbuf;
+    oldstat->Token_Count = Token_Count;
+    oldstat->CurrSource = CurrSource;
+#ifdef __I86__
+    oldstat->tokenarray = tokenarray;
+    oldstat->StringBufferEnd = StringBufferEnd;
+    tokenarray = MemAlloc( sizeof( struct asm_tok) * MAX_TOKEN );
+    token_stringbuf = MemAlloc( MAX_LINE_LEN * 2 );
+#else
+    token_stringbuf = StringBufferEnd;
+    tokenarray += Token_Count + 1;
+    /**/myassert( token_stringbuf < end_stringbuf );
+    /**/myassert( tokenarray < end_tokenarray );
+#endif
+    CurrSource = GetNewLineBuffer( CurrSource );
+    DebugMsg1(("PushInputStatus() stringbuf-tokencnt-currsrc old=%X-%u-%X new=%X-%X-%X\n",
+               oldstat->token_stringbuf, oldstat->Token_Count, oldstat->CurrSource,
+               token_stringbuf, tokenarray, CurrSource ));
     return;
 }
 
-/* restore token state previously saved with SaveTokenState() */
-
-void RestoreTokenState( unsigned char * pSave )
-/*********************************************/
+void PopInputStatus( struct input_status *newstat )
+/*************************************************/
 {
-    int i;
-    Token_Count = *(int *)pSave;
-    pSave += sizeof( int );
-    for (i = 0; i <= Token_Count; i++, pSave += sizeof( struct asm_tok ) )
-        memcpy( AsmBuffer[i], pSave, sizeof( struct asm_tok ) );
-    CurrSource = *(char * *)pSave;
-    pSave += sizeof( char * );
-    i = *(int *)pSave;
-    pSave += sizeof( int );
-    memcpy( token_stringbuf, pSave, i );
-    StringBufferEnd = token_stringbuf + i;
+    DebugMsg1(("PopInputStatus() old=%X-%u-%X new=%X-%u-%X\n",
+               token_stringbuf, Token_Count, CurrSource,
+               newstat->token_stringbuf, newstat->Token_Count, newstat->CurrSource ));
+#ifdef __I86__
+    MemFree( token_stringbuf );
+    MemFree( tokenarray );
+#else
+    StringBufferEnd = token_stringbuf;
+#endif
+    token_stringbuf = newstat->token_stringbuf;
+    Token_Count = newstat->Token_Count;
+    CurrSource = newstat->CurrSource;
+#ifdef __I86__
+    StringBufferEnd = newstat->StringBufferEnd;
+    tokenarray = newstat->tokenarray;
+#else
+    tokenarray -= Token_Count + 1;
+#endif
     return;
 }
+

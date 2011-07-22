@@ -33,11 +33,7 @@
 
 #if defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__)
 
-#include <stdio.h>
 #include <unistd.h>
-#include <string.h>
-#include <errno.h>
-//#include "watcomc.h"
 #include "globals.h"
 
 #define __set_errno( err ) errno = (err)
@@ -290,10 +286,10 @@ char *_fullpath( char *buff, const char *path, size_t size )
 int _memicmp( const void *in_s1, const void *in_s2, size_t len )
 /**************************************************************/
 {
-    const unsigned char *   s1 = (const unsigned char *)in_s1;
-    const unsigned char *   s2 = (const unsigned char *)in_s2;
-    unsigned char           c1;
-    unsigned char           c2;
+    const unsigned char *s1 = (const unsigned char *)in_s1;
+    const unsigned char *s2 = (const unsigned char *)in_s2;
+    unsigned char        c1;
+    unsigned char        c2;
 
     for( ; len; --len )  {
         c1 = *s1;
@@ -339,19 +335,19 @@ char *strupr( char *str )
 
 #ifndef DEBUG_OUT /* OW v1.8 WDW has a problem with locally defined imports */
 
-typedef union cu {
+union cu {
     int c;
-    char * p;
-} cu;
+    char *p;
+};
 
 /* this is an emulation of the Win32 function which is called
  * by the OW runtime. It's the only USER32 function used.
  * By defining it here the binary will just need KERNEL32 to load.
  */
-char * _stdcall CharUpperA(char * lpsz)
-/*************************************/
+char * _stdcall CharUpperA( char *lpsz )
+/**************************************/
 {
-    cu p;
+    union cu p;
     p.p = lpsz;
 
     if ( p.c < 0x10000 )

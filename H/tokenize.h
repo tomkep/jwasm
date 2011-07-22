@@ -35,18 +35,27 @@
 struct line_status {
     char *input;
     char *output;
+    char last_token;
     char is_concat; /* TRUE if line has been concatenated */
 };
 
-extern char     *CurrSource;      // current source line
-extern char     *StringBufferEnd; // start free space in string buffer
+struct input_status {
+    char *token_stringbuf;
+    char *CurrSource;
+    int Token_Count;
+#ifdef __I86__
+    char *StringBufferEnd;
+    struct asm_tok *tokenarray;
+#endif
+};
 
-extern ret_code GetToken( unsigned int, struct line_status *p );
+extern char     *StringBufferEnd; /* start free space in string buffer */
+
+extern ret_code GetToken( struct asm_tok *, struct line_status * );
 extern int      Tokenize( char * , unsigned int, int );
-extern int      GetTokenStateSize( void );
-extern void     SaveTokenState( unsigned char * pSave );
-extern void     RestoreTokenState( unsigned char * pSave );
-extern void     InitTokenBuffer( void );
-extern void     FreeTokenBuffer( void );
+extern void     PushInputStatus( struct input_status * );
+extern void     PopInputStatus( struct input_status * );
+extern void     CreateTokenBuffer( void );
+extern void     DestroyTokenBuffer( void );
 
 #endif

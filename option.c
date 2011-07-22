@@ -13,13 +13,11 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
-#include "insthash.h"
-#include "symbols.h"
+#include "reswords.h"
 #include "expreval.h"
 
 /* prototypes */
-extern asm_sym          *sym_Interface;
+extern struct asym          *sym_Interface;
 #if MZ_SUPPORT
 extern struct MZDATA mzdata;
 #endif
@@ -30,59 +28,53 @@ extern struct MZDATA mzdata;
 #define OPTQUAL
 #endif
 
+#define OPTFUNC( name ) static ret_code OPTQUAL name( int *pi, struct asm_tok tokenarray[] )
+
 /* OPTION directive helper functions */
 
 /* OPTION DOTNAME */
 
-static int OPTQUAL SetDotName( int *pi )
-/**************************************/
+OPTFUNC( SetDotName )
+/*******************/
 {
-    /* AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[(*pi)-1]->string_ptr ); */
     ModuleInfo.dotname = TRUE;
     return( NOT_ERROR );
 }
 
 /* OPTION NODOTNAME */
 
-static int OPTQUAL SetNoDotName( int *pi )
-/****************************************/
+OPTFUNC( SetNoDotName )
+/*********************/
 {
-    //AsmWarn( 4, IGNORING_DIRECTIVE, AsmBuffer[(*pi)-1]->string_ptr );
     ModuleInfo.dotname = FALSE;
     return( NOT_ERROR );
 }
 
 /* OPTION CASEMAP:NONE | NOTPUBLIC | ALL */
-/* NOTPUBLIC isn't implemented yet */
 
-static int OPTQUAL SetCaseMap( int *pi )
-/**************************************/
+OPTFUNC( SetCaseMap )
+/*******************/
 {
     int i = *pi;
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( AsmBuffer[i]->token == T_ID ) {
-        if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "NONE" ) ) {
+    if ( tokenarray[i].token == T_ID ) {
+        if ( 0 == _stricmp( tokenarray[i].string_ptr, "NONE" ) ) {
             ModuleInfo.case_sensitive = TRUE;        /* -Cx */
             ModuleInfo.convert_uppercase = FALSE;
-        } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "NOTPUBLIC" ) ) {
+        } else if ( 0 == _stricmp( tokenarray[i].string_ptr, "NOTPUBLIC" ) ) {
             ModuleInfo.case_sensitive = FALSE;       /* -Cp */
             ModuleInfo.convert_uppercase = FALSE;
-        } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "ALL" ) ) {
+        } else if ( 0 == _stricmp( tokenarray[i].string_ptr, "ALL" ) ) {
             ModuleInfo.case_sensitive = FALSE;       /* -Cu */
             ModuleInfo.convert_uppercase = TRUE;
         } else {
-            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
             return( ERROR );
         }
-        DebugMsg1(("SetCaseMap(%s) ok\n", AsmBuffer[i]->string_ptr ));
+        DebugMsg1(("SetCaseMap(%s) ok\n", tokenarray[i].string_ptr ));
         i++;
         SymSetCmpFunc();
     } else {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     *pi = i;
@@ -91,8 +83,8 @@ static int OPTQUAL SetCaseMap( int *pi )
 
 /* OPTION M510 */
 
-static int OPTQUAL SetM510( int *pi )
-/***********************************/
+OPTFUNC( SetM510 )
+/****************/
 {
     SetMasm510( TRUE );
     return( NOT_ERROR );
@@ -100,8 +92,8 @@ static int OPTQUAL SetM510( int *pi )
 
 /* OPTION NOM510 */
 
-static int OPTQUAL SetNoM510( int *pi )
-/*************************************/
+OPTFUNC( SetNoM510 )
+/******************/
 {
     SetMasm510(FALSE);
     return( NOT_ERROR );
@@ -109,8 +101,8 @@ static int OPTQUAL SetNoM510( int *pi )
 
 /* OPTION SCOPED */
 
-static int OPTQUAL SetScoped( int *pi )
-/*************************************/
+OPTFUNC( SetScoped )
+/******************/
 {
     ModuleInfo.scoped = TRUE;
     return( NOT_ERROR );
@@ -118,8 +110,8 @@ static int OPTQUAL SetScoped( int *pi )
 
 /* OPTION NOSCOPED */
 
-static int OPTQUAL SetNoScoped( int *pi )
-/***************************************/
+OPTFUNC( SetNoScoped )
+/********************/
 {
     ModuleInfo.scoped = FALSE;
     return( NOT_ERROR );
@@ -127,8 +119,8 @@ static int OPTQUAL SetNoScoped( int *pi )
 
 /* OPTION OLDSTRUCTS */
 
-static int OPTQUAL SetOldStructs( int *pi )
-/*****************************************/
+OPTFUNC( SetOldStructs )
+/**********************/
 {
     ModuleInfo.oldstructs = TRUE;
     return( NOT_ERROR );
@@ -136,8 +128,8 @@ static int OPTQUAL SetOldStructs( int *pi )
 
 /* OPTION NOOLDSTRUCTS */
 
-static int OPTQUAL SetNoOldStructs( int *pi )
-/*******************************************/
+OPTFUNC( SetNoOldStructs )
+/************************/
 {
     ModuleInfo.oldstructs = FALSE;
     return( NOT_ERROR );
@@ -145,8 +137,8 @@ static int OPTQUAL SetNoOldStructs( int *pi )
 
 /* OPTION EMULATOR */
 
-static int OPTQUAL SetEmulator( int *pi )
-/***************************************/
+OPTFUNC( SetEmulator )
+/********************/
 {
     ModuleInfo.emulator = TRUE;
     return( NOT_ERROR );
@@ -154,8 +146,8 @@ static int OPTQUAL SetEmulator( int *pi )
 
 /* OPTION NOEMULATOR */
 
-static int OPTQUAL SetNoEmulator( int *pi )
-/*****************************************/
+OPTFUNC( SetNoEmulator )
+/**********************/
 {
     ModuleInfo.emulator = FALSE;
     return( NOT_ERROR );
@@ -163,8 +155,8 @@ static int OPTQUAL SetNoEmulator( int *pi )
 
 /* OPTION LJMP */
 
-static int OPTQUAL SetLJmp( int *pi )
-/***********************************/
+OPTFUNC( SetLJmp )
+/****************/
 {
     ModuleInfo.ljmp = TRUE;
     return( NOT_ERROR );
@@ -172,8 +164,8 @@ static int OPTQUAL SetLJmp( int *pi )
 
 /* OPTION NOLJMP */
 
-static int OPTQUAL SetNoLJmp( int *pi )
-/*************************************/
+OPTFUNC( SetNoLJmp )
+/******************/
 {
     ModuleInfo.ljmp = FALSE;
     return( NOT_ERROR );
@@ -181,8 +173,8 @@ static int OPTQUAL SetNoLJmp( int *pi )
 
 /* OPTION NOREADONLY */
 
-static int OPTQUAL SetNoReadonly( int *pi )
-/*****************************************/
+OPTFUNC( SetNoReadonly )
+/**********************/
 {
     /* default, nothing to do */
     return( NOT_ERROR );
@@ -190,8 +182,8 @@ static int OPTQUAL SetNoReadonly( int *pi )
 
 /* OPTION NOOLDMACROS */
 
-static int OPTQUAL SetNoOldmacros( int *pi )
-/******************************************/
+OPTFUNC( SetNoOldmacros )
+/***********************/
 {
     /* default, nothing to do */
     return( NOT_ERROR );
@@ -199,67 +191,72 @@ static int OPTQUAL SetNoOldmacros( int *pi )
 
 /* OPTION EXPR32 */
 
-static int OPTQUAL SetExpr32( int *pi )
-/*************************************/
+OPTFUNC( SetExpr32 )
+/******************/
 {
     /* default, nothing to do */
     return( NOT_ERROR );
 }
 
-static int OPTQUAL SetNoSignExt( int *pi )
-/****************************************/
+OPTFUNC( SetNoSignExt )
+/*********************/
 {
     ModuleInfo.NoSignExtend = TRUE;
     return( NOT_ERROR );
 }
 
-/* OPTION NOKEYWORD */
+static void SkipOption( int *pi, struct asm_tok tokenarray[] )
+/************************************************************/
+{
+    while ( tokenarray[*pi].token != T_FINAL &&
+           tokenarray[*pi].token != T_COMMA )
+        (*pi)++;
+}
 
-static int OPTQUAL SetNoKeyword( int *pi )
-/****************************************/
+/* OPTION NOKEYWORD: <keyword[,keyword,...]>
+ */
+
+OPTFUNC( SetNoKeyword )
+/*********************/
 {
     int i = *pi;
-    struct ReservedWord *resw;
-    char * p;
+    //struct ReservedWord *resw;
+    int index;
+    char *p;
 
     if( Parse_Pass != PASS_1 ) {
-        *pi = Token_Count;
+        SkipOption( pi, tokenarray );
         return( NOT_ERROR);
     }
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
+    if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
-    i++;
-    if ( AsmBuffer[i]->token != T_STRING ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-        return( ERROR );
-    }
-    for ( p = AsmBuffer[i]->string_ptr; *p; ) {
+    for ( p = tokenarray[i].string_ptr; *p; ) {
         while ( isspace( *p ) ) p++;
         if ( *p ) {
-            char buffer[64];
-            int cnt = sizeof(buffer) - 1;
-            char * p2 = buffer;
-            //struct asm_ins *instruct;
-            for (;*p && cnt;cnt--) {
-                if (isspace(*p) || *p == ',')
+            char *p2 = p;
+            unsigned char cnt;
+            //struct instr_item *instruct;
+            for ( ;*p; p++ ) {
+                if ( isspace( *p ) || *p == ',' )
                     break;
-                *p2++ = *p++;
             }
-            *p2 = NULLC;
-            cnt = p2 - buffer;
-            resw = FindResWord( buffer );
-            if ( resw )
-                DisableKeyword( resw - AsmResWord );
+            cnt = p - p2;
+            /* todo: if MAX_ID_LEN can be > 255, then check size,
+             * since a reserved word's size must be <= 255
+             */
+            index = FindResWord( p2, cnt );
+            if ( index != -1 )
+                DisableKeyword( index );
             else {
-                if ( IsKeywordDisabled( buffer, cnt ) == EMPTY ) {
+                if ( IsKeywordDisabled( p2, cnt ) ) {
                     AsmError( RESERVED_WORD_EXPECTED );
                     return( ERROR );
                 }
             }
         }
-        while (isspace(*p)) p++;
+        while ( isspace(*p) ) p++;
         if (*p == ',') p++;
     }
     i++;
@@ -269,20 +266,15 @@ static int OPTQUAL SetNoKeyword( int *pi )
 
 /* OPTION LANGUAGE:{C|PASCAL|BASIC|FORTRAN|SYSCALL|STDCALL|FASTCALL} */
 
-static int OPTQUAL SetLanguage( int *pi )
-/***************************************/
+OPTFUNC( SetLanguage )
+/********************/
 {
     int i = *pi;
     //lang_type langtype;
     //int language = ERROR;
 
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( AsmBuffer[i]->token == T_RES_ID ) {
-        if ( GetLangType( &i, &ModuleInfo.langtype ) == NOT_ERROR ) {
+    if ( tokenarray[i].token == T_RES_ID ) {
+        if ( GetLangType( &i, tokenarray, &ModuleInfo.langtype ) == NOT_ERROR ) {
             /* update @Interface assembly time variable */
             if ( ModuleInfo.model != MOD_NONE && sym_Interface )
                 sym_Interface->value = ModuleInfo.langtype;
@@ -290,7 +282,7 @@ static int OPTQUAL SetLanguage( int *pi )
             return( NOT_ERROR );
         }
     }
-    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
     return( ERROR );
 }
 
@@ -298,24 +290,15 @@ static int OPTQUAL SetLanguage( int *pi )
  * syntax: option setif2:TRUE|FALSE
  */
 
-static int OPTQUAL SetSetIF2( int *pi )
-/*************************************/
+OPTFUNC( SetSetIF2 )
+/******************/
 {
     int i = *pi;
 
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( AsmBuffer[i]->token == T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->string_ptr );
-        return( ERROR );
-    }
-    if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "TRUE" ) ) {
+    if ( 0 == _stricmp( tokenarray[i].string_ptr, "TRUE" ) ) {
         ModuleInfo.setif2 = TRUE;
         i++;
-    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "FALSE" ) ) {
+    } else if ( 0 == _stricmp( tokenarray[i].string_ptr, "FALSE" ) ) {
         ModuleInfo.setif2 = FALSE;
         i++;
     }
@@ -340,32 +323,27 @@ static int OPTQUAL SetSetIF2( int *pi )
  userparms: prologuearg specified in PROC
  */
 
-static int OPTQUAL SetPrologue( int *pi )
-/***************************************/
+OPTFUNC( SetPrologue )
+/********************/
 {
     int i = *pi;
 
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( AsmBuffer[i]->token != T_ID ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_ID ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     if ( ModuleInfo.proc_prologue ) {
         AsmFree( ModuleInfo.proc_prologue );
         ModuleInfo.proc_prologue = NULL;
     }
-    if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "NONE" ) ) {
+    if ( 0 == _stricmp( tokenarray[i].string_ptr, "NONE" ) ) {
         ModuleInfo.prologuemode = PEM_NONE;
-    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "PROLOGUEDEF" ) ) {
+    } else if ( 0 == _stricmp( tokenarray[i].string_ptr, "PROLOGUEDEF" ) ) {
         ModuleInfo.prologuemode = PEM_DEFAULT;
     } else {
         ModuleInfo.prologuemode = PEM_MACRO;
-        ModuleInfo.proc_prologue = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1);
-        strcpy( ModuleInfo.proc_prologue, AsmBuffer[i]->string_ptr );
+        ModuleInfo.proc_prologue = AsmAlloc( strlen( tokenarray[i].string_ptr ) + 1);
+        strcpy( ModuleInfo.proc_prologue, tokenarray[i].string_ptr );
     }
 
     i++;
@@ -378,18 +356,13 @@ static int OPTQUAL SetPrologue( int *pi )
  do NOT check the macros here!
  */
 
-static int OPTQUAL SetEpilogue( int *pi )
-/***************************************/
+OPTFUNC( SetEpilogue )
+/********************/
 {
     int i = *pi;
 
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( AsmBuffer[i]->token != T_ID ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_ID ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     if ( ModuleInfo.proc_epilogue ) {
@@ -397,14 +370,14 @@ static int OPTQUAL SetEpilogue( int *pi )
         ModuleInfo.proc_epilogue = NULL;
     }
 
-    if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "NONE" ) ) {
+    if ( 0 == _stricmp( tokenarray[i].string_ptr, "NONE" ) ) {
         ModuleInfo.epiloguemode = PEM_NONE;
-    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "EPILOGUEDEF" ) ) {
+    } else if ( 0 == _stricmp( tokenarray[i].string_ptr, "EPILOGUEDEF" ) ) {
         ModuleInfo.epiloguemode = PEM_DEFAULT;
     } else {
         ModuleInfo.epiloguemode = PEM_MACRO;
-        ModuleInfo.proc_epilogue = AsmAlloc( strlen( AsmBuffer[i]->string_ptr ) + 1);
-        strcpy( ModuleInfo.proc_epilogue, AsmBuffer[i]->string_ptr );
+        ModuleInfo.proc_epilogue = AsmAlloc( strlen( tokenarray[i].string_ptr ) + 1);
+        strcpy( ModuleInfo.proc_epilogue, tokenarray[i].string_ptr );
     }
 
     i++;
@@ -416,28 +389,19 @@ static int OPTQUAL SetEpilogue( int *pi )
  * default is GROUP.
  * determines result of OFFSET operator fixups if .model isn't set.
  */
-static int OPTQUAL SetOffset( int *pi )
-/*************************************/
+OPTFUNC( SetOffset )
+/******************/
 {
     int i = *pi;
 
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( AsmBuffer[i]->token == T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->string_ptr );
-        return( ERROR );
-    }
-    if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "GROUP" ) ) {
+    if ( 0 == _stricmp( tokenarray[i].string_ptr, "GROUP" ) ) {
         ModuleInfo.offsettype = OT_GROUP;
-    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "FLAT" ) ) {
+    } else if ( 0 == _stricmp( tokenarray[i].string_ptr, "FLAT" ) ) {
         ModuleInfo.offsettype = OT_FLAT;
-    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "SEGMENT" ) ) {
+    } else if ( 0 == _stricmp( tokenarray[i].string_ptr, "SEGMENT" ) ) {
         ModuleInfo.offsettype = OT_SEGMENT;
     } else {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
     i++;
@@ -447,35 +411,25 @@ static int OPTQUAL SetOffset( int *pi )
 
 /* OPTION PROC:PRIVATE | PUBLIC | EXPORT */
 
-static int OPTQUAL SetProc( int *pi )
-/***********************************/
+OPTFUNC( SetProc )
+/****************/
 {
     int i = *pi;
 
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( AsmBuffer[i]->token == T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i-1]->string_ptr );
-        return( ERROR );
-    }
-
-    switch ( AsmBuffer[i]->token ) {
+    switch ( tokenarray[i].token ) {
     case T_ID:
-        if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "PRIVATE" ) ) {
+        if ( 0 == _stricmp( tokenarray[i].string_ptr, "PRIVATE" ) ) {
             ModuleInfo.procs_private = TRUE;
             ModuleInfo.procs_export = FALSE;
             i++;
-        } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "EXPORT" ) ) {
+        } else if ( 0 == _stricmp( tokenarray[i].string_ptr, "EXPORT" ) ) {
             ModuleInfo.procs_private = FALSE;
             ModuleInfo.procs_export = TRUE;
             i++;
         }
         break;
     case T_DIRECTIVE: /* word PUBLIC is a directive */
-        if ( AsmBuffer[i]->value == T_PUBLIC ) {
+        if ( tokenarray[i].tokval == T_PUBLIC ) {
             ModuleInfo.procs_private = FALSE;
             ModuleInfo.procs_export = FALSE;
             i++;
@@ -491,33 +445,28 @@ static int OPTQUAL SetProc( int *pi )
  * externals defined outside of segments.
  */
 
-static int OPTQUAL SetSegment( int *pi )
-/**************************************/
+OPTFUNC( SetSegment )
+/*******************/
 {
     int i = *pi;
 
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( AsmBuffer[i]->token == T_RES_ID && AsmBuffer[i]->value == T_FLAT ) {
+    if ( tokenarray[i].token == T_RES_ID && tokenarray[i].tokval == T_FLAT ) {
 #if AMD64_SUPPORT
         if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_64 )
             ModuleInfo.defOfssize = USE64;
         else
 #endif
             ModuleInfo.defOfssize = USE32;
-    } else if ( AsmBuffer[i]->token == T_ID && _stricmp( AsmBuffer[i]->string_ptr, "USE16" ) == 0) {
+    } else if ( tokenarray[i].token == T_ID && _stricmp( tokenarray[i].string_ptr, "USE16" ) == 0) {
         ModuleInfo.defOfssize = USE16;
-    } else if ( AsmBuffer[i]->token == T_ID && _stricmp( AsmBuffer[i]->string_ptr, "USE32" ) == 0) {
+    } else if ( tokenarray[i].token == T_ID && _stricmp( tokenarray[i].string_ptr, "USE32" ) == 0) {
         ModuleInfo.defOfssize = USE32;
 #if AMD64_SUPPORT
-    } else if ( AsmBuffer[i]->token == T_ID && _stricmp( AsmBuffer[i]->string_ptr, "USE64" ) == 0) {
+    } else if ( tokenarray[i].token == T_ID && _stricmp( tokenarray[i].string_ptr, "USE64" ) == 0) {
         ModuleInfo.defOfssize = USE64;
 #endif
     } else {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
     i++;
@@ -528,25 +477,16 @@ static int OPTQUAL SetSegment( int *pi )
 #if FIELDALIGN
 /* OPTION FIELDALIGN:1|2|4|8|16|32 */
 
-static int OPTQUAL SetFieldAlign( int *pi )
-/*****************************************/
+OPTFUNC( SetFieldAlign )
+/**********************/
 {
     int i = *pi;
     uint temp, temp2;
-    expr_list opndx;
+    struct expr opndx;
 
-    if ( Options.strict_masm_compat ) {
-        (*pi)--;
-        return( NOT_ERROR );
-    }
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
+    if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
-    }
-    i++;
-    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
-        return( ERROR );
-    if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+    if ( opndx.kind != EXPR_CONST ) {
         AsmError( CONSTANT_EXPECTED );
         return( ERROR );
     }
@@ -568,25 +508,16 @@ static int OPTQUAL SetFieldAlign( int *pi )
 #if PROCALIGN
 /* OPTION PROCALIGN:1|2|4|8|16|32 */
 
-static int OPTQUAL SetProcAlign( int *pi )
-/****************************************/
+OPTFUNC( SetProcAlign )
+/*********************/
 {
     int i = *pi;
     int temp, temp2;
-    expr_list opndx;
+    struct expr opndx;
 
-    if ( Options.strict_masm_compat ) {
-        (*pi)--;
-        return( NOT_ERROR );
-    }
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
+    if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
-    }
-    i++;
-    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
-        return( ERROR );
-    if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+    if ( opndx.kind != EXPR_CONST ) {
         AsmError( CONSTANT_EXPECTED );
         return( ERROR );
     }
@@ -605,31 +536,27 @@ static int OPTQUAL SetProcAlign( int *pi )
 #endif
 
 #if MZ_SUPPORT
-static int OPTQUAL SetMZ( int *pi )
-/*********************************/
+OPTFUNC( SetMZ )
+/**************/
 {
     int i = *pi;
     int j;
     uint_16 *parms;
-    expr_list opndx;
+    struct expr opndx;
 
-    *pi = i;
-    if ( Options.strict_masm_compat ) {
-        (*pi)--;
-        return( NOT_ERROR );
-    }
-    if ( AsmBuffer[i]->token != T_COLON ) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    for (j = 0, parms = (uint_16 *)&mzdata ; j < 4; j++) {
-        if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+    for ( j = 0, parms = (uint_16 *)&mzdata ; j < 4; j++ ) {
+        int k;
+        for ( k = i; tokenarray[k].token != T_FINAL; k++ )
+            if ( tokenarray[k].token == T_COMMA ||
+                tokenarray[k].token == T_COLON ||
+                tokenarray[k].token == T_DBL_COLON )
+                break;
+        if ( EvalOperand( &i, tokenarray, k, &opndx, 0 ) == ERROR )
             return( ERROR );
         if ( opndx.kind == EXPR_EMPTY ) {
         } else if ( opndx.kind == EXPR_CONST ) {
-            if ( opndx.value > 0xFFFF ) {
-                AsmErr( CONSTANT_VALUE_TOO_LARGE, opndx.value64 );
+            if ( opndx.value64 > 0xFFFF ) {
+                EmitConstError( &opndx );
                 return( ERROR );
             }
             *(parms + j) = opndx.value;
@@ -637,8 +564,12 @@ static int OPTQUAL SetMZ( int *pi )
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
-        if ( AsmBuffer[i]->token == T_COMMA )
+        if ( tokenarray[i].token == T_COLON )
             i++;
+        else if ( tokenarray[i].token == T_DBL_COLON ) {
+            i++;
+            j++;
+        }
     }
     /* ensure validity of the params */
     if ( mzdata.ofs_fixups < 0x1E )
@@ -660,24 +591,15 @@ static int OPTQUAL SetMZ( int *pi )
 /* OPTION FRAME: AUTO | NOAUTO
  * default is NOAUTO
  */
-static int OPTQUAL SetFrame( int *pi )
-/*************************************/
+OPTFUNC( SetFrame )
+/*****************/
 {
     int i = *pi;
 
-    if (AsmBuffer[i]->token != T_COLON) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( AsmBuffer[i]->token == T_FINAL ) {
-        AsmError( SYNTAX_ERROR );
-        return( ERROR );
-    }
-    if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "AUTO" ) ) {
+    if ( 0 == _stricmp( tokenarray[i].string_ptr, "AUTO" ) ) {
         ModuleInfo.frame_auto = 1;
         i++;
-    } else if ( 0 == _stricmp( AsmBuffer[i]->string_ptr, "NOAUTO" ) ) {
+    } else if ( 0 == _stricmp( tokenarray[i].string_ptr, "NOAUTO" ) ) {
         ModuleInfo.frame_auto = 0;
         i++;
     }
@@ -687,26 +609,17 @@ static int OPTQUAL SetFrame( int *pi )
 #endif
 
 #if ELF_SUPPORT
-static int OPTQUAL SetElf( int *pi )
-/*********************************/
+OPTFUNC( SetElf )
+/***************/
 {
     int i = *pi;
-    expr_list opndx;
+    struct expr opndx;
 
-    if ( Options.strict_masm_compat ) {
-        (*pi)--;
-        return( NOT_ERROR );
-    }
-    if (AsmBuffer[i]->token != T_COLON) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+    if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
     if ( opndx.kind == EXPR_CONST ) {
         if ( opndx.llvalue > 0xFF ) {
-            AsmErr( CONSTANT_VALUE_TOO_LARGE, opndx.value64 );
+            EmitConstError( &opndx );
             return( ERROR );
         }
         if ( Options.output_format == OFORMAT_ELF )
@@ -722,52 +635,48 @@ static int OPTQUAL SetElf( int *pi )
 
 #if RENAMEKEY
 
-/* OPTION RENAMEKEYWORD */
+/* OPTION RENAMEKEYWORD: <keyword>,new_name */
 
-static int OPTQUAL SetRenameKey( int *pi )
-/****************************************/
+OPTFUNC( SetRenameKey )
+/*********************/
 {
     int i = *pi;
-    struct ReservedWord *resw;
-    char * oldname;
+    //struct ReservedWord *resw;
+    int index;
+    char *oldname;
 
-    /* reject option if -Zne is set */
-    if ( Options.strict_masm_compat ) {
-        (*pi)--;
-        return( NOT_ERROR );
-    }
     /* do nothing if pass > 1 */
     if( Parse_Pass != PASS_1 ) {
-        *pi = Token_Count;
+        SkipOption( pi, tokenarray );
         return( NOT_ERROR );
     }
-    if (AsmBuffer[i]->token != T_COLON) {
-        AsmError( COLON_EXPECTED );
+    if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' )  {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        return( ERROR );
+    }
+    oldname = tokenarray[i].string_ptr;
+    i++;
+    /* v2.06: syntax changed */
+    //if ( tokenarray[i].token != T_COMMA ) {
+    if ( tokenarray[i].token != T_DIRECTIVE || tokenarray[i].dirtype != DRT_EQUALSGN ) {
+        //AsmError( EXPECTING_COMMA );
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     i++;
-    if (AsmBuffer[i]->token != T_STRING || AsmBuffer[i]->string_delim != '<' )  {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
-        return( ERROR );
-    }
-    oldname = AsmBuffer[i]->string_ptr;
-    i++;
-    if ( AsmBuffer[i]->token != T_COMMA ) {
-        AsmError( EXPECTING_COMMA );
-        return( ERROR );
-    }
-    i++;
-    if (AsmBuffer[i]->token != T_ID )  {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_ID )  {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
 
-    resw = FindResWord( oldname );
-    if ( resw == NULL ) {
+    /* todo: if MAX_ID_LEN can be > 255, then check size,
+     * since a reserved word's size must be <= 255 */
+    index = FindResWord( oldname, strlen( oldname ) );
+    if ( index == -1 ) {
         AsmError( RESERVED_WORD_EXPECTED );
         return( ERROR );
     }
-    RenameKeyword( resw - AsmResWord, AsmBuffer[i]->string_ptr, strlen( AsmBuffer[i]->string_ptr ) );
+    RenameKeyword( index, tokenarray[i].string_ptr, strlen( tokenarray[i].string_ptr ) );
     i++;
     *pi = i;
     return( NOT_ERROR );
@@ -775,34 +684,23 @@ static int OPTQUAL SetRenameKey( int *pi )
 #endif
 
 #if AMD64_SUPPORT
-static int OPTQUAL SetWin64( int *pi )
-/************************************/
+OPTFUNC( SetWin64 )
+/*****************/
 {
     int i = *pi;
-    expr_list opndx;
+    struct expr opndx;
 
-    /* if -win64 isn't set, return with ERROR.
-     * this will make jwasm skip this line.
-     */
-    if ( Options.header_format != HFORMAT_WIN64 )
-        return( ERROR );
-
-    /* reject option if -Zne is set */
-    if ( Options.strict_masm_compat ) {
-        (*pi)--;
-        return( NOT_ERROR );
+    /* if -win64 isn't set, skip the option */
+    if ( ModuleInfo.header_format != HFORMAT_WIN64 ) {
+        SkipOption( pi, tokenarray );
+        return( NOT_ERROR);
     }
 
-    if (AsmBuffer[i]->token != T_COLON) {
-        AsmError( COLON_EXPECTED );
-        return( ERROR );
-    }
-    i++;
-    if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
+    if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
     if ( opndx.kind == EXPR_CONST ) {
         if ( opndx.llvalue > 0x1 ) {
-            AsmErr( CONSTANT_VALUE_TOO_LARGE, opndx.value64 );
+            EmitConstError( &opndx );
             return( ERROR );
         }
         ModuleInfo.win64_saveparams = opndx.value;
@@ -815,26 +713,70 @@ static int OPTQUAL SetWin64( int *pi )
 }
 #endif
 
-static int OPTQUAL Unsupported( int *pi )
-/***************************************/
+#if DLLIMPORT
+
+static char *IncludeDll( const char *name )
+/*****************************************/
 {
-    AsmErr( NOT_SUPPORTED, AsmBuffer[(*pi)-2]->tokpos );
+    struct qnode *q;
+    char *node;
+
+    /* allow a zero-sized name! */
+    if ( *name == NULLC )
+        return( "" );
+
+    for ( q = ModuleInfo.g.DllQueue.head; q ; q = q->next ) {
+        if ( _stricmp( q->elmt, name ) == 0 )
+            return( (char *)q->elmt );
+    }
+    node = AsmAlloc( strlen( name ) + 1 );
+    strcpy( node, name );
+    QAddItem( &ModuleInfo.g.DllQueue, node );
+    return( node );
+}
+
+OPTFUNC( SetDllImport )
+/*********************/
+{
+    int i = *pi;
+
+    /* used for COFF only */
+    //if ( Options.output_format != OFORMAT_COFF ) {
+    //    SkipOption( pi, tokenarray );
+    //    return( NOT_ERROR);
+    //}
+
+    if ( tokenarray[i].token == T_ID &&
+        ( _stricmp( tokenarray[i].string_ptr, "NONE" ) == 0 ) ) {
+        ModuleInfo.CurrDll = NULL;
+        i++;
+    } else if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
+        if ( Parse_Pass == PASS_1 )
+            ModuleInfo.CurrDll = IncludeDll( tokenarray[i].string_ptr );
+        i++;
+    }
+    *pi = i;
+    return( NOT_ERROR );
+}
+#endif
+
+OPTFUNC( Unsupported )
+/********************/
+{
+    AsmErr( NOT_SUPPORTED, tokenarray[(*pi)-2].tokpos );
     return( ERROR );
 }
 
 struct asm_option {
     const char *name;
-    int OPTQUAL (*func)(int *);
+    ret_code OPTQUAL (*func)(int *, struct asm_tok[] );
 };
 
 /* the table must be here after the option helper functions
  * to avoid having to define prototypes.
+ * the options without arguments must come first!
  */
 static const struct asm_option optiontab[] = {
-    { "CASEMAP",      SetCaseMap     },
-    { "PROC",         SetProc        },
-    { "PROLOGUE",     SetPrologue    },
-    { "EPILOGUE",     SetEpilogue    },
     { "DOTNAME",      SetDotName     },
     { "NODOTNAME",    SetNoDotName   },
     { "M510",         SetM510        },
@@ -854,31 +796,40 @@ static const struct asm_option optiontab[] = {
     { "EXPR16",       Unsupported    },
     { "EXPR32",       SetExpr32      },
     { "NOSIGNEXTEND", SetNoSignExt   },
-    { "NOKEYWORD",    SetNoKeyword   },
-    { "LANGUAGE",     SetLanguage    },
-    { "SETIF2",       SetSetIF2      },
-    { "OFFSET",       SetOffset      },
-    { "SEGMENT",      SetSegment     },
+#define NOARGOPTS 19 /* number of options without arguments */
+    { "CASEMAP",      SetCaseMap     }, /* CASEMAP:NONE|..   */
+    { "PROC",         SetProc        }, /* PROC:PRIVATE|..   */
+    { "PROLOGUE",     SetPrologue    }, /* PROLOGUE: <name>  */
+    { "EPILOGUE",     SetEpilogue    }, /* EPILOGUE: <name>  */
+    { "LANGUAGE",     SetLanguage    }, /* LANGUAGE: <name>  */
+    { "NOKEYWORD",    SetNoKeyword   }, /* NOKEYWORD: <id>   */
+    { "SETIF2",       SetSetIF2      }, /* SETIF2: <value>   */
+    { "OFFSET",       SetOffset      }, /* OFFSET: GROUP|..  */
+    { "SEGMENT",      SetSegment     }, /* SEGMENT: USE16|.. */
+#define MASMOPTS 28 /* number of options compatible with Masm */
 #if FIELDALIGN
-    { "FIELDALIGN",   SetFieldAlign  },
+    { "FIELDALIGN",   SetFieldAlign  }, /* FIELDALIGN: <value> */
 #endif
 #if PROCALIGN
-    { "PROCALIGN",    SetProcAlign   },
+    { "PROCALIGN",    SetProcAlign   }, /* PROCALIGN: <value> */
 #endif
 #if MZ_SUPPORT
-    { "MZ",           SetMZ          },
+    { "MZ",           SetMZ          }, /* MZ: <value>:<value>.. */
 #endif
 #if AMD64_SUPPORT
-    { "FRAME",        SetFrame       },
+    { "FRAME",        SetFrame       }, /* FRAME: AUTO|.. */
 #endif
 #if ELF_SUPPORT
-    { "ELF",          SetElf         },
+    { "ELF",          SetElf         }, /* ELF: <value> */
 #endif
 #if RENAMEKEY
-    { "RENAMEKEYWORD",SetRenameKey   },
+    { "RENAMEKEYWORD",SetRenameKey   }, /* RENAMEKEYWORD: <id>=<> */
 #endif
 #if AMD64_SUPPORT
-    { "WIN64",        SetWin64       },
+    { "WIN64",        SetWin64       }, /* WIN64: <value> */
+#endif
+#if DLLIMPORT
+    { "DLLIMPORT",    SetDllImport   }, /* DLLIMPORT: <NONE|library> */
 #endif
 };
 
@@ -888,32 +839,50 @@ static const struct asm_option optiontab[] = {
  * syntax:
  * OPTION option[:value][,option[:value,...]]
  */
-ret_code OptionDirective( int i )
-/*******************************/
+ret_code OptionDirective( int i, struct asm_tok tokenarray[] )
+/************************************************************/
 {
     int idx = -1;
 
-    DebugMsg1(( "OPTION directive enter, option=%s\n", AsmBuffer[i+1]->string_ptr ));
+    DebugMsg1(( "OPTION directive enter, option=%s\n", tokenarray[i+1].string_ptr ));
 
     i++; /* skip OPTION directive */
-    while ( AsmBuffer[i]->token != T_FINAL ) {
-        _strupr( AsmBuffer[i]->string_ptr );
+    while ( tokenarray[i].token != T_FINAL ) {
+        _strupr( tokenarray[i].string_ptr );
         for ( idx = 0; idx < TABITEMS; idx++ ) {
-            if ( 0 == strcmp( AsmBuffer[i]->string_ptr, optiontab[idx].name ) )
+            if ( 0 == strcmp( tokenarray[i].string_ptr, optiontab[idx].name ) )
                 break;
         }
         if ( idx >= TABITEMS )
             break;
         i++;
-        if ( optiontab[idx].func( &i ) == ERROR )
+        /* v2.06: check for colon separator here */
+        if ( idx >= NOARGOPTS ) {
+            if ( tokenarray[i].token != T_COLON ) {
+                AsmError( COLON_EXPECTED );
+                return( ERROR );
+            }
+            i++;
+            /* there must be something after the colon */
+            if ( tokenarray[i].token == T_FINAL ) {
+                i -= 2; /* position back to option identifier */
+                break;
+            }
+            /* reject option if -Zne is set */
+            if ( idx >= MASMOPTS && Options.strict_masm_compat ) {
+                i -= 2;
+                break;
+            }
+        }
+        if ( optiontab[idx].func( &i, tokenarray ) == ERROR )
             return( ERROR );
-        if ( AsmBuffer[i]->token != T_COMMA )
+        if ( tokenarray[i].token != T_COMMA )
             break;
         i++;
     }
-    if ( idx >= TABITEMS  || AsmBuffer[i]->token != T_FINAL ) {
-        DebugMsg(( "option syntax error: >%s<\n", AsmBuffer[i]->string_ptr ));
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( idx >= TABITEMS  || tokenarray[i].token != T_FINAL ) {
+        DebugMsg(( "option syntax error: >%s<\n", tokenarray[i].tokpos ));
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     return( NOT_ERROR );

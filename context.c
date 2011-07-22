@@ -12,9 +12,7 @@
 
 #include "globals.h"
 #include "memalloc.h"
-#include "symbols.h"
 #include "parser.h"
-#include "directiv.h"
 #include "assume.h"
 #include "expreval.h"
 #include "fastpass.h"
@@ -37,89 +35,89 @@ static char *contextnames[] = {
 #define NUM_STDREGS 8
 #endif
 
-typedef struct _assumes_context {
+struct assumes_context {
     struct assume_info SegAssumeTable[NUM_SEGREGS];
     struct assume_info StdAssumeTable[NUM_STDREGS];
     struct stdassume_typeinfo type_content[NUM_STDREGS];
-} assumes_context;
+};
 
-typedef struct _listing_context {
+struct listing_context {
     enum listmacro list_macro;
     unsigned char list:1;
     unsigned char cref:1;
     unsigned char listif:1;
     unsigned char list_generated_code:1;
-} listing_context;
+};
 
-typedef struct _cpu_context {
+struct cpu_context {
     short cpu;              /* saved ModuleInfo.cpu      */
-    enum asm_cpu curr_cpu;  /* saved ModuleInfo.curr_cpu */
-} cpu_context;
+    enum cpu_info curr_cpu; /* saved ModuleInfo.curr_cpu */
+};
 
-typedef struct _radix_context {
+struct radix_context {
     uint_8 radix; /* saved ModuleInfo.radix */
-} radix_context;
+};
 
-typedef struct _alignment_context {
+struct alignment_context {
     uint_8 fieldalign; /* saved ModuleInfo.fieldalign */
     uint_8 procalign;  /* saved ModuleInfo.procalign */
-} alignment_context;
+};
 
-typedef struct _context {
-    struct _context *next;
+struct context {
+    struct context *next;
     uint_8 flags;
-    radix_context   rc;
-    alignment_context alc;
-    listing_context lc;
-    cpu_context     cc;
-    assumes_context ac; /* must be last member */
-} context;
+    struct radix_context   rc;
+    struct alignment_context alc;
+    struct listing_context lc;
+    struct cpu_context     cc;
+    struct assumes_context ac; /* must be last member */
+};
 
-extern asm_sym *sym_Cpu;
+extern struct asym *sym_Cpu;
 
-static context *ContextStack;
+static struct context *ContextStack;
 
 #if FASTPASS
 static int saved_numcontexts;
-static context *saved_contexts;
+static struct context *saved_contexts;
 #endif
 
 static int GetContextSize( uint_8 flags )
 /***************************************/
 {
     if ( flags & CONT_ASSUMES )
-        return( sizeof( context ) );
+        return( sizeof( struct context ) );
     /* spare the large assumes context space if not needed */
-    return( sizeof( context ) - sizeof ( assumes_context ) );
+    return( sizeof( struct context ) - sizeof ( struct assumes_context ) );
 }
 
-ret_code ContextDirective( int i )
-/********************************/
+ret_code ContextDirective( int i, struct asm_tok tokenarray[] )
+/*************************************************************/
 {
     int type;
     int start = i;
-    int directive = AsmBuffer[i]->value;
+    int directive = tokenarray[i].tokval;
 
     uint_8 flags = 0;
     uint_8 all;
-    context *pcontext;
+    struct context *pcontext;
 
     all = CONT_ASSUMES | CONT_RADIX | CONT_LISTING | CONT_CPU;
     if ( Options.strict_masm_compat == FALSE )
         all |= CONT_ALIGNMENT;
 
-    DebugMsg(( "%s directive enter\n", AsmBuffer[i]->string_ptr ));
+    DebugMsg(( "%s directive enter\n", tokenarray[i].string_ptr ));
     i++;
-    while ( AsmBuffer[i]->token == T_ID ) {
+    while ( tokenarray[i].token == T_ID ) {
         char **p;
         for ( p = contextnames, type = 0; *p ; p++, type++ ) {
-            if ( _stricmp(*p, AsmBuffer[i]->string_ptr ) == 0 ) {
+            if ( _stricmp(*p, tokenarray[i].string_ptr ) == 0 ) {
                 flags |= ( 1 << type );
                 break;
             }
         }
         if ( *p == NULL )
-            if ( _stricmp( "ALL", AsmBuffer[i]->string_ptr ) == 0 ) {
+            if ( _stricmp( "ALL", tokenarray[i].string_ptr ) == 0 ) {
                 flags |= all;
             } else {
                 break;
@@ -128,12 +126,12 @@ ret_code ContextDirective( int i )
         if ( Options.strict_masm_compat && ( flags & CONT_ALIGNMENT ) )
             break;
         i++;
-        if ( AsmBuffer[i]->token == T_COMMA && AsmBuffer[i+1]->token != T_FINAL )
+        if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL )
             i++;
     }
 
-    if ( AsmBuffer[i]->token != T_FINAL || flags == 0 ) {
-        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token != T_FINAL || flags == 0 ) {
+        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -143,7 +141,7 @@ ret_code ContextDirective( int i )
         /* for POPCONTEXT, check if the items are pushed */
         pcontext = ContextStack;
         if ( pcontext == NULL || ( pcontext->flags & flags ) != flags ) {
-            AsmErr( UNMATCHED_BLOCK_NESTING, AsmBuffer[start]->string_ptr );
+            AsmErr( UNMATCHED_BLOCK_NESTING, tokenarray[start].string_ptr );
             return( ERROR );
         }
         ContextStack = pcontext->next;
@@ -220,8 +218,8 @@ void ContextSaveState( void )
 {
     int i;
     uint_32 size = 0;
-    context *p;
-    context *p2;
+    struct context *p;
+    struct context *p2;
 
     for ( i = 0, p=ContextStack ; p ; i++, p = p->next )
         size += GetContextSize( p->flags );
@@ -231,7 +229,7 @@ void ContextSaveState( void )
         saved_contexts = AsmAlloc( size );
         for ( p = ContextStack, p2 = saved_contexts ; p ; p = p->next ) {
             memcpy( p2, p, GetContextSize( p->flags ) );
-            p2 = (context *)((char *)p2 + GetContextSize ( p->flags ) );
+            p2 = (struct context *)((char *)p2 + GetContextSize ( p->flags ) );
         }
     }
 }
@@ -243,9 +241,9 @@ static void ContextRestoreState( void )
 {
     int i;
     int size;
-    context *p;
-    context *p2;
-    context *p3 = NULL;
+    struct context *p;
+    struct context *p2;
+    struct context *p3 = NULL;
 
     for ( i = saved_numcontexts, p2 = saved_contexts; i ; i-- ) {
         size = GetContextSize( p2->flags );
@@ -257,7 +255,7 @@ static void ContextRestoreState( void )
         p3 = p;
         memcpy( p, p2, size );
         p->next = NULL;
-        p2 = (context *)((char *)p2 + size );
+        p2 = (struct context *)((char *)p2 + size );
     }
 }
 

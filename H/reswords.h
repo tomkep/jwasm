@@ -24,29 +24,50 @@
 *
 *  ========================================================================
 *
-*  Description: file for GNU (Posix) CRT. Included by globals.h
-*               if __UNIX__ or __CYGWIN__ is defined.
+* Description:  interface to instruction hash table.
+*
 ****************************************************************************/
 
-#define _stricmp strcasecmp
-#define _strcmpi strcasecmp
-#define _strnicmp strncasecmp
-#ifndef __WATCOMC__
-#define _memicmp strncasecmp
+
+#ifndef _RESWORDS_H_INCLUDED
+#define _RESWORDS_H_INCLUDED
+
+/* structure of items in the "reserved names" table AsmResWord[] */
+
+struct ReservedWord {
+    short next;              /* index next entry (used for hash table) */
+    unsigned char len;       /* length of reserved word, i.e. 'AX' = 2 */
+    unsigned char flags;
+#if 0 /* __I86__ ( may be activated for JWASMR, see reswords.c) */
+    const char __based( void ) *name;
+#else
+    const char *name;        /* reserved word (char[]) */
 #endif
+};
 
-#define _ltoa   ltoa
-#define _strupr strupr
-
-char *_fullpath( char *, const char *, size_t );
-
-#define _MAX_DRIVE      48      /*  maximum length of node name w/ '\0' */
-#define _MAX_DIR        256     /*  maximum length of subdirectory      */
-#define _MAX_FNAME      48      /*  maximum length of a file name       */
-#define _MAX_EXT        48      /*  maximum length of a file extension  */
-
-#ifndef _MAX_PATH
- #define _MAX_PATH      256     /*  maximum length of path name         */
+enum reservedword_flags {
+    RWF_SPECIAL  = 1, /* keyword is NO instruction */
+    RWF_DISABLED = 2, /* keyword disabled */
+    RWF_IA32     = 4, /* keyword specific to IA32 mode */
+#if AMD64_SUPPORT
+    RWF_X64      = 8, /* keyword specific to IA32+ mode */
 #endif
+#if AVXSUPP
+    RWF_VEX      = 0x10, /* keyword triggers VEX encoding */
+#endif
+};
 
+extern int      FindResWord( const char *, unsigned char );
+extern char     *GetResWName( uint, char * );
+extern bool     IsKeywordDisabled( const char *, int );
+extern void     DisableKeyword( uint );
+#if RENAMEKEY
+extern void     RenameKeyword( uint, const char *, uint_8 );
+#endif
+#if AMD64_SUPPORT
+extern void     Set64Bit( bool );
+#endif
+extern void     ResWordsInit( void );
+extern void     ResWordsFini( void );
 
+#endif

@@ -33,23 +33,20 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
 #include "segment.h"
 #include "fixup.h"
 #include "omfint.h"
 #include "omfspec.h"
 #include "myassert.h"
-#include "queue.h"
 #include "fatal.h"
 
-typedef int (*pobj_filter)( OBJ_WFILE *out, obj_rec *objr );
+#ifdef __I86__
+#define FFQUAL __near
+#else
+#define FFQUAL
+#endif
 
-typedef struct {
-    uint_8      command;
-    pobj_filter func;
-} pobj_list;
-
-OBJ_WFILE     *file_out;
+extern struct omf_wfile  *file_out;
 
 #define WRITE_REC 0 /* 1=enable unbuffered record write */
 
@@ -75,10 +72,9 @@ static void safeSeek( FILE *file, long offset, int mode )
 
 /* start a buffered OMF record output */
 
-static void WBegRec( OBJ_WFILE *out, uint_8 command )
-/***************************************************/
+static void WBegRec( struct omf_wfile *out, uint_8 command )
+/**********************************************************/
 {
-
     /**/myassert( out != NULL && !out->cmd );
 
     out->in_buf = 0;
@@ -91,8 +87,8 @@ static void WBegRec( OBJ_WFILE *out, uint_8 command )
  * - writes the contents of the buffer(cmd, length, contents, checksum)
  */
 
-static void WEndRec( OBJ_WFILE *out )
-/***********************************/
+static void WEndRec( struct omf_wfile *out )
+/******************************************/
 {
     uint_8  checksum;
     uint_8  *p;
@@ -106,7 +102,7 @@ static void WEndRec( OBJ_WFILE *out )
     }
     checksum = - checksum;
     *p = checksum; /* store chksum in buffer */
-    /* write buffer + 4 extra bytes (cmd, length, chksum) */
+    /* write buffer + 4 extra bytes (1 cmd, 2 length, 1 chksum) */
     safeWrite( out->file, &out->cmd, out->in_buf + 4 );
     out->cmd = 0;
 }
@@ -115,8 +111,8 @@ static void WEndRec( OBJ_WFILE *out )
 /* Write an OMF record: command, length, content, checksum.
  * Contents and length don't include checksum
  */
-static void WriteRec( OBJ_WFILE *out, uint_8 command, size_t length, const uint_8 *contents )
-/*******************************************************************************************/
+static void WriteRec( struct omf_wfile *out, uint_8 command, size_t length, const uint_8 *contents )
+/**************************************************************************************************/
 {
     uint_8  buf[3];
     uint_8  checksum;
@@ -141,8 +137,8 @@ static void WriteRec( OBJ_WFILE *out, uint_8 command, size_t length, const uint_
 
 /* write a byte to the current record */
 
-static void PutByte( OBJ_WFILE *out, uint_8 value )
-/*************************************************/
+static void PutByte( struct omf_wfile *out, uint_8 value )
+/********************************************************/
 {
     /**/myassert( out != NULL && out->cmd );
 
@@ -151,8 +147,8 @@ static void PutByte( OBJ_WFILE *out, uint_8 value )
 
 /* write an index - 1|2 byte(s) - to the current record */
 
-static void PutIndex( OBJ_WFILE *out, uint_16 index )
-/***************************************************/
+static void PutIndex( struct omf_wfile *out, uint_16 index )
+/**********************************************************/
 {
     if( index > 0x7f ) {
         PutByte( out, 0x80 | ( index >> 8 ) );
@@ -162,8 +158,8 @@ static void PutIndex( OBJ_WFILE *out, uint_16 index )
 
 /* write a word to the current record */
 
-static void PutWord( OBJ_WFILE *out, uint_16 value )
-/**************************************************/
+static void PutWord( struct omf_wfile *out, uint_16 value )
+/*********************************************************/
 {
     /**/myassert( out != NULL && out->cmd );
 
@@ -173,8 +169,8 @@ static void PutWord( OBJ_WFILE *out, uint_16 value )
 
 /* write a dword to the current record */
 
-static void PutDword( OBJ_WFILE *out, uint_32 value )
-/***************************************************/
+static void PutDword( struct omf_wfile *out, uint_32 value )
+/**********************************************************/
 {
     /**/myassert( out != NULL && out->cmd );
 
@@ -184,8 +180,8 @@ static void PutDword( OBJ_WFILE *out, uint_32 value )
 
 /* write a byte sequence to the current record */
 
-static void PutMem( OBJ_WFILE *out, const uint_8 *buf, size_t length )
-/********************************************************************/
+static void PutMem( struct omf_wfile *out, const uint_8 *buf, size_t length )
+/***************************************************************************/
 {
     const uint_8    *curr;
     size_t          amt;
@@ -199,7 +195,8 @@ static void PutMem( OBJ_WFILE *out, const uint_8 *buf, size_t length )
         out->in_buf += length;
     } else {
         /* this "shouldn't happen". */
-        AsmErr( INTERNAL_ERROR, "omfint" );
+        DebugMsg(("PutMem: error, amt(%u) < length(%u)\n", amt, length ));
+        AsmErr( INTERNAL_ERROR, __FILE__, __LINE__ );
     }
 }
 
@@ -207,8 +204,8 @@ static void PutMem( OBJ_WFILE *out, const uint_8 *buf, size_t length )
 
 /* For 16-bit records which are the same under Intel and MS OMFs */
 
-static int writeMisc( OBJ_WFILE *out, obj_rec *objr )
-/***************************************************/
+static int FFQUAL writeMisc( struct omf_wfile *out, struct omf_rec *objr )
+/************************************************************************/
 {
     /**/myassert( objr != NULL );
     /**/myassert( objr->data != NULL );
@@ -225,8 +222,8 @@ static int writeMisc( OBJ_WFILE *out, obj_rec *objr )
 
 /* For 32-bit records which are the same under Intel and MS OMFs */
 
-static int writeMisc32( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static int FFQUAL writeMisc32( struct omf_wfile *out, struct omf_rec *objr )
+/**************************************************************************/
 {
 
     /**/myassert( objr != NULL );
@@ -245,8 +242,8 @@ static int writeMisc32( OBJ_WFILE *out, obj_rec *objr )
     return( 0 );
 }
 
-static int writeComent( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static int FFQUAL writeComent( struct omf_wfile *out, struct omf_rec *objr )
+/**************************************************************************/
 {
     /**/myassert( objr != NULL );
     /**/myassert( objr->data != NULL );
@@ -259,8 +256,8 @@ static int writeComent( OBJ_WFILE *out, obj_rec *objr )
     return( 0 );
 }
 
-static int writeSegdef( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static int FFQUAL writeSegdef( struct omf_wfile *out, struct omf_rec *objr )
+/**************************************************************************/
 {
     int         is32;
     uint_8      acbp;
@@ -340,8 +337,8 @@ static int writeSegdef( OBJ_WFILE *out, obj_rec *objr )
     return( 0 );
 }
 
-static int writeFixup( OBJ_WFILE *out, obj_rec *objr )
-/****************************************************/
+static int FFQUAL writeFixup( struct omf_wfile *out, struct omf_rec *objr )
+/*************************************************************************/
 {
     struct fixup    *curr;
     size_t          written;
@@ -382,8 +379,8 @@ static int writeFixup( OBJ_WFILE *out, obj_rec *objr )
  * - content
  */
 
-static int writeLedata( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static int FFQUAL writeLedata( struct omf_wfile *out, struct omf_rec *objr )
+/**************************************************************************/
 {
     /**/myassert( objr != NULL );
     /**/myassert( objr->command == CMD_LEDATA || objr->command == CMD_LIDATA );
@@ -400,8 +397,8 @@ static int writeLedata( OBJ_WFILE *out, obj_rec *objr )
     return( 0 );
 }
 
-static int writeTheadr( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static int FFQUAL writeTheadr( struct omf_wfile *out, struct omf_rec *objr )
+/**************************************************************************/
 {
     /**/myassert( objr != NULL );
     /**/myassert( objr->command == CMD_THEADR );
@@ -409,8 +406,8 @@ static int writeTheadr( OBJ_WFILE *out, obj_rec *objr )
     return( writeMisc( out, objr ) );
 }
 
-static int writeModend( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static int FFQUAL writeModend( struct omf_wfile *out, struct omf_rec *objr )
+/**************************************************************************/
 {
     size_t  len;
     int     is32 = FALSE;
@@ -447,8 +444,8 @@ static int writeModend( OBJ_WFILE *out, obj_rec *objr )
     return( 0 );
 }
 
-static void writeBase( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static void writeBase( struct omf_wfile *out, struct omf_rec *objr )
+/******************************************************************/
 {
     size_t grp_idx;
     size_t seg_idx;
@@ -467,8 +464,8 @@ static void writeBase( OBJ_WFILE *out, obj_rec *objr )
  * defines uninitialized communal data items (COMDEFs).
  */
 
-static int writeComdat( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static int FFQUAL writeComdat( struct omf_wfile *out, struct omf_rec *objr )
+/**************************************************************************/
 {
     int         is_32;
 
@@ -497,14 +494,14 @@ static int writeComdat( OBJ_WFILE *out, obj_rec *objr )
     return( 0 );
 }
 
-static int writePubdef( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static int FFQUAL writePubdef( struct omf_wfile *out, struct omf_rec *objr )
+/**************************************************************************/
 {
     int         is32;
     const char  *name;
     size_t      name_len;
-    pubdef_data *pubdata;
-    pubdef_data *pubstop;
+    struct pubdef_data *pubdata;
+    struct pubdef_data *pubstop;
 
     /**/myassert( objr != NULL );
     /**/myassert(   objr->command == CMD_PUBDEF ||
@@ -534,16 +531,16 @@ static int writePubdef( OBJ_WFILE *out, obj_rec *objr )
     return( 0 );
 }
 
-static void writeLinnumData( OBJ_WFILE *out, obj_rec *objr )
-/**********************************************************/
+static void writeLinnumData( struct omf_wfile *out, struct omf_rec *objr )
+/************************************************************************/
 {
     int is32;
 
     is32 = objr->is_32;
 #if defined( __BIG_ENDIAN__ )
     {
-        linnum_data *cur;
-        linnum_data *stop;
+        struct linnum_data *cur;
+        struct linnum_data *stop;
 
         cur = objr->d.linnum.lines;
         stop = cur + objr->d.linnum.num_lines;
@@ -561,10 +558,10 @@ static void writeLinnumData( OBJ_WFILE *out, obj_rec *objr )
     if( is32 ) {
         PutMem( out, (uint_8 *)objr->d.linnum.lines,
             6 * objr->d.linnum.num_lines );
-/**/    myassert( sizeof( linnum_data ) == 6 );
+/**/    myassert( sizeof( struct linnum_data ) == 6 );
     } else {
-        linnum_data *cur;
-        linnum_data *stop;
+        struct linnum_data *cur;
+        struct linnum_data *stop;
 
         cur = objr->d.linnum.lines;
         stop = cur + objr->d.linnum.num_lines;
@@ -578,8 +575,8 @@ static void writeLinnumData( OBJ_WFILE *out, obj_rec *objr )
 #endif
 }
 
-static int writeLinnum( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static int FFQUAL writeLinnum( struct omf_wfile *out, struct omf_rec *objr )
+/**************************************************************************/
 {
 
     /**/myassert( objr != NULL );
@@ -596,8 +593,8 @@ static int writeLinnum( OBJ_WFILE *out, obj_rec *objr )
  * with CMD_COMDAT.
  */
 
-static int writeLinsym( OBJ_WFILE *out, obj_rec *objr )
-/*****************************************************/
+static int FFQUAL writeLinsym( struct omf_wfile *out, struct omf_rec *objr )
+/**************************************************************************/
 {
 
     /**/myassert( objr != NULL );
@@ -611,112 +608,74 @@ static int writeLinsym( OBJ_WFILE *out, obj_rec *objr )
     return( 0 );
 }
 
-static const pobj_list myFuncs[] = {
-    { CMD_THEADR,       writeTheadr },  /* 0x80 */
-    { CMD_COMENT,       writeComent },  /* 0x88 */
-    { CMD_MODEND,       writeModend },  /* 0x8a */
-    { CMD_EXTDEF,       writeMisc },    /* 0x8c */
-    { CMD_TYPDEF,       writeMisc },    /* 0x8e not used */
-    { CMD_PUBDEF,       writePubdef },  /* 0x90 */
-    { CMD_LINNUM,       writeLinnum },  /* 0x94 */
-    { CMD_LNAMES,       writeMisc },    /* 0x96 */
-    { CMD_SEGDEF,       writeSegdef },  /* 0x98 */
-    { CMD_GRPDEF,       writeMisc },    /* 0x9a */
-    { CMD_FIXUP,        writeFixup },   /* 0x9c */
-    { CMD_LEDATA,       writeLedata },  /* 0xa0 */
-    { CMD_LIDATA,       writeLedata },  /* 0xa2 not used */
-    { CMD_COMDEF,       writeMisc },    /* 0xb0 */
-    { CMD_BAKPAT,       writeMisc32 },  /* 0xb2 not used */
-    { CMD_STATIC_EXTDEF,writeMisc32 },  /* 0xb4 not used */
-    { CMD_LPUBDEF,      writePubdef },  /* 0xb6 not used */
-    { CMD_STATIC_COMDEF,writeMisc },    /* 0xb8 not used */
-    { CMD_CEXTDF,       writeMisc },    /* 0xbc not used */
-    { CMD_COMDAT,       writeComdat },  /* 0xc2 not used */
-    { CMD_LINSYM,       writeLinsym },  /* 0xc4 not used */
-    { CMD_ALIAS,        writeMisc },    /* 0xc6 */
-    { CMD_NBKPAT,       writeMisc32 },  /* 0xc8 not used */
-    { CMD_LLNAMES,      writeMisc }     /* 0xca not used */
+static int FFQUAL writeUnexp( struct omf_wfile *out, struct omf_rec *objr )
+/*************************************************************************/
+{
+    DebugMsg(("unexpected OMF record type 0x%02X\n", objr->command ));
+    AsmErr( INTERNAL_ERROR, __FILE__, __LINE__ );
+    return( 0 );
+}
+
+typedef int FFQUAL (*pobj_filter)( struct omf_wfile *, struct omf_rec * );
+
+static const pobj_filter myFuncs[] = {
+    writeUnexp,
+    writeMisc,
+    writeMisc32,
+    writeSegdef,
+    writeLedata,
+    writeFixup,
+    writeComent,
+    writeTheadr,
+    writeModend,
+    writePubdef,
+    writeLinnum,
+    writeComdat,
+    writeLinsym
 };
-#define NUM_FUNCS   ( sizeof( myFuncs ) / sizeof( pobj_list ) )
 
-#define JUMP_OFFSET(cmd)    ( ( ( cmd ) - CMD_MIN_CMD ) >> 1 )
+enum omffiltfuncs {
+    OFF_UNEXP,
+    OFF_MISC,
+    OFF_MISC32,
+    OFF_SEGDEF,
+    OFF_LEDATA,
+    OFF_FIXUP,
+    OFF_COMENT,
+    OFF_THEADR,
+    OFF_MODEND,
+    OFF_PUBDEF,
+    OFF_LINNUM,
+    OFF_COMDAT,
+    OFF_LINSYM
+};
 
-static pobj_filter      jumpTable[ ( CMD_MAX_CMD - CMD_MIN_CMD + 2 ) >> 1 ];
+static const uint_8 func_index[] = {
+    OFF_THEADR, 0,          0,          0,         /* 80 THEADR, LHEADR, PEDATA, PIDATA */
+    OFF_COMENT, OFF_MODEND, OFF_MISC,   OFF_MISC,  /* 88 COMENT, MODEND, EXTDEF, TYPDEF */
+    OFF_PUBDEF, 0,          OFF_LINNUM, OFF_MISC,  /* 90 PUBDEF, LOCSYM, LINNUM, LNAMES */
+    OFF_SEGDEF, OFF_MISC,   OFF_FIXUP,  0,         /* 98 SEGDEF, GRPDEF, FIXUP,  ???    */
+    OFF_LEDATA, OFF_LEDATA, 0,          0,         /* A0 LEDATA, LIDATA, LIBHED, LIBNAM */
+    0,          0,          0,          0,         /* A8 LIBLOC, LIBDIC, ???,    ???    */
+    OFF_MISC,   OFF_MISC32, OFF_MISC32, OFF_PUBDEF,/* B0 COMDEF, BAKPAT, LEXTDEF,LPUBDEF */
+    OFF_MISC,   0,          OFF_MISC,   0,         /* B8 LCOMDEF,???,    CEXTDF, ???    */
+    0,          OFF_COMDAT, OFF_LINSYM, OFF_MISC,  /* C0 ???,    COMDAT, LINSYM, ALIAS  */
+    OFF_MISC32, OFF_MISC                           /* C8 NBKPAT, LLNAMES */
+};
+
+/* v2.06: jumpTable is obsolete */
+//static pobj_filter      jumpTable[ ( CMD_MAX_CMD - CMD_MIN_CMD + 2 ) >> 1 ];
+
+#define JUMP_INDEX(cmd)    ( ( ( cmd ) - CMD_MIN_CMD ) >> 1 )
 
 /* call a function - bit 0 of command is always 0 */
 
-void omf_write_record( obj_rec *objr )
-/************************************/
+void omf_write_record( struct omf_rec *objr )
+/*******************************************/
 {
-
     /**/myassert( objr != NULL && objr->command >= CMD_MIN_CMD && objr->command <= CMD_MAX_CMD + 1 );
     DebugMsg(("omf_write_record( %p ) cmd=%X data=%p length=%u\n", objr, objr->command, objr->data, objr->length ));
     objr->curoff = 0;
-    jumpTable[ JUMP_OFFSET(objr->command) ] ( file_out, objr );
-}
-
-static void RegList( const pobj_list *list, size_t len )
-/******************************************************/
-{
-    size_t  i;
-
-    for( i = 0; i < len; ++i ) {
-        jumpTable[ JUMP_OFFSET( list[i].command ) ] = list[i].func;
-    }
-}
-
-#if 0
-static void UnRegList( const pobj_list *list, size_t len )
-/********************************************************/
-{
-}
-#endif
-
-static OBJ_WFILE *WriteOpen( FILE *file )
-/***************************************/
-{
-    OBJ_WFILE    *out;
-
-    out = AsmAlloc( sizeof( *out ) + OBJ_BUFFER_SIZE );
-    out->file = file;
-    out->cmd = 0;
-
-    return( out );
-}
-
-static void WriteClose( OBJ_WFILE *out )
-/**************************************/
-{
-
-    /**/myassert( out != NULL );
-
-    /* this function is called from inside close_files(),
-     * which in turn is called on fatal errors. Therefore don't
-     * access object module file if write_to_file is FALSE!
-     */
-    /* v2.04: removed. if there's something in the output buffer,
-     * then a fatal error has occured and the object file will be
-     * deleted.
-     */
-    //if( out->in_rec && write_to_file )
-    //    OmfWEndRec( out );
-    out->file = NULL;
-    AsmFree( out );
-}
-
-void omf_intInit( void )
-/**********************/
-{
-    RegList( myFuncs, NUM_FUNCS );
-    file_out = WriteOpen( AsmFile[OBJ] );
-}
-
-void omf_intFini( void )
-/**********************/
-{
-    if ( file_out ) {
-        WriteClose( file_out );
-        file_out = NULL;
-    }
-    //UnRegList( myFuncs, NUM_FUNCS );
+    //jumpTable[ JUMP_INDEX(objr->command) ] ( file_out, objr );
+    myFuncs[ func_index[JUMP_INDEX(objr->command) ] ] ( file_out, objr );
 }

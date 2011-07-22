@@ -1,6 +1,6 @@
 
 ;--- problem: blank macro argument might
-;--- cause a line concatenation in v2.05 rc.
+;--- cause a line concatenation in v2.05.
 
 	.286
 	.model small

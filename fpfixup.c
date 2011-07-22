@@ -32,7 +32,6 @@
 
 #include "globals.h"
 #include "parser.h"
-#include "directiv.h"
 #include "extern.h"
 #include "fixup.h"
 #include "mangle.h"
@@ -69,7 +68,7 @@ void AddFloatingPointEmulationFixup( struct code_info *CodeInfo )
 {
     int i;
     enum fp_patches patch;
-    struct asm_sym *sym[2];
+    struct asym *sym[2];
     struct fixup *fixup;
     int_32 data;
     char name[8] = "F__RQQ";
@@ -112,7 +111,7 @@ void AddFloatingPointEmulationFixup( struct code_info *CodeInfo )
 
     for ( i = 0; i < 2 ; i++ ) {
         if ( sym[i] ) {
-            fixup = AddFixup( sym[i], FIX_OFF16, OPTJ_NONE );
+            fixup = CreateFixup( sym[i], FIX_OFF16, OPTJ_NONE );
             fixup->frame_type = FRAME_TARG;
             fixup->location += i;
             data = 0;

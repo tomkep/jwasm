@@ -7,6 +7,7 @@
 * Description:  do macro expansion.
 *
 * functions:
+* - myltoa()          generic function which replaces ltoa()
 * - RunMacro          run a macro
 * - ExpandLine        expand a source line
 * - GetLiteralValue   get contents of a literal
@@ -18,7 +19,6 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
 #include "expreval.h"
 #include "equate.h"
 #include "input.h"
@@ -38,7 +38,8 @@
 #define TEVALUE_UNSIGNED 1
 
 extern bool   expansion;
-extern void TextItemError( int );
+extern void TextItemError( struct asm_tok * );
+extern struct asm_tok   *tokenarray;  /* start token buffer */
 
 int           MacroLocals;     /* counter for LOCAL names */
 uint_8        MacroLevel;      /* current macro nesting level */
@@ -69,114 +70,63 @@ char *myltoa( uint_32 value, char *buffer, uint radix, bool sign, bool addzero )
     }
     for ( p = &tmpbuf[32]; value; value = value / radix )
         *p-- = __digits[value % radix];
-    if ( addzero && ( *(p+1) > '9') ) /* v2: add a leading '0' if first digit is alpha */
-        *p-- = '0';
-    strcpy( dst, p + 1 );
+    p++;
+    if ( addzero && ( *p > '9') ) /* v2: add a leading '0' if first digit is alpha */
+        *dst++ = '0';
+    strcpy( dst, p );
     DebugMsg1(("myltoa( value=%" FX32 "h, out=%s, radix=%u, sign=%u, %u)\n", saved_value, buffer, radix, sign, addzero ));
     return( buffer );
 }
 
 /* make room (or delete items) in the token buffer */
 
-static void AddTokens( int start, int count )
-/*******************************************/
+static void AddTokens( struct asm_tok tokenarray[], int start, int count )
+/************************************************************************/
 {
     int i;
 
     if ( count > 0 ) {
         for( i = Token_Count; i >= start; i-- ) {
-            *AsmBuffer[i+count] = *AsmBuffer[i];
+            tokenarray[i+count] = tokenarray[i];
         }
     } else if ( count < 0 ) {
         for( i = start - count; i <= Token_Count; ++i ) {
-            *AsmBuffer[i+count] = *AsmBuffer[i];
+            tokenarray[i+count] = tokenarray[i];
         }
     }
     Token_Count += count;
 }
 
-#ifdef __WATCOMC__
-static _inline char HexDigit( char x )
-#elif defined(_MSC_VER)
-static _inline char HexDigit( char x )
-#else
-static char HexDigit( char x )
-#endif
-{
-    x &= 0xF;
-    return((x > 9) ? (x - 10 + 'A') : (x + '0'));
-}
-
-/* Replace placeholders in a stored macro source line with values of actual
- * parameters and locals. A placeholder consists of escape char 0x0a,
- * followed by a one-byte index field.
- */
-static void fill_placeholders( char *dst, const char *src, uint argc, uint localstart, char *argv[] )
-/***************************************************************************************************/
-{
-    uint_32 i;
-    const char *p;
-    uint parmno;
-
-    /* scan the string, replace the placeholders #nn */
-    for( p = src ;*p != NULLC; ) {
-        if (*p == PLACEHOLDER_CHAR ) {
-            p++;
-            /* we found a placeholder, get the index part! */
-            parmno = *(unsigned char *)p - 1; /* index is one-based! */
-            p++;
-            /* if parmno > argc, then it's a macro local */
-            if ( parmno >= argc ) {
-                *dst++ = '?';
-                *dst++ = '?';
-                i = localstart + parmno - argc;
-                if ( i > 0xFFFF ) {
-                    i = sprintf( dst, "%X", i );
-                    dst += i;
-                } else {
-                    *dst++ = HexDigit( i >> 12 );
-                    *dst++ = HexDigit( i >> 8 );
-                    *dst++ = HexDigit( i >> 4 );
-                    *dst++ = HexDigit( i );
-                }
-            } else if ( argv[parmno] ) {  /* actual parameter might be empty (=NULL) */
-                i = strlen( argv[parmno] );
-                memcpy( dst, argv[parmno], i );
-                dst += i;
-            }
-        } else {
-            *dst++ = *p++;
-        }
-    }
-    *dst = NULLC;
-    return;
-}
-
 /* Skip macro execution by reading the current queue until it's empty. */
 
-static void SkipMacro( char * buffer )
-/************************************/
+static void SkipMacro( char *buffer )
+/***********************************/
 {
-    bool oldlist = ModuleInfo.list;
+    /* v2.06: no need anymore to switch off listing.
+     * Also, no need to adjust the buffer variable.
+     */
+    //bool oldlist = ModuleInfo.list;
 
     DebugMsg1(("SkipMacro() enter\n" ));
 
-    ModuleInfo.list = FALSE; /* suppress listing for these lines */
+    //ModuleInfo.list = FALSE; /* suppress listing for these lines */
 
-    buffer = buffer + strlen( buffer) + 1;
+    /* make sure buffer remains align(4) */
+    //buffer = buffer + strlen( buffer) + 1;
+    //buffer = buffer + (( strlen( buffer ) + 1 + 3 ) & ~3);
 
     /* when the queue's empty, -1 will be returned */
-    while ( GetPreprocessedLine( buffer, TRUE ) >= 0 );
+    while ( GetPreprocessedLine( buffer, TRUE, tokenarray ) >= 0 );
 
-    ModuleInfo.list = oldlist;
+    //ModuleInfo.list = oldlist;
     DebugMsg1(("SkipMacro() exit\n" ));
     return;
 }
 /*
  * Convert a string to a literal (enclosed by <>)
  */
-static char * AddBrackets( char *dest, const char *src )
-/******************************************************/
+static char *AddBrackets( char *dest, const char *src )
+/*****************************************************/
 {
     *dest++ = '<';
     while (*src) {
@@ -192,18 +142,18 @@ static char * AddBrackets( char *dest, const char *src )
 /* rebuild a source line
  * adjust all "pos" values behind the current pos
  * - newstring = new value of item i
- * - i = AsmBuffer index of item to replace
+ * - i = token buffer index of item to replace
  * - outbuf = start of source line to rebuild
  * - oldlen = old length of item i
  * - pos_line = position of item in source line
 */
-static ret_code RebuildLine( const char * newstring, int i, char * const outbuf, unsigned oldlen, unsigned pos_line, int addbrackets )
-/************************************************************************************************************************************/
+static ret_code RebuildLine( const char *newstring, int i, char * const outbuf, unsigned oldlen, unsigned pos_line, int addbrackets )
+/***********************************************************************************************************************************/
 {
     char buffer[MAX_LINE_LEN];
     char *dest = buffer;
     unsigned  newlen;
-    unsigned  rest = strlen( AsmBuffer[i]->tokpos + oldlen );
+    unsigned  rest = strlen( tokenarray[i].tokpos + oldlen );
 
     if ( addbrackets ) {
         /* v2.05: changed, using AddBrackets() */
@@ -219,7 +169,7 @@ static ret_code RebuildLine( const char * newstring, int i, char * const outbuf,
                 return( ERROR );
             }
     } else {
-        const char * p = newstring;
+        const char *p = newstring;
         newlen = strlen( newstring );
         if ( newlen > oldlen )
             if ( ( pos_line + newlen - oldlen + rest ) >= MAX_LINE_LEN ) {
@@ -234,12 +184,12 @@ static ret_code RebuildLine( const char * newstring, int i, char * const outbuf,
             *dest++ = *p++;
         }
     }
-    strcpy( dest, AsmBuffer[i]->tokpos + oldlen ); /* concat rest of line */
+    strcpy( dest, tokenarray[i].tokpos + oldlen ); /* concat rest of line */
     strcpy( outbuf, buffer );     /* and finally copy it back */
 
     /* v2.05: changed '<' to '<=' */
     for ( i++; i <= Token_Count; i++) {
-        AsmBuffer[i]->tokpos = AsmBuffer[i]->tokpos - oldlen + newlen;
+        tokenarray[i].tokpos = tokenarray[i].tokpos - oldlen + newlen;
     }
 
     return( STRING_EXPANDED );
@@ -254,22 +204,21 @@ static ret_code RebuildLine( const char * newstring, int i, char * const outbuf,
  * Both text macros and macro functions are expanded!
  */
 
-static ret_code ExpandText( char * line, int substitute )
-/*******************************************************/
+static ret_code ExpandText( char *line, int substitute )
+/******************************************************/
 {
     char *pSrc;
     char *pDst;
     char *pIdent;
     bool is_exitm;
     //char *pStart;
-    unsigned char *pSave = NULL;
     ret_code rc = NOT_ERROR;
     int count;
     bool expanded = TRUE;
-    dir_node * dir;
+    struct dsym *dir;
     char srcline[MAX_LINE_LEN];
 
-    DebugMsg(("ExpandText(line=>%s<, subst=%u ) enter\n", line, substitute ));
+    DebugMsg1(("ExpandText(line=>%s<, subst=%u ) enter\n", line, substitute ));
     for ( count = 0; count < MAX_TEXTMACRO_NESTING && expanded; count++ ) {
         strcpy( srcline, line );
         expanded = FALSE;
@@ -281,7 +230,7 @@ static ret_code ExpandText( char * line, int substitute )
                     *pDst++ = *pSrc++;
                 } while ( is_valid_id_char( *pSrc ));
                 *pDst = NULLC;
-                dir = (dir_node *)SymSearch( pIdent );
+                dir = (struct dsym *)SymSearch( pIdent );
 #ifdef DEBUG_OUT
                 if ( dir && ( dir->sym.state == SYM_TMACRO || dir->sym.state == SYM_MACRO ) ) {
                     DebugMsg(( "ExpandText: symbol found: %s, state=%u, defined=%u, *pDst-1=%c\n", dir->sym.name, dir->sym.state, dir->sym.isdefined, *(pDst-1) ));
@@ -305,7 +254,7 @@ static ret_code ExpandText( char * line, int substitute )
                         if ( *pSrc == '&' )
                             pSrc++;
                     }
-                    DebugMsg(("ExpandText(): %s is to be replaced by >%s<\n", pIdent, dir->sym.string_ptr));
+                    DebugMsg1(("ExpandText(): %s is to be replaced by >%s<\n", pIdent, dir->sym.string_ptr));
                     //strcpy( pIdent, dir->sym.string_ptr);
                     GetLiteralValue( pIdent, dir->sym.string_ptr );
                     pDst = pIdent + strlen(pIdent);
@@ -314,34 +263,29 @@ static ret_code ExpandText( char * line, int substitute )
                     continue;
                 }
 #if 1
-                /* expand macro functions. The token buffer has to be
-                 saved/restored if RunMacro() is called */
+                /* expand macro functions. */
                 if ( dir &&
                      dir->sym.state == SYM_MACRO &&
                      dir->sym.isdefined == TRUE &&
                      dir->sym.isfunc == TRUE) {
-                    char * p = pSrc;
+                    char *p = pSrc;
                     int i;
                     while ( isspace(*p) ) p++;
                     /* no macro function invokation if the '(' is missing! */
                     if (*p == '(') {
-                        if_state savedIfState;
+                        //enum if_state savedIfState;
                         pSrc -= strlen(pIdent);
                         if ( substitute ) {
                             if ( *(pIdent-1) == '&' )
                                 pIdent--;
                         }
                         *pIdent = NULLC;
-                        if ( pSave == NULL )
-                            pSave = (unsigned char *)AsmTmpAlloc( GetTokenStateSize() );
-                        SaveTokenState( pSave );
-                        savedIfState = CurrIfState;
-                        CurrIfState = BLOCK_ACTIVE;
-                        //i = RunMacro( dir, pSrc, pIdent, TRUE, addbrackets );
-                        i = RunMacro( dir, pSrc, pIdent, TRUE, FALSE, &is_exitm );
-                        CurrIfState = savedIfState;
-                        DebugMsg(( "ExpandText: back from RunMacro(%s), rc=%u, text returned=>%s<\n", dir->sym.name, i, pIdent ));
-                        RestoreTokenState( pSave );
+                        //savedIfState = CurrIfState;
+                        //CurrIfState = BLOCK_ACTIVE;
+                        //i = RunMacro( dir, pSrc, pIdent, addbrackets );
+                        i = RunMacro( dir, pSrc, pIdent, FALSE, &is_exitm );
+                        //CurrIfState = savedIfState;
+                        DebugMsg1(( "ExpandText: back from RunMacro(%s), rc=%u, text returned=>%s<\n", dir->sym.name, i, pIdent ));
                         if ( i == -1 )
                             return( ERROR );
                         pSrc += i;
@@ -359,47 +303,52 @@ static ret_code ExpandText( char * line, int substitute )
         *pDst = NULLC;
     } /* end for */
     if ( count == MAX_TEXTMACRO_NESTING ) {
+        DebugMsg(("ExpandTextline=>%s<) error exit\n", line));
         AsmError( MACRO_NESTING_LEVEL_TOO_DEEP );
         return( ERROR );
     }
-    DebugMsg(("ExpandText(line=>%s<) exit\n", line));
+    DebugMsg1(("ExpandText(line=>%s<) exit\n", line));
     return( rc );
 }
 
 #define TMPSTACKALLOC 0
 
-/* run a macro
- * macro: macro item
- * params: parameter string (includes macro name!)
- * prefix: line prefix which should be emitted "first".
- *         this is also the output buffer!
- * insert: 1=call PushLineQueue() (0 is obsolete!)
- * addbrackets: 1=enclose result string in <>
+static ret_code ExpandTMacro( struct dsym *dir, int pos, char * const outbuf, int addbrackets, int equmode );
+
+/* run a macro.
+ * - macro:  macro item
+ * - params: parameter string (includes macro name!)
+ * - prefix: line prefix which should be emitted "first".
+ *           this is also the output buffer!
+ * - addbrackets: 1=enclose result string in <>
+ * - is_exitm: returns TRUE if EXITM has been hit
  * returns number of characters processed or -1 on errors
  */
-int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbrackets, bool *is_exitm )
-/******************************************************************************************************/
+int RunMacro( struct dsym *macro, char *params, char *prefix, int addbrackets, bool *is_exitm )
+/*********************************************************************************************/
 {
-    char        *newline;
+    char        *parmbuffer;
+    char        *savedStringBuffer;
     char        *orgsrc = params;
-    macro_info  *info;
-    struct asmlines *lnode;
-    dir_node    *dir;
-    expr_list   opndx;
+    struct macro_info *info;
+    struct srcline *lnode;
+    struct dsym *dir;
+    struct expr opndx;
+    struct macro_instance mi;
     int         i;
     int         parmidx;
     int         varargcnt;
     int         bracket_level = -1;/* () level */
-    uint        localstart;
     char        parm_end_delim;   /* parameter end delimiter */
+    char        addprefix;
     char        *ptr;
-    char        **parm_array = NULL;
-    char        line[MAX_LINE_LEN];
+    char        tmpline[MAX_LINE_LEN];
 
-    DebugMsg1(("RunMacro(%s, src=>%s<, prf=>%s<, insert=%u) enter, lvl=%u, locals=%04u\n", macro->sym.name, params, prefix, insert, MacroLevel, MacroLocals ));
+    DebugMsg1(("RunMacro(%s, src=>%s<, prf=>%s< ) enter, lvl=%u, locals=%04u\n", macro->sym.name, params, prefix, MacroLevel, MacroLocals ));
 
+    mi.parm_array = NULL;
     /* v2.03: ensure the "next" source ptr is aligned */
-    newline = CurrSource + (( strlen( CurrSource ) + 1 + 3 ) & ~3);
+    parmbuffer = StringBufferEnd;
 
     info = macro->e.macroinfo;
 #ifdef DEBUG_OUT
@@ -419,10 +368,10 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
         }
     }
 
-    DebugMsg1(( "RunMacro(%s): params=>%s< \n", macro->sym.name, params ));
+    DebugMsg1(( "RunMacro(%s): params=>%s< parmcnt=%u\n", macro->sym.name, params, info->parmcnt ));
 
     if ( info->parmcnt )
-        parm_array = (char **)AsmTmpAlloc( info->parmcnt * sizeof( char * ) );
+        mi.parm_array = (char **)myalloca( info->parmcnt * sizeof( char * ) );
 
     /* skip white spaces (in case there are no params at all) */
     while ( isspace(*params) ) params++;
@@ -437,9 +386,9 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
 #if MACROLABEL
     if ( macro->sym.label ) {
         i = strlen( prefix );
-        parm_array[parmidx] = (char *)AsmTmpAlloc( i + 1 );
-        memcpy( parm_array[0], prefix, i + 1 );
-        ptr = parm_array[0];
+        mi.parm_array[parmidx] = (char *)myalloca( i + 1 );
+        memcpy( mi.parm_array[0], prefix, i + 1 );
+        ptr = mi.parm_array[0];
         while ( i && isspace(*(ptr+i-1))) i--;
         *(ptr + i) = NULLC;
         parmidx++;
@@ -458,11 +407,11 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
                 AsmErr( MISSING_MACRO_ARGUMENT, macro->sym.name, parmidx + 1 );
                 return( -1 );
             }
-            parm_array[parmidx] = info->parmlist[parmidx].deflt;
+            mi.parm_array[parmidx] = info->parmlist[parmidx].deflt;
 
         } else {
 
-            char * startid = NULL;
+            char *startid = NULL;
             int  str_level = 0;    /* <> level */
             char  *dst;
             char  *tmpparams;
@@ -471,8 +420,8 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
             int  numex;
             char quote_ch = NULLC;
 
-            *newline = NULLC;
-            ptr = newline;
+            *parmbuffer = NULLC;
+            ptr = parmbuffer;
 
             DebugMsg1(( "RunMacro(%s.%u), >%s<\n", macro->sym.name, parmidx, params ));
 
@@ -549,7 +498,7 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
 
                 /* skip argument's trailing spaces */
                 if ( str_level == 0 && isspace( *params ) ) {
-                    char * ptr2 = params+1;
+                    char *ptr2 = params+1;
                     while ( isspace(*ptr2) ) ptr2++;
                     if ( *ptr2 == ',' || *ptr2 == parm_end_delim ) {
                         params++;
@@ -583,13 +532,13 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
                     *ptr = NULLC;
                     if ( expansion_flag == TRUE ) {
                         /* v2.03: Source + IfState saved/restored */
-                        char *savedCurrSource = CurrSource;
-                        if_state savedIfState = CurrIfState;
-                        CurrSource = newline;
-                        CurrIfState = BLOCK_ACTIVE;
+                        //enum if_state savedIfState = CurrIfState;
+                        savedStringBuffer = StringBufferEnd;
+                        StringBufferEnd = GetNewLineBuffer( parmbuffer );
+                        //CurrIfState = BLOCK_ACTIVE;
                         tmpparams = params;
-                        strcpy( line, startid );
-                        dst = line + strlen( line );
+                        strcpy( tmpline, startid );
+                        dst = tmpline + strlen( tmpline );
                         while ( isspace(*tmpparams) ) tmpparams++;
                         if ( *tmpparams == '(' ) {
                             int lvl = 1;
@@ -604,25 +553,25 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
                         } else /* v2.04: don't swallow white spaces */
                             tmpparams = params;
                         *dst = NULLC;
-                        if ( ExpandText( line, FALSE ) == STRING_EXPANDED ) {
-                            DebugMsg1(( "RunMacro(%s.%u), ExpandText()=>%s<\n", macro->sym.name, parmidx, line ));
-                            strcpy( startid, line );
+                        if ( ExpandText( tmpline, FALSE ) == STRING_EXPANDED ) {
+                            DebugMsg1(( "RunMacro(%s.%u), ExpandText()=>%s<\n", macro->sym.name, parmidx, tmpline ));
+                            strcpy( startid, tmpline );
                             ptr = startid + strlen( startid );
                             params = tmpparams;
                         } else {
                             numex++;
-                            DebugMsg1(( "RunMacro(%s.%u), numex=%u, ExpandText()=>%s<\n", macro->sym.name, parmidx, numex, line ));
+                            DebugMsg1(( "RunMacro(%s.%u), numex=%u, ExpandText()=>%s<\n", macro->sym.name, parmidx, numex, tmpline ));
                         }
-                        CurrIfState = savedIfState;
-                        CurrSource = savedCurrSource;
+                        //CurrIfState = savedIfState;
+                        StringBufferEnd = savedStringBuffer;
                     } else {
 
-                        dir = (dir_node *)SymSearch( startid );
+                        dir = (struct dsym *)SymSearch( startid );
                         if (dir &&
                             dir->sym.state == SYM_MACRO &&
                             dir->sym.isdefined == TRUE &&
                             dir->sym.isfunc == TRUE) {
-                            char * p = params;
+                            char *p = params;
                             while ( isspace(*p) ) p++;
                             /* no macro function invokation if the '(' is missing! */
                             if (*p == '(') {
@@ -631,26 +580,41 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
                                  source line. Therefore variable CurrSource must
                                  be adjusted, and the old value saved/restored.
                                  */
-                                char *savedCurrSource = CurrSource;
-                                if_state savedIfState = CurrIfState;
+                                //enum if_state savedIfState = CurrIfState;
                                 bool is_exitm2;
-                                CurrSource = newline;
-                                CurrIfState = BLOCK_ACTIVE;
+                                savedStringBuffer = StringBufferEnd;
+                                StringBufferEnd = GetNewLineBuffer( parmbuffer );
+                                //CurrIfState = BLOCK_ACTIVE;
                                 params -= strlen( startid );
                                 ptr -= strlen( startid );
                                 *ptr = NULLC;
-                                line[0] = NULLC;
-                                i = RunMacro( dir, params, line, TRUE, FALSE, &is_exitm2 );
-                                DebugMsg1(("RunMacro(%s.%u): back from RunMacro(%s), rc=%u, buffer=>%s<\n", macro->sym.name, parmidx, dir->sym.name, i, line));
-                                CurrIfState = savedIfState;
-                                CurrSource = savedCurrSource;
+                                tmpline[0] = NULLC;
+                                i = RunMacro( dir, params, tmpline, FALSE, &is_exitm2 );
+                                DebugMsg1(("RunMacro(%s.%u): back from RunMacro(%s), rc=%u, buffer=>%s<\n", macro->sym.name, parmidx, dir->sym.name, i, tmpline));
+                                //CurrIfState = savedIfState;
+                                StringBufferEnd = savedStringBuffer;
                                 if ( i == -1 )
                                     return( -1 );
-                                strcpy( ptr, line );
+                                strcpy( ptr, tmpline );
                                 ptr += strlen( ptr );
-                                params = params + i;
+                                params += i;
                             }
                         }
+#if 1 /* v2.06: added (see macparm.asm regression test) */
+                        else if ( dir &&  dir->sym.state == SYM_TMACRO &&
+                                 dir->sym.isdefined == TRUE ) {
+                            int tmp = Token_Count; /* ExpandTMacro() may destroy Token_Count */
+                            GetLiteralValue( tmpline, dir->sym.string_ptr );
+                            savedStringBuffer = StringBufferEnd;
+                            StringBufferEnd = GetNewLineBuffer( parmbuffer );
+                            ptr -= strlen( startid );
+
+                            ExpandTMacro( dir, -1, ptr, FALSE, FALSE );
+                            StringBufferEnd = savedStringBuffer;
+                            ptr += strlen( ptr );
+                            Token_Count = tmp;
+                        }
+#endif
                     }
                     startid = NULL;
                 } /* end if (text) macro */
@@ -660,11 +624,13 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
 
             /* convert numeric expression into a string? */
             if ( expansion_flag && numex ) {
+                int max_token;
                 DebugMsg1(( "RunMacro(%s.%u), num expansion: >%s<\n", macro->sym.name, parmidx, start_expr ));
-                Token_Count = Tokenize( start_expr, 1, FALSE );
-
-                i = 1;
-                if ( EvalOperand( &i, Token_Count, &opndx, 0 ) != ERROR ) {
+                savedStringBuffer = StringBufferEnd;
+                StringBufferEnd = GetNewLineBuffer( parmbuffer );
+                i = Token_Count + 1;
+                max_token = Tokenize( start_expr, i, TRUE );
+                if ( EvalOperand( &i, tokenarray, max_token, &opndx, 0 ) != ERROR ) {
                     DebugMsg1(( "RunMacro(%s.%u): num expansion, opndx.type=%d, value=%d\n", macro->sym.name, parmidx, opndx.type, opndx.value ));
                     /* the expression evaluator accepts forward references
                      but the % operator won't accept them */
@@ -674,13 +640,14 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
                         } else {
                             AsmError( EXPRESSION_NOT_A_CONSTANT );
                         }
-                    } else if ( AsmBuffer[i]->token != T_FINAL ) {
+                    } else if ( tokenarray[i].token != T_FINAL ) {
                         /* the evaluator was unable to evaluate the full expression */
-                        DebugMsg1(( "RunMacro(%s.%u): num expansion, unexpected token=%s\n", macro->sym.name, parmidx, AsmBuffer[i]->string_ptr ));
-                        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[i]->tokpos );
+                        DebugMsg1(( "RunMacro(%s.%u): num expansion, unexpected token=%s\n", macro->sym.name, parmidx, tokenarray[i].string_ptr ));
+                        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
                     } else
                         myltoa( opndx.uvalue, start_expr, ModuleInfo.radix, opndx.hvalue < 0, FALSE );
                 }
+                StringBufferEnd = savedStringBuffer;
             }
 
             if (  macro->sym.mac_vararg && ( parmidx == info->parmcnt - 1 ) ) {
@@ -691,10 +658,10 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
                     *ptr++ = *params;
                 *ptr = NULLC;
                 if ( varargcnt == 0 ) {
-                    parm_array[parmidx] = (char *)AsmTmpAlloc( MAX_LINE_LEN + 1 );
-                    strcpy( parm_array[parmidx], newline );
+                    mi.parm_array[parmidx] = (char *)myalloca( MAX_LINE_LEN + 1 );
+                    strcpy( mi.parm_array[parmidx], parmbuffer );
                 } else
-                    strcat( parm_array[parmidx], newline );
+                    strcat( mi.parm_array[parmidx], parmbuffer );
                 varargcnt++;
 #else
                 while ( *params != NULLC && *params != parm_end_delim && *params != ',' )
@@ -703,36 +670,40 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
                     *ptr++ = *params;
                 *ptr = NULLC;
                 if ( varargcnt == 0 )
-                    parm_array[parmidx] = newline;
+                    mi.parm_array[parmidx] = parmbuffer;
                 varargcnt++;
-                newline = ptr;
+                parmbuffer = ptr;
 #endif
-            } else if ( *newline ) {
+            } else if ( *parmbuffer ) {
 #if TMPSTACKALLOC
-                parm_array[parmidx] = (char *)AsmTmpAlloc( strlen( newline ) + 1 );
-                strcpy( parm_array[parmidx],  newline );
+                mi.parm_array[parmidx] = (char *)myalloca( strlen( parmbuffer ) + 1 );
+                strcpy( mi.parm_array[parmidx],  parmbuffer );
 #else
-                parm_array[parmidx] = newline;
-                newline = newline + (( strlen( newline ) + 1 + 3 ) & ~3 );
+                mi.parm_array[parmidx] = parmbuffer;
+                parmbuffer = GetNewLineBuffer( parmbuffer );
 #endif
             } else
-                parm_array[parmidx] = "";
+                mi.parm_array[parmidx] = "";
         } /*end if */
 
 #ifdef DEBUG_OUT
-        if ( parm_array[parmidx] )
-            DebugMsg1(("RunMacro(%s.%u): actual parameter value=>%s<\n", macro->sym.name, parmidx, parm_array[parmidx] ));
+        if ( mi.parm_array[parmidx] )
+            DebugMsg1(("RunMacro(%s.%u): actual parameter value=>%s<\n", macro->sym.name, parmidx, mi.parm_array[parmidx] ));
         else
             DebugMsg1(("RunMacro(%s.%u): actual parameter value=NULL\n", macro->sym.name, parmidx ));
 #endif
 
         if ( *params == ',' ) {
             params++;
-            while (isspace(*params)) params++;
+            while ( isspace( *params ) ) params++;
             if ( macro->sym.mac_vararg && ( parmidx == info->parmcnt - 1 ) && *params )
                 parmidx--;
         }
     } /* end for  */
+
+    /* v2.06: parmbuffer isn't aligned to dword for VARARG argument */
+    if ( macro->sym.mac_vararg && mi.parm_array[info->parmcnt-1])
+        parmbuffer = GetNewLineBuffer( mi.parm_array[info->parmcnt-1] );
 
     if ( bracket_level >= 0 ) {
         if ( *params == NULLC ) {
@@ -749,7 +720,7 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
         /* if macro name is "", it's a FOR/FORC macro.
          a check for a valid end must NOT be done then. */
     } else if ( *params != '\0' && *macro->sym.name != NULLC ) {
-        DebugMsg1(("RunMacro(%s): expected NULL, found >%s<\n", macro->sym.name, params));
+        DebugMsg1(("RunMacro(%s): expected NULLC, found >%s<, parmidx=%u\n", macro->sym.name, params, parmidx ));
         /* v2.05: changed to a warning. That's what Masm does */
         AsmWarn( 1, TOO_MANY_ARGUMENTS_IN_MACRO_CALL, macro->sym.name );
         //return( -1 );
@@ -758,30 +729,21 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
     /* a predefined macro func with a function address? */
 
     if ( macro->sym.predefined == TRUE && macro->sym.func_ptr != NULL ) {
-        line[0] = NULLC;
-        macro->sym.func_ptr( line, parm_array );
+        savedStringBuffer = StringBufferEnd;
+        StringBufferEnd = parmbuffer;
+        tmpline[0] = NULLC;
+        macro->sym.func_ptr( tmpline, mi.parm_array );
         if ( addbrackets ) {
-            AddBrackets( prefix + strlen( prefix ), line );
+            AddBrackets( prefix + strlen( prefix ), tmpline );
         } else
-            strcat( prefix, line );
+            strcat( prefix, tmpline );
         *is_exitm = TRUE;
+        StringBufferEnd = savedStringBuffer;
         return( params - orgsrc );
     }
 
-#if 0
-    /* v2.0: no ENDM is pushed anymore,
-     * but exit RunMacro() prematurely seems a bad idea!
-     * See 'AddLineQueue( prefix )' below!
-     */
-    if ( info->data == NULL )
-        return( params - orgsrc );
-#endif
-
-    if ( insert ) {
-        PushLineQueue(); /* start a new line queue */
-    }
-
-    /* if there's a label before the macro, write it */
+    /* check if a (code) label before the macro is to be written */
+    addprefix = FALSE;
     if ( macro->sym.isfunc == FALSE && prefix ) {
         for ( ptr = prefix; *ptr && isspace(*ptr); ptr++ );
         if ( *ptr ) { /* v2.03: don't queue an empty prefix */
@@ -789,80 +751,83 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
 #if MACROLABEL
             if ( macro->sym.label == FALSE )
 #endif
-                AddLineQueue( prefix );
-            *prefix = NULLC; /* added v1.96 */
+                addprefix = TRUE;
         }
     }
-    localstart = MacroLocals;
+    mi.localstart = MacroLocals;
     MacroLocals += info->localcnt; /* adjust global variable MacroLocals */
 
-    /* emit the macro's source lines */
-    for( lnode = info->data; lnode != NULL; lnode = lnode->next ) {
-        /* if line contains placeholders, replace them by current values */
-        if ( lnode->ph_count ) {
-            fill_placeholders( line, lnode->line, info->parmcnt, localstart, parm_array );
-            AddLineQueue( line );
-        } else {
-            AddLineQueue( lnode->line );
-        }
-//        line_queue->tail->macrolevel = MacroLevel+1;
-    }
+    /* avoid to use values stored in struct macro_info directly. A macro
+     * may be redefined within the macro! Hence copy all values that are
+     * needed later in the while loop to macro_instance!
+     */
+    mi.startline = mi.currline = info->data;
+    mi.parmcnt = info->parmcnt;
 
     /* v2.03: no processing if line queue is empty */
-    if ( line_queue  ) {
-        char *OldSource = CurrSource;
+    if ( mi.currline || addprefix ) {
+        struct input_status oldstat;
         int currlevel = queue_level;
-//        line_queue->tail->macrolevel = MacroLevel+1;
+        //line_queue->tail->macrolevel = MacroLevel+1;
+        /* v2.06: fixme: what about to save/restore ModuleInfo.line_flags */
         DebugMsg1(("RunMacro(%s): enter assembly loop, macro level=%u\n", macro->sym.name, MacroLevel+1 ));
         /* v2.04: this listing is too excessive */
         //if ( ModuleInfo.list && ( ModuleInfo.list_macro == LM_LISTMACROALL || MacroLevel == 0 ) )
         if ( MacroLevel == 0 && macro->sym.isfunc == FALSE && *macro->sym.name )
             LstWriteSrcLine();
+        savedStringBuffer = StringBufferEnd;
+        StringBufferEnd = parmbuffer;
+        PushInputStatus( &oldstat );
+
+        PushLineQueue(); /* make sure the line queue is empty */
+
+        if ( addprefix ) {
+            AddLineQueue( prefix );
+            *prefix = NULLC; /* added v1.96 */
+        }
         /*
-         * move the current line queue to the file stack!
+         * move the macro instance onto the file stack!
          * Also reset the current linenumber!
          */
-        PushMacro( (asm_sym *)macro, 0 );
+        PushMacro( macro, &mi, 0 );
         MacroLevel++;
         /* Run the assembler until we hit EXITM or ENDM.
          * Also handle GOTO and macro label lines!
          */
-        while ( queue_level >= currlevel ) {
+        while ( queue_level > currlevel ) {
             int i;
-            while ( 0 == (i = GetPreprocessedLine( newline, FALSE )) );
+            while ( 0 == (i = GetPreprocessedLine( CurrSource, FALSE, tokenarray )) );
             if ( i < 0 ) {
                 break;
             }
             /* skip macro label lines */
-            if ( AsmBuffer[0]->token == T_COLON ) {
+            if ( tokenarray[0].token == T_COLON ) {
                 /* v2.05: emit the error msg here, not in StoreMacro() */
-                if ( AsmBuffer[1]->token != T_ID )
-                    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->tokpos );
-                else if ( AsmBuffer[2]->token != T_FINAL )
-                    AsmErr( SYNTAX_ERROR_EX, AsmBuffer[2]->tokpos );
+                if ( tokenarray[1].token != T_ID )
+                    AsmErr( SYNTAX_ERROR_EX, tokenarray[0].tokpos );
+                else if ( tokenarray[2].token != T_FINAL )
+                    AsmErr( SYNTAX_ERROR_EX, tokenarray[2].tokpos );
                 continue;
             }
 
-            if ( AsmBuffer[0]->token == T_DIRECTIVE ) {
-                if ( AsmBuffer[0]->value == T_EXITM ) {
+            if ( tokenarray[0].token == T_DIRECTIVE ) {
+                if ( tokenarray[0].tokval == T_EXITM ) {
                     if ( ModuleInfo.list && ModuleInfo.list_macro == LM_LISTMACROALL )
                         LstWriteSrcLine();
+                    tmpline[0] = NULLC;
                     /* v2.05: display error if there's more than 1 argument or
                      * the argument isn't a text item
                      */
-                    if ( AsmBuffer[1]->token != T_FINAL ) {
-                        if ( AsmBuffer[1]->token != T_STRING || AsmBuffer[1]->string_delim != '<' )
-                            TextItemError( 1 );
+                    if ( tokenarray[1].token != T_FINAL ) {
+                        if ( tokenarray[1].token != T_STRING || tokenarray[1].string_delim != '<' )
+                            TextItemError( &tokenarray[1] );
                         else if ( Token_Count > 2 )
-                            AsmErr( SYNTAX_ERROR_EX, AsmBuffer[2]->tokpos );
-                    }
-                    if ( addbrackets ) {
-                        AddBrackets( line, AsmBuffer[1]->string_ptr );
-                    } else {
-                        line[0] = NULLC;
-                        if ( AsmBuffer[1]->token != T_FINAL ) {
-                            char *p = AsmBuffer[1]->string_ptr;
-                            char *p2 = line;
+                            AsmErr( SYNTAX_ERROR_EX, tokenarray[2].tokpos );
+                        else if ( addbrackets ) {
+                            AddBrackets( tmpline, tokenarray[1].string_ptr );
+                        } else {
+                            char *p = tokenarray[1].string_ptr;
+                            char *p2 = tmpline;
                             while (*p) {
                                 if (*p == '!' &&
                                     (*(p+1) == '<' || *(p+1) == '>' || *(p+1) == '!'))
@@ -871,38 +836,38 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
                             }
                             *p2 = NULLC;
                         }
+                        if ( prefix ) /* prefix may be NULL ( loop directives ) */
+                            strcat( prefix, tmpline );
                     }
                     DebugMsg1(("RunMacro(%s): EXITM, prefix=%s, exitm result=%s, suffix=%s\n",
-                               macro->sym.name, prefix ? prefix : "NULL", line, params));
-                    if ( prefix ) { /* prefix may be NULL ( loop directives ) */
-                        strcat( prefix, line );
-                    }
-                    SkipMacro( newline );
+                               macro->sym.name, prefix ? prefix : "NULL", tmpline, params));
+                    SkipMacro( tmpline ); /* CurrSource won't work! */
                     *is_exitm = TRUE;
                     break;
 #if 0 /* won't happen anymore */
-                } else if ( AsmBuffer[0]->value == T_ENDM ) {
+                } else if ( tokenarray[0].tokval == T_ENDM ) {
                     DebugMsg1(("RunMacro(%s): ENDM\n", macro->sym.name ));
                     break;
 #endif
-                } else if ( AsmBuffer[0]->value == T_GOTO ) {
-                    if ( AsmBuffer[1]->token != T_FINAL ) {
-                        int len = strlen( AsmBuffer[1]->string_ptr );
-                        DebugMsg1(("RunMacro(%s): GOTO %s, MacroLevel=%u\n", macro->sym.name, AsmBuffer[1]->string_ptr, MacroLevel ));
-                        for( i = 1, lnode = info->data; lnode != NULL; lnode = lnode->next, i++ ) {
+                } else if ( tokenarray[0].tokval == T_GOTO ) {
+                    if ( tokenarray[1].token != T_FINAL ) {
+                        int len = strlen( tokenarray[1].string_ptr );
+                        DebugMsg1(("RunMacro(%s): GOTO %s, MacroLevel=%u\n", macro->sym.name, tokenarray[1].string_ptr, MacroLevel ));
+                        /* search for the destination line */
+                        for( i = 1, lnode = mi.startline; lnode != NULL; lnode = lnode->next, i++ ) {
                             ptr = lnode->line;
                             //DebugMsg(("RunMacro(%s): GOTO, scan line >%s< for label >%s<\n", macro->sym.name, ptr, line));
                             if ( *ptr == ':' ) {
                                 if ( lnode->ph_count ) {
-                                    fill_placeholders( line, lnode->line, info->parmcnt, localstart, parm_array );
-                                    ptr = line;
+                                    fill_placeholders( tmpline, lnode->line, mi.parmcnt, mi.localstart, mi.parm_array );
+                                    ptr = tmpline;
                                 }
                                 ptr++;
                                 while( isspace( *ptr )) ptr++;
                                 DebugMsg1(("RunMacro(%s): GOTO, line=>%s<\n", macro->sym.name, ptr ));
                                 /* macro labels are always case-insensitive! */
-                                //if ( ( SymCmpFunc( ptr, AsmBuffer[1]->string_ptr, len ) == 0 ) &&
-                                if ( ( _memicmp( ptr, AsmBuffer[1]->string_ptr, len ) == 0 ) &&
+                                //if ( ( SymCmpFunc( ptr, tokenarray[1].string_ptr, len ) == 0 ) &&
+                                if ( ( _memicmp( ptr, tokenarray[1].string_ptr, len ) == 0 ) &&
                                     ( is_valid_id_char(*(ptr+len) ) == FALSE ) ) {
                                     /* label found! */
                                     break;
@@ -911,45 +876,54 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
                         }
                         if ( !lnode ) {
                             /* v2.05: display error msg BEFORE SkipMacro()! */
-                            DebugMsg1(("RunMacro(%s): GOTO, label >%s< not found!\n", macro->sym.name, AsmBuffer[1]->string_ptr ));
-                            AsmErr( MACRO_LABEL_NOT_DEFINED, AsmBuffer[1]->string_ptr );
+                            DebugMsg1(("RunMacro(%s): GOTO, label >%s< not found!\n", macro->sym.name, tokenarray[1].string_ptr ));
+                            AsmErr( MACRO_LABEL_NOT_DEFINED, tokenarray[1].string_ptr );
                         }
                     } else {
                         lnode = NULL;
-                        AsmErr( SYNTAX_ERROR_EX, AsmBuffer[0]->tokpos );
+                        AsmErr( SYNTAX_ERROR_EX, tokenarray[0].tokpos );
                     }
-                    SkipMacro( newline );
+                    SkipMacro( tmpline );
                     /* v2.05: MacroLevel isn't touched anymore inside the loop */
                     //MacroLevel--;
                     if ( lnode && lnode->next ) {
-                        DebugMsg1(("RunMacro(%s): GOTO, found label >%s<\n", macro->sym.name, line));
+                        DebugMsg1(("RunMacro(%s): GOTO, found label >%s<\n", macro->sym.name, tmpline));
                         //PushLineQueue();
-                        for( lnode = lnode->next; lnode != NULL; lnode = lnode->next ) {
-                            if ( lnode->ph_count ) {
-                                fill_placeholders( line, lnode->line, info->parmcnt, localstart, parm_array );
-                                AddLineQueue( line );
-                            } else
-                                AddLineQueue( lnode->line );
-                        }
-                        PushMacro( (asm_sym *)macro, i );
+                        mi.currline = lnode->next;
+                        PushMacro( macro, &mi, i );
                         continue;
                     }
                     break;
                 }
             }
-            ParseLine();
+            ParseLine( tokenarray );
             if ( Options.preprocessor_stdout == TRUE )
-                WritePreprocessedLine( newline );
+                WritePreprocessedLine( CurrSource, tokenarray );
 
             /* the macro might contain an END directive */
             if ( ModuleInfo.EndDirFound ) {
-                while ( GetTextLine( newline, MAX_LINE_LEN ) );
+                while ( GetTextLine( CurrSource ) );
                 *is_exitm = TRUE; /* force loop exit */
                 break;
             }
         } /* end while */
         MacroLevel--;
-        CurrSource = OldSource;
+        PopInputStatus( &oldstat );
+        StringBufferEnd = savedStringBuffer;
+
+#if FASTMEM==0
+        /* v2.06: free "old" macro line data if macro has been changed
+         * and isn't in use anymore */
+        if ( mi.startline != info->data && ( !MacroInUse( macro ) ) ) {
+            struct srcline  *curr;
+            struct srcline  *next;
+            DebugMsg1(("RunMacro(%s): macro has been changed, releasing old lines\n", macro->sym.name ));
+            for( curr = mi.startline ; curr; curr = next ) {
+                next = curr->next;
+                AsmFree( curr );
+            }
+        }
+#endif
     } /* end if */
 
     DebugMsg1(("RunMacro(%s) exit, MacroLevel=%u\n", macro->sym.name, MacroLevel ));
@@ -959,19 +933,19 @@ int RunMacro( dir_node *macro, char *params, char *prefix, int insert, int addbr
 
 /* replace text macros and macro functions by their values, recursively
  * dir: found text macro/macro function item
- * pos: item's AsmBuffer index
+ * pos: item's token buffer index
  * outbuf: output buffer
  * equmode: if 1, don't expand macro functions
  */
-static ret_code ExpandTMacro( dir_node * dir, int pos, char * const outbuf, int addbrackets, int equmode )
-/********************************************************************************************************/
+static ret_code ExpandTMacro( struct dsym *dir, int pos, char * const outbuf, int addbrackets, int equmode )
+/**********************************************************************************************************/
 {
     int count;
     int i;
     //int len;
     bool is_exitm;
-    dir_node *tmpdir;
-    char * p;
+    struct dsym *tmpdir;
+    char *p;
     char *src;
     char *dst;
     char buffer[MAX_LINE_LEN];
@@ -997,7 +971,7 @@ static ret_code ExpandTMacro( dir_node * dir, int pos, char * const outbuf, int 
             *p++ = *src++;
         } while ( is_valid_id_char( *src ) );
         *p = NULLC;
-        tmpdir = (dir_node *)SymSearch( buffer );
+        tmpdir = (struct dsym *)SymSearch( buffer );
         if ( tmpdir == NULL )
             break;
 
@@ -1006,13 +980,15 @@ static ret_code ExpandTMacro( dir_node * dir, int pos, char * const outbuf, int 
             i = src - dst;
             buffer[0] = NULLC;
             /* size of original string */
-            count = strlen( AsmBuffer[pos]->string_ptr );
-            strcpy( buffer2, AsmBuffer[pos]->tokpos + count );
-
+            if ( pos >= 0 ) {
+                count = strlen( tokenarray[pos].string_ptr );
+                strcpy( buffer2, tokenarray[pos].tokpos + count );
+            } else
+                buffer2[0] = NULLC;
             GetLiteralValue( buffer3, dst );
 
-            //i = RunMacro( tmpdir, buffer3, buffer, TRUE, addbrackets );
-            i = RunMacro( tmpdir, buffer3, buffer, TRUE, FALSE, &is_exitm );
+            //i = RunMacro( tmpdir, buffer3, buffer, addbrackets );
+            i = RunMacro( tmpdir, buffer3, buffer, FALSE, &is_exitm );
             DebugMsg1(("ExpandTMacro(+%s): replace >%s< by >%s<\n", tmpdir->sym.name, dir->sym.string_ptr, buffer));
             /* v2.01: don't forget possible chars in the text macro
              * string behind the ')'! */
@@ -1050,39 +1026,42 @@ static ret_code ExpandTMacro( dir_node * dir, int pos, char * const outbuf, int 
         }
         break;
     }
-    DebugMsg1(("ExpandTMacro: replace >%s< by >%s<\n", AsmBuffer[pos]->string_ptr, dir->sym.string_ptr));
-    return( RebuildLine( dst,
-                pos,
-                AsmBuffer[pos]->tokpos,
-                strlen( AsmBuffer[pos]->string_ptr ),
-                AsmBuffer[pos]->tokpos - outbuf,
-                addbrackets ) );
+#ifdef DEBUG_OUT
+    if ( pos >= 0 )
+        DebugMsg1(("ExpandTMacro: replace >%s< by >%s<\n", tokenarray[pos].string_ptr, dir->sym.string_ptr));
+#endif
+    return( pos >= 0 ? RebuildLine( dst,
+                                   pos,
+                                   tokenarray[pos].tokpos,
+                                   strlen( tokenarray[pos].string_ptr ),
+                                   tokenarray[pos].tokpos - outbuf,
+                                   addbrackets ) : NOT_ERROR );
 }
 
 /* expand one token
- * count: index of token in AsmBuffer
+ * i: index of token in token buffer
  * line: full source line
  * equmode: if 1, dont expand macro functions
  */
-static ret_code ExpandToken( int count, char *line, int addbrackets, int equmode )
-/********************************************************************************/
+static ret_code ExpandToken( int i, struct asm_tok tokenarray[], char *line, int addbrackets, int equmode )
+/*********************************************************************************************************/
 {
     int pos;
-    int i;
-    //char * p;
+    int tmp;
+    //char *p;
     bool is_exitm;
-    expr_list opndx;
-    dir_node    *dir;
+    struct expr opndx;
+    struct dsym *dir;
     ret_code rc = NOT_ERROR;
 
     /* v2.05: the '%' should only be handled as an operator if addbrackets==TRUE,
      * which means that the current directive is a preprocessor directive and the
      * expected argument is a literal (or text macro).
      */
-    //if ( AsmBuffer[count]->token == T_PERCENT && equmode == FALSE ) {
-    if ( addbrackets && AsmBuffer[count]->token == T_PERCENT ) {
-        pos = count+1;
-        DebugMsg1(("ExpandToken: %% found, line=%s\n", AsmBuffer[pos]->tokpos ));
+    //if ( tokenarray[i].token == T_PERCENT && equmode == FALSE ) {
+    if ( addbrackets && tokenarray[i].token == T_PERCENT ) {
+        pos = i+1;
+        DebugMsg1(("ExpandToken: %% found, line=%s\n", tokenarray[pos].tokpos ));
 
         /* if a text macro/macro function call is found, it has to be
          * evaluated BEFORE the expression evaluator is called!
@@ -1092,26 +1071,26 @@ static ret_code ExpandToken( int count, char *line, int addbrackets, int equmode
          *     %ECHO   TE1
          * must display 4. The '%' is superfluous.
          */
-        for ( i = pos; i < Token_Count && AsmBuffer[i]->token != T_COMMA; i++ )
-            if ( AsmBuffer[i]->token == T_ID )
-                if ( dir = (dir_node *)SymSearch( AsmBuffer[i]->string_ptr ) ) {
-                    if (dir->sym.isdefined == FALSE ) {
+        for ( tmp = pos; tmp < Token_Count && tokenarray[tmp].token != T_COMMA; tmp++ )
+            if ( tokenarray[tmp].token == T_ID )
+                if ( dir = (struct dsym *)SymSearch( tokenarray[tmp].string_ptr ) ) {
+                    if ( dir->sym.isdefined == FALSE ) {
                         ;
                     } else if ( dir->sym.state == SYM_TMACRO ) {
-                        if ( ExpandTMacro( dir, i, AsmBuffer[i]->tokpos, FALSE, FALSE ) == STRING_EXPANDED ) {
+                        if ( ExpandTMacro( dir, tmp, tokenarray[tmp].tokpos, FALSE, FALSE ) == STRING_EXPANDED ) {
                             Token_Count = 0; /* skip processing */
                             return( STRING_EXPANDED );
                         }
                     } else if ( dir->sym.state == SYM_MACRO &&
-                               AsmBuffer[i+1]->token == T_OP_BRACKET ) {
-                        if ( ExpandToken( i, line, FALSE, FALSE ) == STRING_EXPANDED ) {
+                               tokenarray[tmp+1].token == T_OP_BRACKET ) {
+                        if ( ExpandToken( tmp, tokenarray, line, FALSE, FALSE ) == STRING_EXPANDED ) {
                             Token_Count = 0; /* skip processing */
                             return( STRING_EXPANDED );
                         }
                     }
                 }
 
-        if ( EvalOperand( &pos, Token_Count, &opndx, 0 ) == ERROR ) {
+        if ( EvalOperand( &pos, tokenarray, Token_Count, &opndx, 0 ) == ERROR ) {
             opndx.value = 0;
         } else if ( opndx.kind != EXPR_CONST ) {
             if ( opndx.sym && opndx.sym->state == SYM_UNDEFINED )
@@ -1129,66 +1108,66 @@ static ret_code ExpandToken( int count, char *line, int addbrackets, int equmode
         myltoa( opndx.value, StringBufferEnd, ModuleInfo.radix, opndx.hvalue < 0, FALSE );
 #endif
         /* v2.05: get size of string to be "replaced" */
-        i = AsmBuffer[pos]->tokpos - AsmBuffer[count]->tokpos;
-        DebugMsg1(("ExpandToken: curr pos=%u, start expr=%u, expr size=%d\n", pos, count+1, i ));
+        tmp = tokenarray[pos].tokpos - tokenarray[i].tokpos;
+        DebugMsg1(("ExpandToken: curr pos=%u, start expr=%u, expr size=%d\n", pos, i+1, tmp ));
 
-        AsmBuffer[count]->token = T_STRING;
-        AsmBuffer[count]->string_ptr = StringBufferEnd;
-        AddTokens( count+1, count+1 - pos );
+        tokenarray[i].token = T_STRING;
+        tokenarray[i].string_ptr = StringBufferEnd;
+        AddTokens( tokenarray, i+1, i+1 - pos );
 
         return( RebuildLine( StringBufferEnd,
-                    count,
-                    AsmBuffer[count]->tokpos,
                     i,
-                    AsmBuffer[count]->tokpos - line,
+                    tokenarray[i].tokpos,
+                    tmp,
+                    tokenarray[i].tokpos - line,
                     addbrackets ) );
     }
 
-    //if( AsmBuffer[count]->token == T_ID ||
-        //( expansion == TRUE && AsmBuffer[count]->token == T_STRING ) )  {
-    if( AsmBuffer[count]->token == T_ID ) {
-        DebugMsg1(("ExpandToken: testing id >%s< equmode=%u\n", AsmBuffer[count]->string_ptr, equmode ));
-        dir = (dir_node *)SymSearch( AsmBuffer[count]->string_ptr );
+    //if( tokenarray[i].token == T_ID ||
+        //( expansion == TRUE && tokenarray[i].token == T_STRING ) )  {
+    if( tokenarray[i].token == T_ID ) {
+        DebugMsg1(("ExpandToken: testing id >%s< equmode=%u\n", tokenarray[i].string_ptr, equmode ));
+        dir = (struct dsym *)SymSearch( tokenarray[i].string_ptr );
         if( dir != NULL) {
             if (dir->sym.state == SYM_MACRO &&
                 dir->sym.isdefined == TRUE &&
                 equmode == FALSE ) {
                 char buffer[MAX_LINE_LEN];
                 char cmd[MAX_LINE_LEN];
-                memcpy( buffer, line, AsmBuffer[count]->tokpos - line );
-                buffer[AsmBuffer[count]->tokpos - line] = NULLC;
-                strcpy( cmd, AsmBuffer[count]->tokpos );
+                memcpy( buffer, line, tokenarray[i].tokpos - line );
+                buffer[tokenarray[i].tokpos - line] = NULLC;
+                strcpy( cmd, tokenarray[i].tokpos );
                 if ( dir->sym.isfunc == TRUE ) {
-                    if_state savedIfState;
+                    //enum if_state savedIfState;
                     /* ignore macro functions without a following '(' */
-                    if ( AsmBuffer[count+1]->token != T_OP_BRACKET ) {
+                    if ( tokenarray[i+1].token != T_OP_BRACKET ) {
                         DebugMsg1(("ExpandToken: macro function %s without () - not expanded!\n", dir->sym.name ));
                         return( NOT_ERROR );
                     }
                     DebugMsg1(("ExpandToken: macro function %s to be expanded\n", dir->sym.name ));
-                    savedIfState = CurrIfState;
-                    CurrIfState = BLOCK_ACTIVE;
-                    i = RunMacro( dir, AsmBuffer[count]->tokpos, buffer, TRUE, addbrackets, &is_exitm );
-                    CurrIfState = savedIfState;
-                    if ( i != -1 ) {
+                    //savedIfState = CurrIfState;
+                    //CurrIfState = BLOCK_ACTIVE;
+                    tmp = RunMacro( dir, tokenarray[i].tokpos, buffer, addbrackets, &is_exitm );
+                    //CurrIfState = savedIfState;
+                    if ( tmp != -1 ) {
                         DebugMsg1(("ExpandToken: back from RunMacro(%s), string=>%s<\n", dir->sym.name, buffer));
-                        strcat( buffer, cmd + i );
+                        strcat( buffer, cmd + tmp );
                         strcpy( line, buffer );
                         rc = STRING_EXPANDED;
                     } else
                         rc = ERROR;
                 } else {
                     /* v2.05: check for T_DIRECTIVE added (option epilogue) */
-                    if ( AsmBuffer[0]->token == T_DIRECTIVE ||
-                        ( count > 0 &&
+                    if ( tokenarray[0].token == T_DIRECTIVE ||
+                        ( i > 0 &&
 #if MACROLABEL
                         dir->sym.label == FALSE &&
 #endif
                         /* v2.05: regression in v2.04 */
-                        //AsmBuffer[count-1]->token != T_COLON ) {
-                        AsmBuffer[count-1]->token != T_COLON &&
-                        AsmBuffer[count-1]->token != T_DBL_COLON )) {
-                        DebugMsg1(("ExpandToken: macro proc %s at pos %u NOT expanded\n", dir->sym.name, count ));
+                        //tokenarray[i-1].token != T_COLON ) {
+                        tokenarray[i-1].token != T_COLON &&
+                        tokenarray[i-1].token != T_DBL_COLON )) {
+                        DebugMsg1(("ExpandToken: macro proc %s at pos %u NOT expanded\n", dir->sym.name, i ));
 #if 1 /* v2.03: no error, just don't expand! */
                         return( rc );
 #else
@@ -1198,11 +1177,11 @@ static ret_code ExpandToken( int count, char *line, int addbrackets, int equmode
 #endif
                     }
                     DebugMsg1(("ExpandToken: macro proc %s to be expanded\n", dir->sym.name ));
-                    i = RunMacro( dir, AsmBuffer[count]->tokpos, buffer, TRUE, FALSE, &is_exitm );
+                    tmp = RunMacro( dir, tokenarray[i].tokpos, buffer, FALSE, &is_exitm );
                     DebugMsg1(("ExpandToken: back from RunMacro(%s) - called as proc\n", dir->sym.name));
-                    if ( i != -1 ) {
+                    if ( tmp != -1 ) {
                         if ( is_exitm ) {
-                            strcat( buffer, cmd + i );
+                            strcat( buffer, cmd + tmp );
                             strcpy( line, buffer );
                             rc = STRING_EXPANDED;
                         } else {
@@ -1211,30 +1190,30 @@ static ret_code ExpandToken( int count, char *line, int addbrackets, int equmode
                     } else
                         rc = ERROR;
                 }
-                Token_Count = 0; /* AsmBuffer is destroyed, exit */
+                Token_Count = 0; /* tokenarray is destroyed, exit */
 //            } else if( dir->sym.state == SYM_TMACRO && dir->sym.defined == TRUE) {
             } else if( dir->sym.state == SYM_TMACRO ) {
-                DebugMsg1(("ExpandToken: text macro %s to be expanded\n", dir->sym.name ));
-                rc = ExpandTMacro( dir, count, AsmBuffer[count]->tokpos, addbrackets, equmode );
-                DebugMsg1(("ExpandToken: after expansion: %s\n", AsmBuffer[count]->tokpos ));
+                DebugMsg1(("ExpandToken: text macro %s to be expanded (%s)\n", dir->sym.name, dir->sym.string_ptr ));
+                rc = ExpandTMacro( dir, i, tokenarray[i].tokpos, addbrackets, equmode );
+                DebugMsg1(("ExpandToken: after expansion: %s\n", tokenarray[i].tokpos ));
             }
         }
     }
 #if NEWEXP
-    else if ( expansion == TRUE && AsmBuffer[count]->token == T_STRING ) {
+    else if ( expansion == TRUE && tokenarray[i].token == T_STRING ) {
         char line2[MAX_LINE_LEN];
-        strcpy( line2, AsmBuffer[count]->string_ptr );
-        if ( AsmBuffer[count]->string_delim == '"' ||
-            AsmBuffer[count]->string_delim == '\'' ) {
+        strcpy( line2, tokenarray[i].string_ptr );
+        if ( tokenarray[i].string_delim == '"' ||
+            tokenarray[i].string_delim == '\'' ) {
             if ( strchr( line2, '&' ) == NULL )
                 return( rc );
         }
         if ( ExpandText( line2, TRUE ) == STRING_EXPANDED ) {
             return( RebuildLine( line2,
-                                count,
-                                AsmBuffer[count]->tokpos,
-                                strlen( AsmBuffer[count]->string_ptr ),
-                                AsmBuffer[count]->tokpos - line,
+                                i,
+                                tokenarray[i].tokpos,
+                                strlen( tokenarray[i].string_ptr ),
+                                tokenarray[i].tokpos - line,
                                 addbrackets ) );
         }
     }
@@ -1247,20 +1226,20 @@ static ret_code ExpandToken( int count, char *line, int addbrackets, int equmode
  * INSTR
  */
 
-static ret_code FullExpandToken( int i, char *line )
-/**************************************************/
+static ret_code FullExpandToken( int i, struct asm_tok tokenarray[], char *line )
+/*******************************************************************************/
 {
     char buffer[MAX_LINE_LEN];
 
-    if ( AsmBuffer[i]->token == T_ID ) {
-        DebugMsg1(( "FullExpandToken(%u): sym=%s >%s<\n", i, AsmBuffer[i]->string_ptr, line ));
-        strcpy( buffer, AsmBuffer[i]->string_ptr );
+    if ( tokenarray[i].token == T_ID ) {
+        DebugMsg1(( "FullExpandToken(%u): sym=%s >%s<\n", i, tokenarray[i].string_ptr, line ));
+        strcpy( buffer, tokenarray[i].string_ptr );
         if ( ExpandText( buffer, FALSE ) == STRING_EXPANDED ) {
-            AsmBuffer[i]->token = T_STRING;
+            tokenarray[i].token = T_STRING;
             return( RebuildLine( buffer, i,
-                                AsmBuffer[i]->tokpos,
-                                strlen( AsmBuffer[i]->string_ptr ),
-                                AsmBuffer[i]->tokpos - line, TRUE ) );
+                                tokenarray[i].tokpos,
+                                strlen( tokenarray[i].string_ptr ),
+                                tokenarray[i].tokpos - line, TRUE ) );
         }
     }
     return( NOT_ERROR );
@@ -1271,8 +1250,8 @@ static ret_code FullExpandToken( int i, char *line )
  * equmode: 1=don't expand macro functions
  */
 
-void ExpandLinePart( int i, char *line, int addbrackets, int equmode )
-/********************************************************************/
+void ExpandLinePart( int i, struct asm_tok tokenarray[], char *line, int addbrackets, int equmode )
+/*************************************************************************************************/
 {
     int k;
     ret_code rc;
@@ -1280,16 +1259,17 @@ void ExpandLinePart( int i, char *line, int addbrackets, int equmode )
     while ( 1 ) {
         rc = NOT_ERROR;
         for( k = i; k < Token_Count; k++ ) {
-            if ( ExpandToken( k, line, addbrackets, equmode ) == STRING_EXPANDED )
+            if ( ExpandToken( k, tokenarray, line, addbrackets, equmode ) == STRING_EXPANDED )
                 rc = STRING_EXPANDED;
         }
         /* if there was an expansion, the tokenizer must be called. */
         /* if Token_Count is 0, there was a macro function call and
          * the loop must continue (won't happen if equmode == TRUE!)
          */
+        /* v2.06: most likely obsolete by now */
         if ( rc == STRING_EXPANDED ) {
             k = Token_Count;
-            Token_Count = Tokenize( line, i, FALSE );
+            Token_Count = Tokenize( line, i, TRUE );
             if ( k )
                 break;
         } else
@@ -1299,12 +1279,12 @@ void ExpandLinePart( int i, char *line, int addbrackets, int equmode )
 
 /* scan current line for (text) macros and expand them. */
 
-ret_code ExpandLine( char * string )
-/**********************************/
+ret_code ExpandLine( char *string, struct asm_tok tokenarray[] )
+/**************************************************************/
 {
     int count = 0;
     int addbrackets = FALSE;
-    asm_sym *sym;
+    struct asym *sym;
     ret_code rc;
     int flags;
     int i,j;
@@ -1315,9 +1295,9 @@ ret_code ExpandLine( char * string )
      * parameter, the string has to be enclosed in '<>' again.
      */
     DebugMsg1(( "ExpandLine(%s) enter\n", string ));
-    i = ( Token_Count > 2 && ( AsmBuffer[1]->token == T_COLON || AsmBuffer[1]->token == T_DBL_COLON ) && AsmBuffer[2]->token == T_DIRECTIVE ) ? 2 : 0;
-    if ( AsmBuffer[i]->token == T_DIRECTIVE ) {
-        flags = GetValueSp( AsmBuffer[i]->value );
+    i = ( Token_Count > 2 && ( tokenarray[1].token == T_COLON || tokenarray[1].token == T_DBL_COLON ) && tokenarray[2].token == T_DIRECTIVE ) ? 2 : 0;
+    if ( tokenarray[i].token == T_DIRECTIVE ) {
+        flags = GetValueSp( tokenarray[i].tokval );
         if ( flags & DF_STRPARM )
             addbrackets = TRUE;
         else if ( flags & DF_NOEXPAND ) {
@@ -1327,25 +1307,25 @@ ret_code ExpandLine( char * string )
             if ( expansion == FALSE )
                 return( NOT_ERROR );
         }
-    } else if ( Token_Count > 1 && AsmBuffer[1]->token == T_DIRECTIVE ) {
-        switch ( AsmBuffer[1]->dirtype ) {
+    } else if ( Token_Count > 1 && tokenarray[1].token == T_DIRECTIVE ) {
+        switch ( tokenarray[1].dirtype ) {
         case DRT_CATSTR:
             for ( i = 2; i < Token_Count; i++ ) {
 #if 0
-                if ( ExpandToken( i, string, TRUE, FALSE ) == STRING_EXPANDED )
+                if ( ExpandToken( i, tokenarray, string, TRUE, FALSE ) == STRING_EXPANDED )
                     return( STRING_EXPANDED );
 #else /* v2.0: expand text macros only. If a macro function is found, skip loop */
-                if ( AsmBuffer[i]->token == T_ID ) {
-                    sym = SymSearch( AsmBuffer[i]->string_ptr );
+                if ( tokenarray[i].token == T_ID ) {
+                    sym = SymSearch( tokenarray[i].string_ptr );
                     if ( sym && sym->state == SYM_TMACRO && sym->isdefined == TRUE ) {
-                        DebugMsg1(( "ExpandLine, TEXTEQU: TMACRO %s found\n", AsmBuffer[i]->string_ptr ));
-                        if ( ( i == 2 || AsmBuffer[i-1]->token == T_COMMA ) && ( AsmBuffer[i+1]->token == T_COMMA || AsmBuffer[i+1]->token == T_FINAL ) ) {
-                            if ( FullExpandToken( i, string ) == STRING_EXPANDED ) {
+                        DebugMsg1(( "ExpandLine, TEXTEQU: TMACRO %s found\n", tokenarray[i].string_ptr ));
+                        if ( ( i == 2 || tokenarray[i-1].token == T_COMMA ) && ( tokenarray[i+1].token == T_COMMA || tokenarray[i+1].token == T_FINAL ) ) {
+                            if ( FullExpandToken( i, tokenarray, string ) == STRING_EXPANDED ) {
                                 DebugMsg1(( "ExpandLine, TEXTEQU, STRING_EXPANDED exit (%s)\n", string ));
                                 return( STRING_EXPANDED );
                             }
                         } else {
-                            if ( ExpandToken( i, string, FALSE, FALSE ) == STRING_EXPANDED )
+                            if ( ExpandToken( i, tokenarray, string, FALSE, FALSE ) == STRING_EXPANDED )
                                 return( STRING_EXPANDED );
                         }
                     } else if ( sym && sym->state == SYM_MACRO && sym->isdefined == TRUE )
@@ -1357,16 +1337,16 @@ ret_code ExpandLine( char * string )
             addbrackets = TRUE;
             break;
         case DRT_SUBSTR:
-            rc = ExpandToken( 2, string, TRUE, FALSE );
+            rc = ExpandToken( 2, tokenarray, string, TRUE, FALSE );
             if ( rc == STRING_EXPANDED ) {
-                AsmBuffer[2]->token = T_STRING;
+                tokenarray[2].token = T_STRING;
             }
             count = 3;
             goto std_expansion;
         case DRT_SIZESTR:
             if ( expansion == TRUE )
                 break;
-            if ( ExpandToken( 0, string, FALSE, FALSE ) == STRING_EXPANDED )
+            if ( ExpandToken( 0, tokenarray, string, FALSE, FALSE ) == STRING_EXPANDED )
                 return( STRING_EXPANDED );
             count = 2;
             addbrackets = TRUE;
@@ -1376,7 +1356,7 @@ ret_code ExpandLine( char * string )
              * label INSTR [number,] literal, literal
              */
             for ( i = 2, count = 0, j = 0; i < Token_Count; i++ )
-                if ( AsmBuffer[i]->token == T_COMMA ) {
+                if ( tokenarray[i].token == T_COMMA ) {
                     if ( j == 0 )
                         j = i+1;
                     count++;
@@ -1385,28 +1365,31 @@ ret_code ExpandLine( char * string )
                 count = 2;
             else {
                 count = j;
-                rc = ExpandToken( 2, string, FALSE, FALSE );
+                rc = ExpandToken( 2, tokenarray, string, FALSE, FALSE );
             }
-            if ( FullExpandToken( count, string ) == STRING_EXPANDED )
+            if ( FullExpandToken( count, tokenarray, string ) == STRING_EXPANDED )
                 return( STRING_EXPANDED );
             addbrackets = TRUE;
             rc = NOT_ERROR;
             goto std_expansion;
         case DRT_MACRO:
-            sym = SymSearch( AsmBuffer[0]->string_ptr );
+            sym = SymSearch( tokenarray[0].string_ptr );
             /* don't expand macro DEFINITIONs!
              * the name is an exception, if it's not the macro itself
              */
             if ( sym && sym->state != SYM_MACRO )
-                return ( ExpandToken( 0, string, FALSE, FALSE ) );
-            return( NOT_ERROR );
+                return ( ExpandToken( 0, tokenarray, string, FALSE, FALSE ) );
+            /* v2.06: expand MACRO arguments if expansion is ON */
+            if ( expansion == FALSE )
+                return( NOT_ERROR );
+            break;
         case DRT_EQU:
             /* EQU is a special case. If the - expanded - expression is
-             a number, then the value for EQU is numeric. Else the
-             expression isn't expanded at all. This effectively makes it
-             impossible to expand EQU lines here.
+             * a number, then the value for EQU is numeric. Else the
+             * expression isn't expanded at all. This effectively makes it
+             * impossible to expand EQU lines here.
              */
-            sym = SymSearch( AsmBuffer[0]->string_ptr );
+            sym = SymSearch( tokenarray[0].string_ptr );
             if ( sym == NULL || sym->state == SYM_TMACRO ) {
                 if ( expansion == FALSE ) {
                     DebugMsg1(( "ExpandLine(%s) exit\n", string ));
@@ -1424,12 +1407,7 @@ ret_code ExpandLine( char * string )
     }
 #if NEWEXP==0
     if ( expansion == TRUE ) {
-        if ( STRING_EXPANDED == ExpandText( string, TRUE ) ) {
-            DebugMsg1(( "ExpandLine(%s) exit, STRING_EXPANDED\n", string ));
-            return( STRING_EXPANDED );
-        }
-        /* probably better to exit here! */
-        return( NOT_ERROR );
+        return( ExpandText( string, TRUE ) );
     }
 #endif
     /* scan the line from left to right for (text) macros.
@@ -1443,7 +1421,7 @@ ret_code ExpandLine( char * string )
     rc = NOT_ERROR;
 std_expansion:
     for(  ; count < Token_Count; count++ ) {
-        if ( ExpandToken( count, string, addbrackets, FALSE ) == STRING_EXPANDED )
+        if ( ExpandToken( count, tokenarray, string, addbrackets, FALSE ) == STRING_EXPANDED )
             rc = STRING_EXPANDED;
     }
     DebugMsg1(( "ExpandLine(%s) exit, rc=%u, token_count=%u\n", string, rc, Token_Count ));
@@ -1453,8 +1431,8 @@ std_expansion:
 /* get value of a literal, skip literal-character operators(!) */
 /* returns no of characters copied into buffer (without terminating 00) */
 
-int GetLiteralValue( char * buffer, const char * p )
-/****************************************************/
+int GetLiteralValue( char *buffer, const char *p )
+/************************************************/
 {
     char *dest = buffer;
     if ( p )

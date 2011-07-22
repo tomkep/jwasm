@@ -33,7 +33,6 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "directiv.h"
 #include "segment.h"
 #include "fixup.h"
 #include "omfint.h"
@@ -42,7 +41,7 @@
 
 extern struct format_options formatoptions[];
 extern const char szNull[];
-extern uint GetGrpIdx( struct asm_sym *sym );
+extern uint GetGrpIdx( struct asym *sym );
 
 static uint_8 *putIndex( uint_8 *p, uint_16 index )
 /*************************************************/
@@ -108,8 +107,8 @@ static uint_8 *putTargetDatum( uint_8 *p, uint_8 method, uint_16 datum )
  * type is FIX_GEN_INTEL or FIX_GEN_MS386
  */
 
-static size_t OmfFixGenLRef( logref *lr, uint_8 *buf, int type )
-/***************************************************************/
+static size_t OmfFixGenLRef( struct logref *lr, uint_8 *buf, int type )
+/*********************************************************************/
 {
     uint_8  *p;
     uint_8  target;
@@ -143,8 +142,8 @@ static size_t OmfFixGenLRef( logref *lr, uint_8 *buf, int type )
 
 /* de facto unused */
 
-static size_t OmfFixGenPRef( physref *ref, uint_8 *buf, int type )
-/****************************************************************/
+static size_t OmfFixGenPRef( struct physref *ref, uint_8 *buf, int type )
+/***********************************************************************/
 {
     uint_8  *p;
 
@@ -160,8 +159,8 @@ static size_t OmfFixGenPRef( physref *ref, uint_8 *buf, int type )
  * is_logical is always 1 then.
  */
 
-size_t OmfFixGenRef( logphys *ref, int is_logical, uint_8 *buf, int type )
-/************************************************************************/
+size_t OmfFixGenRef( union logphys *ref, int is_logical, uint_8 *buf, int type )
+/******************************************************************************/
 {
 /**/myassert( ref != NULL );
 /**/myassert( buf != NULL );
@@ -174,10 +173,10 @@ size_t OmfFixGenRef( logphys *ref, int is_logical, uint_8 *buf, int type )
 
 /* fill a logref from a fixup's info */
 
-static int fill_logref( const struct fixup *fixup, logref *lr )
-/*************************************************************/
+static int fill_logref( const struct fixup *fixup, struct logref *lr )
+/********************************************************************/
 {
-    struct asm_sym      *sym;
+    struct asym      *sym;
 
     sym = fixup->sym; /* may be NULL! */
 
@@ -209,7 +208,7 @@ static int fill_logref( const struct fixup *fixup, logref *lr )
         DebugMsg(("fill_logref(%X): GROUP %s\n", fixup, sym->name));
 
         lr->target = TARGET_GRP;
-        lr->target_datum = ((dir_node *)sym)->e.grpinfo->grp_idx;
+        lr->target_datum = ((struct dsym *)sym)->e.grpinfo->grp_idx;
         if( fixup->frame_type != EMPTY ) {
             lr->frame = fixup->frame_type;
             lr->frame_datum = fixup->frame_datum;
@@ -248,7 +247,7 @@ static int fill_logref( const struct fixup *fixup, logref *lr )
                 lr->frame_datum = GetGrpIdx( sym );
             }
         } else {
-            //asm_sym *grpsym;
+            //struct asym *grpsym;
             /* it's a SYM_INTERNAL */
             DebugMsg(("fill_logref(%X): fixup->frame, datum=%u.%u sym->name=%s state=%X segm=%X\n",
                       fixup, fixup->frame_type, fixup->frame_datum, sym->name, sym->state, sym->segment ));
@@ -305,7 +304,7 @@ size_t OmfFixGenFix( struct fixup *fixup, uint_8 *buf, int type )
     uint_8  locat1;
     uint_8  self_relative = FALSE;
     uint_16 data_rec_offset;
-    logref  lr;
+    struct logref lr;
 
     /**/myassert( fixup != NULL );
     /**/myassert( buf != NULL );

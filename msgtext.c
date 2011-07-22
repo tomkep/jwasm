@@ -29,6 +29,7 @@
 ****************************************************************************/
 
 #include "globals.h"
+#include "token.h"
 #include "tokenize.h"
 #include "msgtext.h"
 
@@ -45,8 +46,8 @@ char banner_printed = FALSE;
  */
 
 #include "win32.h"
-typedef void * HRSRC;
-typedef void * HGLOBAL;
+typedef void *HRSRC;
+typedef void *HGLOBAL;
 WINBASEAPI HRSRC   WINAPI FindResource( void *, char *, uint_32 );
 WINBASEAPI HGLOBAL WINAPI LoadResource( void *, HRSRC );
 WINBASEAPI void *  WINAPI LockResource( HGLOBAL );
@@ -54,17 +55,15 @@ WINBASEAPI void    WINAPI WideCharToMultiByte( uint_32, uint_32, uint_16 *, uint
 
 #else
 
-#include "errmsg.h"
-
 #ifdef __I86__
 
 #include <i86.h>
 #define FPTR( x ) MK_FP( FP_SEG( TX_MSG_USAGE ), x )
 #undef pick
-#define pick( code, string_eng, string_jap )  const char __based( __segname("_CODE") ) TX_ ## code[] = string_eng;
+#define pick( code, string )  const char __based( __segname("_CODE") ) TX_ ## code[] = string;
 #include "msgdef.h"
 #undef pick
-#define pick( code, string_eng, string_jap ) TX_ ## code,
+#define pick( code, string ) TX_ ## code,
 static const char __based ( __segname("_CODE") ) * const msgtexts[] = {
 #include "msgdef.h"
 };
@@ -73,7 +72,7 @@ static const char __based ( __segname("_CODE") ) * const msgtexts[] = {
 
 #define FPTR( x ) x
 #undef pick
-#define pick( code, string_eng, string_jap )  string_eng,
+#define pick( code, string )  string,
 static const char * const msgtexts[] = {
 #include "msgdef.h"
 };
@@ -85,8 +84,10 @@ static const char usage[] = {
 #include "usage.h"
 };
 
+/* the compiler string stored in CodeView symbolic debugging info */
 #ifdef DEBUG_OUT
 const char szCVCompiler[] = { "Microsoft (R) Macro Assembler Version 6.15.8803" };
+//const char szCVCompiler[] = { "Microsoft (R) Macro Assembler Version 8.00.50727" };
 #else
 const char szCVCompiler[] = { "JWasm v" _JWASM_VERSION_ };
 #endif
@@ -102,7 +103,7 @@ void MsgFini( void )
 }
 
 char *MsgGet( int msgid, char *buffer )
-/**************************************/
+/*************************************/
 {
 #if USERESOURCES
     HRSRC hRsrc;
@@ -151,7 +152,7 @@ void MsgPrintUsage( void )
 /************************/
 {
     const char *p;
-    trademark();
+    write_logo();
     for ( p = usage; *p != '\n'; ) {
         const char *p2 = p +strlen(p) + 1;
         printf("%-20s %s\n", p, p2 );
@@ -159,15 +160,15 @@ void MsgPrintUsage( void )
     }
 }
 
-char *MsgGetJWasmName( char * buffer )
-/************************************/
+char *MsgGetJWasmName( char *buffer )
+/***********************************/
 {
     sprintf( buffer, MsgGetEx( MSG_JWASM ), _JWASM_VERSION_, __DATE__ );
     return( buffer );
 }
 
-int trademark( void )
-/*******************/
+int write_logo( void )
+/********************/
 {
     char buffer[128];
     if( banner_printed == FALSE ) {

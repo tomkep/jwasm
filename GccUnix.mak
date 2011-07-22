@@ -37,15 +37,16 @@ proj_obj = $(OUTD)/main.o     $(OUTD)/assemble.o $(OUTD)/assume.o  \
            $(OUTD)/parser.o   $(OUTD)/tokenize.o $(OUTD)/input.o   \
            $(OUTD)/expans.o   $(OUTD)/symbols.o  $(OUTD)/labels.o  \
            $(OUTD)/fixup.o    $(OUTD)/codegen.o  $(OUTD)/data.o    \
-           $(OUTD)/insthash.o $(OUTD)/branch.o   $(OUTD)/queue.o   \
+           $(OUTD)/reswords.o $(OUTD)/branch.o   $(OUTD)/queue.o   \
            $(OUTD)/hll.o      $(OUTD)/proc.o     $(OUTD)/option.o  \
            $(OUTD)/omf.o      $(OUTD)/omfint.o   $(OUTD)/omffixup.o\
            $(OUTD)/coff.o     $(OUTD)/elf.o      $(OUTD)/bin.o     \
-           $(OUTD)/listing.o  $(OUTD)/fatal.o    \
+           $(OUTD)/listing.o  $(OUTD)/fatal.o    $(OUTD)/linnum.o  \
            $(OUTD)/context.o  $(OUTD)/extern.o   $(OUTD)/simsegm.o \
            $(OUTD)/apiemu.o   $(OUTD)/dbgcv.o    $(OUTD)/end.o     \
            $(OUTD)/backptch.o $(OUTD)/msgtext.o  $(OUTD)/tbyte.o   \
-           $(OUTD)/cpumodel.o $(OUTD)/safeseh.o  $(OUTD)/cmdline.o
+           $(OUTD)/cpumodel.o $(OUTD)/safeseh.o  $(OUTD)/cmdline.o \
+           $(OUTD)/fastpass.o 
 ######
 
 #.c.o:
@@ -68,8 +69,8 @@ endif
 $(OUTD)/msgtext.o: msgtext.c H/msgdef.h H/usage.h
 	$(CC) -c $(inc_dirs) $(c_flags) -o $*.o msgtext.c
 
-$(OUTD)/parser.o: parser.c H/instruct.h H/special.h H/directve.h
-	$(CC) -c $(inc_dirs) $(c_flags) -o $*.o parser.c
+$(OUTD)/reswords.o: reswords.c H/instruct.h H/special.h H/directve.h
+	$(CC) -c $(inc_dirs) $(c_flags) -o $*.o reswords.c
 
 ######
 

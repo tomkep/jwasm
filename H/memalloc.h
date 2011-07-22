@@ -37,17 +37,17 @@ extern void *MemAlloc( size_t size );
 extern void *MemRealloc( void *ptr, size_t size );
 extern void MemFree( void *ptr );
 
-#if defined(__WATCOMC__) || defined(__BORLANDC__)
-#define AsmTmpAlloc( amount )   alloca( amount )
+#if defined(__WATCOMC__) || defined(__BORLANDC__) || defined(__OCC__)
+#define myalloca  alloca
 #include <malloc.h>
 #elif defined(__GNUC__) || defined(__TINYC__)
-#include <stdlib.h>
-#define AsmTmpAlloc( amount )   alloca( amount )
+//#include <stdlib.h> /* v2.06: stdlib.h is already included in globals.h */
+#define myalloca  alloca
 #elif defined(__PCC__)
-#define AsmTmpAlloc( amount )   _alloca( amount )
+#define myalloca  _alloca
 #include <malloc.h>
 #else
-#define AsmTmpAlloc( amount )   _alloca( amount )
+#define myalloca  _alloca
 #endif
 
 /* AsmAlloc() and AsmFree() are fast variants, which

@@ -61,6 +61,7 @@ v2 S2 <>
 	mov eax, [offset v2][eax][ecx].S2.f1
 	mov eax, [S2.f1][eax]
 	mov eax, [S2.f1][eax][ecx]
+	mov eax, [eax].S2.f1[ecx*4]
 ;	mov eax, [S2.f1][v2]  ;this is rejected by both Masm and JWasm
 	mov eax, v2.f1[ebx]
 	mov eax, v2.f1[ebx*2]

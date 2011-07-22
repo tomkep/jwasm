@@ -49,6 +49,14 @@ jfc -pe EXTERN4.EXE EXTERN4.EXP
 jwasm -q -coff SEH64.ASC
 if errorlevel 1 goto end
 jfc -co SEH64.OBJ SEH64.EXP
+
+jwasm -q -win64 MOV643.ASC
+if errorlevel 1 goto end
+jfc -co MOV643.OBJ MOV643.EXP
+
+jwasm -q -win64 PROC641.ASC
+if errorlevel 1 goto end
+jfc -co PROC641.OBJ PROC641.EXP
 goto end
 
 :coffdbg

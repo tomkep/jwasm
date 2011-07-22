@@ -5,14 +5,14 @@
 ****************************************************************************/
 
 /* v1.96: items needn't be sorted anymore!
- * The items are stored in structures of type asm_special.
+ * The items are stored in structures of type special_item.
  * If an item is inserted, moved or deleted, the project needs
  * a full rebuild.
  */
 
 /* directives field usage:
  * value  = DF_ flags
- * value8 = DRT_ value
+ * bytval = DRT_ value
  * flags  = RWF_ flags
  * cpu    = cpu flags
  * sflags = depends on DRT_
@@ -20,7 +20,7 @@
 
 /* cpu directives */
 
-/* token      str        len value     val8    flags  cpu   sflags */
+/* token      str        len value     bytval  flags  cpu   sflags */
 res(DOT_8086, .8086,       5,  0,      DRT_CPU,  0,   P_86,  P_86   )
 res(DOT_186,  .186,        4,  0,      DRT_CPU,  0,   P_86,  P_186  )
 res(DOT_286,  .286,        4,  0,      DRT_CPU,  0,   P_86,  P_286  )
@@ -52,33 +52,36 @@ res(DOT_NO87, .no87,       5,  0,      DRT_CPU,  0,   P_86,  P_NO87 )
 /* .LFCOND is synonym for .LISTIF
  * .SFCOND is synonym for .NOLISTIF
  * .TFCOND toggles .LFCOND, .SFCOND
- * .XALL is synonym for .LISTMACRO
- * .LALL is synonym for .LISTMACROALL
- * .SALL is synonym for .NOLISTMACRO
  */
 
 res(DOT_CREF,         .cref,          5, 0,           DRT_LISTING, 0,  P_86, 0)
-res(DOT_LALL,         .lall,          5, 0,           DRT_LISTING, 0,  P_86, 0)
 res(DOT_LFCOND,       .lfcond,        7, 0,           DRT_LISTING, 0,  P_86, 0)
 res(DOT_LIST,         .list,          5, 0,           DRT_LISTING, 0,  P_86, 0)
 res(DOT_LISTALL,      .listall,       8, 0,           DRT_LISTING, 0,  P_86, 0)
 res(DOT_LISTIF,       .listif,        7, 0,           DRT_LISTING, 0,  P_86, 0)
-res(DOT_LISTMACRO,    .listmacro,    10, 0,           DRT_LISTING, 0,  P_86, 0)
-res(DOT_LISTMACROALL, .listmacroall, 13, 0,           DRT_LISTING, 0,  P_86, 0)
 res(DOT_NOCREF,       .nocref,        7, DF_NOEXPAND, DRT_LISTING, 0,  P_86, 0)
 res(DOT_NOLIST,       .nolist,        7, 0,           DRT_LISTING, 0,  P_86, 0)
 res(DOT_NOLISTIF,     .nolistif,      9, 0,           DRT_LISTING, 0,  P_86, 0)
-res(DOT_NOLISTMACRO,  .nolistmacro,  12, 0,           DRT_LISTING, 0,  P_86, 0)
-res(DOT_SALL,         .sall,          5, 0,           DRT_LISTING, 0,  P_86, 0)
 res(DOT_SFCOND,       .sfcond,        7, 0,           DRT_LISTING, 0,  P_86, 0)
 res(DOT_TFCOND,       .tfcond,        7, 0,           DRT_LISTING, 0,  P_86, 0)
-res(DOT_XALL,         .xall,          5, 0,           DRT_LISTING, 0,  P_86, 0)
 res(DOT_XCREF,        .xcref,         6, DF_NOEXPAND, DRT_LISTING, 0,  P_86, 0)
 res(DOT_XLIST,        .xlist,         6, 0,           DRT_LISTING, 0,  P_86, 0)
 res(PAGE,             page,           4, 0,           DRT_LISTING, 0,  P_86, 0)
 res(SUBTITLE,         subtitle,       8, 0,           DRT_LISTING, 0,  P_86, 0)
 res(SUBTTL,           subttl,         6, 0,           DRT_LISTING, 0,  P_86, 0)
 res(TITLE,            title,          5, 0,           DRT_LISTING, 0,  P_86, 0)
+
+/* list macro directives
+ * .XALL is synonym for .LISTMACRO
+ * .LALL is synonym for .LISTMACROALL
+ * .SALL is synonym for .NOLISTMACRO
+ */
+res(DOT_LISTMACRO,    .listmacro,    10, 0,           DRT_LISTMAC, 0,  P_86, LM_LISTMACRO)
+res(DOT_LISTMACROALL, .listmacroall, 13, 0,           DRT_LISTMAC, 0,  P_86, LM_LISTMACROALL)
+res(DOT_NOLISTMACRO,  .nolistmacro,  12, 0,           DRT_LISTMAC, 0,  P_86, LM_NOLISTMACRO)
+res(DOT_XALL,         .xall,          5, 0,           DRT_LISTMAC, 0,  P_86, LM_LISTMACRO)
+res(DOT_LALL,         .lall,          5, 0,           DRT_LISTMAC, 0,  P_86, LM_LISTMACROALL)
+res(DOT_SALL,         .sall,          5, 0,           DRT_LISTMAC, 0,  P_86, LM_NOLISTMACRO)
 
 
 res(DOT_ALPHA,     .alpha,      6,  0,          DRT_SEGORDER, 0,  P_86, SEGORDER_ALPHA )
@@ -97,17 +100,17 @@ res(DOT_CONST,      .const,     6,  DF_NOSTRUC|DF_PROC, DRT_SIMSEG, 0,  P_86, 6)
 
 /* hll directives */
 
-res(DOT_IF,         .if,        3,  DF_CEXPR|DF_NOSTRUC|DF_STORE|DF_PROC,  DRT_HLLSTART, 0,  P_86, 0)
-res(DOT_REPEAT,     .repeat,    7,  DF_NOSTRUC|DF_STORE|DF_PROC,           DRT_HLLSTART, 0,  P_86, 0)
-res(DOT_WHILE,      .while,     6,  DF_CEXPR|DF_NOSTRUC|DF_STORE|DF_PROC,  DRT_HLLSTART, 0,  P_86, 0)
-res(DOT_BREAK,      .break,     6,  0,                             DRT_HLLEXIT,  0,  P_86, 0)
-res(DOT_CONTINUE,   .continue,  9,  0,                             DRT_HLLEXIT,  0,  P_86, 0)
-res(DOT_ELSE,       .else,      5,  0,                             DRT_HLLEXIT,  0,  P_86, 0)
-res(DOT_ELSEIF,     .elseif,    7,  DF_CEXPR,                      DRT_HLLEXIT,  0,  P_86, 0)
-res(DOT_ENDIF,      .endif,     6,  0,                             DRT_HLLEND,   0,  P_86, 0)
-res(DOT_ENDW,       .endw,      5,  0,                             DRT_HLLEND,   0,  P_86, 0)
-res(DOT_UNTIL,      .until,     6,  DF_CEXPR,                      DRT_HLLEND,   0,  P_86, 0)
-res(DOT_UNTILCXZ,   .untilcxz,  9,  DF_CEXPR,                      DRT_HLLEND,   0,  P_86, 0)
+res(DOT_IF,         .if,        3,  DF_CEXPR|DF_NOSTRUC|DF_STORE|DF_PROC, DRT_HLLSTART, 0, P_86, 0)
+res(DOT_REPEAT,     .repeat,    7,  DF_NOSTRUC|DF_STORE|DF_PROC,          DRT_HLLSTART, 0, P_86, 0)
+res(DOT_WHILE,      .while,     6,  DF_CEXPR|DF_NOSTRUC|DF_STORE|DF_PROC, DRT_HLLSTART, 0, P_86, 0)
+res(DOT_BREAK,      .break,     6,  0,                                    DRT_HLLEXIT,  0, P_86, 0)
+res(DOT_CONTINUE,   .continue,  9,  0,                                    DRT_HLLEXIT,  0, P_86, 0)
+res(DOT_ELSE,       .else,      5,  0,                                    DRT_HLLEXIT,  0, P_86, 0)
+res(DOT_ELSEIF,     .elseif,    7,  DF_CEXPR,                             DRT_HLLEXIT,  0, P_86, 0)
+res(DOT_ENDIF,      .endif,     6,  0,                                    DRT_HLLEND,   0, P_86, 0)
+res(DOT_ENDW,       .endw,      5,  0,                                    DRT_HLLEND,   0, P_86, 0)
+res(DOT_UNTIL,      .until,     6,  DF_CEXPR,                             DRT_HLLEND,   0, P_86, 0)
+res(DOT_UNTILCXZ,   .untilcxz,  9,  DF_CEXPR,                             DRT_HLLEND,   0, P_86, 0)
 
 res(DOT_EXIT,       .exit,      5,  DF_STORE,  DRT_STARTEXIT,  0,   P_86, 0)
 res(DOT_STARTUP,    .startup,   8,  DF_STORE,  DRT_STARTEXIT,  0,   P_86, 0)
@@ -139,7 +142,7 @@ res(DOT_ERRNDEF, .errndef,     8, DF_NOEXPAND|DF_STORE, DRT_ERRDIR,  0, P_86, CC
 
 /* conditional assembly directives, handled by preprocessor */
 
-/* token          str        len  value        val8       flgs cpu  sflags */
+/* token          str        len  value        bytval     flgs cpu  sflags */
 res(COMMENT,      comment,     7, 0,           DRT_CONDDIR, 0, P_86, 0)
 res(IF,           if,          2, 0,           DRT_CONDDIR, 0, P_86, CC_NUMARG)
 res(IFE,          ife,         3, 0,           DRT_CONDDIR, 0, P_86, CC_NUMARG)
@@ -195,12 +198,12 @@ res(INSTR,     instr,          5, DF_STRPARM | DF_LABEL, DRT_INSTR,   0, P_86, 0
 res(SIZESTR,   sizestr,        7, DF_STRPARM | DF_LABEL, DRT_SIZESTR, 0, P_86, 0)
 
 /* data definition directives */
-res(DB,        db,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_BYTE )
-res(DW,        dw,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_WORD )
-res(DD,        dd,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_DWORD)
-res(DF,        df,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_FWORD)
-res(DQ,        dq,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_QWORD)
-res(DT,        dt,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, ST_TBYTE)
+res(DB,        db,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, T_BYTE )
+res(DW,        dw,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, T_WORD )
+res(DD,        dd,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, T_DWORD)
+res(DF,        df,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, T_FWORD)
+res(DQ,        dq,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, T_QWORD)
+res(DT,        dt,             2, DF_LABEL,    DRT_DATADIR, 0, P_86, T_TBYTE)
 
 #if AMD64_SUPPORT
 res(DOT_ALLOCSTACK, .allocstack,11, 0,        DRT_EXCFRAME, RWF_X64,  P_64, 0)
@@ -236,26 +239,26 @@ res(INVOKE,      invoke,      6, DF_NOSTRUC|DF_PROC|DF_STORE,   DRT_INVOKE, 0,  
 
 /* other directives */
 
-/* token         str        len  value               val8 flags cpu sflags */
-res(ORG,         org,         3, 0,                    DRT_ORG,   0,  P_86, 0)
-res(ALIGN,       align,       5, 0,                    DRT_ALIGN, 0,  P_86, 0)
-res(EVEN,        even,        4, 0,                    DRT_ALIGN, 0,  P_86, 0)
+/* token         str        len  value                       bytval     flags cpu sflags */
+res(ORG,         org,         3, 0,                          DRT_ORG,     0,  P_86, 0)
+res(ALIGN,       align,       5, 0,                          DRT_ALIGN,   0,  P_86, 0)
+res(EVEN,        even,        4, 0,                          DRT_ALIGN,   0,  P_86, 0)
 
-res(SEGMENT,     segment,     7, DF_LABEL|DF_NOSTRUC|DF_PROC,     DRT_SEGMENT, 0,  P_86, 0)
-res(ENDS,        ends,        4, DF_LABEL|DF_PROC,     DRT_ENDS,    0,  P_86, 0)
-res(GROUP,       group,       5, DF_LABEL,             DRT_GROUP,   0,  P_86, 0)
-res(ASSUME,      assume,      6, 0,                    DRT_ASSUME,  0,  P_86, 0)
+res(SEGMENT,     segment,     7, DF_LABEL|DF_NOSTRUC|DF_PROC,DRT_SEGMENT, 0,  P_86, 0)
+res(ENDS,        ends,        4, DF_LABEL|DF_PROC,           DRT_ENDS,    0,  P_86, 0)
+res(GROUP,       group,       5, DF_LABEL,                   DRT_GROUP,   0,  P_86, 0)
+res(ASSUME,      assume,      6, 0,                          DRT_ASSUME,  0,  P_86, 0)
 
-res(ALIAS,       alias,       5, 0,                    DRT_ALIAS, 0,  P_86, 0)
-res(ECHO,        echo,        4, DF_NOEXPAND|DF_NOCONCAT,DRT_ECHO,  0,  P_86, 0)
-res(END,         end,         3, DF_NOSTRUC|DF_STORE,  DRT_END,   0,  P_86, 0)
-res(EQU,         equ,         3, DF_STRPARM|DF_LABEL,  DRT_EQU,   0,  P_86, 0)
+res(ALIAS,       alias,       5, 0,                          DRT_ALIAS,   0,  P_86, 0)
+res(ECHO,        echo,        4, DF_NOEXPAND|DF_NOCONCAT,    DRT_ECHO,    0,  P_86, 0)
+res(END,         end,         3, DF_NOSTRUC|DF_STORE,        DRT_END,     0,  P_86, 0)
+res(EQU,         equ,         3, DF_STRPARM|DF_LABEL,        DRT_EQU,     0,  P_86, 0)
 #if INCLUDEBIN
-res(INCBIN,      incbin,      6, DF_NOSTRUC|DF_PROC|DF_STORE,   DRT_INCBIN, 0,  P_86, 0)
+res(INCBIN,      incbin,      6, DF_NOSTRUC|DF_PROC|DF_STORE,DRT_INCBIN,  0,  P_86, 0)
 #endif
-res(INCLUDELIB,  includelib, 10, DF_NOCONCAT,          DRT_INCLIB, 0,  P_86, 0)
-res(NAME,        name,        4, 0,                    DRT_NAME,   0,  P_86, 0)
-res(OPTION,      option,      6, 0,                    DRT_OPTION, 0,  P_86, 0)
-res(POPCONTEXT,  popcontext, 10, 0,                    DRT_CONTEXT,0,  P_86, 0)
-res(PUSHCONTEXT, pushcontext,11, 0,                    DRT_CONTEXT,0,  P_86, 0)
+res(INCLUDELIB,  includelib, 10, DF_NOCONCAT,                DRT_INCLIB,  0,  P_86, 0)
+res(NAME,        name,        4, 0,                          DRT_NAME,    0,  P_86, 0)
+res(OPTION,      option,      6, 0,                          DRT_OPTION,  0,  P_86, 0)
+res(POPCONTEXT,  popcontext, 10, 0,                          DRT_CONTEXT, 0,  P_86, 0)
+res(PUSHCONTEXT, pushcontext,11, 0,                          DRT_CONTEXT, 0,  P_86, 0)
 

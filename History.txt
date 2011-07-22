@@ -1,8 +1,137 @@
 
    Changelog
 
+   07/22/2011, v2.06e:
+
+   Bugfixes:
+   -  ELF64 format: in v2.05-v2.06d, addends weren't handled correctly.
+
+   07/02/2011, v2.06d:
+
+   Bugfixes:
+   -  64-bit: in v2.05-v2.06c, a relocatable constant was often assumed
+      to have a magnitude of 32, thus accepting operands which are invalid
+      ( "mov m64, offset label" or "push offset label" ).
+
+   06/29/2011, v2.06c:
+
+   Bugfixes:
+   -  v2.06-v2.06b, directives DB, DW: if the result of a subtraction of
+      2 labels ( dw label1 - label2 ) was negative, it was rejected.
+
+   06/28/2011, v2.06b:
+
+   Bugfixes:
+   -  struct fields that were forward referenced may have caused warnings
+      or errors in v2.06-v2.06a.
+   -  in v2.04-v2.06a, if a pointer to a struct was redefined and the
+      redefinition used a type alias, the redefinition failed (see 
+      regression test types5.asm)
+
+   06/26/2011, v2.06a:
+
+   Bugfixes:
+   -  in v2.06 was a regression for IMUL with 3 operands: if the third
+      operand's value was 127 < x < 256, the instruction was encoded
+      incorrectly.
+
+   06/26/2011, v2.06:
+
+   Bugfixes:
+   -  relative pathes for filenames containing '/' may have caused
+      problems in non-Unix versions.
+   -  register "assumes" on the right side of the binary '+' operator
+      were ignored.
+   -  64-bit: in v2.05, "MOV <reg>,offset <label>" was created with a
+      32-bit immediate (and fixup).
+   -  JWASMR.EXE: struct sizes > 32767 caused problems.
+   -  for RECORD types used in an expression, the default value must be the
+      record's mask, not the record's size in bytes.
+   -  offset of a struct member may have been calculated wrongly if the base
+      was just a type (not a variable) AND the first member also had a
+      struct type ("mov eax, <struct_type>.<mbr>.<mbr>").
+   -  inside struct declarations, a '?' was accepted as initializer of struct
+      members.
+   -  segment combine type COMMON was displayed as '?' in listing.
+   -  in v2.00-v2.05, PUSH/POP of a 64-bit memory operand wasn't rejected
+      in 16/32-bit code.
+   -  in v2.05, quoted filenames in the cmdline didn't work.
+   -  division operator '/' did interpret operands as unsigned values.
+   -  instructions BT, BTC, BTR and BTS did accept memory byte operands.
+   -  instruction PALIGNR wasn't encoded correctly.
+   -  OPTION RENAMEKEYWORD: restoring of the keywords failed.
+   -  instructions INSx and OUTSx weren't encoded correctly if arguments
+      were given.
+   -  INVOKE, 64-bit: float constants may have caused a GPF.
+   -  INVOKE: size check for constants was missing.
+   -  in v2.05, indirect addressing may have failed with 'structure field
+      expected' if address was in format [reg].<member>[reg].
+   -  an erroneous redefinition of a RECORD type may have caused a GPF.
+   -  if multiple files were assembled with different output formats,
+      some combinations didn't work as expected due to unwanted side
+      effects.
+   -  LABEL directive: code labels (NEAR, FAR, PROC) cannot be defined
+      anymore if CS is assumed ERROR. Previously this check was done only
+      when the label was defined through a trailing colon.
+   -  operator THIS was accepted in expressions outside segments.
+   -  XLAT, XLATB: memory operand of any size was accepted.
+   -  IMUL: syntax check was sloppy.
+   -  CMOVcc: byte registers were accepted as first operand.
+   -  if an instruction has just a memory operand, but with multiple
+      possible sizes, no error was emitted if size of current argument
+      was unspecified.
+   -  in IF blocks, multiple ELSE branches weren't rejected.
+   -  size of fixup for absolute externals may have been wrong in a few
+      cases ( i.e. second operand of BT[c|r|s] instructions ).
+   -  check for REAL4 initializer limits was missing.
+   -  arrays in unions weren't taken into account with their full size.
+   -  it wasn't checked if names of fields of anonymous struct members were
+      already used in a struct.
+   -  magnitude test of numbers wasn't strict enough.
+   -  in v2.05, if the argument of EQU was a number with a
+      magnitude > 32 bits, the equate wasn't created as a text macro.
+   -  operator DUP: if initial value was a quoted string and size of the
+      data item was > 1, every second repetition was incorrect.
+   -  64-bit: max. width of RECORD was 32 - changed to 64.
+   -  64-bit: if OPTION FRAME:AUTO was set and a XMM register was added
+      in the USES list or a PROC, the offsets of local variables wasn't
+      calculated correctly and the generated epilogue may have used a wrong
+      value to restore RSP.
+   -  if a text macro, defined via cmdline option -D, was also defined in
+      the source and the value of both definitions was an empty string,
+      a GPF did occur.
+   -  HADDPD, HADDPS, HSUBPD, HSUBPS: variant with m128 as second operand
+      was rejected.
+   -  64-bit: PEXTRQ/PINSRQ were encoded incorrectly if a m64 operand
+      was destination or source.
+   -  syntax 'INVOKE <struct_name>.<mbr>[reg]' caused a GPF in v2.05 (and
+      didn't work in v1.96-v2.04).
+   -  expansion of macro arguments changed so text macros are expanded
+      earlier ( needed in cases when a macro argument was a text macro
+      and the value of the text macro was a macro function call - see
+      macparm.asm regression test ).
+
+   Other changes:
+   -  cmdline option -Sf added.
+   -  OPTION RENAMEKEYWORD, OPTION MZ: syntax changed. Both options used
+      comma-separated values, which made it impossible to use them in a
+      "multiple-option" line.
+   -  operators LOW32/HIGH32 supported.
+   -  INVOKE: 64-bit constants (integer and floating-point) supported as
+      parameters.
+   -  Value of predefined text macro @Version changed from <615> to <800>.
+   -  OC.mak added to support the Orange C compiler (LadSoft).
+   -  result of SHL operator is now 64-bit, same as with Masm v8+.
+   -  OPTION DLLIMPORT added.
+   -  cmdline option -Fd added.
+   -  cmdline option -Fr (set error file name) changed to -Fw, since
+      option name -Fr is already used by Masm (limited browser info).
+   -  instructions XSAVE, XRSTOR, XGETBV, XSETBV, XSAVEOPT supported.
+   -  AVX instruction set supported.
+
    03/02/2011, v2.05:
 
+   Bugfixes:
    -  PROC directive: it wasn't checked that VARARG parameter was last
       parameter.
    -  ASSUME directive: using an arbitrary pointer type as argument
@@ -27,11 +156,11 @@
       to Masm.
    -  syntax check of macro "local" lines was too sloppy.
    -  when searching macro parameter and local names in macro lines, the
-      search was always case-sensitive, ignoring current case-mapping 
+      search was always case-sensitive, ignoring current case-mapping
       setting.
    -  ELF64 format: relocations were stored in sections of type SHT_REL.
       Changed to SHT_RELA.
-   -  in v2.04, SIZE operator might have returned wrong results for 
+   -  in v2.04, SIZE operator might have returned wrong results for
       structured variables (SIZEOF had no problems).
    -  in v1.93-v2.04, initialization of an array of structures may have
       given a wrong result if both DUP and comma operators were used.
@@ -41,7 +170,7 @@
       caused problems if a number was immediately followed by an identifier.
    -  MZ format: segment fixups for a segment in a group were wrong if both
       the group and the segment weren't located at 0.
-   -  INVOKE, 16-bit code, VARARG parameter: in v2.04, if argument was a 
+   -  INVOKE, 16-bit code, VARARG parameter: in v2.04, if argument was a
       32-bit register, register SP was adjusted wrongly after the call.
    -  it wasn't checked if GOTO labels inside macros were reserved words.
    -  INVOKE, 64-bit Windows: in v2.04, it wasn't possible to call functions
@@ -75,7 +204,7 @@
    -  if a source file argument wasn't the first and the file couldn't
       be found, a GPF occured.
    -  INC/DEC: in v1.94-2.04, "unsized" memory operands were accepted.
-   -  SHLD/SHRD: syntax check was too sloopy.
+   -  SHLD/SHRD: syntax check was too sloppy.
 
    Other changes:
    -  cmdline option -eq added.
@@ -86,15 +215,17 @@
 
    10/17/2010, v2.04c:
 
+   Bugfixes:
    -  in v2.04-2.04b, a type coercion of NEAR or FAR for a memory operand
       (sometimes used for indirect calls or jumps ) didn't work correctly.
 
    10/08/2010, v2.04b:
 
+   Bugfixes:
    -  in v2.04 + v2.04a, if IMUL's second argument was a forward reference
       and a third argument was also given, then error 'invalid instruction
       operands' was emitted.
-   -  an empty PROC located outside of a segment block didn't emit error 
+   -  an empty PROC located outside of a segment block didn't emit error
       'Must be inside segment block' - and in v2.04 additionally an access
       violation did occur.
    -  using ALIAS names in expressions was rejected in v2.04. Previously,
@@ -103,7 +234,7 @@
    10/05/2010, v2.04a:
 
    Bugfixes:
-   -  in v2.04, if operator OFFSET was used in an indirect addressing 
+   -  in v2.04, if operator OFFSET was used in an indirect addressing
       expression ( mov ax,[bx+offset var] ), the variable's type information
       wasn't removed.
    -  in v2.04, value of assembly time variables were evaluated wrong if they
@@ -150,7 +281,7 @@
    -  for COMMunal variables, there was no check if the symbol was defined
       with a different kind already.
    -  if .STARTUP or .EXIT occured before any code or data definition
-      lines, the code generated by those directives might have get 
+      lines, the code generated by those directives might have get
       truncated.
    -  INVOKE: a FWORD parameter caused an error if the argument to be
       pushed was a constant.
@@ -159,19 +290,19 @@
    -  MOVD didn't accept a REAL4 memory operand as second argument.
    -  EXTERN directive: altname was ignored if external was a prototype.
    -  EXTERN directive: altname symbol was rejected if it was external.
-   -  OMF output format: no WKEXT comment records were written for 
+   -  OMF output format: no WKEXT comment records were written for
       EXTERNal items with an alternate name.
    -  if floating-point emulation fixups were to be generated, there was
       no NOP inserted before FWAIT if current CPU was 80386 or better.
    -  INVOKE, VARARG parameter: if cpu was < 80386 and a constant value
       which didn't fit into a word was to be pushed, JWasm complained.
    -  INVOKE, VARARG parameter: the calculation of the stack adjustment
-      value was wrong in the following cases: 
-      a) when a byte register was pushed 
+      value was wrong in the following cases:
+      a) when a byte register was pushed
       b) when the argument consisted of 2 registers ('ds::bx')
-   -  JWASMR.EXE: freeing a PROC's local items was done with the wrong 
+   -  JWASMR.EXE: freeing a PROC's local items was done with the wrong
       linked list. This often resulted in an abnormal termination.
-   -  in v2.03, if Win64 output format was selected, a GPF did occur if 
+   -  in v2.03, if Win64 output format was selected, a GPF did occur if
       a stack variable was used as an argument for INVOKE.
    -  SHR and SHL operator didn't reject negative shift counts. Also,
       shift counts >= 64 returned compiler-dependant results.
@@ -195,9 +326,9 @@
       anymore.
    -  64-bit: LAR and LSL weren't implemented ML64-compatible, they accepted
       DWORD/QWORD memory operands.
-   -  in a few cases (where JWasm assumed forward references to be labels, 
+   -  in a few cases (where JWasm assumed forward references to be labels,
       which later turned out to be numbers) there was a risk that a short
-      destination for a jump wasn't detected and hence not the smallest 
+      destination for a jump wasn't detected and hence not the smallest
       possible code was generated.
    -  comparisons of TYPE expressions may have failed for expressions with
       type coercion.
@@ -225,11 +356,11 @@
    Bugfixes:
    -  invalid cmdline option behind source filename caused a GPF.
    -  expressions in a data field initializer were evaluated when the
-      structure was instanced. This gave incorrect results or assembly 
+      structure was instanced. This gave incorrect results or assembly
       errors if the expression contained an assembly time variable
       ( including $ ).
    -  INVOKE directive: if register EAX|RAX was used for indirect addressing
-      of a parameter, there was no check if the content of the register has 
+      of a parameter, there was no check if the content of the register has
       been overwritten previously due to an ADDR operator.
    -  INVOKE directive, 64-bit: if a parameter beyond the first four was an
       address which had to be loaded into register RAX to store it onto the
@@ -265,7 +396,7 @@
       operand.
    -  a displacement which didn't fit into 32-bits caused error 'Constant
       value too large' in versions 2.00 - 2.02. This has been changed to a
-      warning (level 3) in 16- and 32-bit. In 64-bit code, it is still an 
+      warning (level 3) in 16- and 32-bit. In 64-bit code, it is still an
       error.
    -  In expressions, types combined with the open (square) bracket operator
       ( "mov eax, DWORD [ebx] ) weren't rejected.
@@ -282,7 +413,7 @@
    -  empty lines - or lines containing just a comment - in macros weren't
       counted, thus a wrong line number might have been displayed if an
       error occured inside a macro.
-   -  name arguments for .DATA? and .CONST were always accepted, but 
+   -  name arguments for .DATA? and .CONST were always accepted, but
       ignored. Now they are accepted only if -Zne isn't set and the name
       is NOT ignored then.
    -  64-bit: for -win64, default for GS register assumption was "ERROR".
@@ -292,7 +423,7 @@
       assumed to be FLAT.
    -  64-bit: encoding of indirect addressing with base registers R12/R13
       and no index registers wasn't correct.
-   -  64-bit: encoding of indirect addressing with base registers 
+   -  64-bit: encoding of indirect addressing with base registers
       RBP/R13/R13D + index register and no displacement wasn't correct.
    -  64-bit: register R12D was rejected as base for indirect addressing.
    -  PURGE made macros "invalid" (it should just delete the macro content).
@@ -304,7 +435,7 @@
    -  OPTION DOTNAME: in v2.0-v2.02, this option may have caused macro
       parameters not being recognized in macro source lines if the parameter
       was preceded by a dot.
-   -  in v2.0-v2.02, the % operator didn't work reliably for VARARG macro 
+   -  in v2.0-v2.02, the % operator didn't work reliably for VARARG macro
       arguments.
    -  a text macro which contained a macro function call and extra chars
       might not have been expanded correctly if it was used as an argument
@@ -335,7 +466,7 @@
       group value, the short 'byte' form of the PUSH opcode was generated,
       which - in conjunction with the fixup for this value - resulted in
       bad code.
-   -  literal-character operator (!) was ignored within arguments of 
+   -  literal-character operator (!) was ignored within arguments of
       directives IFIDN[I] and IFDIF[I].
    -  literal-character operator (!) wasn't handled in literals of .ERRxx
       directives.
@@ -343,13 +474,13 @@
       were always rejected.
    -  FORC/IRPC: additional items after the literal argument weren't
       rejected.
-   -  in v2.01, arithmetic instructions with a forward memory reference 
-      as first operand and an immediate value as second operand were 
+   -  in v2.01, arithmetic instructions with a forward memory reference
+      as first operand and an immediate value as second operand were
       rejected if cpu was < .386.
    -  for formats other than OMF, the buffer which hold the contents of a
       segment might have been allocated too small if the segment was a
       code segment and contained forward references but no labels.
-   -  OMF format: there was a risk that WLink refused the object module 
+   -  OMF format: there was a risk that WLink refused the object module
       generated by JWasm because size of code sections did shrink in
       assembly passes > 2 but file size wasn't adjusted accordingly.
    -  CMPSx string instruction: if first operand had a DS prefix, it was
@@ -482,8 +613,8 @@
    -  in v1.96, indirectly calling a function with a different offset
       magnitude by type coercion (call PF16 ptr [ebx]) created wrong code.
    -  the argument of REPEAT was treated as unsigned integer, but should be
-      a signed integer. 
-   -  JWasm complained about a missing <text> argument for IRC/IRPC, but 
+      a signed integer.
+   -  JWasm complained about a missing <text> argument for IRC/IRPC, but
       this is actually a valid syntax.
    -  If a struct member's name was also a type name and the member's type
       was of arbitrary type, a syntax error occured.
@@ -500,7 +631,7 @@
       contained the DUP operator.
    -  directives INCLUDE, INCLUDELIB and INCBIN: filenames beginning with
       a digit may have caused a GPF.
-   -  indirect addressing mode: usage of multiple index registers wasn't 
+   -  indirect addressing mode: usage of multiple index registers wasn't
       detected in all cases.
 
    Other changes:
@@ -623,7 +754,7 @@
    -  invalid cmdline options don't abort the assembly process anymore,
       just a warning is displayed.
    -  GccDos.MAK, PellesC.MAK, BCC.MAK and TCC.MAK added.
-   -  the 16bit version, JWASMR, no longer supports -coff and -elf. It 
+   -  the 16bit version, JWASMR, no longer supports -coff and -elf. It
       didn't work reliably in v1.95.
    -  Makefile: creating JWASMD.EXE now also works with OW v1.8.
    -  OW v1.8 used to create the JWasm binaries. Previously it was v1.7a.
@@ -666,7 +797,7 @@
       syntax error.
    -  if a term '<variable>.<type>' was found in an expression, it wasn't
       handled similar to '<type> PTR <variable>'.
-   -  @InStr and @SizeStr returned result as string in radix 10, but 
+   -  @InStr and @SizeStr returned result as string in radix 10, but
       current radix is to be used instead (which "usually" IS 10).
    -  AT segments didn't work in v1.94.
    -  ALIGN directive did emit bytes in BSS and AT segments.
@@ -699,7 +830,7 @@
    -  type conflicts for symbols which had an additional EXTERNDEF entry
       were detected for data labels only.
    -  IF[N]DEF <symbol> failed if <symbol> was a forward reference.
-   -  ':' operator did clear a type which was set by the PTR operator. 
+   -  ':' operator did clear a type which was set by the PTR operator.
       Test case: <type> PTR ds:[0].
    -  hll expression evaluator did always handle the '()' operator, while
       it should handle it only if the expression enclosed contains a
@@ -726,7 +857,7 @@
       which then caused a bad binary.
    -  output format BIN: relative offsets (jumps and calls) were calculated
       wrong.
-   -  OPTION PROC:PRIVATE made procedures private even if PUBLIC 
+   -  OPTION PROC:PRIVATE made procedures private even if PUBLIC
       directives existed for them.
    -  PROTOs will no longer accept PUBLIC attribute (Masm also rejects).
    -  a PROC with attribute PRIVATE and a PUBLIC directive for the very
@@ -873,7 +1004,7 @@
    -  TR6 register wasn't accepted for cpu 80386.
    -  GROUP directive didn't ensure that the segment's offset magnitude
       matches the group's one.
-   -  in data items, segment/group name overrides were rejected if the 
+   -  in data items, segment/group name overrides were rejected if the
       offset part wasn't a label. Example: mov ax, DGROUP:[0].
    -  for cpu < 80386, conditional NEAR jump was rejected, but it should
       be allowed if OPTION LJMP is on (which is the default).
@@ -1056,13 +1187,13 @@
       lost because the rvalue is stored as a string enclosed in <>, which
       requires that '!' are doubled.
    -  errors which occured when the listing file was opened were ignored.
-   -  type comparison of public data items which also had an externdef entry 
+   -  type comparison of public data items which also had an externdef entry
       was too rigid and often failed for arbitrary types.
    -  for INVOKE, if an address was to be pushed (ADDR operator) and the
       parameter wasn't declared FAR, just the offset was pushed. Now the
       segment part is also pushed if the parameter's size is @wordsize+2
       (which is 4+2 in 32bit and 2+2 in 16bit).
-   -  for INVOKE, if cpu was < 80386 and a dword-sized constant value had 
+   -  for INVOKE, if cpu was < 80386 and a dword-sized constant value had
       to be pushed, there was a risk that the value was calculated wrong.
    -  simplified segment directives didn't accept segment names beginning
       with a dot.
@@ -1319,9 +1450,9 @@
    -  if a numeric equate's magnitude exceeded 32bit, the high bits
       were skipped. Now the equate will be stored as a text macro in this
       case.
-   -  there was no parameter syntax check for [ELSE]IFIDN[I], 
+   -  there was no parameter syntax check for [ELSE]IFIDN[I],
       [ELSE]IFDIF[I], [ELSE]IFB, [ELSE]IFNB.
-   -  if a segment was open when the END directive was detected, 
+   -  if a segment was open when the END directive was detected,
       the segment's content was skipped, no error message was displayed.
    -  if a FOR parameter string contained a call of a macro function
       which had more than 1 parameter, a syntax error occured.
@@ -1393,7 +1524,7 @@
 
    Bugfixes:
    -  string equates now handled the way MASM does.
-   -  fixup of start address now refers to the group of the start 
+   -  fixup of start address now refers to the group of the start
       address's segment. WASM still has problems if the
       start address is in a segment which isn't the first one in a group.
    -  EXTERNDEFs which aren't referenced in the source now won't
@@ -1407,7 +1538,7 @@
    -  some "reserved" words in WASM, which aren't reserved in MASM
       were removed from this list: "ERROR", "PRIVATE", "COMMON", "EXPORT",
       "READONLY", "IGNORE", "CASEMAP", "SMALL", "MEMORY", "COMPACT", "ABS",
-      "NOTHING", "MEDIUM", "LARGE", "TINY", "HUGE", "USES", "FARSTACK", 
+      "NOTHING", "MEDIUM", "LARGE", "TINY", "HUGE", "USES", "FARSTACK",
       "NEARSTACK", "OS_DOS", "OS_OS2".
    -  symbol type conflicts are now detected and reported as errors.
    -  default type of LOCAL variables was always WORD.
@@ -1420,7 +1551,7 @@
       or changed. This side-effect wasn't expected.
    -  WASM needed ':REQ' in capitals to make a macro parameter "required".
       MASM is not case sensitive here.
-   -  macro parameters in the macro definition were expanded, which is a 
+   -  macro parameters in the macro definition were expanded, which is a
       bad idea. Thus it was impossible to give macro parameters a name
       which was already used in the namespace (for example the name of a
       previously defined macro).
