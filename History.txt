@@ -1,8 +1,69 @@
 
    Changelog
 
-   07/22/2011, v2.06e:
+   07/02/2012, v2.07:
 
+   Bugfixes:
+   -  ELF format: size of .bss segment wasn't set.
+   -  ELF format: segments of class "CONST" weren't marked as read-only
+      in the ELF module.
+   -  segment attribute INFO wasn't handled for ELF.
+   -  Win64: in v2.05-v2.06, VARARG didn't work for the - first 4 - register
+      arguments.
+   -  when a procedure's prologue and epilogue code was generated, it was
+      assumed that radix was 10.
+   -  if the size of a byte array in a structure was defined by the length
+      of a quoted string initializer, it wasn't marked internally as array
+      and hence the initialization of data items of this type may have been
+      wrong.
+   -  it wasn't checked if a string initializer for a simple byte field
+      in a struct was too long.
+   -  if a struct contains fields with negative offset, the struct's size
+      was calculated incorrectly.
+   -  JWASMR.EXE: in a few circumstances, negative constants were rejected.
+   -  in v2.04-2.06, it wasn't detected if a group contained an undefined
+      segment.
+   -  INVOKE: if the argument for a VARARG parameter was a structure, it
+      was rejected in some cases.
+   -  a line that contained both a comment and a directive which triggered
+      source line generation (INVOKE, hll directives, ... ) messed up the
+      listing.
+   -  EQU/= directive: optional type coercions weren't stored, just the
+      value of the constant.
+   -  FLAT, USE32 and USE64 segment attributes were always accepted, no
+      check for compatible cpu was done.
+   -  fixups for assembly time variables wasn't correct if the variable
+      had type "far".
+   -  output format MZ: there was no warning when a 16-bit group's size
+      exceeded 64 kB.
+   -  OMF output format: many publics in a module may have corrupted
+      the object module.
+   -  if a struct member was operand for the SEG operator, the member's
+      offset within the struct was used as addend for the segment fixup.
+   -  calling convention FASTCALL for 16-bit MS C was implemented faulty.
+      Registers aren't CX and DX, but AX, DX and BX.
+   -  if -Zi was set and a segment had size 0 and a label (empty proc),
+      the resulting coff object module had errors.
+   -  Win64: .pdata information may have been incorrect if multiple code
+      sections with SEH data were defined.
+   -  handling of standard register ASSUMEs in the expression evaluator
+      were not compatible with Masm.
+   -  Win64: in v2.06, the space for local variables was calculated 
+      incorrectly if OPTION FRAME:AUTO was set, an odd number of GPRs &
+      no XMM registers were included in the USES list.
+
+   Other changes:
+   -  IF[N]DEF and .ERR[N]DEF directives: argument may be a structure and
+      member name, separated by a dot.
+   -  cmdline option -Fd: filename argument for this option is no longer
+      mandatory for COFF output format.
+   -  FADDP, FMULP, FDIV[R]P and FSUB[R]P variants with no arguments added.
+   -  COFF/ELF: missing support for segment attribute ALIAS added.
+   -  for better Masm compatibility, memory operands with size
+      1 (PADD[S|US]B), 2 (PADD[S|US]W), 4 (PADDD) and 8 (PADDQ) are accepted.
+
+   07/22/2011, v2.06e:
+   
    Bugfixes:
    -  ELF64 format: in v2.05-v2.06d, addends weren't handled correctly.
 

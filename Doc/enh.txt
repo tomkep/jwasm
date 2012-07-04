@@ -35,6 +35,18 @@
 
   5. ASSUME extension
 
-     use ASSUME CS:USE16 and ASSUME CS:USE32 to change current offset size
+     use ASSUME CS:[USE16|USE32|USE64] to change current offset size
      without changing segments.
 
+  6. FOR extension
+
+     Preprocessor extension:
+
+     FOR EACH x IN [<struct>|<union>|<record>|<proc>]
+       ...
+     ENDM
+
+     - x is the loop variable, it's a text macro, its value will be
+       the name of the item ( Anonymous members will be skipped ).
+     - the "members" are enumerated. For PROCedures, these are the
+       parameters, local variables and local labels.

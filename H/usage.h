@@ -17,7 +17,7 @@
 "-EP\0"             "Output preprocessed listing to stdout\0"
 "-eq\0"             "don't display error messages\0"
 #if DLLIMPORT
-"-Fd<file_name>\0"  "Set linker import definition file name\0"
+"-Fd[=<file_name>]\0"  "Write import definition file\0"
 #endif
 "-Fi<file_name>\0"  "Force <file_name> to be included\0"
 "-Fl[=<file_name>]\0" "Write listing file\0"

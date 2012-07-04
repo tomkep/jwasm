@@ -50,7 +50,11 @@ CCV=r
 
 inc_dirs  = -IH -I$(WATCOM)\H
 
+!ifdef JWLINK
+LINK = jwlink.exe
+!else
 LINK = $(WATCOM)\binnt\wlink.exe
+!endif
 
 #cflags stuff
 #########
@@ -69,7 +73,6 @@ extra_c_flags += -DDJGPP_SUPPORT=1
 !endif
 #########
 
-LOPT = op quiet
 !if $(DEBUG)
 # for OW v1.8, the debug version needs user32.lib to resolve CharUpperA()
 # without it, WD(W) will crash immediately.
@@ -77,8 +80,6 @@ LOPTD = debug dwarf op symfile lib user32.lib
 !else
 LOPTD = 
 !endif
-
-lflagsw = $(LOPTD) system nt $(LOPT) op map=$^*
 
 CC=$(WATCOM)\binnt\wcc386 -q -3$(CCV) -zc -bc -bt=nt $(inc_dirs) $(extra_c_flags) -fo$@
 
@@ -123,27 +124,30 @@ $(OUTD):
 
 $(OUTD)/$(name).exe: $(proj_obj)
 	$(LINK) @<<
-$(lflagsw) file { $(proj_obj) } name $@ op stack=0x20000, heapsize=0x100000, norelocs com stack=0x1000
+$(LOPTD)
+format windows pe runtime console
+file { $(proj_obj) } name $@
+Libpath $(WATCOM)\lib386 
+Libpath $(WATCOM)\lib386\nt
+Library kernel32
+op quiet, stack=0x20000, heapsize=0x100000, norelocs, map=$^* com stack=0x1000
 <<
 !if $(DEBUG)
-	@copy $(OUTD)\$(name).exe TEST\*.* >NUL
-	@copy $(OUTD)\$(name).sym TEST\*.* >NUL
+	copy $(OUTD)\$(name).exe TEST\*.* >NUL
+	copy $(OUTD)\$(name).sym TEST\*.* >NUL
 !endif
 
 $(OUTD)/$(name)d.exe: $(proj_obj)
 	$(LINK) @<<
 $(LOPTD)
-format windows nt 
-runtime console 
-file { $(proj_obj) }
-name $@
+format windows pe runtime console
+file { $(proj_obj) } name $@
 Libpath $(WATCOM)\lib386 
 Libpath $(WATCOM)\lib386\nt
 Libpath $(HXDIR)\lib
 Library imphlp.lib, dkrnl32s.lib 
 Libfile cstrtwhx.obj 
-$(LOPT)
-op map=$^*, stub=$(HXDIR)\Bin\loadpex.bin, stack=0x40000, heapsize=0x100000
+op quiet, map=$^*, stub=$(HXDIR)\Bin\loadpex.bin, stack=0x40000, heapsize=0x100000
 <<
 #	$(HXDIR)\Bin\pestub.exe -x -z -n $@
 	pestub.exe -x -z -n $@

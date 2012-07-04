@@ -39,7 +39,6 @@
 #include "omfspec.h"
 #include "myassert.h"
 
-extern struct format_options formatoptions[];
 extern const char szNull[];
 extern uint GetGrpIdx( struct asym *sym );
 
@@ -193,7 +192,7 @@ static int fill_logref( const struct fixup *fixup, struct logref *lr )
 
     if( sym == NULL ) {
 
-        if ( fixup->frame_type == EMPTY ) /* v1.96: nothing to do without a frame */
+        if ( fixup->frame_type == FRAME_NONE ) /* v1.96: nothing to do without a frame */
             return( 0 );
         lr->target = fixup->frame_type;
         lr->target_datum = fixup->frame_datum;
@@ -209,7 +208,7 @@ static int fill_logref( const struct fixup *fixup, struct logref *lr )
 
         lr->target = TARGET_GRP;
         lr->target_datum = ((struct dsym *)sym)->e.grpinfo->grp_idx;
-        if( fixup->frame_type != EMPTY ) {
+        if( fixup->frame_type != FRAME_NONE ) {
             lr->frame = fixup->frame_type;
             lr->frame_datum = fixup->frame_datum;
         } else {
@@ -223,7 +222,7 @@ static int fill_logref( const struct fixup *fixup, struct logref *lr )
 
         lr->target = TARGET_SEG;
         lr->target_datum = GetSegIdx( sym );
-        if( fixup->frame_type != EMPTY ) {
+        if( fixup->frame_type != FRAME_NONE ) {
             lr->frame = fixup->frame_type;
             lr->frame_datum = fixup->frame_datum;
         } else {
@@ -260,7 +259,7 @@ static int fill_logref( const struct fixup *fixup, struct logref *lr )
             lr->target_datum = GetSegIdx( sym->segment );
         }
 
-        if( fixup->frame_type != EMPTY ) {
+        if( fixup->frame_type != FRAME_NONE ) {
             lr->frame = (uint_8)fixup->frame_type;
         } else {
             lr->frame = FRAME_TARG;
@@ -351,7 +350,7 @@ size_t OmfFixGenFix( struct fixup *fixup, uint_8 *buf, int type )
         break;
     default:
         AsmErr( UNSUPPORTED_FIXUP_TYPE,
-               formatoptions[Options.output_format].formatname,
+               ModuleInfo.fmtopt->formatname,
                fixup->sym ? fixup->sym->name : szNull );
         return( 0 );
     }

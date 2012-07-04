@@ -87,14 +87,14 @@ enum {
  */
 
 enum {
-    COMB_INVALID        = 0,
-    COMB_ABOVEALL       = 1,
-    COMB_ADDOFF         = 2,
-    COMB_BAD            = 3,
-    COMB_FOUR           = 4,
-    COMB_STACK          = 5,
-    COMB_COMMON         = 6,
-    COMB_ALIGNTOP       = 7,
+    COMB_INVALID        = 0,  /* PRIVATE attribute */
+    COMB_ABOVEALL       = 1,  /* marked as "reserved" */
+    COMB_ADDOFF         = 2,  /* PUBLIC attribute */
+    COMB_BAD            = 3,  /* marked as "reserved" */
+    COMB_FOUR           = 4,  /* comment: same as 2 */
+    COMB_STACK          = 5,  /* STACK attribute */
+    COMB_COMMON         = 6,  /* COMMON attribute */
+    COMB_ALIGNTOP       = 7,  /* comment: same as 2 */
 };
 #define SEGATTR_A( a )  (ALIGN_##a << 5)
 #define SEGATTR_C( a )  (COMB_##a << 2)
@@ -102,21 +102,11 @@ enum {
     SEGATTR_BIG  =   1<< 1,   /* exactly 64k or 2**32 */
     SEGATTR_P    =   1,       /* use 32 */
 };
-/*  Bits in FIXUPP records */
-
-enum {
-    FIXUPP_FIXUP        = 0x80,
-
-    FIXDAT_FTHREAD      = 0x80,
-    FIXDAT_TTHREAD      = 8,
-    FIXDAT_PBIT         = 4,
-    FIXDAT_MBIT         = 0x40,
-    TRDDAT_DBIT         = 0x40,
 
 /*
  *  INTEL Frame Specifiers
  */
-
+enum frame_types {
     FRAME_SEG           = 0,        /* segment index                    */
     FRAME_GRP           = 1,        /* group index                      */
     FRAME_EXT           = 2,        /* external index                   */
@@ -124,11 +114,12 @@ enum {
     FRAME_LOC           = 4,        /* frame containing location        */
     FRAME_TARG          = 5,        /* frame same as target             */
     FRAME_NONE          = 6,        /* no frame                         */
+};
 
 /*
  *  INTEL Target Specifiers
  */
-
+enum target_types {
     TARGET_SEGWD        = 0,        /* segment index with displacement  */
     TARGET_GRPWD        = 1,        /* group index with displacement    */
     TARGET_EXTWD        = 2,        /* external index with displacement */
@@ -139,6 +130,18 @@ enum {
     TARGET_ABS          = 7,        /* abs frame num, no displacement   */
 
     TARGET_WITH_DISPL   = ~4,       /* frame with displacement          */
+};
+
+/*  Bits in FIXUPP records */
+
+enum {
+    FIXUPP_FIXUP        = 0x80,
+
+    FIXDAT_FTHREAD      = 0x80,
+    FIXDAT_TTHREAD      = 8,
+    FIXDAT_PBIT         = 4,
+    FIXDAT_MBIT         = 0x40,
+    TRDDAT_DBIT         = 0x40,
 
 /*
  *  INTEL Group Specifiers

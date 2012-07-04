@@ -420,6 +420,18 @@ ret_code EndstructDirective( int i, struct asm_tok tokenarray[] )
 
     i++; /* go past ENDS */
 
+    /* v2.07: if ORG was used inside the struct, the struct's size
+     * has to be calculated now - there may exist negative offsets.
+     */
+    if ( dir->e.structinfo->OrgInside ) {
+        struct field_item *f;
+        int_32 min = 0;
+        for ( f = dir->e.structinfo->head; f; f = f->next )
+            if ( f->sym->offset < min )
+                min = f->sym->offset;
+        dir->sym.total_size = dir->sym.total_size - min;
+    }
+
     /* Pad bytes at the end of the structure. */
 #if 1
     /* v2.02: this is to be done in any case, whether -Zg is set or not */
@@ -761,7 +773,7 @@ void UpdateStructSize( struct asym *sym )
             CurrStruct->sym.total_size = sym->total_size;
     } else {
         CurrStruct->sym.offset += sym->total_size;
-        if ( CurrStruct->sym.offset > CurrStruct->sym.total_size )
+        if ( CurrStruct->sym.offset > (int_32)CurrStruct->sym.total_size )
             CurrStruct->sym.total_size = CurrStruct->sym.offset;
     }
     DebugMsg1(("UpdateStructSize(%s.%s): %s, curr mbr size=%u curr struc/union size=%u\n",
@@ -785,7 +797,7 @@ ret_code SetStructCurrentOffset( int_32 offset )
     CurrStruct->sym.offset = offset;
     /* if an ORG is inside the struct, it cannot be instanced anymore */
     CurrStruct->e.structinfo->OrgInside = TRUE;
-    if ( offset > CurrStruct->sym.total_size )
+    if ( offset > (int_32)CurrStruct->sym.total_size )
         CurrStruct->sym.total_size = offset;
 
     return( NOT_ERROR );

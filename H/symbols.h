@@ -81,7 +81,7 @@ enum memtype {
     MT_FAR   = 0x82,
     MT_EMPTY = 0xC0,
     MT_BITS  = 0xC1,   /* record field */
-    MT_ABS   = 0xC2,
+    //MT_ABS   = 0xC2, /* v2.07: obsolete */
     MT_PTR   = 0xC3,   /* v2.05: changed, old value 0x83 */
     MT_TYPE  = 0xC4,   /* structured variable */
     MT_FLOAT   = 0x20, /* bit 5 */
@@ -136,8 +136,10 @@ struct asym {
     unsigned char   used:1,       /* symbol has been referenced */
                     isdefined:1,  /* symbol is "defined" in this pass */
                     scoped:1,     /* symbol is local label or LOCAL */
-                    global:1,     /* symbol has been added to the globals queue */
-                    equate:1,     /* symbol has been defined with EQU */
+                    /* v2.07: removed */
+                    //isglobal:1,   /* symbol has been added to the globals queue */
+                    iat_used:1,   /* v2.07: IAT entry of symbol used */
+                    isequate:1,   /* symbol has been defined with EQU */
                     predefined:1, /* symbol is predefined */
                     variable:1,   /* symbol is variable ('=' directive) */
                     public:1;     /* symbol has been added to the publics queue */
@@ -170,7 +172,7 @@ struct asym {
                 unsigned char asmpass;    /* SYM_INTERNAL (mem_type NEAR|FAR) */
             };
             unsigned char   seg_ofssize:2;    /* SYM_EXTERNAL only */
-            unsigned char   comm:1;    /* is communal */
+            unsigned char   iscomm:1;  /* is communal */
             unsigned char   weak:1;    /* 1 if an unused "externdef" */
             unsigned char   isfar:1;   /* SYM_EXTERNAL, SYM_TYPE, SYM_STACK */
             unsigned char   is_vararg:1;/* SYM_STACK, VARARG param */
@@ -288,20 +290,32 @@ struct seg_info {
         uint_32         num_linnums;    /* used by COFF (after LinnumQueue has been read) */
     };
     uint_32             num_relocs;     /* used by COFF/ELF */
-    short               idx;            /* segment # */
+    short               seg_idx;        /* segment # */
     enum seg_type       segtype;        /* segment's type (code, data, ...) */
-    direct_idx          lname_idx;      /* LNAME index (OMF only) */
-    direct_idx          class_name_idx;
-    uint_16             abs_frame;      /* ABS seg, frame number */
-    uint_32             abs_offset;     /* ABS seg, offset */
+    direct_idx          lname_idx;      /* segment's name LNAME index (OMF only) */
+    direct_idx          class_name_idx; /* segment's class LNAME index */
+    union {
+        uint_16         abs_frame;      /* ABS seg, frame number (OMF,BIN) */
+#if COMDATSUPP
+        uint_16         comdat_number;  /* associated COMDAT segno (COFF) */
+#endif
+    };
+    union {
+        uint_32         abs_offset;     /* ABS seg, offset (OMF only) */
+        char            *aliasname;     /* ALIAS name (COFF/ELF only) */
+    };
     unsigned char       Ofssize;        /* segment's offset size */
-    unsigned char       characteristics;/* used by COFF */
+    unsigned char       characteristics;/* used by COFF/ELF */
     unsigned char       alignment:4;    /* is value 2^x */
-    unsigned char       readonly:1;     /* if the segment is readonly */
+    unsigned char       readonly:1;     /* if segment is readonly */
+    unsigned char       info:1;         /* if segment is info only (COFF/ELF) */
     unsigned char       force32:1;      /* force 32bit segdef (OMF only) */
     unsigned char       data_in_code:1; /* data items in code segm (OMF only) */
     unsigned char       written:1;      /* code/data just written */
     unsigned char       combine:3;
+#if COMDATSUPP
+    unsigned char       comdat_selection:3; /* COFF only */
+#endif
 };
 
 #define MAX_SEGALIGNMENT 0x0F

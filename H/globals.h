@@ -59,7 +59,7 @@
 #define MAX_LINE_LEN            600     /* no restriction for this number */
 #define MAX_TOKEN               MAX_LINE_LEN / 4  /* max tokens in one line */
 #define MAX_STRING_LEN          MAX_LINE_LEN - 32 /* must be < MAX_LINE_LEN */
-#define MAX_ID_LEN              247
+#define MAX_ID_LEN              247  /* must be < MAX_LINE_LEN */
 #define MAX_STRUCT_ALIGN        32
 /* v2.06: obsolete */
 //#define MAX_RESW_LEN            31 /* max length of a reserved word */
@@ -101,6 +101,11 @@
 #ifndef AVXSUPP
 #define AVXSUPP      1 /* support AVX extensions                 */
 #endif
+#if COFF_SUPPORT
+#define COMDATSUPP   0 /* support COMDAT segment attribute */
+#else
+#define COMDATSUPP   0
+#endif
 
 /* other extension switches */
 #define IMAGERELSUPP 1 /* support IMAGEREL operator (not for OMF) */
@@ -121,6 +126,7 @@
 #ifndef DLLIMPORT
 #define DLLIMPORT    1 /* support OPTION DLLIMPORT               */
 #endif
+#define MASM_SSE_MEMX 1 /* support 2 mem types for mmx/xmm */
 
 /* old Wasm extensions */
 #define PAGE4K       0 /* support 4kB-page OMF segment alignment */
@@ -143,9 +149,9 @@
 #include "queue.h"
 
 /* JWasm version info */
-#define _BETA_ "e"
-#define _JWASM_VERSION_ "2.06" _BETA_
-#define _JWASM_VERSION_INT_ 206
+#define _BETA_
+#define _JWASM_VERSION_ "2.07" _BETA_
+#define _JWASM_VERSION_INT_ 207
 
 #define NULLC  '\0'
 //#define NULLS  ""
@@ -157,6 +163,16 @@
 #else
 #define FX32 "X"
 #define FU32 "u"
+#endif
+
+#if defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__)
+#define I64X_SPEC "llX"
+#define I64x_SPEC "llx"
+#define I64d_SPEC "lld"
+#else
+#define I64X_SPEC "I64X"
+#define I64x_SPEC "I64x"
+#define I64d_SPEC "I64d"
 #endif
 
 #define is_valid_id_char( ch )  ( isalnum(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
@@ -418,7 +434,7 @@ enum segofssize {
  * added, also adjust tables in proc.c, mangle.c and probably invoke.c!
  */
 enum fastcall_type {
-    FCT_MS32,       /* MS 32bit fastcall (ecx,edx) */
+    FCT_MSC,        /* MS 16-/32-bit fastcall (ax,dx,cx / ecx,edx) */
 #if OWFC_SUPPORT
     FCT_WATCOMC,    /* OW register calling convention (eax, ebx, ecx, edx) */
 #endif
@@ -533,6 +549,7 @@ struct global_options {
     bool        no_export_decoration;    /* -zze option */
     bool        entry_decorated;         /* -zzs option  */
     bool        write_listing;           /* -Fl option  */
+    bool        write_impdef;            /* -Fd option  */
     bool        case_sensitive;          /* -Cp,-Cx,-Cu options */
     bool        convert_uppercase;       /* -Cp,-Cx,-Cu options */
     bool        preprocessor_stdout;     /* -EP option  */
@@ -567,7 +584,8 @@ struct module_vars {
     unsigned            error_count;     /* total of errors so far */
     unsigned            warning_count;   /* total of warnings so far */
     unsigned            num_segs;        /* number of segments in module */
-    struct qdesc        GlobalQueue;     /* GLOBAL items ( =externdefs ) */
+    /* v2.07: GlobalQueue is obsolete */
+    //struct qdesc        GlobalQueue;     /* GLOBAL items ( =externdefs ) */
     struct qdesc        PubQueue;        /* PUBLIC items */
     struct qdesc        LnameQueue;      /* LNAME items (segments, groups and classes) */
 #if COFF_SUPPORT
@@ -581,6 +599,8 @@ struct module_vars {
 #endif
 };
 
+struct format_options;
+
 struct module_info {
     struct module_vars  g;
     char                *proc_prologue;  /* prologue macro if PEM_MACRO */
@@ -588,6 +608,7 @@ struct module_info {
 #if DLLIMPORT
     char                *CurrDll;        /* OPTION DLLIMPORT dll */
 #endif
+    const struct format_options *fmtopt; /* v2.07: added */
     unsigned            anonymous_label; /* "anonymous label" counter */
     unsigned            hll_label;       /* hll directive label counter */
     enum dist_type      distance;        /* stack distance */

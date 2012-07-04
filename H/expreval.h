@@ -41,7 +41,7 @@ enum exprtype {
     EXPR_FLOAT          /* v2.05: float */
 };
 
-// argument types accepted by unary operators
+/* argument types accepted by unary operators */
 
 enum oparg_types {
     AT_TYPE  = 0x01, /* type */
@@ -66,8 +66,10 @@ enum oparg_types {
     AT_ALL   = AT_TYPE | AT_LABEL | AT_IND | AT_REG | AT_FIELD | AT_NUM | AT_UNDEF | AT_BF | AT_FLOAT
 };
 
+/* expression, returned by expression evaluator */
+
 struct expr {
-    union {
+    union {                         /* value of expression */
         struct {
             int_32  value;
             int_32  hvalue;
@@ -110,6 +112,7 @@ struct expr {
             unsigned is_opattr: 1;  /* current operator is OPATTR */
             unsigned negative : 1;  /* for EXPR_FLOAT only */
             unsigned ftype    : 1;  /* for EXPR_FLOAT only (float type) */
+            unsigned assumecheck: 1;/* v2.07: for ASSUMEd std registers */
         };
     };
     struct asym     *sym;   /* label used */

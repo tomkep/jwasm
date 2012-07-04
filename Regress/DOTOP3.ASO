@@ -21,4 +21,18 @@ xxx S1 <>
 	mov eax, eax.S1			;invalid use of register
 	mov eax, [eax].xxx		;structure field expected
 
+;--- prior to v2.07, it was accepted if a struct type
+;--- was followed by another struct type
+
+S21 struct
+f1	db ?
+S21 ends
+
+S2 struct
+f2	S11 <>
+S2 ends
+
+	mov al,[ebx.S2.S21.f1]
+	mov al,[ebx],S2.S21.f1
+
 END

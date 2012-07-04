@@ -1,7 +1,6 @@
 
-; jwasm prioritizes assumes differently from masm:
-; masm enforces the assume on the LAST register
-; jwasm enforces the assume on the FIRST register.
+; standard register ASSUMEs prior to v2.07 were handled incompatible with masm.
+; in masm, a potential assume of the LAST register has higher priority.
 
 	.386
 	.model flat
@@ -20,6 +19,6 @@ S2 ends
 	assume edx:ptr S2
 	mov [ecx+eax].v1,0	; Fails with jwasm < 2.06.
 	mov [edx+eax].v1,0	; Fails with jwasm < 2.06.
-;	mov [eax+edx].v1,0	; Works with jwasm < 2.06. Should fail.
+	mov [eax+edx].v1,0	; Works with jwasm < 2.06. Should fail.
 
 	end

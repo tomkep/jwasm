@@ -42,8 +42,10 @@
 extern const struct opnd_class opnd_clstab[];
 #if AVXSUPP
 extern struct ReservedWord  ResWordTable[];
-extern uint_8               vex_flags[];
+extern const uint_8               vex_flags[];
 #endif
+
+const char szNull[] = {"<NULL>"};
 
 /* v2.03: OutputCodeByte no longer needed */
 #define OutputCodeByte( x ) OutputByte( x )
@@ -466,17 +468,32 @@ static void output_data( const struct code_info *CodeInfo, enum operand_type det
             }
         }
     }
-    DebugMsg1(( "output_data: size=%u\n", size ));
-
+#ifdef DEBUG_OUT
+    if ( size > 4 )
+        DebugMsg1(( "output_data: size=%u cont=%" I64X_SPEC "\n", size, (uint_64)CodeInfo->opnd[index].data ));
+    else if ( size )
+        DebugMsg1(( "output_data: size=%u cont=%" FX32 "\n", size, CodeInfo->opnd[index].data ));
+    else
+        DebugMsg1(( "output_data: size=0\n" ));
+#endif
     if ( size ) {
-        if ( CodeInfo->opnd[index].InsFixup && write_to_file ) {
-            CodeInfo->opnd[index].InsFixup->location = GetCurrOffset();
-            //store_fixup( CodeInfo->opnd[index].InsFixup, &CodeInfo->data[index] );
-            OutputBytes( (unsigned char *)&CodeInfo->opnd[index].data,
-                                size, CodeInfo->opnd[index].InsFixup );
-        } else {
-            OutputBytes( (unsigned char *)&CodeInfo->opnd[index].data, size, NULL );
+        if ( CodeInfo->opnd[index].InsFixup ) {
+            /* v2.07: fixup type check moved here */
+            if ( Parse_Pass > PASS_1 )
+                if ( ( 1 << CodeInfo->opnd[index].InsFixup->type ) & ModuleInfo.fmtopt->invalid_fixup_type ) {
+                    AsmErr( UNSUPPORTED_FIXUP_TYPE,
+                           ModuleInfo.fmtopt->formatname,
+                           CodeInfo->opnd[index].InsFixup->sym ? CodeInfo->opnd[index].InsFixup->sym->name : szNull );
+                    /* don't exit! */
+                }
+            if ( write_to_file ) {
+                CodeInfo->opnd[index].InsFixup->location = GetCurrOffset();
+                OutputBytes( (unsigned char *)&CodeInfo->opnd[index].data,
+                            size, CodeInfo->opnd[index].InsFixup );
+                return;
+            }
         }
+        OutputBytes( (unsigned char *)&CodeInfo->opnd[index].data, size, NULL );
     }
     return;
 }

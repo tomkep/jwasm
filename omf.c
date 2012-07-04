@@ -90,7 +90,6 @@ union DOS_DATETIME {
 
 extern void cv_write_debug_tables( struct dsym *, struct dsym *);
 
-//extern struct format_options formatoptions[];
 extern struct qdesc LinnumQueue;    /* queue of line_num_info items */
 
 extern struct fname_list *FNames;
@@ -332,7 +331,7 @@ void omf_write_linnum( void )
         obj.d.linnum.num_lines = count;
         obj.d.linnum.lines = (struct linnum_data *)StringBufferEnd;
         obj.d.linnum.d.base.grp_idx = GetGrpIdx( GetGroup( &CurrSeg->sym ) ); /* fixme ? */
-        obj.d.linnum.d.base.seg_idx = CurrSeg->e.seginfo->idx;
+        obj.d.linnum.d.base.seg_idx = CurrSeg->e.seginfo->seg_idx;
         obj.d.linnum.d.base.frame = 0; /* fixme ? */
         omf_write_record( &obj );
     }
@@ -452,7 +451,7 @@ void omf_write_ledata( struct dsym *seg )
         LastCodeBufSize = size;
         InitRec( &obj, CMD_LEDATA );
         AttachData( &obj, seg->e.seginfo->CodeBuffer, size );
-        obj.d.ledata.idx = seg->e.seginfo->idx;
+        obj.d.ledata.idx = seg->e.seginfo->seg_idx;
         obj.d.ledata.offset = seg->e.seginfo->start_loc;
         if( obj.d.ledata.offset > 0xffffUL )
             obj.is_32 = TRUE;
@@ -663,7 +662,7 @@ void omf_write_grp( void )
             //writeseg = TRUE;
             segminfo = (struct dsym *)(seg->seg);
             Put8( &grp, GRP_SEGIDX );
-            PutIndex( &grp, segminfo->e.seginfo->idx );
+            PutIndex( &grp, segminfo->e.seginfo->seg_idx );
             /* truncate the group record if it comes near 4096! */
             if ( grp.curoff > OBJ_BUFFER_SIZE - 10 ) {
                 AsmWarn( 2, GROUP_TOO_LARGE, curr->sym.name );
@@ -740,7 +739,7 @@ void omf_write_seg( bool initial )
         obj.d.segdef.seg_name_idx = curr->e.seginfo->lname_idx;
 
         obj.d.segdef.combine        = curr->e.seginfo->combine;
-        obj.d.segdef.idx            = curr->e.seginfo->idx;
+        obj.d.segdef.idx            = curr->e.seginfo->seg_idx;
         obj.d.segdef.class_name_idx = curr->e.seginfo->class_name_idx;
         obj.d.segdef.abs.frame      = curr->e.seginfo->abs_frame;
         obj.d.segdef.abs.offset     = curr->e.seginfo->abs_offset;
@@ -876,7 +875,7 @@ static struct asym *GetExt( struct readext *r )
                 r->p = r->p->next;
             if ( r->p ) {
                 if ( r->p->sym.state == SYM_EXTERNAL &&
-                    ( r->p->sym.comm == TRUE ) || ( r->p->sym.weak == TRUE ) )
+                    ( r->p->sym.iscomm == TRUE ) || ( r->p->sym.weak == TRUE ) )
                     continue;
                 r->p->sym.included = TRUE;
                 r->index++;
@@ -1048,7 +1047,7 @@ ret_code omf_write_comdef( void )
     curr = SymTables[TAB_EXT].head;
     while ( curr ) {
         for( num = 0, recsize = 0; curr != NULL ; curr = curr->next ) {
-            if ( curr->sym.comm == FALSE )
+            if ( curr->sym.iscomm == FALSE )
                 continue;
             symsize = Mangle( &curr->sym, buffer );
 #if MAX_ID_LEN > 255
@@ -1240,18 +1239,17 @@ static void WritePubRec( uint_8 cmd, struct asym *curr_seg, uint count, bool nee
     obj.d.pubdef.num_pubs = count;
     obj.d.pubdef.pubs = data;
     omf_write_record( &obj );
-#if 0
-    /* free the names */
-    for( i = 0, d = data; i < count; i++, d++ ) {
-        if( d->name != NULL ) {
-            AsmFree( d->name );
-        }
-    }
-#endif
     return;
 }
 
-#define PUBITEMBASELEN (4+2+1)  /* sizes offset + index + name len */
+/* max. sizes offset(4) + index(2) + name len(1).
+ * offset is 2 only for 16-bit, but we don't know
+ * whether a 32-bit public is in the queue until we have
+ * read it.
+ * index is always 0 and hence will need 1 byte only.
+ * So there are always a few bytes wasted - it won't matter.
+ */
+#define PUBITEMBASELEN (4+2+1)
 
 ret_code omf_write_public( bool initial )
 /***************************************/
@@ -1265,7 +1263,6 @@ ret_code omf_write_public( bool initial )
     uint                symsize;
     uint_8              cmd = CMD_PUBDEF;
     bool                need32;
-    char                *pbuf;
 
     DebugMsg(("omf_write_pub enter\n"));
 
@@ -1275,40 +1272,41 @@ ret_code omf_write_public( bool initial )
         fseek( file_out->file, public_pos, SEEK_SET);
     }
 
+    /* v2.07: struct pubdef_data has been modified to match
+     * the data to be written to the object module more closely.
+     * This fixed a possible overrun if too many publics were written.
+     */
+
     vp = NULL;
     d = (struct pubdef_data *)StringBufferEnd;
-    pbuf = StringBufferEnd + 1024;
     size = 10; /* =size of an empty PUBDEF record */
     count = 0;
     need32 = FALSE;
     while ( sym = (struct asym *)GetPublicData( &vp ) ) {
-        symsize = Mangle( sym, pbuf );
-        d->name = pbuf;
-        /* if segment changes of record becomes too big, write record */
+        symsize = Mangle( sym, d->name );
+        /* if segment changes, or record becomes too big, write record */
         if( ( count && ( sym->segment != curr_seg )) ||
            ( ( size + symsize + PUBITEMBASELEN ) > MAX_PUB_LENGTH )) {
             WritePubRec( cmd, curr_seg, count, need32, (struct pubdef_data *)StringBufferEnd );
             d = (struct pubdef_data *)StringBufferEnd;
-            pbuf = StringBufferEnd + 1024;
-            Mangle( sym, pbuf );
-            d->name = pbuf;
+            Mangle( sym, d->name );
             size = 10; /* =size of an empty PUBDEF record */
             count = 0;
             need32 = FALSE;
         }
         if ( ModuleInfo.convert_uppercase )
             _strupr( d->name );
-        pbuf += symsize + 1;
         curr_seg = sym->segment;
         if( sym->offset > 0xffffUL )
             need32 = TRUE;
 
         size += symsize + PUBITEMBASELEN;
+        d->len = symsize;
         d->offset = sym->offset;
         d->type.idx = 0;
         count++;
         DebugMsg(("omf_write_pub(%u): %s, ofs=%Xh, rec_size=%u\n", count, d->name, d->offset, size ));
-        d++;
+        d = (struct pubdef_data *)(d->name + d->len);
     }
     if ( count )
         WritePubRec( cmd, curr_seg, count, need32, (struct pubdef_data *)StringBufferEnd );
@@ -1377,7 +1375,7 @@ void omf_write_modend( struct fixup *fixup, uint_32 displ )
             obj.d.modend.ref.log.target_datum = GetSegIdx( sym->segment );
         }
 
-        if( fixup->frame_type != EMPTY && fixup->frame_type != FRAME_SEG ) {
+        if( fixup->frame_type != FRAME_NONE && fixup->frame_type != FRAME_SEG ) {
             obj.d.modend.ref.log.frame = (uint_8)fixup->frame_type;
         } else {
             obj.d.modend.ref.log.frame = FRAME_TARG;

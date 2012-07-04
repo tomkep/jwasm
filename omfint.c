@@ -498,10 +498,8 @@ static int FFQUAL writePubdef( struct omf_wfile *out, struct omf_rec *objr )
 /**************************************************************************/
 {
     int         is32;
-    const char  *name;
-    size_t      name_len;
+    int         i;
     struct pubdef_data *pubdata;
-    struct pubdef_data *pubstop;
 
     /**/myassert( objr != NULL );
     /**/myassert(   objr->command == CMD_PUBDEF ||
@@ -512,19 +510,16 @@ static int FFQUAL writePubdef( struct omf_wfile *out, struct omf_rec *objr )
     writeBase( out, objr );
     pubdata = objr->d.pubdef.pubs;
     if( pubdata != NULL ) {
-        pubstop = pubdata + objr->d.pubdef.num_pubs;
-        while( pubdata < pubstop ) {
-            name = pubdata->name;
-            name_len = strlen( name );
-            PutByte( out, name_len );
-            PutMem( out, (uint_8 *)name, (size_t)name_len );
+        for ( i = 0; i < objr->d.pubdef.num_pubs; i++ ) {
+            PutByte( out, pubdata->len );
+            PutMem( out, (uint_8 *)pubdata->name, (size_t)pubdata->len );
             if( is32 ) {
                 PutDword( out, pubdata->offset );
             } else {
                 PutWord( out, pubdata->offset );
             }
             PutIndex( out, pubdata->type.idx );
-            ++pubdata;
+            pubdata = (struct pubdef_data *)(pubdata->name + pubdata->len);
         }
     }
     WEndRec( out );

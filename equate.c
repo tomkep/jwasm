@@ -51,45 +51,18 @@ const int_64 minintvalues[] = { 0xffffffff00000000i64, 0xffffffff00000000i64,
 };
 #endif
 
-#if FASTPASS
-
-/* for FASTPASS, just pass 1 is a full pass, the other passes
- don't start from scratch and they just assemble the preprocessed
- source. To be able to restart the assembly process from a certain
- location within the source, it's necessary to save the value of
- assembly time variables.
- */
-
-static void SaveVariableState( struct asym *sym )
-/***********************************************/
-{
-    struct equ_item *p;
-    DebugMsg1(( "SaveVariableState(%s)=%d\n", sym->name, sym->value ));
-    sym->saved = TRUE; /* don't try to save this symbol (anymore) */
-    p = AsmAlloc( sizeof( struct equ_item ) );
-    p->next = NULL;
-    p->sym = sym;
-    p->lvalue   = sym->value;
-    p->hvalue   = sym->value3264; /* v2.05: added */
-    p->isdefined = sym->isdefined;
-    if ( modstate.EquTail ) {
-        modstate.EquTail->next = p;
-        modstate.EquTail = p;
-    } else {
-        modstate.EquHead = modstate.EquTail = p;
-    }
-//    printf("state of symbol >%s< saved, value=%u, defined=%u\n", sym->name, sym->value, sym->defined);
-}
-#endif
+/* set the value of a constant (EQU) or an assembly time variable (=) */
 
 static void SetValue( struct asym *sym, struct expr *opndx )
 /**********************************************************/
 {
-    sym->equate = TRUE;
+    sym->isequate = TRUE;
     sym->state = SYM_INTERNAL;
     sym->isdefined = TRUE;
     if ( opndx->kind == EXPR_CONST ) {
-        sym->mem_type = MT_ABS;
+        /* v2.07: use expression's memtype */
+        //sym->mem_type = MT_ABS;
+        sym->mem_type = opndx->mem_type;
         sym->uvalue = opndx->uvalue;
         sym->value3264 = opndx->hvalue;
         sym->segment = NULL;
@@ -118,6 +91,10 @@ static void SetValue( struct asym *sym, struct expr *opndx )
     return;
 }
 
+/* the '=' directive defines an assembly time variable.
+ * this can only be a number, with or without "type".
+ */
+
 static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
 /***************************************************************************/
 {
@@ -134,6 +111,7 @@ static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
         //opndx.llvalue = *(uint_64 *)(tokenarray[2].string_ptr - sizeof(uint_64) );
         myatoi128( tokenarray[i].string_ptr, &opndx.llvalue, tokenarray[i].numbase, tokenarray[i].numlen );
         opndx.kind = EXPR_CONST;
+        opndx.mem_type = MT_EMPTY; /* v2.07: added */
     } else {
         if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
             return( NULL );
@@ -141,6 +119,8 @@ static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
             AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( NULL );
         }
+        /* a relocatable item (EXPR_ADDR) is accepted if it is guess of the
+         * expression evaluator, which encountered a forward ref */
         if( opndx.kind != EXPR_CONST &&
            ( opndx.kind != EXPR_ADDR ||
             opndx.indirect == TRUE ||
@@ -165,7 +145,8 @@ static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
             sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
         }
         sym->variable  = TRUE;
-    } else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->mem_type == MT_ABS ) {
+    //} else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->mem_type == MT_ABS ) {
+    } else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->mem_type == MT_EMPTY ) {
         sym_ext2int( sym );
         sym->variable  = TRUE;
     } else if ( sym->state != SYM_INTERNAL ||
@@ -183,7 +164,7 @@ static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
 #endif
     sym->variable = TRUE;
     SetValue( sym, &opndx );
-    DebugMsg1(( "CreateAssemblyTimeVariable(%s)=%d\n", name, sym->value ));
+    DebugMsg1(( "CreateAssemblyTimeVariable(%s) memtype=%Xh value=%d\n", name, sym->mem_type, sym->value ));
     return( sym );
 }
 
@@ -197,7 +178,7 @@ struct asym *CreateVariable( const char *name, int value )
 {
     struct asym      *sym;
 
-    DebugMsg1(( "CreateVariableEx(%s, %d ) enter\n", name, value ));
+    DebugMsg1(( "CreateVariable(%s, %d ) enter\n", name, value ));
 
     sym = SymSearch( name );
     if( sym == NULL ) {
@@ -207,7 +188,7 @@ struct asym *CreateVariable( const char *name, int value )
 #endif
     } else if ( sym->state == SYM_UNDEFINED ) {
         sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
-    } else if ( sym->equate == FALSE ) {
+    } else if ( sym->isequate == FALSE ) {
         AsmErr( SYMBOL_REDEFINITION, name );
         return( NULL );
     }
@@ -218,10 +199,10 @@ struct asym *CreateVariable( const char *name, int value )
 #endif
     sym->isdefined  = TRUE;
     sym->state    = SYM_INTERNAL;
-    sym->mem_type = MT_ABS;
+    //sym->mem_type = MT_ABS;
     sym->variable = TRUE;
     sym->offset   = value;
-    sym->equate   = TRUE;
+    sym->isequate = TRUE;
     return( sym );
 }
 
@@ -229,7 +210,7 @@ struct asym *CreateVariable( const char *name, int value )
  * CreateConstant()
  * this is the worker behind EQU.
  * EQU may define 3 different types of equates:
- * - numbers
+ * - numbers (with or without "type")
  * - relocatable items ( aliases )
  * - text macros
  * the argument may be
@@ -264,7 +245,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
 
         return ( SetTextMacro( tokenarray, sym, name, tokenarray[2].tokpos ) );
 
-    } else if( sym->equate == FALSE ) {
+    } else if( sym->isequate == FALSE ) {
 
         DebugMsg1(( "CreateConstant(%s) state=%u, mem_type=%Xh, value=%" FX32 ", symbol redefinition\n", name, sym->state, sym->mem_type, sym->value));
         AsmErr( SYMBOL_REDEFINITION, name );
@@ -294,6 +275,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
         //opndx.string = NULL;
         opndx.instr = EMPTY;
         opndx.kind = EXPR_CONST;
+        opndx.mem_type = MT_EMPTY; /* v2.07: added */
         opndx.flags1 = 0;
         rc = NOT_ERROR;
         //DebugMsg1(( "CreateConstant(%s): simple numeric value=%" FX32 "\n", name, tokenarray[2].value64 ));
@@ -370,7 +352,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
         //}
         sym->variable = FALSE;
         SetValue( sym, &opndx );
-        DebugMsg1(("CreateConstant(%s): memtype=%X value=%I64X isproc=%u variable=%u\n", name, sym->mem_type, sym->value, sym->value3264, sym->isproc, sym->variable ));
+        DebugMsg1(("CreateConstant(%s): memtype=%Xh value=%" I64X_SPEC " isproc=%u variable=%u\n", name, sym->mem_type, sym->value, sym->value3264, sym->isproc, sym->variable ));
         return( sym );
     }
     DebugMsg1(("CreateConstant(%s): value is NOT numeric, calling SetTextMacro()\n", name ));

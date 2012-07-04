@@ -57,7 +57,7 @@ static int ms64_decorate( const struct asym *sym, char *buffer );
  */
 
 static const mangle_func fcmanglers[] = {
-    ms32_decorate, /* FCT_MS32 */
+    ms32_decorate, /* FCT_MSC */
 #if OWFC_SUPPORT
     ow_decorate,   /* FCT_WATCOMC */
 #endif

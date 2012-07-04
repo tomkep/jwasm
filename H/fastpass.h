@@ -18,6 +18,7 @@ struct equ_item {
     struct asym *sym;
     int lvalue;
     int hvalue;
+    enum memtype mem_type; /* v2.07: added */
     bool isdefined;
 };
 
@@ -74,6 +75,7 @@ void ContextSaveState( void );
 void StoreLine( char *, uint_32 );
 void SkipSavedState( void );
 struct line_item *RestoreState( void );
+void SaveVariableState( struct asym *sym );
 
 #define FStoreLine() if ( Parse_Pass == PASS_1 ) StoreLine( CurrSource, list_pos )
 

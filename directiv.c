@@ -412,12 +412,13 @@ ret_code SegOrderDirective( int i, struct asm_tok tokenarray[] )
         AsmErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
         return( ERROR );
     }
-
+#if COFF_SUPPORT || ELF_SUPPORT
     if ( Options.output_format != OFORMAT_OMF &&
         Options.output_format != OFORMAT_BIN ) {
         if ( Parse_Pass == PASS_1 )
             AsmWarn( 2, DIRECTIVE_IGNORED_FOR_COFF, tokenarray[i].string_ptr );
     } else {
+#endif
 #if 1 /* v2.05 */
         ModuleInfo.segorder = GetSflagsSp( tokenarray[i].tokval );
 #else
@@ -428,6 +429,8 @@ ret_code SegOrderDirective( int i, struct asm_tok tokenarray[] )
         default:          ModuleInfo.segorder = SEGORDER_SEQ;     break;
         }
 #endif
+#if COFF_SUPPORT || ELF_SUPPORT
     }
+#endif
     return( NOT_ERROR );
 }

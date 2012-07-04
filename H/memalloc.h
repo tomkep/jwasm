@@ -41,8 +41,8 @@ extern void MemFree( void *ptr );
 #define myalloca  alloca
 #include <malloc.h>
 #elif defined(__GNUC__) || defined(__TINYC__)
-//#include <stdlib.h> /* v2.06: stdlib.h is already included in globals.h */
 #define myalloca  alloca
+#include <malloc.h>  /* added v2.07 */
 #elif defined(__PCC__)
 #define myalloca  _alloca
 #include <malloc.h>

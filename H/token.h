@@ -72,7 +72,7 @@ struct asm_tok {
 #endif
     union {
         unsigned char dirtype;    /* T_DIRECTIVE: type */
-        unsigned char bytval;     /* T_STYPE: index type table (ST_xxx) */
+        unsigned char bytval;     /* T_STYPE: memtype */
         unsigned char precedence; /* T_UNARY_OPERATOR/T_BINARY_OPERATOR */
         char string_delim;        /* T_STRING: string delimiter */
         char floattype;           /* T_FLOAT: 0 or 'r' */

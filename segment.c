@@ -53,14 +53,21 @@ extern ret_code    EndstructDirective( int, struct asm_tok tokenarray[] );
 struct asym  symPC = { NULL,"$", 0 };  /* the '$' symbol */
 struct asym  *symCurSeg;     /* @CurSeg symbol */
 
-#define INIT_ATTR       0x01
-#define INIT_ALIGN      0x02
-#define INIT_COMBINE    0x04
-#define INIT_SEGSIZE    0x08
-#define INIT_CHAR       0x10
-#define INIT_AT         0x20
-#define INIT_FLAT       0x40
-#define INIT_ALIGNPARAM 0x80
+#define INIT_ATTR         0x01 /* READONLY attribute */
+#define INIT_ALIGN        0x02 /* BYTE, WORD, PARA, DWORD, ... */
+#define INIT_ALIGN_PARAM  (0x80 | INIT_ALIGN) /* ALIGN(x) */
+#define INIT_COMBINE      0x04 /* PRIVATE, PUBLIC, STACK, COMMON */
+#define INIT_COMBINE_AT   (0x80 | INIT_COMBINE) /* AT */
+#if COMDATSUPP
+#define INIT_COMBINE_COMDAT (0xC0 | INIT_COMBINE) /* COMDAT */
+#endif
+#define INIT_OFSSIZE      0x08 /* USE16, USE32, ... */
+#define INIT_OFSSIZE_FLAT (0x80 | INIT_OFSSIZE) /* FLAT */
+#define INIT_ALIAS        0x10 /* ALIAS(x) */
+#define INIT_CHAR         0x20 /* DISCARD, SHARED, EXECUTE, ... */
+#define INIT_CHAR_INFO    (0x80 | INIT_CHAR) /* INFO */
+
+#define INIT_EXCL_MASK    0x1F  /* exclusive bits */
 
 struct typeinfo {
     uint_8    value;      /* value assigned to the token */
@@ -115,7 +122,9 @@ void SetCurPC( struct asym *sym )
 {
     if( CurrStruct ) {
         //symPC.segment = NULL;
-        symPC.mem_type = MT_ABS;
+        //symPC.mem_type = MT_ABS;
+        symPC.mem_type = MT_EMPTY;
+        symPC.segment = NULL; /* v2.07: needed again */
         symPC.offset = CurrStruct->sym.offset + (CurrStruct->next ? CurrStruct->next->sym.offset : 0);
     } else {
         symPC.mem_type = MT_NEAR;
@@ -481,7 +490,9 @@ ret_code GrpDir( int i, struct asm_tok tokenarray[] )
         } else {
             /* v2.04: don't check the "defined" flag. It's for IFDEF only! */
             //if( seg == NULL || seg->sym.state != SYM_SEG || seg->sym.defined == FALSE ) {
-            if( seg == NULL || seg->sym.state != SYM_SEG ) {
+            /* v2.07: check the "segment" field instead of "defined" flag! */
+            //if( seg == NULL || seg->sym.state != SYM_SEG ) {
+            if( seg == NULL || seg->sym.state != SYM_SEG || seg->sym.segment == NULL ) {
                 AsmErr( SEG_NOT_DEFINED, name );
                 return( ERROR );
             }
@@ -596,7 +607,7 @@ uint GetSegIdx( const struct asym *sym )
 /* get idx to sym's segment */
 {
     if( sym )
-        return( ((struct dsym *)sym)->e.seginfo->idx );
+        return( ((struct dsym *)sym)->e.seginfo->seg_idx );
     return( 0 );
 }
 
@@ -618,8 +629,9 @@ int GetSymOfssize( const struct asym *sym )
 {
     struct dsym   *curr;
 
-    if ( sym->mem_type == MT_ABS )
-        return( USE16 );
+    /* v2.07: MT_ABS has been removed */
+    //if ( sym->mem_type == MT_ABS )
+    //    return( USE16 );
 
     curr = GetSegm( sym );
     if( curr == NULL ) {
@@ -631,6 +643,9 @@ int GetSymOfssize( const struct asym *sym )
             return( sym->Ofssize );
         if( sym->state == SYM_SEG  )
             return( ((struct dsym *)sym)->e.seginfo->Ofssize );
+        /* v2.07: added */
+        if ( sym->mem_type == MT_EMPTY )
+            return( USE16 );
     } else {
         return( curr->e.seginfo->Ofssize );
     }
@@ -784,7 +799,7 @@ struct asym *CreateIntSegment( const char *name, const char *classname, uint_8 a
         seg = CreateSegment( NULL, name, FALSE );
     if ( seg ) {
         if( seg->e.seginfo->lname_idx == 0 ) {
-            seg->e.seginfo->idx = ++ModuleInfo.g.num_segs;
+            seg->e.seginfo->seg_idx = ++ModuleInfo.g.num_segs;
             seg->e.seginfo->lname_idx = ++LnamesIdx;
             AddLnameData( &seg->sym );
         }
@@ -914,7 +929,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         sym = (struct asym *)CreateSegment( (struct dsym *)sym, name, TRUE );
         sym->list = TRUE; /* always list segments */
         dir = (struct dsym *)sym;
-        dir->e.seginfo->idx = ++ModuleInfo.g.num_segs;
+        dir->e.seginfo->seg_idx = ++ModuleInfo.g.num_segs;
         is_old = FALSE;
         /*
          * initialize segment with values from the one without suffix
@@ -961,7 +976,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
              * So unlink the segment and add it at the end.
              */
             UnlinkSeg( dir );
-            dir->e.seginfo->idx = ++ModuleInfo.g.num_segs;
+            dir->e.seginfo->seg_idx = ++ModuleInfo.g.num_segs;
             dir->next = NULL;
             if ( SymTables[TAB_SEG].head == NULL )
                 SymTables[TAB_SEG].head = SymTables[TAB_SEG].tail = dir;
@@ -1013,36 +1028,43 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         /* initstate is used to check if any field is already
          * initialized
          */
-        if( ( type->init != INIT_CHAR ) && ( initstate & type->init ) ) {
+        if( initstate & INIT_EXCL_MASK & type->init ) {
             AsmErr( SEGMENT_ATTRIBUTE_DEFINED_ALREADY, token );
             continue;
         } else {
             initstate |= type->init; /* mark it initialized */
         }
 
-        if ( type->init & INIT_ATTR ) {
+        switch ( type->init ) {
+        case INIT_ATTR:
             dir->e.seginfo->readonly = TRUE;
-        } else if ( type->init & INIT_ALIGNPARAM ) {
+            break;
+        case INIT_ALIGN:
+            DebugMsg1(("SegmentDir(%s): align attribute found\n", name ));
+            dir->e.seginfo->alignment = type->value;
+            break;
+        case INIT_ALIGN_PARAM:
             DebugMsg1(("SegmentDir(%s): ALIGN() found\n", name ));
             if ( Options.output_format == OFORMAT_OMF ) {
                 AsmErr( NOT_SUPPORTED_WITH_OMF_FORMAT, tokenarray[i].string_ptr );
+                i = Token_Count; /* stop further parsing of this line */
                 break;
             }
             i++;
             if ( tokenarray[i].token != T_OP_BRACKET ) {
                 AsmErr( EXPECTED, "(" );
-                continue;
+                break;
             }
             i++;
             if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
-                continue;
+                break;
             if ( tokenarray[i].token != T_CL_BRACKET ) {
                 AsmErr( EXPECTED, ")" );
-                continue;
+                break;
             }
             if ( opndx.kind != EXPR_CONST ) {
                 AsmError( CONSTANT_EXPECTED );
-                continue;
+                break;
             }
             /*
              COFF allows alignment values
@@ -1053,11 +1075,12 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
                 AsmError( POWER_OF_2 );
             }
             dir->e.seginfo->alignment = temp2;
-
-        } else if ( type->init & INIT_ALIGN ) {
-            DebugMsg1(("SegmentDir(%s): align attribute found\n", name ));
-            dir->e.seginfo->alignment = type->value;
-        } else if ( type->init & INIT_AT ) {
+            break;
+        case INIT_COMBINE:
+            DebugMsg1(("SegmentDir(%s): combine attribute found\n", name ));
+            dir->e.seginfo->combine = type->value;
+            break;
+        case INIT_COMBINE_AT:
             DebugMsg1(("SegmentDir(%s): AT found\n", name ));
             dir->e.seginfo->combine = type->value;
             /* v2.05: always use MAX_SEGALIGNMENT */
@@ -1072,32 +1095,141 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
                     AsmError( CONSTANT_EXPECTED );
                 }
             }
-        } else if ( type->init & INIT_COMBINE ) {
-            DebugMsg1(("SegmentDir(%s): combine attribute found\n", name ));
+            break;
+#if COMDATSUPP
+        case INIT_COMBINE_COMDAT:
+            DebugMsg1(("SegmentDir(%s): COMDAT found\n", name ));
+            if ( Options.output_format != OFORMAT_COFF ) {
+                AsmErr( NOT_SUPPORTED_WITH_CURR_FORMAT, tokenarray[i].string_ptr );
+                i = Token_Count; /* stop further parsing of this line */
+                break;
+            }
+            i++;
+            if ( tokenarray[i].token != T_OP_BRACKET ) {
+                AsmErr( EXPECTED, "(" );
+                break;
+            }
+            i++;
+            if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
+                break;
+            if ( opndx.kind != EXPR_CONST ) {
+                AsmError( CONSTANT_EXPECTED );
+                i = Token_Count; /* stop further parsing of this line */
+                break;
+            }
+            if ( opndx.value < 1 || opndx.value > 6 ) {
+                AsmErr( VALUE_NOT_WITHIN_ALLOWED_RANGE, "1-6" );
+            } else {
+                /* if value is IMAGE_COMDAT_SELECT_ASSOCIATIVE,
+                 * get the associated segment name argument.
+                 */
+                if ( opndx.value == 5 ) {
+                    struct asym *sym2;
+                    if ( tokenarray[i].token != T_COMMA ) {
+                        AsmError( EXPECTING_COMMA );
+                        i = Token_Count; /* stop further parsing of this line */
+                        break;
+                    }
+                    i++;
+                    if ( tokenarray[i].token != T_ID ) {
+                        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+                        i = Token_Count; /* stop further parsing of this line */
+                        break;
+                    }
+                    /* associated segment must be COMDAT, but not associative */
+                    sym2 = SymSearch( tokenarray[i].string_ptr );
+                    if ( sym2 == NULL ||
+                        sym2->state != SYM_SEG ||
+                        ((struct dsym *)sym2)->e.seginfo->comdat_selection == 0 ||
+                        ((struct dsym *)sym2)->e.seginfo->comdat_selection == 5 )
+                        AsmErr( INVALID_ASSOCIATED_SEGMENT, tokenarray[i].string_ptr );
+                    else
+                        dir->e.seginfo->comdat_number = ((struct dsym *)sym2)->e.seginfo->seg_idx;
+                    i++;
+                }
+            }
+            if ( tokenarray[i].token != T_CL_BRACKET ) {
+                AsmErr( EXPECTED, ")" );
+                break;
+            }
+            dir->e.seginfo->comdat_selection = opndx.value;
             dir->e.seginfo->combine = type->value;
-        } else if ( type->init & INIT_FLAT ) {
-            DefineFlatGroup();
-#if AMD64_SUPPORT
-            dir->e.seginfo->Ofssize = ModuleInfo.defOfssize;
-#else
-            dir->e.seginfo->Ofssize = USE32;
+            break;
 #endif
-            /* put the segment into the FLAT group.
-             * this is not quite Masm-compatible, because trying to put
-             * the segment into another group will cause an error.
-             */
-            dir->e.seginfo->group = &ModuleInfo.flat_grp->sym;
-        } else if ( type->init & INIT_SEGSIZE ) {
-            dir->e.seginfo->Ofssize = type->value;
+        case INIT_OFSSIZE:
+        case INIT_OFSSIZE_FLAT:
+            /* v2.07: check for compatible cpu mode */
+            if ( type->value == USE32 && ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 )
+#if AMD64_SUPPORT
+                || type->value == USE64 && ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_64 )
+#endif
+               ) {
+                AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+                break;
+            }
+            if ( type->init == INIT_OFSSIZE_FLAT ) {
+                DefineFlatGroup();
+#if AMD64_SUPPORT
+                dir->e.seginfo->Ofssize = ModuleInfo.defOfssize;
+#else
+                dir->e.seginfo->Ofssize = USE32;
+#endif
+                /* put the segment into the FLAT group.
+                 * this is not quite Masm-compatible, because trying to put
+                 * the segment into another group will cause an error.
+                 */
+                dir->e.seginfo->group = &ModuleInfo.flat_grp->sym;
+            } else
+                dir->e.seginfo->Ofssize = type->value;
+            break;
 #if COFF_SUPPORT || ELF_SUPPORT
-        } else if( type->init & INIT_CHAR ) {
+        case INIT_CHAR_INFO:
+            dir->e.seginfo->info = TRUE;
+            break;
+        case INIT_CHAR:
             DebugMsg1(("SegmentDir(%s): characteristics found\n", name ));
             ; /* characteristics are restricted to COFF/ELF */
             if ( Options.output_format == OFORMAT_OMF || Options.output_format == OFORMAT_BIN ) {
                 AsmErr( NOT_SUPPORTED_WITH_CURR_FORMAT, tokenarray[i].string_ptr );
-                continue;
+            } else
+                dir->e.seginfo->characteristics |= type->value;
+            break;
+        case INIT_ALIAS:
+            DebugMsg1(("SegmentDir(%s): ALIAS found\n", name ));
+            if ( Options.output_format != OFORMAT_COFF &&
+                Options.output_format != OFORMAT_ELF ) {
+                AsmErr( NOT_SUPPORTED_WITH_CURR_FORMAT, tokenarray[i].string_ptr );
+                i = Token_Count; /* stop further parsing of this line */
+                break;
             }
-            dir->e.seginfo->characteristics |= type->value;
+            i++;
+            if ( tokenarray[i].token != T_OP_BRACKET ) {
+                AsmErr( EXPECTED, "(" );
+                break;
+            }
+            i++;
+            if ( tokenarray[i].token != T_STRING ||
+                ( tokenarray[i].string_delim != '"' &&
+                tokenarray[i].string_delim != '\'' ) ) {
+                AsmErr( SYNTAX_ERROR_EX, token );
+                i = Token_Count; /* stop further parsing of this line */
+                break;
+            }
+            temp = i;
+            i++;
+            if ( tokenarray[i].token != T_CL_BRACKET ) {
+                AsmErr( EXPECTED, ")" );
+                break;
+            }
+            dir->e.seginfo->aliasname = AsmAlloc( tokenarray[temp].stringlen );
+            memcpy( dir->e.seginfo->aliasname, tokenarray[temp].string_ptr+1, tokenarray[temp].stringlen );
+            *(dir->e.seginfo->aliasname+tokenarray[temp].stringlen) = NULLC;
+            break;
+#endif
+#ifdef DEBUG_OUT
+        default: /* shouldn't happen */
+            myassert( 0 );
+            break;
 #endif
         }
     } /* end for */
@@ -1134,7 +1266,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         else if ( oldOfssize  != dir->e.seginfo->Ofssize )
             txt = TXT_SEG_WORD_SIZE;
         else if ( oldclassidx != dir->e.seginfo->class_name_idx )
-            txt = TXT_CLASS;
+            txt = TXT_CLASS; /* Masm warns only! */
         else if ( oldcharacteristics != dir->e.seginfo->characteristics )
             txt = TXT_CHARACTERISTICS;
 

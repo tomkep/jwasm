@@ -9,6 +9,7 @@
 
 /*---------------------------------------------------------------------------*/
 
+extern struct asym   *CreateExternal( struct asym *sym, const char *name, char weak );
 extern struct asym   *MakeExtern( const char *name, enum memtype type, struct asym * vartype, struct asym *, unsigned char );
 //extern struct asym   *CreateProto( int, const char * );
 

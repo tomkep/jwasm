@@ -208,7 +208,8 @@ enum directive_flags {
     DF_NOSTRUC  = 0x10, /* directive not allowed inside structs/unions */
     DF_NOCONCAT = 0x20, /* don't concat line */
     DF_PROC     = 0x40, /* directive triggers prologue generation */
-    DF_STORE    = 0x80  /* for FASTPASS */
+    DF_STORE    = 0x80, /* FASTPASS: directive triggers line store */
+    DF_CGEN     = 0x100 /* directive generates lines */
 };
 
 /* values for <bytval> if type == RWT_DIRECTIVE */

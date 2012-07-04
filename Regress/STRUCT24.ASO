@@ -1,0 +1,29 @@
+
+;--- access to a struct with incompatible size must be flagged
+
+	.386
+	.model flat
+	option casemap:none
+
+S1 STRUCT
+x  dd ?
+S1 ENDS
+
+S2 STRUCT
+y  dw ?
+S2 ENDS
+
+S3 STRUCT
+x  dd ?
+y  dd ?
+S3 ENDS
+
+	.code
+
+	assume ebx:ptr S2
+	mov ax, [ebx].y        ;1. ok
+	mov eax, [ebx.S1]      ;2. ok
+	mov eax, [ebx.S1.x]    ;3. ok
+	mov eax, [ebx.S3]      ;4. should fail
+
+	end

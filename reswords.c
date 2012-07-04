@@ -72,6 +72,30 @@ enum operand_sets {
     OP_XMM_M32   = ( OP_XMM | OP_M32 ),
     OP_XMM_M64   = ( OP_XMM | OP_M64 ),
     OP_XMM_M128  = ( OP_XMM | OP_M128 ),
+#if MASM_SSE_MEMX
+/* extended Masm syntax: sometimes Masm accepts 2 mem types
+ * for the memory operand, although the mem access will always
+ * be QWORD/OWORD.
+ */
+    OP_MMX_M64_08  = ( OP_MMX | OP_M64  | OP_M08 ),
+    OP_MMX_M64_16  = ( OP_MMX | OP_M64  | OP_M16 ),
+    OP_MMX_M64_32  = ( OP_MMX | OP_M64  | OP_M32 ),
+
+    OP_XMM_M128_08 = ( OP_XMM | OP_M128 | OP_M08 ),
+    OP_XMM_M128_16 = ( OP_XMM | OP_M128 | OP_M16 ),
+    OP_XMM_M128_32 = ( OP_XMM | OP_M128 | OP_M32 ),
+    OP_XMM_M128_64 = ( OP_XMM | OP_M128 | OP_M64 ),
+#else
+/* see macro OpCls() below */
+#define OPC_MMXMMX_M64_08NONE  OPC_MMXMMX_M64NONE
+#define OPC_MMXMMX_M64_16NONE  OPC_MMXMMX_M64NONE
+#define OPC_MMXMMX_M64_32NONE  OPC_MMXMMX_M64NONE
+
+#define OPC_XMMXMM_M128_08NONE OPC_XMMXMM_M128NONE
+#define OPC_XMMXMM_M128_16NONE OPC_XMMXMM_M128NONE
+#define OPC_XMMXMM_M128_32NONE OPC_XMMXMM_M128NONE
+#define OPC_XMMXMM_M128_64NONE OPC_XMMXMM_M128NONE
+#endif
 #if AVXSUPP
     OP_YMM_M256  = ( OP_YMM | OP_M256 ),
 #endif
@@ -277,7 +301,7 @@ struct ReservedWord ResWordTable[] = {
  * but in fact it's the wrong place, since the content of vex_flags[]
  * are associated with opcodes, not with instruction variants.
  */
-uint_8 vex_flags[] = {
+const uint_8 vex_flags[] = {
     /* flags for the AVX instructions in instruct.h. The order must
      * be equal to the one in instruct.h! ( this is to be improved.)
      */

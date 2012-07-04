@@ -95,16 +95,25 @@ extern int lq_line;
 struct asym WordSize = { NULL,"@WordSize", 0 };
 
 /* names for output formats. order must match enum oformat */
-const struct format_options formatoptions[] = {
+static const struct format_options formatoptions[] = {
     { NULL,     BIN_DISALLOWED,  "BIN"  },
     { NULL,     OMF_DISALLOWED,  "OMF"  },
 #if COFF_SUPPORT
-    { NULL,     COFF_DISALLOWED, "COFF" },
+    { NULL,     COFF32_DISALLOWED, "COFF" },
 #endif
 #if ELF_SUPPORT
-    { elf_init, ELF_DISALLOWED,  "ELF"  },
+    { elf_init, ELF32_DISALLOWED,  "ELF"  },
 #endif
 };
+#if AMD64_SUPPORT
+#if COFF_SUPPORT
+const struct format_options coff64_fmtopt = { NULL, COFF64_DISALLOWED, "PE32+" };
+#endif
+#if ELF_SUPPORT
+const struct format_options elf64_fmtopt = { elf_init, ELF64_DISALLOWED,  "ELF64"  };
+#endif
+#endif
+
 
 FILE                    *CurrFile[NUM_FILE_TYPES];  /* ASM, ERR, OBJ and LST */
 char                    *CurrFName[NUM_FILE_TYPES];
@@ -307,15 +316,13 @@ static ret_code WriteContent( void )
         }
         for ( curr = SymTables[TAB_EXT].head; curr != NULL ; curr = curr->next ) {
             DebugMsg(("WriteContent: ext=%s, isproc=%u, weak=%u\n", curr->sym.name, curr->sym.isproc, curr->sym.weak ));
-            if ( curr->sym.isproc && ( curr->sym.weak == FALSE ) ) {
-                //curr->sym.dllname &&
-                //*curr->sym.dllname ) {
+            if ( curr->sym.isproc && curr->sym.weak == FALSE &&
+                curr->sym.dllname && *curr->sym.dllname != NULLC ) {
                 int size;
-                if ( curr->sym.dllname == NULL || *curr->sym.dllname == NULLC )
-                    continue;
                 Mangle( &curr->sym, StringBufferEnd );
                 size = sprintf( CurrSource, "import '%s'  %s.%s\n", StringBufferEnd, curr->sym.dllname, curr->sym.name );
-                fwrite( CurrSource, 1, size, ld );
+                if ( fwrite( CurrSource, 1, size, ld ) != size )
+                    WriteError();
             }
         }
         fclose( ld );
@@ -531,10 +538,7 @@ static void CmdlParamsInit( int pass )
         strcat( tmp, uscores );
 
         /* define target */
-        sym = SymCreate( tmp, TRUE );
-        sym->state = SYM_INTERNAL;
-        sym->mem_type = MT_ABS;
-        sym->defined = TRUE;
+        sym = CreateVariable( tmp, 0 );
         sym->predefined = TRUE;
 
         p = NULL;
@@ -558,10 +562,7 @@ static void CmdlParamsInit( int pass )
             p = "__UNIX__";
         }
         if ( p ) {
-            sym = SymCreate( p, TRUE );
-            sym->state = SYM_INTERNAL;
-            sym->mem_type = MT_ABS;
-            sym->defined = TRUE;
+            sym = CreateVariable( p, 0 );
             sym->predefined = TRUE;
         }
     }
@@ -846,7 +847,7 @@ static void set_ext_idx( void )
         if ( curr->sym.used )
             curr->sym.weak = FALSE;
         /* skip COMM and unused EXTERNDEF/PROTO items. */
-        if (( curr->sym.comm == TRUE ) || ( curr->sym.weak == TRUE ))
+        if (( curr->sym.iscomm == TRUE ) || ( curr->sym.weak == TRUE ))
             continue;
 #if FASTPASS==0
         /* v2.05: clear fixup list (used for backpatching in pass one) */
@@ -890,7 +891,7 @@ static void set_ext_idx( void )
     /* now scan the COMM items */
 
     for( curr = SymTables[TAB_EXT].head; curr != NULL; curr = curr->next ) {
-        if ( curr->sym.comm == FALSE )
+        if ( curr->sym.iscomm == FALSE )
             continue;
         index++;
         curr->sym.ext_idx = index;
@@ -900,6 +901,7 @@ static void set_ext_idx( void )
     return;
 }
 
+#if 0 /* v2.07: removed */
 /* scan - and clear - global queue (EXTERNDEFs).
  * items which have been defined within the module
  * will become public.
@@ -907,22 +909,22 @@ static void set_ext_idx( void )
  * They will become public when - and if - the PROC directive
  * for the symbol is met.
  */
-
 static void scan_globals( void )
 /******************************/
 {
     struct qnode    *curr;
     struct qnode    *next;
     struct asym     *sym;
-    /* make all symbols of type SYM_INTERNAL, which aren't
-     a constant, public.  */
-    if ( Options.all_symbols_public )
-        SymMakeAllSymbolsPublic();
 
     /* turn EXTERNDEFs into PUBLICs if defined in the module.
      * PROCs are handled differently - so ignore these entries here!
      */
-
+    /* obsolete since v2.07.
+     * it's simpler and better to make the symbol public if it turns
+     * from SYM_EXTERNAL to SYM_INTERNAL.
+     * the other case, that is, the EXTERNDEF comes AFTER the definition,
+     * is handled in ExterndefDirective()
+     */
     DebugMsg(("scan_globals: GlobalQueue=%X\n", ModuleInfo.g.GlobalQueue));
     for ( curr = ModuleInfo.g.GlobalQueue.head; curr; curr = next ) {
         next = curr->next;
@@ -940,6 +942,7 @@ static void scan_globals( void )
     /* the queue is empty now */
     ModuleInfo.g.GlobalQueue.head = NULL;
 }
+#endif
 
 /* checks after pass one has been finished without errors */
 
@@ -1188,8 +1191,8 @@ static void ModuleInit( void )
     //SimpleType[ST_PROC].mem_type = MT_NEAR;
 
     memset( SymTables, 0, sizeof( SymTables[0] ) * TAB_LAST );
-    if ( formatoptions[Options.output_format].init )
-        formatoptions[Options.output_format].init( &ModuleInfo );
+    if ( ModuleInfo.fmtopt->init )
+        ModuleInfo.fmtopt->init( &ModuleInfo );
     return;
 }
 
@@ -1389,6 +1392,14 @@ static void AssembleInit( const char *source )
     LinnumQueue.head = NULL;
 
     ModuleInfo.header_format = Options.header_format;
+#if AMD64_SUPPORT
+    if ( Options.header_format == HFORMAT_WIN64 )
+        ModuleInfo.fmtopt = &coff64_fmtopt;
+    else if ( Options.header_format == HFORMAT_ELF64 )
+        ModuleInfo.fmtopt = &elf64_fmtopt;
+    else
+#endif
+    ModuleInfo.fmtopt = &formatoptions[Options.output_format];
     SetFilenames( source );
 
 #if FASTPASS
@@ -1507,8 +1518,14 @@ int EXPQUAL AssembleModule( const char *source )
         if ( Parse_Pass == PASS_1 && ModuleInfo.g.error_count == 0 ) {
             DebugMsg(("AssembleModule(%u): pass 1 actions\n", Parse_Pass + 1));
 
+            /* make all symbols of type SYM_INTERNAL, which aren't
+             a constant, public.  */
+            if ( Options.all_symbols_public )
+                SymMakeAllSymbolsPublic();
+
             /* convert EXTERNDEFs into EXTERNs, PUBLICs or nothing */
-            scan_globals();
+            /* v2.07: removed */
+            //scan_globals();
             /* set index field in externals */
             set_ext_idx();
 #ifdef DEBUG_OUT

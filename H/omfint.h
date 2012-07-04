@@ -225,17 +225,17 @@ struct pubdef_info {
     struct base_info base;  /* base information                         */
     uint_16 num_pubs;       /* number of publics in following array     */
     struct pubdef_data {
-        char *name;         /* name of this public                      */
-        uint_32 offset;     /* public offset                            */
+        uint_32 offset;     /* public's offset/value                    */
         union {             /* see PUBDEF.h for more information        */
             uint_16 idx;    /* Intel OMF type index                     */
         } type;
+        uint_8 len;
+        char name[1];       /* name of this public                      */
     } *pubs;                /* array of size num_pubs                   */
 };
 /*
-    (This format for PUBDEFs is probably only useful for WOMP.)  No data
-    should be attached to this record.  Everything is described by the
-    pubs array.
+ No data should be attached to this record.  Everything is described by
+ the pubs array.
 */
 
 

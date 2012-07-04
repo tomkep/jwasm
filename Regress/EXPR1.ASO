@@ -29,7 +29,7 @@ v1	dd 0
 	mov eax,dword [v1]	;invalid (syntax error in expression)
 	mov eax,dword (v1)	;invalid (syntax error in expression)
 	mov eax,dword v1	;invalid (missing operator)
-	mov eax,dword (ebx)	;invalid (Masm: invalid use of register; JWasm: syntax error in expression)
+	mov eax,dword (ebx)	;invalid (invalid use of register)
 
     end
 

@@ -668,7 +668,10 @@ void ReleaseMacroData( struct dsym *macro )
     macro->e.macroinfo->data = NULL;
     macro->e.macroinfo->srcfile = 0;
     macro->sym.mac_vararg = FALSE;
-    macro->sym.isfunc = FALSE;
+    /* v2.07: the macro type should not change if a macro is
+     * PURGEd.
+     */
+    //macro->sym.isfunc = FALSE;
     return;
 }
 
@@ -714,6 +717,8 @@ ret_code MacroDir( int i, struct asm_tok tokenarray[] )
                 macro->e.macroinfo->data = NULL;
 #endif
             ReleaseMacroData( macro );
+            /* v2.07: isfunc isn't reset anymore in ReleaseMacroData() */
+            macro->sym.isfunc = FALSE;
             macro->sym.variable = TRUE;
         }
         store_data = TRUE;
@@ -728,6 +733,7 @@ ret_code MacroDir( int i, struct asm_tok tokenarray[] )
 
 /*
  * PURGE directive.
+ * syntax: PURGE macro [, macro, ... ]
  * Masm deletes the macro content, but the symbol name isn't released
  * and cannot be used for something else.
  * Text macros cannot be purged, because the PURGE arguments are expanded.

@@ -85,7 +85,7 @@ $(OUTD):
 $(OUTD)\$(name).dll : $(OUTD)/$(name)s.lib
 	$(linker) @<<
 $(lflagsw) $(OUTD)/$(name)s.lib
-/LIBPATH:"$(VCDIR)\Lib" /DLL /LIBPATH:"$(W32LIB)" kernel32.lib /OUT:$@
+/LIBPATH:"$(VCDIR)\Lib" /DLL "$(W32LIB)/kernel32.lib" /OUT:$@
 /EXPORT:AssembleModule /EXPORT:ParseCmdline /EXPORT:CmdlineFini
 <<
 

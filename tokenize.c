@@ -58,7 +58,8 @@ extern int cnttok1;
 static struct asm_tok *end_tokenarray;
 static char           *end_stringbuf;
 #endif
-extern char    *CurrComment;
+//extern char    *CurrComment;
+extern char    CurrComment[];
 
 static char    *token_stringbuf;  /* start token string buffer */
 char           *StringBufferEnd;  /* start free space in string buffer */
@@ -981,9 +982,10 @@ int Tokenize( char *line, unsigned int start, int rescan )
         if( *p.input == NULLC || *p.input == ';' ) {
             if ( *p.input == ';' ) {
                 int size = strlen( p.input );
-                memcpy( p.output, p.input, size + 1 );
-                CurrComment = p.output;
-                p.output += ( ( size + 4 ) & ~3 );
+                //memcpy( p.output, p.input, size + 1 );
+                //CurrComment = p.output;
+                //p.output += ( ( size + 4 ) & ~3 );
+                memcpy( CurrComment, p.input, size + 1 );
                 *p.input = NULLC;
             }
             /* if a comma is last token, concat lines ... with some exceptions

@@ -517,9 +517,11 @@ void SymMakeAllSymbolsPublic( void )
     for( i = 0; i < GHASH_TABLE_SIZE; i++ ) {
         for( sym = gsym_table[i]; sym; sym = sym->next ) {
             if ( sym->state == SYM_INTERNAL &&
-                 sym->mem_type != MT_ABS &&  /* no symbolic constants */
-                 sym->predefined == FALSE && /* no predefined symbols ($) */
-                 sym->public == FALSE ) {
+                /* v2.07: MT_ABS is obsolete */
+                //sym->mem_type != MT_ABS &&  /* no EQU or '=' constants */
+                sym->isequate == FALSE &&     /* no EQU or '=' constants */
+                sym->predefined == FALSE && /* no predefined symbols ($) */
+                sym->public == FALSE ) {
                 sym->public = TRUE;
                 AddPublicData( sym );
             }
@@ -592,14 +594,17 @@ void SymInit( void )
     /* add __JWASM__ numeric equate */
     sym = SymCreate( "__JWASM__", TRUE );
     sym->state = SYM_INTERNAL;
-    sym->mem_type = MT_ABS;
+    /* v2.07: MT_ABS is obsolete */
+    //sym->mem_type = MT_ABS;
     sym->isdefined = TRUE;
     sym->predefined = TRUE;
     sym->offset = _JWASM_VERSION_INT_;
 
     /* add @Line numeric equate */
     LineCur.sfunc_ptr = &UpdateLineNumber;
-    LineCur.mem_type = MT_ABS;
+    /* v2.07: MT_ABS is obsolete */
+    //LineCur.mem_type = MT_ABS;
+    LineCur.mem_type = MT_EMPTY;
     LineCur.state = SYM_INTERNAL;
     LineCur.isdefined = TRUE;
     LineCur.predefined = TRUE;
@@ -611,7 +616,9 @@ void SymInit( void )
     SymAddToTable( &LineCur );
 
     /* add @WordSize numeric equate */
-    WordSize.mem_type = MT_ABS;
+    /* v2.07: MT_ABS is obsolete */
+    //WordSize.mem_type = MT_ABS;
+    WordSize.mem_type = MT_EMPTY;
     WordSize.state = SYM_INTERNAL;
     WordSize.isdefined = TRUE;
     WordSize.predefined = TRUE;
@@ -729,7 +736,8 @@ static void DumpSymbol( struct asym *sym )
     case SYM_INTERNAL:
         if ( sym->isproc )
             type = "PROCEDURE";
-        else if ( sym->mem_type == MT_ABS )
+        //else if ( sym->mem_type == MT_ABS )
+        else if ( sym->segment == NULL )
             type = "NUMBER";
         else
             type = "INTERNAL";

@@ -81,6 +81,11 @@ OpCls( MGT8,     RGT8,       NONE  )
 OpCls( MMX,      I8_U,       NONE  )
 OpCls( MMX,      MMX,        NONE  )
 OpCls( MMX,      MMX_M64,    NONE  )
+#if MASM_SSE_MEMX
+OpCls( MMX,      MMX_M64_08, NONE  )
+OpCls( MMX,      MMX_M64_16, NONE  )
+OpCls( MMX,      MMX_M64_32, NONE  )
+#endif
 OpCls( MMX,      RMGT16,     NONE  )  /* MOVD, CVTSI2SD, CVTSI2SS */
 OpCls( MMX,      XMM,        NONE  )
 OpCls( MMX,      XMM_M64,    NONE  )
@@ -152,6 +157,12 @@ OpCls( XMM,      XMM_M16,    NONE  )
 OpCls( XMM,      XMM_M32,    NONE  )
 OpCls( XMM,      XMM_M64,    NONE  )
 OpCls( XMM,      XMM_M128,   NONE  )
+#if MASM_SSE_MEMX
+OpCls( XMM,      XMM_M128_08, NONE  )
+OpCls( XMM,      XMM_M128_16, NONE  )
+OpCls( XMM,      XMM_M128_32, NONE  )
+OpCls( XMM,      XMM_M128_64, NONE  )
+#endif
 #if AVXSUPP
 OpCls( XMM,      YMM_M256,   NONE  )
 OpCls( YMM,      M32,        NONE  )

@@ -54,7 +54,7 @@ LOPT = op quiet
 LOPTD = debug dwarf op symfile lib user32.lib
 !endif
 
-lflagsw = $(LOPTD) system nt_dll initinstance terminstance $(LOPT) op map=$^*, offset=0x5000000 export AssembleModule='_AssembleModule@4', ParseCmdline='_ParseCmdline@8', CmdlineFini='_CmdlineFini@0'
+lflagsw = $(LOPTD) format windows pe dll $(LOPT) op map=$^*, offset=0x5000000 export AssembleModule='_AssembleModule@4', ParseCmdline='_ParseCmdline@8', CmdlineFini='_CmdlineFini@0'
 
 CC=$(WATCOM)\binnt\wcc386 -q -3$(CCV) -bd -zc -bt=nt $(inc_dirs) $(extra_c_flags) -fo$@
 
@@ -90,6 +90,9 @@ $(OUTD):
 $(OUTD)/$(name).dll: $(proj_obj)
 	$(LINK) @<<
 $(lflagsw) file { $(proj_obj) } name $@
+Libpath $(WATCOM)\lib386 
+Libpath $(WATCOM)\lib386\nt
+Library kernel32, user32
 <<
 
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h

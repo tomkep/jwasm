@@ -1,13 +1,8 @@
 
 # this makefile (WMake) creates the Linux binary of JWasm.
-# Open Watcom v1.7 or v1.8 is used.
+# Open Watcom v1.7-v1.9 may be used.
 
 name = jwasm
-
-# support for 64bit?
-!ifdef AMD64
-c_flags64=-DAMD64_SUPPORT=1
-!endif
 
 !ifndef DEBUG
 DEBUG=0
@@ -48,7 +43,7 @@ extra_c_flags += -ot -s -DNDEBUG
 LOPTD = debug dwarf op symfile
 !endif
 
-CC = $(WATCOM)\Binnt\wcc386 -q -3$(CCV) -zc -bc -bt=linux $(inc_dirs) $(extra_c_flags) $(c_flags64) -fo$@
+CC = $(WATCOM)\Binnt\wcc386 -q -3$(CCV) -zc -bc -bt=linux $(inc_dirs) $(extra_c_flags) -fo$@
 
 .c{$(OUTD)}.obj:
 	$(CC) $<
@@ -83,12 +78,11 @@ $(OUTD):
 
 $(OUTD)/$(name) : $(proj_obj)
 	$(LINK) @<<
-format elf
-runtime linux
-$(LOPTD) $(LOPT) op map=$^*
+format elf runtime linux
+$(LOPTD)
 libpath $(WATCOM)/lib386
 libpath $(WATCOM)/lib386/linux
-op exportall, norelocs, quiet, stack=0x20000 
+op map=$^*, norelocs, quiet, stack=0x20000
 file { $(proj_obj) }
 name $@.
 <<

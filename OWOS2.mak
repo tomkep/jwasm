@@ -3,6 +3,15 @@
 # tools used:
 # - Open Watcom v1.7a/v1.8/v1.9
 
+# 2011-07-09 -- rousseau at ecomstation.com -- fixed some stuff.
+# - Removed a trailing space after the '&' in the object-list on the 
+#   line with '$(OUTD)/omffixup.obj' that breaks wmake v1.9.
+# - Added '.SYMBOLIC' to 'clean:' to supress dependency checking.
+# - Added check for existence of files to 'clean:' to supress 
+#   abort when files are not found.
+# - Replaced 'erase' with 'del' in 'clean:' as this is the more common name.
+
+
 name = JWasm
 
 !ifndef DEBUG
@@ -57,7 +66,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    &
            $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   &
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
-           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj& 
+           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj&
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
            $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
@@ -86,7 +95,7 @@ $(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h
 
 ######
 
-clean:
-	@erase $(OUTD)\*.exe
-	@erase $(OUTD)\*.obj
-	@erase $(OUTD)\*.map
+clean: .SYMBOLIC
+	@if exist $(OUTD)\*.exe del $(OUTD)\*.exe
+	@if exist $(OUTD)\*.obj del $(OUTD)\*.obj
+	@if exist $(OUTD)\*.map del $(OUTD)\*.map

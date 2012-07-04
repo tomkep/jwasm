@@ -90,32 +90,32 @@ res(DOT_SEQ,       .seq,        4,  0,          DRT_SEGORDER, 0,  P_86, SEGORDER
 res(DOSSEG,        dosseg,      6,  0,          DRT_SEGORDER, 0,  P_86, SEGORDER_DOSSEG)
 
 /* simplified segment directives, numbers in sflags must match enum sim_seg (simseg.c) */
-res(DOT_CODE,       .code,      5,  DF_NOSTRUC|DF_PROC, DRT_SIMSEG, 0,  P_86, 0)
-res(DOT_STACK,      .stack,     6,  DF_NOSTRUC|DF_PROC, DRT_SIMSEG, 0,  P_86, 1)
-res(DOT_DATA,       .data,      5,  DF_NOSTRUC|DF_PROC, DRT_SIMSEG, 0,  P_86, 2)
-res(DOT_DATA_UN,    .data?,     6,  DF_NOSTRUC|DF_PROC, DRT_SIMSEG, 0,  P_86, 3)
-res(DOT_FARDATA,    .fardata,   8,  DF_NOSTRUC|DF_PROC, DRT_SIMSEG, 0,  P_86, 4)
-res(DOT_FARDATA_UN, .fardata?,  9,  DF_NOSTRUC|DF_PROC, DRT_SIMSEG, 0,  P_86, 5)
-res(DOT_CONST,      .const,     6,  DF_NOSTRUC|DF_PROC, DRT_SIMSEG, 0,  P_86, 6)
+res(DOT_CODE,       .code,      5,  DF_NOSTRUC|DF_PROC|DF_CGEN, DRT_SIMSEG, 0,  P_86, 0)
+res(DOT_STACK,      .stack,     6,  DF_NOSTRUC|DF_PROC|DF_CGEN, DRT_SIMSEG, 0,  P_86, 1)
+res(DOT_DATA,       .data,      5,  DF_NOSTRUC|DF_PROC|DF_CGEN, DRT_SIMSEG, 0,  P_86, 2)
+res(DOT_DATA_UN,    .data?,     6,  DF_NOSTRUC|DF_PROC|DF_CGEN, DRT_SIMSEG, 0,  P_86, 3)
+res(DOT_FARDATA,    .fardata,   8,  DF_NOSTRUC|DF_PROC|DF_CGEN, DRT_SIMSEG, 0,  P_86, 4)
+res(DOT_FARDATA_UN, .fardata?,  9,  DF_NOSTRUC|DF_PROC|DF_CGEN, DRT_SIMSEG, 0,  P_86, 5)
+res(DOT_CONST,      .const,     6,  DF_NOSTRUC|DF_PROC|DF_CGEN, DRT_SIMSEG, 0,  P_86, 6)
 
 /* hll directives */
 
-res(DOT_IF,         .if,        3,  DF_CEXPR|DF_NOSTRUC|DF_STORE|DF_PROC, DRT_HLLSTART, 0, P_86, 0)
-res(DOT_REPEAT,     .repeat,    7,  DF_NOSTRUC|DF_STORE|DF_PROC,          DRT_HLLSTART, 0, P_86, 0)
-res(DOT_WHILE,      .while,     6,  DF_CEXPR|DF_NOSTRUC|DF_STORE|DF_PROC, DRT_HLLSTART, 0, P_86, 0)
-res(DOT_BREAK,      .break,     6,  0,                                    DRT_HLLEXIT,  0, P_86, 0)
-res(DOT_CONTINUE,   .continue,  9,  0,                                    DRT_HLLEXIT,  0, P_86, 0)
-res(DOT_ELSE,       .else,      5,  0,                                    DRT_HLLEXIT,  0, P_86, 0)
-res(DOT_ELSEIF,     .elseif,    7,  DF_CEXPR,                             DRT_HLLEXIT,  0, P_86, 0)
-res(DOT_ENDIF,      .endif,     6,  0,                                    DRT_HLLEND,   0, P_86, 0)
-res(DOT_ENDW,       .endw,      5,  0,                                    DRT_HLLEND,   0, P_86, 0)
-res(DOT_UNTIL,      .until,     6,  DF_CEXPR,                             DRT_HLLEND,   0, P_86, 0)
-res(DOT_UNTILCXZ,   .untilcxz,  9,  DF_CEXPR,                             DRT_HLLEND,   0, P_86, 0)
+res(DOT_IF,         .if,        3,  DF_CGEN|DF_CEXPR|DF_NOSTRUC|DF_STORE|DF_PROC, DRT_HLLSTART, 0, P_86, 0)
+res(DOT_REPEAT,     .repeat,    7,  DF_CGEN|DF_NOSTRUC|DF_STORE|DF_PROC,          DRT_HLLSTART, 0, P_86, 0)
+res(DOT_WHILE,      .while,     6,  DF_CGEN|DF_CEXPR|DF_NOSTRUC|DF_STORE|DF_PROC, DRT_HLLSTART, 0, P_86, 0)
+res(DOT_BREAK,      .break,     6,  DF_CGEN,                                      DRT_HLLEXIT,  0, P_86, 0)
+res(DOT_CONTINUE,   .continue,  9,  DF_CGEN,                                      DRT_HLLEXIT,  0, P_86, 0)
+res(DOT_ELSE,       .else,      5,  DF_CGEN,                                      DRT_HLLEXIT,  0, P_86, 0)
+res(DOT_ELSEIF,     .elseif,    7,  DF_CGEN|DF_CEXPR,                             DRT_HLLEXIT,  0, P_86, 0)
+res(DOT_ENDIF,      .endif,     6,  DF_CGEN,                                      DRT_HLLEND,   0, P_86, 0)
+res(DOT_ENDW,       .endw,      5,  DF_CGEN,                                      DRT_HLLEND,   0, P_86, 0)
+res(DOT_UNTIL,      .until,     6,  DF_CGEN|DF_CEXPR,                             DRT_HLLEND,   0, P_86, 0)
+res(DOT_UNTILCXZ,   .untilcxz,  9,  DF_CGEN|DF_CEXPR,                             DRT_HLLEND,   0, P_86, 0)
 
-res(DOT_EXIT,       .exit,      5,  DF_STORE,  DRT_STARTEXIT,  0,   P_86, 0)
-res(DOT_STARTUP,    .startup,   8,  DF_STORE,  DRT_STARTEXIT,  0,   P_86, 0)
+res(DOT_EXIT,       .exit,      5,  DF_CGEN|DF_STORE,  DRT_STARTEXIT,  0,   P_86, 0)
+res(DOT_STARTUP,    .startup,   8,  DF_CGEN|DF_STORE,  DRT_STARTEXIT,  0,   P_86, 0)
 
-res(DOT_MODEL,      .model,     6,  0,         DRT_MODEL,  0,   P_86, 0)
+res(DOT_MODEL,      .model,     6,  DF_CGEN,   DRT_MODEL,  0,   P_86, 0)
 res(DOT_RADIX,      .radix,     6,  0,         DRT_RADIX,  0,   P_86, 0)
 
 /* directives invalid for IA32+ */
@@ -230,12 +230,12 @@ res(EXTERNDEF,   externdef,   9, 0,                    DRT_EXTERNDEF,0,  P_86, 0
 res(PUBLIC,      public,      6, 0,                    DRT_PUBLIC,   0,  P_86, 0)
 
 /* "proc" directives */
-res(PROTO,       proto,       5, DF_LABEL,                      DRT_PROTO,  0,  P_86, 0)
-res(PROC,        proc,        4, DF_LABEL|DF_NOSTRUC|DF_STORE,  DRT_PROC,   0,  P_86, 0)
-res(ENDP,        endp,        4, DF_LABEL|DF_NOSTRUC,           DRT_ENDP,   0,  P_86, 0)
-res(LOCAL,       local,       5, 0,                             DRT_LOCAL,  0,  P_86, 0)
-res(LABEL,       label,       5, DF_LABEL|DF_NOSTRUC|DF_STORE,  DRT_LABEL,  0,  P_86, 0)
-res(INVOKE,      invoke,      6, DF_NOSTRUC|DF_PROC|DF_STORE,   DRT_INVOKE, 0,  P_86, 0)
+res(PROTO,       proto,       5, DF_LABEL,                            DRT_PROTO,  0,  P_86, 0)
+res(PROC,        proc,        4, DF_CGEN|DF_LABEL|DF_NOSTRUC|DF_STORE,DRT_PROC,   0,  P_86, 0)
+res(ENDP,        endp,        4, DF_LABEL|DF_NOSTRUC,                 DRT_ENDP,   0,  P_86, 0)
+res(LOCAL,       local,       5, 0,                                   DRT_LOCAL,  0,  P_86, 0)
+res(LABEL,       label,       5, DF_LABEL|DF_NOSTRUC|DF_STORE,        DRT_LABEL,  0,  P_86, 0)
+res(INVOKE,      invoke,      6, DF_CGEN|DF_NOSTRUC|DF_PROC|DF_STORE, DRT_INVOKE, 0,  P_86, 0)
 
 /* other directives */
 
@@ -251,7 +251,7 @@ res(ASSUME,      assume,      6, 0,                          DRT_ASSUME,  0,  P_
 
 res(ALIAS,       alias,       5, 0,                          DRT_ALIAS,   0,  P_86, 0)
 res(ECHO,        echo,        4, DF_NOEXPAND|DF_NOCONCAT,    DRT_ECHO,    0,  P_86, 0)
-res(END,         end,         3, DF_NOSTRUC|DF_STORE,        DRT_END,     0,  P_86, 0)
+res(END,         end,         3, DF_CGEN|DF_NOSTRUC|DF_STORE,DRT_END,     0,  P_86, 0)
 res(EQU,         equ,         3, DF_STRPARM|DF_LABEL,        DRT_EQU,     0,  P_86, 0)
 #if INCLUDEBIN
 res(INCBIN,      incbin,      6, DF_NOSTRUC|DF_PROC|DF_STORE,DRT_INCBIN,  0,  P_86, 0)

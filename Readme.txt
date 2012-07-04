@@ -58,7 +58,9 @@ JWasm Readme
     JWasm's documentation consists of
 
     - Readme.txt (this file)
-    - Manual.txt, which describes the differences to Masm.
+    - a Manual, which describes the differences to Masm. It may be in
+      HTML (Manual.html), Windows HTMLHelp (JWasm.ch*) or ASCII text
+      (Manual.txt) format.
     - History.txt, which describes bugfixes and changes of all JWasm versions.
     - License.txt, which is a copy of the Sybase Open Watcom Public License.
 
@@ -73,19 +75,21 @@ JWasm Readme
 
     Format  Linker    Comment
     -------------------------------------------------------------
-    OMF     WLink     contained in Open Watcom, free, open source
+    OMF     Wlink     contained in Open Watcom, free, open source
+    OMF     ALink     by A. Williams, free
     OMF     ValX      by David Lindauer (Ladsoft), free
     OMF     OptLink   from Digital Mars, free
-    OMF     ALink     by A. Williams, free
     OMF     Link16    the old OMF linker (v5.60) from Microsoft
     OMF     TLink     from Borland
-    COFF    WLink     this linker accepts OMF and COFF modules
+    COFF    Wlink     this linker accepts OMF and COFF modules
     COFF    MS Link   will also accept OMF modules
     COFF    PoLink    supplied with PellesC, free
-    ELF32   LD        the GNU linker
     WIN64   MS Link   must be version 7.10 or newer
     WIN64   Polink    must be version 5 or newer
+    WIN64   JWlink    fork of OW Wlink
+    ELF32   LD        the GNU linker
     ELF64   LD        the GNU linker
+    ELF64   JWlink    fork of OW Wlink
 
     Note that the name of the MS OMF linker binary is LINK.EXE, identical
     to the MS COFF linker name.
@@ -125,11 +129,22 @@ JWasm Readme
     32bit-DOS binaries of JWasm.
 
 
-    6. Using JWasm with Visual Studio 2005/2008/2010/...
+    6. Using JWasm with Visual Studio
+
+    a) VS 2005/2008
 
     To integrate JWasm into VS, copy file jwasm.rules to directory
     <vc_dir>\VC\VCProjectDefaults. After this is done, JWasm can be
     selected as assembler inside the VS IDE.
+
+    b) VS 2010
+
+    - Unzip file VS2010CustomBuildRule.zip. The result a 3 files with
+      extensions .props, .targets and .xml.
+    - Copy those files to MSBUILD's build customization directory, which
+      usually is found at 
+
+      C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\BuildCustomizations
 
 
     7. Contributors
@@ -137,9 +152,10 @@ JWasm Readme
     These people contributed to JWasm ( additions, bugfixes, bug reports):
 
     agner, BlackVortex, drizz, Paul Edwards, filofel, Peter Flass,
-    James C. Fuller, gfalen, Japheth, Jimg, jj2007, Khusraw, Alex Kozlov,
-    Peter Kuznetsov, misca, Michal Necasek, H. Nidudsson, Terry Philips,
-    qWord, RotateRight, Ito Toshimitsu, Vortex.
+    James C. Fuller, gfalen, habran, Japheth, Jimg, jj2007, Khusraw, 
+    Alex Kozlov, Peter Kuznetsov, misca, Michal Necasek, H. Nidudsson,
+    Nikitakita, Jose Pascoa, Terry Philips, qWord, RotateRight, Ito Toshimitsu,
+    Vortex.
 
     Japheth
 

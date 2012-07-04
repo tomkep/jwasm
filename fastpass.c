@@ -29,7 +29,7 @@
 struct mod_state modstate; /* struct to store assembly status */
 static struct line_item *LineStoreHead;
 static struct line_item *LineStoreTail;
-struct line_item *LineStoreCurr;
+struct line_item *LineStoreCurr; /* must be global! */
 bool StoreState;
 bool UseSavedState;
 
@@ -58,19 +58,19 @@ static void SaveState( void )
     DebugMsg(( "SaveState exit\n" ));
 }
 
-void StoreLine( char *string, uint_32 list_pos )
-/**********************************************/
+void StoreLine( char *srcline, uint_32 list_pos )
+/***********************************************/
 {
     int i;
 
-    if ( GeneratedCode )
+    if ( GeneratedCode ) /* don't store generated lines! */
         return;
-    if ( StoreState == FALSE )
+    if ( StoreState == FALSE ) /* line store already started? */
         SaveState();
 
-    i = strlen( string );
+    i = strlen( srcline );
     LineStoreCurr = AsmAlloc( i + sizeof( struct line_item ) );
-    DebugMsg1(("StoreLine(>%s<, listpos=%u): cur=%X\n", string, list_pos, LineStoreCurr ));
+    DebugMsg1(("StoreLine(>%s<, listpos=%u): cur=%X\n", srcline, list_pos, LineStoreCurr ));
     LineStoreCurr->next = NULL;
     LineStoreCurr->lineno = LineNumber;
     if ( MacroLevel ) {
@@ -79,7 +79,7 @@ void StoreLine( char *string, uint_32 list_pos )
         LineStoreCurr->srcfile = get_curr_srcfile();
     }
     LineStoreCurr->list_pos = list_pos;
-    memcpy( LineStoreCurr->line, string, i + 1 );
+    memcpy( LineStoreCurr->line, srcline, i + 1 );
 #ifdef DEBUG_OUT
     if ( Options.print_linestore )
         printf("%s\n", LineStoreCurr->line );
@@ -102,6 +102,36 @@ void SkipSavedState( void )
     UseSavedState = FALSE;
 }
 
+/* for FASTPASS, just pass 1 is a full pass, the other passes
+ don't start from scratch and they just assemble the preprocessed
+ source. To be able to restart the assembly process from a certain
+ location within the source, it's necessary to save the value of
+ assembly time variables.
+ */
+
+void SaveVariableState( struct asym *sym )
+/****************************************/
+{
+    struct equ_item *p;
+
+    DebugMsg1(( "SaveVariableState(%s)=%d\n", sym->name, sym->value ));
+    sym->saved = TRUE; /* don't try to save this symbol (anymore) */
+    p = AsmAlloc( sizeof( struct equ_item ) );
+    p->next = NULL;
+    p->sym = sym;
+    p->lvalue    = sym->value;
+    p->hvalue    = sym->value3264; /* v2.05: added */
+    p->mem_type  = sym->mem_type;  /* v2.07: added */
+    p->isdefined = sym->isdefined;
+    if ( modstate.EquTail ) {
+        modstate.EquTail->next = p;
+        modstate.EquTail = p;
+    } else {
+        modstate.EquHead = modstate.EquTail = p;
+    }
+//    printf("state of symbol >%s< saved, value=%u, defined=%u\n", sym->name, sym->value, sym->defined);
+}
+
 struct line_item *RestoreState( void )
 /************************************/
 {
@@ -110,12 +140,14 @@ struct line_item *RestoreState( void )
         struct equ_item *curr;
         /* restore values of assembly time variables */
         for ( curr = modstate.EquHead; curr; curr = curr->next ) {
-            DebugMsg1(("RestoreState: sym >%s<, value=%Xh (sym_high=%X), defined=%u\n", curr->sym->name, curr->lvalue, curr->hvalue, curr->isdefined ));
-            if ( curr->sym->mem_type == MT_ABS ) {
-                curr->sym->value   = curr->lvalue;
+            DebugMsg1(("RestoreState: sym >%s<, value=%Xh (hvalue=%Xh), defined=%u\n", curr->sym->name, curr->lvalue, curr->hvalue, curr->isdefined ));
+            /* v2.07: MT_ABS is obsolete */
+            //if ( curr->sym->mem_type == MT_ABS ) {
+                curr->sym->value     = curr->lvalue;
                 curr->sym->value3264 = curr->hvalue;
+                curr->sym->mem_type  = curr->mem_type; /* v2.07: added */
                 curr->sym->isdefined = curr->isdefined;
-            }
+            //}
         }
         /* fields in struct "g" are not to be restored. */
         memcpy( &modstate.modinfo.g, &ModuleInfo.g, sizeof( ModuleInfo.g ) );

@@ -60,6 +60,7 @@
 
 extern ret_code segm_override( const struct expr *, struct code_info * );
 extern struct asym *SegOverride;
+extern const char szNull[];
 
 /* initialize an array inside a structure
  * if there are no brackets, the next comma, '>' or '}' will terminate
@@ -81,7 +82,7 @@ static ret_code InitializeArray( const struct field_item *f, int *pi, struct asm
     int  lvl;
     char buffer[MAX_LINE_LEN];
 
-    DebugMsg1(("InitializeArray( %s ) enter, items=%lu, type=%s\n", f->sym->name, f->sym->total_length, f->initializer ));
+    DebugMsg1(("InitializeArray( %s ) enter, items=%lu, type=%s, tokenpos=%s\n", f->sym->name, f->sym->total_length, f->initializer, tokenarray[i].tokpos ));
 
     /* empty the line queue to update the current offset */
     if ( line_queue ) {
@@ -132,8 +133,15 @@ static ret_code InitializeArray( const struct field_item *f, int *pi, struct asm
             AsmErr( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM, buffer );
 #endif
         *pi = j;
-        AddLineQueueX( "%s %s", f->initializer, buffer );
-
+        /* v2.07: accept an "empty" quoted string as array initializer for byte arrays */
+        if ( lvl == 2 &&
+            f->sym->total_size == f->sym->total_length &&
+            ( tokenarray[i].string_delim == '"' || tokenarray[i].string_delim == '\'' ) )
+            ;
+        else {
+            AddLineQueueX( "%s %s", f->initializer, buffer );
+            RunLineQueueEx();
+        }
     } else {
 
         /* initializer is a literal */
@@ -155,12 +163,11 @@ static ret_code InitializeArray( const struct field_item *f, int *pi, struct asm
             } else
                 AddLineQueueX( "%s %s", f->initializer, tokenarray[i].string_ptr );
         }
+        RunLineQueueEx();
     }
 
-    RunLineQueueEx();
-
     /* the generated line has been assembled and the true size
-     * of the array is known now.
+     * of the array can be calculated now (may be 0).
      */
 
     j = GetCurrOffset() - oldofs ;
@@ -169,10 +176,17 @@ static ret_code InitializeArray( const struct field_item *f, int *pi, struct asm
     if ( j > f->sym->total_size ) {
         AsmErr( TOO_MANY_INITIAL_VALUES_FOR_ARRAY, tokenarray[i].tokpos );
     } else if (j < f->sym->total_size ) {
+        char *filler = "0";
         DebugMsg1(("InitializeArray: remaining bytes=%lu\n", f->sym->total_size - j ));
+        /* v2.07: if element size is 1 and a string is used as initial value,
+         * pad array with spaces!
+         */
+        if ( f->sym->total_size == f->sym->total_length &&
+            f->value && ( *f->value == '"' || *f->value == '\'' ) )
+            filler = "' '";
         AddLineQueueX( "db %u dup (%s)",
                       f->sym->total_size - j,
-                      CurrSeg && CurrSeg->e.seginfo->segtype != SEGTYPE_BSS ? "0" : "?" );
+                      CurrSeg && CurrSeg->e.seginfo->segtype != SEGTYPE_BSS ? filler : "?" );
     }
 
     DebugMsg1(("InitializeArray(%s) exit, curr ofs=%X\n", f->sym->name, GetCurrOffset() ));
@@ -342,6 +356,14 @@ static ret_code InitStructuredVar( int index, struct asm_tok tokenarray[], const
                     tokenarray[i].token != T_COMMA ) {
             InitializeArray( f, &i, tokenarray );
 
+        } else if ( f->sym->total_size == f->sym->total_length &&
+                   tokenarray[i].token == T_STRING &&
+                   tokenarray[i].stringlen > 1 &&
+                   ( tokenarray[i].string_delim == '"' ||
+                    tokenarray[i].string_delim == '\'' ) ) {
+            /* v2.07: it's a byte type, but no array, string initializer must have true length 1 */
+            AsmError( STRING_OR_TEXT_LITERAL_TOO_LONG );
+            i++;
         } else {
             strcpy( buffer, f->initializer );
             ptr = buffer + strlen( buffer );
@@ -414,7 +436,7 @@ static ret_code InitStructuredVar( int index, struct asm_tok tokenarray[], const
 #if AMD64_SUPPORT
         /* AddLineQueueX() can't handle 64-bit numbers */
         if ( ddir == T_DQ ) {
-            sprintf( buffer, "%0I64xh", dwRecInit );
+            sprintf( buffer, "%0" I64x_SPEC "h", dwRecInit );
             AddLineQueueX( is_record_set ? "%r %s" : "%r ?", ddir, buffer );
         } else
             AddLineQueueX( is_record_set ? "%r 0%xh" : "%r ?", ddir, (uint_32)dwRecInit );
@@ -553,7 +575,11 @@ void atofloat( void *out, const char *inp, unsigned size, bool negative, uint_8 
 static void output_float( const struct expr *opndx, unsigned size )
 /*****************************************************************/
 {
-    char buffer[12];
+    /* v2.07: buffer extended to max size of a data item (=32).
+     * test case: XMMWORD REAL10 ptr 1.0
+     */
+    //char buffer[12];
+    char buffer[32];
 
     if ( opndx->mem_type != MT_EMPTY ) {
         memset( buffer, 0, sizeof( buffer ) );
@@ -592,6 +618,11 @@ static void update_sizes( struct asym *sym, bool first, uint_32 size )
  * - no_of_bytes: size of type
  * - dup: array size if called by DUP operator, otherwise 1
  * - struct_field: 1=inside a STRUCT declaration
+ *
+ * the symbol will have its 'isarray' flag set if any of the following is true:
+ * 1. at least 2 items separated by a comma are used for initialization
+ * 2. the DUP operator occures
+ * 3. item size is 1 and a quoted string with len > 1 is used as initializer
  */
 
 static ret_code data_item( int *start_pos, struct asm_tok tokenarray[], struct asym *sym, const struct dsym *struct_sym, uint_32 no_of_bytes, uint_32 dup, bool struct_field, bool float_initializer, bool first )
@@ -816,6 +847,20 @@ next_item:
                 string_len -= 2;
                 pchar++;
 
+                /* v2.07: check for empty string for ALL types */
+                if ( string_len == 0 ) {
+                    if ( struct_field ) {
+                        /* no error for struct field */
+                        /* v2.07: don't modify string_len! Instead
+                         * mark field as array!
+                         */
+                        //string_len = 1;
+                        sym->isarray = TRUE;
+                    } else {
+                        AsmError( EMPTY_STRING ); /* MASM doesn't like "" */
+                        return( ERROR );
+                    }
+                }
                 /* a string is only regarded as an array if item size is 1 */
                 /* else it is regarded as ONE item */
                 if( no_of_bytes != 1 ) {
@@ -823,19 +868,13 @@ next_item:
                         AsmError( INITIALIZER_OUT_OF_RANGE );
                         return( ERROR );
                     }
-                } else if ( string_len == 0 ) {
-                    if ( struct_field )
-                        string_len = 1;
-                    else {
-                        AsmError( EMPTY_STRING ); /* MASM doesn't like "" */
-                        return( ERROR );
-                    }
                 }
 
-                if( sym && Parse_Pass == PASS_1 ) {
+                if( sym && Parse_Pass == PASS_1 && string_len > 0 ) {
                     update_sizes( sym, first, no_of_bytes );
                     if ( no_of_bytes == 1 && string_len > 1 ) {
                         int j;
+                        sym->isarray = TRUE; /* v2.07: added */
                         for ( j = string_len-1; j; j-- )
                             update_sizes( sym, FALSE, no_of_bytes );
                     }
@@ -879,7 +918,7 @@ next_item:
                             tmp = ( opndx.chararray[7] < 0x80 ? 0 : 0xFF );
                             memset( opndx.chararray, tmp, no_of_bytes );
                             if ( opndx.llvalue != 0 && opndx.llvalue != -1 ) {
-                                DebugMsg(("data_item.CONST: error, unhandled data is %I64X_%016I64X\n", opndx.hlvalue, opndx.llvalue));
+                                DebugMsg(("data_item.CONST: error, unhandled data is %" I64X_SPEC "_%016" I64X_SPEC "\n", opndx.hlvalue, opndx.llvalue));
                                 AsmError( INITIALIZER_MAGNITUDE_TOO_LARGE );
                                 return( ERROR );
                             }
@@ -911,7 +950,7 @@ next_item:
                      * the line below might be better.
                      */
                     //if ( opndx.hvalue != 0 && ( opndx.hvalue != -1 || opndx.value == 0 ) ) {
-                    DebugMsg(("data_item.ADDR: displacement doesn't fit in 32 bits: %I64X\n", opndx.value64 ));
+                    DebugMsg(("data_item.ADDR: displacement doesn't fit in 32 bits: %" I64X_SPEC "\n", opndx.value64 ));
                     EmitConstError( &opndx );
                     return( ERROR );
                 }
@@ -1143,6 +1182,13 @@ next_item:
                 }
                 break;
             }
+            /* v2.07: fixup type check moved here */
+            if ( ( 1 << fixup_type ) & ModuleInfo.fmtopt->invalid_fixup_type ) {
+                AsmErr( UNSUPPORTED_FIXUP_TYPE,
+                       ModuleInfo.fmtopt->formatname,
+                       opndx.sym ? opndx.sym->name : szNull );
+                return( ERROR );
+            }
             fixup = NULL;
             if ( write_to_file ) {
                 /* there might be a segment override:
@@ -1321,7 +1367,7 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct dsym *type_sym )
             if ( StoreState ) FStoreLine();
 #endif
             currofs = sym->offset;
-            DebugMsg1(("data_dir: %s, AddFieldToStruct called, ofs=%X\n", sym->name, sym->offset ));
+            DebugMsg1(("data_dir: %s, AddFieldToStruct called, ofs=%d\n", sym->name, sym->offset ));
         } else { /* v2.04: else branch added */
             sym = CurrStruct->e.structinfo->tail->sym;
             currofs = sym->offset;
@@ -1440,7 +1486,9 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct dsym *type_sym )
         LstWrite( CurrStruct ? LSTTYPE_STRUCT : LSTTYPE_DATA, currofs, sym );
 
     /**/myassert( CurrStruct || CurrSeg );
-    DebugMsg1(("data_dir: exit, no error (Curr%s.ofs=%X)\n",
+    DebugMsg1(("data_dir: exit, no error, label=%s, is_array=%u Curr%s.ofs=%X\n",
+               sym ? sym->name : "NULL",
+               sym ? sym->isarray : 0,
                CurrStruct ? "Struct" : "Seg",
                CurrStruct ? CurrStruct->sym.offset : CurrSeg->sym.offset ));
     return( NOT_ERROR );

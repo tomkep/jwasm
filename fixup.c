@@ -38,9 +38,6 @@
 
 extern int_8           Frame_Type;     /* Frame of current fixup */
 extern uint_16         Frame_Datum;    /* Frame datum of current fixup */
-extern struct format_options formatoptions[];
-
-const char szNull[] = {"<NULL>"};
 
 struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_options option )
 /*********************************************************************************************/
@@ -140,8 +137,8 @@ void FreeFixup( struct fixup *fixup )
  * they no longer exist when store_fixup() is called.
  */
 
-ret_code store_fixup( struct fixup *fixup, int_32 *pdata )
-/********************************************************/
+void store_fixup( struct fixup *fixup, int_32 *pdata )
+/****************************************************/
 {
     //struct fixup     *fixup;
 
@@ -161,12 +158,18 @@ ret_code store_fixup( struct fixup *fixup, int_32 *pdata )
 #endif
 
     fixup->nextrlc = NULL;
-    if ( ( 1 << fixup->type ) & formatoptions[Options.output_format].invalid_fixup_type ) {
+#if 0
+    /* v2.07: no error checks here! store_fixup() is called only if pass > 1
+     * and as long as write_to_file is true! This check is now done in
+     * codegen() and data_item().
+     */
+    if ( ( 1 << fixup->type ) & ModuleInfo.fmtopt->invalid_fixup_type ) {
         AsmErr( UNSUPPORTED_FIXUP_TYPE,
-               formatoptions[Options.output_format].formatname,
+               ModuleInfo.fmtopt->formatname,
                fixup->sym ? fixup->sym->name : szNull );
         return( ERROR );
     }
+#endif
     if ( Options.output_format == OFORMAT_OMF ) {
 
         /* for OMF, the target's offset is stored at the fixup's location. */
@@ -178,9 +181,22 @@ ret_code store_fixup( struct fixup *fixup, int_32 *pdata )
 
 #if ELF_SUPPORT
         if ( Options.output_format == OFORMAT_ELF ) {
-            if ( ModuleInfo.header_format == HFORMAT_ELF64 )
-                ; /* v2.06e: not for ELF64 */
-            else
+            /* v2.07: inline addend for ELF32 only.
+             * Also, in 64-bit, pdata may be a int_64 pointer (FIX_OFF64)!
+             */
+#if AMD64_SUPPORT
+            if ( ModuleInfo.header_format == HFORMAT_ELF64 ) {
+#if 0
+                /* this won't work currently because fixup.offset may have to
+                 * save *(int_64) pdata, but it is 32-bit only!
+                 */
+                if ( fixup->type == FIX_OFF64 )
+                    *(int_64 *)pdata = 0;
+                else
+                    *pdata = 0;
+#endif
+            } else
+#endif
             if ( fixup->type == FIX_RELOFF32 )
                 *pdata = -4;
 #if GNURELOCS /* v2.04: added */
@@ -226,6 +242,6 @@ ret_code store_fixup( struct fixup *fixup, int_32 *pdata )
         CurrSeg->e.seginfo->FixupListTail->nextrlc = fixup;
         CurrSeg->e.seginfo->FixupListTail = fixup;
     }
-    return( NOT_ERROR );
+    return;
 }
 

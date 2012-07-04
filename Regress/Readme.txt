@@ -5,7 +5,11 @@
   
   - tool JFC must be created. Source code is supplied in the Samples
   directory.
-  - Tool WLINK is to be copied from Open Watcom.
+  - jwlink (modified OW WLink) must be downloaded from japheth.de.
+  - MS link from VC 8 is used for one Win64 SEH test. If it is not
+    available, this test must be commented out in runtest.cmd.
+    (to be improved)
+  - all tools must be copied to directory ..\Tools
 
   2. Run Tests
   

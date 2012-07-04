@@ -104,6 +104,7 @@ struct global_options Options = {
     /* no_export_decoration  */     FALSE,
     /* entry_decorated       */     FALSE,
     /* write_listing         */     FALSE,
+    /* write_impdef          */     FALSE,
     /* case_sensitive        */     FALSE,
     /* convert_uppercase     */     FALSE,
     /* preprocessor_stdout   */     FALSE,
@@ -127,7 +128,7 @@ struct global_options Options = {
     /* langtype              */     LANG_NONE,
     /* model                 */     MOD_NONE,
     /* cpu                   */     P_86,
-    /* fastcall type         */     FCT_MS32,
+    /* fastcall type         */     FCT_MSC,
     /* syntax check only     */     FALSE,
 #if MANGLERSUPP
     /* naming_convention*/          NC_DO_NOTHING,
@@ -381,7 +382,7 @@ static void OPTQUAL Set_q( void )      { Set_nologo(); Options.quiet = TRUE; }
 static void OPTQUAL Set_EP( void ) { Options.preprocessor_stdout = TRUE; Set_q(); }
 
 #if DLLIMPORT
-static void OPTQUAL Set_Fd( void ) { get_fname( OPTN_LNKDEF_FN, GetAFileName() ); }
+static void OPTQUAL Set_Fd( void ) { get_fname( OPTN_LNKDEF_FN, GetAFileName() ); Options.write_impdef = TRUE;}
 #endif
 static void OPTQUAL Set_Fw( void ) { get_fname( OPTN_ERR_FN, GetAFileName() ); }
 static void OPTQUAL Set_Fl( void ) { get_fname( OPTN_LST_FN, GetAFileName() ); Options.write_listing = TRUE;}
@@ -512,7 +513,7 @@ static struct cmdloption const cmdl_options[] = {
     { "eq",     optofs( no_error_disp ),        Set_True },
     { "e=#",    0,        Set_e },
 #if DLLIMPORT
-    { "Fd=^@",  0,        Set_Fd },
+    { "Fd=@",   0,        Set_Fd },
 #endif
     { "Fi=^@",  0,        Set_Fi },
     { "Fl=@",   0,        Set_Fl },
@@ -592,7 +593,7 @@ static struct cmdloption const cmdl_options[] = {
     { "zcm",    0,        Set_zcm },
     { "zcw",    optofs( no_cdecl_decoration ), Set_True },
 #if OWFC_SUPPORT
-    { "zf0",    FCT_MS32,    Set_zf },
+    { "zf0",    FCT_MSC,     Set_zf },
     { "zf1",    FCT_WATCOMC, Set_zf },
 #endif
     { "zlc",    optofs( no_comment_data_in_code_records ), Set_True },

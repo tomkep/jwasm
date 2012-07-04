@@ -48,6 +48,7 @@
 #include "listing.h"
 #include "input.h"
 #include "macro.h"
+#include "types.h"
 
 /*
  the current if-block can be in one of 3 states:
@@ -271,9 +272,13 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
 #endif
         if ( opndx.kind == EXPR_CONST )
             ;
-        else if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE )
+        else if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE ) {
             opndx.value += opndx.sym->offset;
-        else {
+            /* v2.07: Masm doesn't accept a relocatable item,
+             * so emit at least a warning!
+             */
+            AsmWarn( 2, CONSTANT_EXPECTED );
+        } else {
             AsmError( CONSTANT_EXPECTED );
             return( ERROR );
         }
@@ -363,11 +368,28 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
          */
         /* v2.0: [ELSE]IF[N]DEF is valid *without* an argument! */
         //if ( tokenarray[i].token == T_ID && tokenarray[i+1].token == T_FINAL) {
-        if ( ( tokenarray[i].token == T_ID && tokenarray[i+1].token == T_FINAL ) ||
-            tokenarray[i].token == T_FINAL ) {
-            NextIfState = ( check_defd( tokenarray[i].string_ptr )  ? BLOCK_ACTIVE : BLOCK_INACTIVE );
-            if ( tokenarray[i].token != T_FINAL )
-                i++;
+        if ( tokenarray[i].token == T_FINAL ) {
+        } else if ( tokenarray[i].token == T_ID  ) {
+            /* v2.07: handle structs + members (if -Zne is NOT set) */
+            struct asym *sym;
+            if ( Options.strict_masm_compat == FALSE &&
+                tokenarray[i+1].token == T_DOT &&
+                ( sym = SymSearch( tokenarray[i].string_ptr ) ) &&
+                ( ( sym->state == SYM_TYPE ) || sym->type ) ) {
+                uint_32 value;
+                value = 0;
+                do {
+                    i += 2;
+                    /* if it's a structured variable, use its type! */
+                    if ( sym->state != SYM_TYPE )
+                        sym = sym->type;
+                    sym = SearchNameInStruct( sym, tokenarray[i].string_ptr, &value, 0 );
+                } while ( sym && tokenarray[i+1].token == T_DOT );
+                NextIfState = ( sym ? BLOCK_ACTIVE : BLOCK_INACTIVE );
+            } else {
+                NextIfState = ( check_defd( tokenarray[i].string_ptr )  ? BLOCK_ACTIVE : BLOCK_INACTIVE );
+            }
+            i++;
         } else if ( Options.strict_masm_compat == FALSE && (
                     tokenarray[i].token == T_RES_ID ||
                     tokenarray[i].token == T_STYPE ||
@@ -379,7 +401,8 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
                    tokenarray[i+1].token == T_FINAL ) {
             NextIfState = BLOCK_ACTIVE;
             i++;
-        } else {
+        }
+        if ( tokenarray[i].token != T_FINAL ) {
             AsmWarn( 2, IFDEF_EXPECTS_SYMBOL_ARGUMENT, tokenarray[i-1].tokpos );
             while ( tokenarray[i].token != T_FINAL ) i++;
         }
@@ -418,6 +441,13 @@ static char * GetErrText( struct asm_tok *text, char *buffer )
 
 /* v2.05: the error directives are no longer handled in the
  * preprocessor, because the errors are displayed in pass 2 only
+ * - .err        [<text>]
+ * - .err<1|2>   [<text>]
+ * - .err<e|nz>  expression [, <text>]
+ * - .errdif[i]  literal1, literal2 [, <text>]
+ * - .erridn[i]  literal1, literal2 [, <text>]
+ * - .err[n]b    text_literal [, <text>]
+ * - .err[n]def  symbol [, <text>]
  */
 ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
 /***********************************************************/
@@ -471,8 +501,10 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
          */
         if ( tokenarray[i].token == T_ID ) {
             struct asym * sym;
-            strcpy( tmpbuffer, tokenarray[i].string_ptr );
-            i++;
+            int idloc = i;
+            do {
+                i++;
+            } while ( tokenarray[i].token == T_DOT || tokenarray[i].token == T_ID );
             if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
                 /* v2.05: added */
                 ExpandLinePart( i, tokenarray, tokenarray[i].tokpos, TRUE, FALSE );
@@ -490,7 +522,35 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
                 break;
 
             /* don't use check_defd()! */
-            sym = SymSearch( tmpbuffer );
+            /* v2.07: check for structured variables */
+            if ( Options.strict_masm_compat == FALSE &&
+                tokenarray[idloc+1].token == T_DOT &&
+                ( sym = SymSearch( tokenarray[idloc].string_ptr ) ) &&
+                ( ( sym->state == SYM_TYPE ) || sym->type ) ) {
+                uint_32 value;
+                int j = idloc;
+                int size;
+                value = 0;
+                do {
+                    j += 2;
+                    /* if it's a structured variable, use its type! */
+                    if ( sym->state != SYM_TYPE )
+                        sym = sym->type;
+                    sym = SearchNameInStruct( sym, tokenarray[j].string_ptr, &value, 0 );
+                } while ( sym && tokenarray[j+1].token == T_DOT );
+                if ( tokenarray[j].token == T_ID )
+                    j++;
+                else if ( tokenarray[j].token != T_FINAL && tokenarray[j].token != T_COMMA ) {
+                    AsmErr( SYNTAX_ERROR_EX, tokenarray[j].string_ptr );
+                    return( ERROR );
+                }
+                size = tokenarray[j].tokpos - tokenarray[idloc].tokpos;
+                memcpy( tmpbuffer, tokenarray[idloc].tokpos, size );
+                tmpbuffer[size] = NULLC;
+            } else {
+                sym = SymSearch( tokenarray[idloc].string_ptr );
+                strcpy( tmpbuffer, tokenarray[idloc].string_ptr );
+            }
             if ( sym && sym->state == SYM_UNDEFINED )
                 sym = NULL;
 

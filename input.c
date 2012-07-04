@@ -122,7 +122,8 @@ int cnttok0;
 int cnttok1;
 #endif
 
-char *CurrComment;
+//char *CurrComment;
+char CurrComment[MAX_LINE_LEN];
 
 /* buffer for source lines
  * since the lines are sometimes concatenated
@@ -520,11 +521,16 @@ void AddLineQueueX( const char *fmt, ... )
             case 'u':
             case 'x':
                 l = va_arg( args, long );
-                if ( *s == 'x' )
+                if ( *s == 'x' ) {
                     myltoa( l, d, 16, FALSE, FALSE );
-                else
+                    d += strlen( d );
+                } else {
                     myltoa( l, d, 10, l < 0, FALSE );
-                d += strlen( d );
+                    d += strlen( d );
+                    /* v2.07: add a 't' suffix if radix is != 10 */
+                    if ( ModuleInfo.radix != 10 )
+                        *d++ = 't';
+                }
                 break;
             default:
                 *d++ = *s;
@@ -555,7 +561,6 @@ void PushMacro( struct dsym *macro, struct macro_instance *mi, unsigned line )
     fl = PushLineSource( TRUE, &macro->sym );
     fl->mi = mi;
     //fl->hidden = *sym->name ? FALSE : TRUE; /* v2.0: don't hide loop macros */
-    fl->hidden = FALSE;
     //line_queue = NULL;
     queue_level++;
     fl->line_num = line;
@@ -794,7 +799,8 @@ char *GetTextLine( char *buffer )
 
     *buffer = NULLC;
 
-    CurrComment = NULL;
+    /* fixme: best location to reset the comment? */
+    CurrComment[0] = NULLC;
 
     /* Check the line_queue first!
      * The line_queue is global and there is ONE only.

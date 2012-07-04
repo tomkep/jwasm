@@ -87,7 +87,7 @@ void SortSegments( void )
     bool changed = TRUE;
     bool swap;
     struct dsym *curr;
-    int index = 1;
+    //int index = 1;
 
     while ( changed == TRUE ) {
         struct dsym *prev = NULL;
@@ -114,9 +114,11 @@ void SortSegments( void )
             }
         }
     }
-    for ( curr = SymTables[TAB_SEG].head; curr ; curr = curr->next ) {
-        curr->e.seginfo->idx = index++;
-    }
+
+    /* v2.7: don't change segment indices! They're stored in fixup.frame_datum */
+    //for ( curr = SymTables[TAB_SEG].head; curr ; curr = curr->next ) {
+    //    curr->e.seginfo->seg_idx = index++;
+    //}
 }
 
 /* calculate starting offset of segments and groups */
@@ -197,6 +199,10 @@ static void CalcOffset( struct dsym *curr, bool firstseg )
     if ( grp ) {
         //grp->sym.total_size = offset + curr->e.seginfo->start_loc;
         grp->sym.total_size = offset;
+        /* v2.07: for 16-bit groups, ensure that it fits in 64 kB */
+        if ( grp->sym.total_size > 0x10000 && grp->sym.Ofssize == USE16 ) {
+            AsmWarn( 2, GROUP_EXCEEDS_64K, grp->sym.name );
+        }
     }
     DebugMsg(("CalcOffset(%s) exit: seg.fileofs=%" FX32 "h, seg.start_offset=%" FX32 "h, endofs=%" FX32 "h fileoffset=%" FX32 "h\n",
               curr->sym.name, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset, offset, fileoffset ));
@@ -330,6 +336,7 @@ static ret_code DoFixup( struct dsym *curr )
     union genptr codeptr;
     struct dsym *seg;
     uint_32 value;
+    uint_32 offset;  /* v2.07 */
     struct fixup *fixup;
 
     if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
@@ -339,21 +346,25 @@ static ret_code DoFixup( struct dsym *curr )
     for ( fixup = curr->e.seginfo->FixupListHead; fixup; fixup = fixup->nextrlc ) {
         codeptr.db = curr->e.seginfo->CodeBuffer +
             ( fixup->location - curr->e.seginfo->start_loc );
-        /* assembly time variable (also $ symbol) in reloc? */
-        if ( fixup->sym && fixup->sym->variable ) {
-            seg = (struct dsym *)fixup->segment;
-            value = seg->e.seginfo->start_offset + fixup->offset;
-            DebugMsg(("DoFixup(%s, %04" FX32 ", %s): variable, fixup->segment=%Xh fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
-                      curr->sym.name, fixup->location, fixup->sym->name, seg, fixup->offset, fixup->sym->offset ));
-        } else if ( fixup->sym && fixup->sym->segment ) {
-            seg = (struct dsym *)fixup->sym->segment;
+        if ( fixup->sym && fixup->sym->segment ) {
+            /* assembly time variable (also $ symbol) in reloc? */
+            /* v2.07: moved inside if-block, using new local var "offset" */
+            if ( fixup->sym->variable ) {
+                seg = (struct dsym *)fixup->segment;
+                offset = 0;
+                DebugMsg(("DoFixup(%s, %04" FX32 ", %s): variable, fixup->segment=%Xh fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
+                          curr->sym.name, fixup->location, fixup->sym->name, seg, fixup->offset, fixup->sym->offset ));
+            } else {
+                seg = (struct dsym *)fixup->sym->segment;
+                offset = fixup->sym->offset;
+            }
             /* the offset result consists of
              * - the symbol's offset
              * - the fixup's offset (usually the displacement )
              * - the segment/group offset in the image
              */
             if ( fixup->type == FIX_OFF32_IMGREL ) {
-                value = ( fixup->offset + fixup->sym->offset + seg->e.seginfo->start_offset ) - imagestart;
+                value = ( fixup->offset + offset + seg->e.seginfo->start_offset ) - imagestart;
                 DebugMsg(("DoFixup(%s): IMGREL, loc=%" FX32 " value=%" FX32 " seg.start=%" FX32 " imagestart=%" FX32 "\n",
                           curr->sym.name, fixup->location, value, seg->e.seginfo->start_offset, imagestart ));
             } else if ( fixup->type == FIX_OFF32_SECREL ) {
@@ -361,14 +372,14 @@ static ret_code DoFixup( struct dsym *curr )
                 /* check if symbol's segment name contains a '$'.
                  * If yes, search the segment without suffix.
                  */
-                value = ( fixup->offset + fixup->sym->offset ) - seg->e.seginfo->start_loc;
+                value = ( fixup->offset + offset ) - seg->e.seginfo->start_loc;
                 if ( tmp = strchr( seg->sym.name, '$' ) ) {
                     int namlen = tmp - seg->sym.name;
                     struct dsym *segfirst;
                     for( segfirst = SymTables[TAB_SEG].head; segfirst; segfirst = segfirst->next ) {
                         if ( segfirst->sym.name_size == namlen &&
                             ( memcmp( segfirst->sym.name, seg->sym.name, namlen ) == 0 ) ) {
-                            value = ( fixup->offset + fixup->sym->offset + seg->e.seginfo->start_offset ) - segfirst->e.seginfo->start_offset;
+                            value = ( fixup->offset + offset + seg->e.seginfo->start_offset ) - segfirst->e.seginfo->start_offset;
                             DebugMsg(("DoFixup(%s): SECREL, primary seg=%s, start_offset=%" FX32 "\n",
                                       curr->sym.name, segfirst->sym.name, segfirst->e.seginfo->start_offset ));
                             break;
@@ -379,18 +390,18 @@ static ret_code DoFixup( struct dsym *curr )
             /* v2.01: don't use group if fixup explicitely refers the segment! */
             //} else if ( seg->e.seginfo->group ) {
             } else if ( seg->e.seginfo->group && fixup->frame_type != FRAME_SEG ) {
-                value = (seg->e.seginfo->group->offset & 0xF) + seg->e.seginfo->start_offset + fixup->offset + fixup->sym->offset;
+                value = (seg->e.seginfo->group->offset & 0xF) + seg->e.seginfo->start_offset + fixup->offset + offset;
             } else if ( fixup->type >= FIX_RELOFF8 && fixup->type <= FIX_RELOFF32 ) {
                 /* v1.96: special handling for "relative" fixups */
-                value = seg->e.seginfo->start_offset + fixup->offset + fixup->sym->offset;
+                value = seg->e.seginfo->start_offset + fixup->offset + offset;
             } else
-                value = (seg->e.seginfo->start_offset & 0xF) + fixup->offset + fixup->sym->offset;
+                value = (seg->e.seginfo->start_offset & 0xF) + fixup->offset + offset;
             DebugMsg(("DoFixup(%s, %04" FX32 ", %s): target->start_offset=%" FX32 "h, fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
-                      curr->sym.name, fixup->location, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, fixup->sym->offset ));
+                      curr->sym.name, fixup->location, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, offset ));
         } else {
             seg = (struct dsym *)fixup->segment;
             DebugMsg(("DoFixup(%s, %04" FX32 ", %s): target segment=0, fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
-                      curr->sym.name, fixup->location, fixup->sym ? fixup->sym->name : "", fixup->offset, fixup->sym ? fixup->sym->offset : 0 ));
+                      curr->sym.name, fixup->location, fixup->sym ? fixup->sym->name : "", fixup->offset ? offset : 0 ));
             value = 0;
         }
         switch (fixup->type) {
@@ -441,7 +452,7 @@ static ret_code DoFixup( struct dsym *curr )
 #if AMD64_SUPPORT
         case FIX_OFF64:
             *codeptr.dq = value;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF64, value=%" FX32 "h, *target=%I64Xh\n", curr->sym.name, fixup->location, value, *codeptr.dq ));
+            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF64, value=%" FX32 "h, *target=%" I64X_SPEC "h\n", curr->sym.name, fixup->location, value, *codeptr.dq ));
             break;
 #endif
         case FIX_HIBYTE:

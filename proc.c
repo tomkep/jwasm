@@ -62,6 +62,7 @@
 #endif
 
 extern const char szDgroup[];
+extern char       CurrComment[];
 
 /*
  * Masm allows nested procedures
@@ -71,7 +72,8 @@ extern const char szDgroup[];
 /*
  * calling convention FASTCALL supports:
  * - Watcom C: registers e/ax,e/dx,e/bx,e/cx
- * - MS fastcall: registers e/cx,e/dx  (default for 32bit)
+ * - MS fastcall 16-bit: registers ax,dx,bx (default for 16bit)
+ * - MS fastcall 32-bit: registers ecx,edx (default for 32bit)
  * - Win64: registers rcx, rdx, r8, r9 (default for 64bit)
  */
 
@@ -80,7 +82,6 @@ int                     procidx;        /* procedure index */
 
 static struct proc_info *ProcStack;
 
-bool                    in_epilogue;
 bool                    DefineProc;     /* TRUE if definition of procedure
                                          * hasn't ended yet */
 #if AMD64_SUPPORT
@@ -92,8 +93,17 @@ static UNWIND_CODE      unw_code[128];
 
 /* tables for FASTCALL support */
 
-static const enum special_token ms32_regs16[] = { T_CX, T_DX };
+/* v2.07: 16-bit MS FASTCALL registers are AX, DX, BX.
+ * And params on stack are in PASCAL order.
+ */
+//static const enum special_token ms32_regs16[] = { T_CX, T_DX };
+static const enum special_token ms32_regs16[] = { T_AX, T_DX, T_BX };
 static const enum special_token ms32_regs32[] = { T_ECX,T_EDX };
+/* v2.07: added */
+static const int ms32_maxreg[] = {
+    sizeof( ms32_regs16) / sizeof (ms32_regs16[0] ),
+    sizeof( ms32_regs32) / sizeof (ms32_regs32[0] ),
+};
 #if OWFC_SUPPORT
 static const enum special_token watc_regs8[] = {T_AL, T_DL, T_BL, T_CL };
 static const enum special_token watc_regs16[] = {T_AX, T_DX, T_BX, T_CX };
@@ -132,7 +142,7 @@ static void ms64_return( struct dsym *, char * );
  */
 
 static const struct fastcall_conv fastcall_tab[] = {
-    { ms32_pcheck, ms32_return },  /* FCT_MS32 */
+    { ms32_pcheck, ms32_return },  /* FCT_MSC */
 #if OWFC_SUPPORT
     { watc_pcheck, watc_return },  /* FCT_WATCOMC */
 #endif
@@ -245,7 +255,7 @@ static void watc_return( struct dsym *proc, char *buffer )
     int value;
     value = 4 * CurrWordSize;
     if( proc->e.procinfo->is_vararg == FALSE && proc->e.procinfo->parasize > value )
-        sprintf( buffer + strlen( buffer ), "%d", proc->e.procinfo->parasize - value );
+        sprintf( buffer + strlen( buffer ), "%d%c", proc->e.procinfo->parasize - value, ModuleInfo.radix != 10 ? 't' : NULLC );
     return;
 }
 #endif
@@ -253,6 +263,8 @@ static void watc_return( struct dsym *proc, char *buffer )
 /* the MS Win32 fastcall ABI is simple: register ecx and edx are used,
  * if the parameter's value fits into the register.
  * there is no space reserved on the stack for a register backup.
+ * The 16-bit ABI uses registers AX, DX and BX - additional registers
+ * are pushed in PASCAL order (i.o.w.: left to right).
  */
 
 static int ms32_pcheck( struct dsym *proc, struct dsym *paranode, int *used )
@@ -261,7 +273,9 @@ static int ms32_pcheck( struct dsym *proc, struct dsym *paranode, int *used )
     char regname[32];
     int size = SizeFromMemtype( paranode->sym.mem_type, paranode->sym.Ofssize, paranode->sym.type );
 
-    if ( size > CurrWordSize || *used >= 2 )
+    /* v2.07: 16-bit has 3 register params (AX,DX,BX) */
+    //if ( size > CurrWordSize || *used >= 2 )
+    if ( size > CurrWordSize || *used >= ms32_maxreg[ModuleInfo.Ofssize] )
         return( 0 );
     paranode->sym.state = SYM_TMACRO;
     GetResWName( ModuleInfo.Ofssize ? ms32_regs32[*used] : ms32_regs16[*used], regname );
@@ -274,8 +288,11 @@ static int ms32_pcheck( struct dsym *proc, struct dsym *paranode, int *used )
 static void ms32_return( struct dsym *proc, char *buffer )
 /********************************************************/
 {
-    if( proc->e.procinfo->parasize > ( 2 * CurrWordSize ) )
-        sprintf( buffer + strlen( buffer ), "%d", proc->e.procinfo->parasize - (2 * CurrWordSize) );
+    /* v2.07: changed */
+    //if( proc->e.procinfo->parasize > ( 2 * CurrWordSize ) )
+    //    sprintf( buffer + strlen( buffer ), "%d%c", proc->e.procinfo->parasize - (2 * CurrWordSize), ModuleInfo.radix != 10 ? 't' : NULLC );
+    if( proc->e.procinfo->parasize > ( ms32_maxreg[ModuleInfo.Ofssize] * CurrWordSize ) )
+        sprintf( buffer + strlen( buffer ), "%d%c", proc->e.procinfo->parasize - ( ms32_maxreg[ModuleInfo.Ofssize] * CurrWordSize), ModuleInfo.radix != 10 ? 't' : NULLC );
     return;
 }
 
@@ -385,6 +402,8 @@ ret_code LocalDir( int i, struct asm_tok tokenarray[] )
 #if AMD64_SUPPORT
     int         displ;
     int         cnt;
+    int         sizestd;
+    int         sizexmm;
 #endif
     struct qualified_type ti;
     int         align = CurrWordSize;
@@ -411,13 +430,13 @@ ret_code LocalDir( int i, struct asm_tok tokenarray[] )
 
     i++; /* go past LOCAL */
 #if AMD64_SUPPORT
-    /* adjust start displacement for Win64 FRAME procs.
-     * v2.06: the list may contain xmm registers, which have size 16!
-     */
     if ( info->isframe ) {
         uint_16 *regs = info->regslist;
-        int sizestd = 0;
-        int sizexmm = 0;
+        sizexmm = 0;
+        sizestd = 0;
+        /* adjust start displacement for Win64 FRAME procs.
+         * v2.06: the list may contain xmm registers, which have size 16!
+         */
         if ( regs )
             for( cnt = *regs++; cnt; cnt--, regs++ )
                 if ( GetValueSp( *regs ) & OP_XMM )
@@ -425,7 +444,10 @@ ret_code LocalDir( int i, struct asm_tok tokenarray[] )
                 else
                     sizestd += 8;
         displ = sizexmm + sizestd;
-        if ( sizestd & 0xf )
+        /* v2.07: ( fix by habran )
+         * see below why this is to be done only when sizexmm is != 0
+         */
+        if ( sizexmm && (sizestd & 0xf) )
             displ += 8;
     }
 #endif
@@ -533,6 +555,13 @@ ret_code LocalDir( int i, struct asm_tok tokenarray[] )
         local->sym.ptr_memtype = ti.ptr_memtype;
         local->sym.total_size = ti.size * local->sym.total_length;
 
+#if AMD64_SUPPORT
+        /* v2.07: add the alignment here! */
+        if ( info->isframe && ( info->localsize == 0 ) ) {
+            if ( sizexmm == 0 && ( displ & 0xf ) )
+                info->localsize = 8 - ( local->sym.total_size & 0x7 );
+        }
+#endif
         info->localsize += local->sym.total_size;
 
         if ( ti.size > align )
@@ -816,9 +845,7 @@ static ret_code ParseParams( int i, struct asm_tok tokenarray[], struct dsym *pr
             case LANG_BASIC:
             case LANG_FORTRAN:
             case LANG_PASCAL:
-#if AMD64_SUPPORT
             left_to_right:
-#endif
                 paranode->nextparam = NULL;
                 if( proc->e.procinfo->paralist == NULL ) {
                     proc->e.procinfo->paralist = paranode;
@@ -837,6 +864,9 @@ static ret_code ParseParams( int i, struct asm_tok tokenarray[], struct dsym *pr
                 if ( ti.Ofssize == USE64 )
                     goto left_to_right;
 #endif
+                /* v2.07: MS fastcall 16-bit is PASCAL! */
+                if ( ti.Ofssize == USE16 && ModuleInfo.fctype == FCT_MSC )
+                    goto left_to_right;
             default:
                 paranode->nextparam = proc->e.procinfo->paralist;
                 proc->e.procinfo->paralist = paranode;
@@ -940,19 +970,23 @@ ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, boo
         /* don't overwrite a PUBLIC directive for this symbol! */
         if ( ModuleInfo.procs_private == FALSE )
             proc->sym.public = TRUE;
+        /* write epilog code */
+        if ( Options.masm_compat_gencode ) {
+            /* v2.07: Masm uses LEAVE if
+             * - current code is 32-bit/64-bit or
+             * - cpu is .286 or .586+ */
+            //proc->e.procinfo->pe_type = ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_286 );
+            proc->e.procinfo->pe_type = ( ModuleInfo.Ofssize > USE16 ||
+                                         ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_286 ||
+                                         ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_586 ) ? 1 : 0;
+        } else {
+            /* use LEAVE for 286, 386 (and x64) */
+            proc->e.procinfo->pe_type = ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_286 ||
 #if AMD64_SUPPORT
-        if ( Options.masm_compat_gencode )
-            /* use LEAVE for cpu >= .286 */
-            proc->e.procinfo->pe_type = ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_286 );
-        else
-            /* use LEAVE for 286, 386 and x64 */
-            proc->e.procinfo->pe_type = ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_286 ) ||
-                ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_386 ) ||
-                ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_64 );
-#else
-        /* use LEAVE for 286 and 386 */
-        proc->e.procinfo->pe_type = ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_286 ) || ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_386 );
+                                         ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_64 ||
 #endif
+                                         ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_386 ) ? 1 : 0;
+        }
     }
 
 #if MANGLERSUPP
@@ -1154,8 +1188,10 @@ ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, boo
     }
 
     /* the parameters must follow */
-    if ( tokenarray[i].token == T_STYPE || tokenarray[i].token == T_RES_ID || tokenarray[i].token == T_DIRECTIVE )
+    if ( tokenarray[i].token == T_STYPE || tokenarray[i].token == T_RES_ID || tokenarray[i].token == T_DIRECTIVE ) {
         AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        return( ERROR );
+    }
 
     /* skip optional comma */
     if ( tokenarray[i].token == T_COMMA )
@@ -1504,8 +1540,10 @@ static void WriteSEHData( struct dsym *proc )
     struct dsym *xdata;
     char *segname = ".xdata";
     int i;
+    int simplespec;
     uint_8 olddotname;
     uint_32 xdataofs = 0;
+    char segnamebuff[12];
     char buffer[128];
 
     if ( endprolog_found == FALSE ) {
@@ -1547,12 +1585,22 @@ static void WriteSEHData( struct dsym *proc )
     }
     AddLineQueueX( "%s %r", segname, T_ENDS );
 
-    segname = ".pdata";
-    if ( unw_segs_defined )
+    /* v2.07: ensure that .pdata items are sorted */
+    if ( 0 == strcmp( GetCodeSegName(), proc->sym.segment->name ) ) {
+        segname = ".pdata";
+        simplespec = ( unw_segs_defined & 1 );
+        unw_segs_defined = 3;
+    } else {
+        segname = segnamebuff;
+        sprintf( segname, ".pdata$%04u", GetSegIdx( proc->sym.segment ) );
+        simplespec = 0;
+        unw_segs_defined |= 2;
+    }
+
+    if ( simplespec )
         AddLineQueueX( "%s %r", segname, T_SEGMENT );
     else
         AddLineQueueX( "%s %r align(%u) flat readonly 'DATA'", segname, T_SEGMENT, 4 );
-    unw_segs_defined = 1;
     /* write the .pdata stuff ( type IMAGE_RUNTIME_FUNCTION_ENTRY )*/
     AddLineQueueX( "dd %r %s, %r %s+0%xh, %r $xdatasym+0%xh",
                   T_IMAGEREL, proc->sym.name,
@@ -1919,10 +1967,11 @@ static ret_code write_userdef_prologue( void )
     if ( Options.preprocessor_stdout )
         printf( "option prologue:none\n" );
 
-    sprintf( buffer,"%s(%s, %u, %u, %u, <<%s>>, <%s>)", ModuleInfo.proc_prologue,
+    /* v2.07: make this work with radix != 10 */
+    //sprintf( buffer,"%s(%s, %u, %u, %u, <<%s>>, <%s>)", ModuleInfo.proc_prologue,
+    sprintf( buffer,"%s(%s, 0%XH, 0%XH, 0%XH, <<%s>>, <%s>)", ModuleInfo.proc_prologue,
              CurrProc->sym.name, flags, info->parasize, info->localsize,
              reglst, info->prologuearg ? info->prologuearg : "" );
-
     retvalue[0] = NULLC;
     RunMacro( dir, buffer, retvalue, FALSE, &is_exitm );
     DebugMsg(("write_userdef_prologue: macro %s returned >%s<\n", ModuleInfo.proc_prologue, retvalue));
@@ -2040,7 +2089,7 @@ static ret_code write_win64_default_prologue( struct proc_info *info )
         if ( ( sizestd && (!(info->localsize & 0xF ) ) ) ||
             ( sizestd == 0 && (info->localsize & 0xF ) ) )
             info->localsize += 8;
-        DebugMsg1(("write_win64_default_prologue: localsize=%u, sizestd=%u\n", info->localsize, sizestd ));
+        DebugMsg1(("write_win64_default_prologue: localsize=%u sizestd=%u\n", info->localsize, sizestd ));
 
         /*
          * SUB  RSP, localsize
@@ -2148,7 +2197,7 @@ static ret_code write_default_prologue( void )
         if( info->localsize != 0 ) {
             /* using ADD and the 2-complement has one advantage:
              * it will generate short instructions up to a size of 128.
-             * with SUB, short instructions work up to 127 only
+             * with SUB, short instructions work up to 127 only.
              */
             if ( Options.masm_compat_gencode || info->localsize == 128 )
                 AddLineQueueX( "add %r, %d", stackreg[ModuleInfo.Ofssize], NUMQUAL - info->localsize );
@@ -2202,6 +2251,7 @@ static ret_code write_default_prologue( void )
 void write_prologue( void )
 /*************************/
 {
+    char cmt1 = CurrComment[0];
     DefineProc = FALSE;
 
     /* there are 3 cases:
@@ -2210,14 +2260,15 @@ void write_prologue( void )
      * option prologue:usermacro      *proc_prologue != NULLC
      */
     if ( ModuleInfo.prologuemode == PEM_DEFAULT ) {
-        DebugMsg1(("write_prologue: default prologue\n" ));
+        DebugMsg1(("write_prologue(%s): default prologue\n", CurrProc->sym.name ));
         write_default_prologue();
     } else if ( ModuleInfo.prologuemode == PEM_NONE ) {
-        DebugMsg1(("write_prologue: prologue is NULL\n" ));
+        DebugMsg1(("write_prologue(%s): prologue is NULL\n", CurrProc->sym.name  ));
     } else {
-        DebugMsg1(("write_prologue: userdefined prologue %s\n", ModuleInfo.proc_prologue ));
+        DebugMsg1(("write_prologue(%s): userdefined prologue %s\n", CurrProc->sym.name , ModuleInfo.proc_prologue ));
         write_userdef_prologue();
     }
+    CurrComment[0] = cmt1;
     return;
 }
 
@@ -2357,9 +2408,10 @@ static void write_default_epilogue( void )
     if( ( info->localsize == 0 ) && info->stackparam == FALSE && info->is_vararg == FALSE && info->forceframe == FALSE )
         return;
 
-    if( info->pe_type  ) {
-        /* write 80286 and 80386 epilog code */
-        /* masm always uses LEAVE if cpu is >= .286 */
+    /* restore registers e/sp and e/bp.
+     * emit either "leave" or "mov e/sp,e/bp, pop e/bp".
+     */
+    if( info->pe_type ) {
         AddLineQueue( "leave" );
     } else  {
         /*
@@ -2426,7 +2478,9 @@ static ret_code write_userdef_epilogue( bool flag_iret )
     *p = NULLC;
     //strcat( reglst, ">" );
 
-    sprintf( buffer,"%s %s, %02XH, %02XH, %02XH, <<%s>>, <%s>", ModuleInfo.proc_epilogue,
+    /* v2.07: make the numeric arguments more Masm-compatible */
+    //sprintf( buffer,"%s %s, %02XH, %02XH, %02XH, <<%s>>, <%s>", ModuleInfo.proc_epilogue,
+    sprintf( buffer,"%s %s, 0%XH, 0%XH, 0%XH, <<%s>>, <%s>", ModuleInfo.proc_epilogue,
              CurrProc->sym.name, flags, info->parasize, info->localsize,
              reglst, info->prologuearg ? info->prologuearg : "" );
 
@@ -2516,7 +2570,7 @@ ret_code RetInstr( int i, struct asm_tok tokenarray[], int count )
             case LANG_FORTRAN:
             case LANG_PASCAL:
                 if( info->parasize != 0 ) {
-                    sprintf( p, "%d", info->parasize );
+                    sprintf( p, "%d%c", info->parasize, ModuleInfo.radix != 10 ? 't' : NULLC );
                 }
                 break;
             case LANG_FASTCALL:
@@ -2524,7 +2578,7 @@ ret_code RetInstr( int i, struct asm_tok tokenarray[], int count )
                 break;
             case LANG_STDCALL:
                 if( !info->is_vararg && info->parasize != 0 ) {
-                    sprintf( p, "%d", info->parasize );
+                    sprintf( p, "%d%c", info->parasize, ModuleInfo.radix != 10 ? 't' : NULLC  );
                 }
                 break;
             }

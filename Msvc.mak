@@ -13,6 +13,11 @@ name = jwasm
 DOS=0
 WIN=1
 
+# use the MS linker or jwlink
+!ifndef MSLINK
+MSLINK=1
+!endif
+
 # directory paths to adjust
 # VCDIR  - root directory for VC compiler, linker, include and lib files
 # W32LIB - directory for Win32 import library files (kernel32.lib)
@@ -111,17 +116,28 @@ $(OUTD):
 	@mkdir $(OUTD)
 
 $(OUTD)\$(name).exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
+!if $(MSLINK)
 	$(linker) @<<
 $(lflagsw) $(OUTD)/main.obj $(OUTD)/$(name).lib
-/LIBPATH:"$(VCDIR)\Lib" /LIBPATH:"$(W32LIB)" kernel32.lib /OUT:$@
+/LIBPATH:"$(VCDIR)/Lib" "$(W32LIB)/kernel32.lib" /OUT:$@
 <<
+!else
+	jwlink format windows pe file $(OUTD)/main.obj name $@ lib $(OUTD)/$(name).lib libpath "$(VCDIR)/Lib" lib "$(W32LIB)/kernel32.lib" op start=_mainCRTStartup, norelocs, eliminate, map=$(OUTD)/$(name).map
+!endif
 
 $(OUTD)\$(name)d.exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
+!if $(MSLINK)
 	$(linker) @<<
 $(lflagsd) /NODEFAULTLIB initw32.obj $(OUTD)/main.obj $(OUTD)/$(name).lib /LIBPATH:$(VCDIR)\Lib
 libc.lib oldnames.lib /LIBPATH:$(HXDIR)\Lib dkrnl32s.lib imphlp.lib /STUB:$(HXDIR)\Bin\LOADPEX.BIN
 /OUT:$@ /FIXED:NO
 <<
+!else
+	jwlink @<<
+format windows pe file $(OUTD)/main.obj name $@ lib $(OUTD)/$(name).lib
+libpath $(VCDIR)/Lib lib $(HXDIR)/dkrnl32, $(HXDIR)/imphlp op start=_mainCRTStartup, norelocs, eliminate, map=$(OUTD)/$(name).map, stub=$(HXDIR)\Bin\LOADPEX.BIN
+<<
+!endif
 	@$(HXDIR)\bin\patchpe $@
 
 $(OUTD)\$(name).lib : $(proj_obj)

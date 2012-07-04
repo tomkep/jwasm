@@ -67,7 +67,7 @@ static uint_16 GetTyperef( struct asym *sym, uint_8 Ofssize )
         }
     } else {
         switch ( sym->mem_type ) {
-        case MT_ABS:  break;
+        //case MT_ABS:  break;  /* v2.07: MT_ABS obsolete */
         case MT_PTR:  break;
         case MT_BITS:
             if ( sym->cv_typeref )
@@ -625,7 +625,9 @@ void cv_write_debug_tables( struct dsym *symbols, struct dsym *types )
         case SYM_TYPE: /* types also have an entry in the symbols table */
         //case SYM_STACK: /* stack symbols are local only */
         case SYM_INTERNAL:
-            if ( sym->mem_type == MT_ABS || sym->predefined ) /* skip EQUates */
+            /* v2.07: MT_ABS obsolete */
+            //if ( sym->mem_type == MT_ABS || sym->predefined ) /* skip EQUates */
+            if ( sym->isequate || sym->predefined ) /* skip EQUates */
                 break;
             ps = cv_write_symbol( symbols, sym, ps, sbuffer );
             break;
