@@ -1677,12 +1677,18 @@ static ret_code plus_op( struct expr *token_1, struct expr *token_2 )
         CAsmError( INVALID_USE_OF_REGISTER );
         return( ERROR );
     }
-    /* v2.07: don't allow multiple overrides */
+    /* v2.07: don't allow multiple overrides.
+     * v2.07a: allow multiple overrides only if one
+     * is a segment and the other is a GROUP/SEGMENT
+     */
     if ( token_2->override ) {
         if ( token_1->override ) {
-            DebugMsg(("plus_op: multiple overrides\n" ));
-            CAsmError( MULTIPLE_OVERRIDES );
-            return( ERROR );
+            /* v2.07a: both T_REG or both T_ID is rejected */
+            if ( token_1->override->token == token_2->override->token ) {
+                DebugMsg(("plus_op: multiple overrides\n" ));
+                CAsmError( MULTIPLE_OVERRIDES );
+                return( ERROR );
+            }
         }
         token_1->override = token_2->override;
     }
@@ -2235,9 +2241,13 @@ static ret_code colon_op( struct expr *token_1, struct expr *token_2 )
                token_2->type ? token_2->type->name : "NULL",
                token_1->is_type, token_2->is_type ));
     if( token_2->override != NULL ) {
-        CAsmError( MULTIPLE_OVERRIDES );
-        DebugMsg(("colon_op: multiple override=%s\n", token_2->override->string_ptr ));
-        return( ERROR );
+        /* v2.07a: don't flag if overrides are of different kind */
+        if ( ( token_1->kind == EXPR_REG && token_2->override->token == T_REG ) ||
+            ( token_1->kind == EXPR_ADDR && token_2->override->token == T_ID ) ) {
+            CAsmError( MULTIPLE_OVERRIDES );
+            DebugMsg(("colon_op: multiple override=%s\n", token_2->override->string_ptr ));
+            return( ERROR );
+        }
     }
     switch ( token_2->kind ) {
     case EXPR_REG:

@@ -1091,6 +1091,8 @@ next_item:
                             DebugMsg(("data_item.ADDR: error, memtype %X wont fit in a WORD\n", opndx.mem_type));
                             AsmError( INITIALIZER_MAGNITUDE_TOO_LARGE );
                         };
+                    } else if ( opndx.sym && opndx.sym->state == SYM_EXTERNAL && opndx.abs == TRUE ) {
+                        /* v2.07a: accept ABSolute externals (regression in v2.07) */
                     } else if ( opndx.sym &&
                              opndx.sym->state != SYM_UNDEFINED &&
                              ( GetSymOfssize(opndx.sym) > USE16 ) ) {

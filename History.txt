@@ -1,6 +1,13 @@
 
    Changelog
 
+   07/21/2012, v2.07a:
+   
+   -  regression in v2.07: for absolute externals, a magnitude was assumed
+      that may have been too large, resulting in error 'Initializer magnitude
+      too large'.
+   -  check for multiple overrides in expressions was too rigid in v2.07.
+
    07/02/2012, v2.07:
 
    Bugfixes:
