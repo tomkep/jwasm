@@ -62,7 +62,8 @@ extra_c_flags =
 !if $(DEBUG)
 extra_c_flags += -od -d2 -w3 -DDEBUG_OUT
 !else
-extra_c_flags += -obmilrt -s -DNDEBUG
+#extra_c_flags += -obmilrt -s -DNDEBUG
+extra_c_flags += -oxa -s -DNDEBUG
 !endif
 
 !if $(TRMEM)
@@ -99,7 +100,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
            $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj&
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
-           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/cmdline.obj &
+           $(OUTD)/listing.obj  $(OUTD)/cmdline.obj &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
@@ -133,6 +134,7 @@ Library kernel32
 op quiet, stack=0x20000, heapsize=0x100000, norelocs, map=$^* com stack=0x1000
 <<
 !if $(DEBUG)
+	@if not exist TEST mkdir TEST
 	copy $(OUTD)\$(name).exe TEST\*.* >NUL
 	copy $(OUTD)\$(name).sym TEST\*.* >NUL
 !endif

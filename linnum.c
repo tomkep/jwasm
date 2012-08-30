@@ -1,7 +1,6 @@
-
 /****************************************************************************
 *
-*  This code is Public Domain. It's new for JWasm.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -24,7 +23,6 @@
 #include "extern.h"
 #include "fastpass.h"
 #include "msgtext.h"
-#include "fatal.h"
 #include "myassert.h"
 #include "linnum.h"
 
@@ -42,7 +40,7 @@ static void AddLinnumData( struct line_num_info *data )
     if ( Options.output_format == OFORMAT_COFF ) {
         q = (struct qdesc *)CurrSeg->e.seginfo->LinnumQueue;
         if ( q == NULL ) {
-            q = AsmAlloc( sizeof( struct qdesc ) );
+            q = LclAlloc( sizeof( struct qdesc ) );
             CurrSeg->e.seginfo->LinnumQueue = q;
             q->head = NULL;
         }
@@ -103,7 +101,7 @@ void AddLinnumDataRef( uint_32 line_num )
             dmyproc->Ofssize = ModuleInfo.Ofssize;
             dmyproc->langtype = ModuleInfo.langtype;
             if ( write_to_file == TRUE ) {
-                curr = AsmAlloc( sizeof( struct line_num_info ) );
+                curr = LclAlloc( sizeof( struct line_num_info ) );
                 curr->sym = dmyproc;
                 curr->line_number = LineNumber;
                 curr->file = get_curr_srcfile();
@@ -123,7 +121,7 @@ void AddLinnumDataRef( uint_32 line_num )
         return;
     }
     DebugMsg(("AddLinnumDataRef(#=%u) enter, currofs=%Xh, CurrProc=%s, GeneratedCode=%u\n", line_num, GetCurrOffset(), CurrProc ? CurrProc->sym.name : "NULL", GeneratedCode ));
-    curr = AsmAlloc( sizeof( struct line_num_info ) );
+    curr = LclAlloc( sizeof( struct line_num_info ) );
     curr->number = line_num;
     if ( line_num == 0 ) { /* happens for COFF only */
         /* changed v2.03 (CurrProc might have been NULL) */
@@ -171,7 +169,7 @@ void QueueDeleteLinnum( struct qdesc *queue )
     curr = queue->head;
     for( ; curr ; curr = next ) {
         next = curr->next;
-        AsmFree( curr );
+        LclFree( curr );
     }
     return;
 }

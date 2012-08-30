@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*  This code is Public Domain. It's new for JWasm.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -67,14 +67,14 @@ OPTFUNC( SetCaseMap )
             ModuleInfo.case_sensitive = FALSE;       /* -Cu */
             ModuleInfo.convert_uppercase = TRUE;
         } else {
-            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
             return( ERROR );
         }
         DebugMsg1(("SetCaseMap(%s) ok\n", tokenarray[i].string_ptr ));
         i++;
         SymSetCmpFunc();
     } else {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     *pi = i;
@@ -229,7 +229,7 @@ OPTFUNC( SetNoKeyword )
         return( NOT_ERROR);
     }
     if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     for ( p = tokenarray[i].string_ptr; *p; ) {
@@ -251,7 +251,7 @@ OPTFUNC( SetNoKeyword )
                 DisableKeyword( index );
             else {
                 if ( IsKeywordDisabled( p2, cnt ) ) {
-                    AsmError( RESERVED_WORD_EXPECTED );
+                    EmitError( RESERVED_WORD_EXPECTED );
                     return( ERROR );
                 }
             }
@@ -276,13 +276,13 @@ OPTFUNC( SetLanguage )
     if ( tokenarray[i].token == T_RES_ID ) {
         if ( GetLangType( &i, tokenarray, &ModuleInfo.langtype ) == NOT_ERROR ) {
             /* update @Interface assembly time variable */
-            if ( ModuleInfo.model != MOD_NONE && sym_Interface )
+            if ( ModuleInfo.model != MODEL_NONE && sym_Interface )
                 sym_Interface->value = ModuleInfo.langtype;
             *pi = i;
             return( NOT_ERROR );
         }
     }
-    AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+    EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
     return( ERROR );
 }
 
@@ -329,11 +329,11 @@ OPTFUNC( SetPrologue )
     int i = *pi;
 
     if ( tokenarray[i].token != T_ID ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     if ( ModuleInfo.proc_prologue ) {
-        AsmFree( ModuleInfo.proc_prologue );
+        LclFree( ModuleInfo.proc_prologue );
         ModuleInfo.proc_prologue = NULL;
     }
     if ( 0 == _stricmp( tokenarray[i].string_ptr, "NONE" ) ) {
@@ -342,7 +342,7 @@ OPTFUNC( SetPrologue )
         ModuleInfo.prologuemode = PEM_DEFAULT;
     } else {
         ModuleInfo.prologuemode = PEM_MACRO;
-        ModuleInfo.proc_prologue = AsmAlloc( strlen( tokenarray[i].string_ptr ) + 1);
+        ModuleInfo.proc_prologue = LclAlloc( strlen( tokenarray[i].string_ptr ) + 1);
         strcpy( ModuleInfo.proc_prologue, tokenarray[i].string_ptr );
     }
 
@@ -362,11 +362,11 @@ OPTFUNC( SetEpilogue )
     int i = *pi;
 
     if ( tokenarray[i].token != T_ID ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     if ( ModuleInfo.proc_epilogue ) {
-        AsmFree( ModuleInfo.proc_epilogue );
+        LclFree( ModuleInfo.proc_epilogue );
         ModuleInfo.proc_epilogue = NULL;
     }
 
@@ -376,7 +376,7 @@ OPTFUNC( SetEpilogue )
         ModuleInfo.epiloguemode = PEM_DEFAULT;
     } else {
         ModuleInfo.epiloguemode = PEM_MACRO;
-        ModuleInfo.proc_epilogue = AsmAlloc( strlen( tokenarray[i].string_ptr ) + 1);
+        ModuleInfo.proc_epilogue = LclAlloc( strlen( tokenarray[i].string_ptr ) + 1);
         strcpy( ModuleInfo.proc_epilogue, tokenarray[i].string_ptr );
     }
 
@@ -401,7 +401,7 @@ OPTFUNC( SetOffset )
     } else if ( 0 == _stricmp( tokenarray[i].string_ptr, "SEGMENT" ) ) {
         ModuleInfo.offsettype = OT_SEGMENT;
     } else {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
     i++;
@@ -466,7 +466,7 @@ OPTFUNC( SetSegment )
         ModuleInfo.defOfssize = USE64;
 #endif
     } else {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
     i++;
@@ -487,16 +487,16 @@ OPTFUNC( SetFieldAlign )
     if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
     if ( opndx.kind != EXPR_CONST ) {
-        AsmError( CONSTANT_EXPECTED );
+        EmitError( CONSTANT_EXPECTED );
         return( ERROR );
     }
     if( opndx.uvalue > MAX_STRUCT_ALIGN ) {
-        AsmError( STRUCT_ALIGN_TOO_HIGH );
+        EmitError( STRUCT_ALIGN_TOO_HIGH );
         return( ERROR );
     }
     for( temp = 1, temp2 = 0; temp < opndx.uvalue ; temp <<= 1, temp2++ );
     if( temp != opndx.uvalue ) {
-        AsmError( POWER_OF_2 );
+        EmitError( POWER_OF_2 );
         return( ERROR );
     }
     ModuleInfo.fieldalign = temp2;
@@ -518,15 +518,15 @@ OPTFUNC( SetProcAlign )
     if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
     if ( opndx.kind != EXPR_CONST ) {
-        AsmError( CONSTANT_EXPECTED );
+        EmitError( CONSTANT_EXPECTED );
         return( ERROR );
     }
     if( opndx.value > MAX_STRUCT_ALIGN ) {
-        AsmError( STRUCT_ALIGN_TOO_HIGH );
+        EmitError( STRUCT_ALIGN_TOO_HIGH );
     }
     for( temp = 1, temp2 = 0; temp < opndx.value ; temp <<= 1, temp2++ );
     if( temp != opndx.value ) {
-        AsmError( POWER_OF_2 );
+        EmitError( POWER_OF_2 );
         return( ERROR );
     }
     ModuleInfo.procalign = temp2;
@@ -561,7 +561,7 @@ OPTFUNC( SetMZ )
             }
             *(parms + j) = opndx.value;
         } else {
-            AsmError( CONSTANT_EXPECTED );
+            EmitError( CONSTANT_EXPECTED );
             return( ERROR );
         }
         if ( tokenarray[i].token == T_COLON )
@@ -577,7 +577,7 @@ OPTFUNC( SetMZ )
 
     for( j = 16; j < mzdata.alignment; j <<= 1 );
     if( j != mzdata.alignment )
-        AsmError( INVALID_HEADER_ALIGNMENT );
+        EmitError( INVALID_HEADER_ALIGNMENT );
 
     if ( mzdata.heapmax < mzdata.heapmin )
         mzdata.heapmax = mzdata.heapmin;
@@ -625,7 +625,7 @@ OPTFUNC( SetElf )
         if ( Options.output_format == OFORMAT_ELF )
             ModuleInfo.osabi = opndx.value;
     } else {
-        AsmError( CONSTANT_EXPECTED );
+        EmitError( CONSTANT_EXPECTED );
         return( ERROR );
     }
     *pi = i;
@@ -651,7 +651,7 @@ OPTFUNC( SetRenameKey )
         return( NOT_ERROR );
     }
     if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' )  {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     oldname = tokenarray[i].string_ptr;
@@ -659,13 +659,13 @@ OPTFUNC( SetRenameKey )
     /* v2.06: syntax changed */
     //if ( tokenarray[i].token != T_COMMA ) {
     if ( tokenarray[i].token != T_DIRECTIVE || tokenarray[i].dirtype != DRT_EQUALSGN ) {
-        //AsmError( EXPECTING_COMMA );
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        //EmitError( EXPECTING_COMMA );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     i++;
     if ( tokenarray[i].token != T_ID )  {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
 
@@ -673,7 +673,7 @@ OPTFUNC( SetRenameKey )
      * since a reserved word's size must be <= 255 */
     index = FindResWord( oldname, strlen( oldname ) );
     if ( index == -1 ) {
-        AsmError( RESERVED_WORD_EXPECTED );
+        EmitError( RESERVED_WORD_EXPECTED );
         return( ERROR );
     }
     RenameKeyword( index, tokenarray[i].string_ptr, strlen( tokenarray[i].string_ptr ) );
@@ -699,13 +699,13 @@ OPTFUNC( SetWin64 )
     if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
         return( ERROR );
     if ( opndx.kind == EXPR_CONST ) {
-        if ( opndx.llvalue > 0x1 ) {
+        if ( opndx.llvalue & ( ~W64F_ALL ) ) {
             EmitConstError( &opndx );
             return( ERROR );
         }
-        ModuleInfo.win64_saveparams = opndx.value;
+        ModuleInfo.win64_flags = opndx.value;
     } else {
-        AsmError( CONSTANT_EXPECTED );
+        EmitError( CONSTANT_EXPECTED );
         return( ERROR );
     }
     *pi = i;
@@ -729,7 +729,7 @@ static char *IncludeDll( const char *name )
         if ( _stricmp( q->elmt, name ) == 0 )
             return( (char *)q->elmt );
     }
-    node = AsmAlloc( strlen( name ) + 1 );
+    node = LclAlloc( strlen( name ) + 1 );
     strcpy( node, name );
     QAddItem( &ModuleInfo.g.DllQueue, node );
     return( node );
@@ -763,7 +763,7 @@ OPTFUNC( SetDllImport )
 OPTFUNC( Unsupported )
 /********************/
 {
-    AsmErr( NOT_SUPPORTED, tokenarray[(*pi)-2].tokpos );
+    EmitErr( NOT_SUPPORTED, tokenarray[(*pi)-2].tokpos );
     return( ERROR );
 }
 
@@ -859,7 +859,7 @@ ret_code OptionDirective( int i, struct asm_tok tokenarray[] )
         /* v2.06: check for colon separator here */
         if ( idx >= NOARGOPTS ) {
             if ( tokenarray[i].token != T_COLON ) {
-                AsmError( COLON_EXPECTED );
+                EmitError( COLON_EXPECTED );
                 return( ERROR );
             }
             i++;
@@ -882,7 +882,7 @@ ret_code OptionDirective( int i, struct asm_tok tokenarray[] )
     }
     if ( idx >= TABITEMS  || tokenarray[i].token != T_FINAL ) {
         DebugMsg(( "option syntax error: >%s<\n", tokenarray[i].tokpos ));
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     return( NOT_ERROR );

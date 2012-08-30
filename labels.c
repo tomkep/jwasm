@@ -51,14 +51,14 @@ char *GetAnonymousLabel( char *buffer, int value )
     return( buffer );
 }
 
-/* define a label
+/* define a (code) label
  * name: name of the label
  * mem_type: its memory type
  * ti: qualified type pointer, used if memtype is MT_TYPE or MT_PROC
- * bLocal: label should be defined locally if inside a PROC
+ * bLocal: code label should be defined locally if inside a PROC
  */
-ret_code CreateLabel( const char *name, enum memtype mem_type, struct qualified_type *ti, bool bLocal )
-/*****************************************************************************************************/
+struct asym *CreateLabel( const char *name, enum memtype mem_type, struct qualified_type *ti, bool bLocal )
+/*********************************************************************************************************/
 {
     struct asym         *sym;
     uint_32             addr;
@@ -67,8 +67,8 @@ ret_code CreateLabel( const char *name, enum memtype mem_type, struct qualified_
     DebugMsg1(("CreateLabel(%s, memtype=%Xh, %" FX32 "h, %u) enter\n", name, mem_type, ti, bLocal));
 
     if( CurrSeg == NULL ) {
-        AsmError( MUST_BE_IN_SEGMENT_BLOCK );
-        return( ERROR );
+        EmitError( MUST_BE_IN_SEGMENT_BLOCK );
+        return( NULL );
     }
     /* v2.06: don't allow a code label (NEAR, FAR, PROC) if CS is
      * assumed ERROR. This was previously checked for labels with
@@ -77,8 +77,8 @@ ret_code CreateLabel( const char *name, enum memtype mem_type, struct qualified_
     if ( ( mem_type & MT_SPECIAL_MASK) == MT_ADDRESS ) {
         if ( SegAssumeTable[ASSUME_CS].error ) { /* CS assumed to ERROR? */
             DebugMsg(("CreateLabel: code label and CS assumed error\n" ));
-            AsmError( USE_OF_REGISTER_ASSUMED_TO_ERROR );
-            return( ERROR );
+            EmitError( USE_OF_REGISTER_ASSUMED_TO_ERROR );
+            return( NULL );
         }
     }
 
@@ -90,7 +90,7 @@ ret_code CreateLabel( const char *name, enum memtype mem_type, struct qualified_
 
     sym = SymLookupLabel( name, bLocal );
     if( sym == NULL )
-        return( ERROR );
+        return( NULL );
     if( Parse_Pass == PASS_1 ) {
         if( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
             /* don't accept EXTERNDEF for a local label! */
@@ -98,14 +98,14 @@ ret_code CreateLabel( const char *name, enum memtype mem_type, struct qualified_
             //if ( bLocal && CurrProc ) {
             if ( sym->isproc || ( bLocal && CurrProc ) ) {
                 DebugMsg(("CreateLabel(%s): error, EXTERNDEF for local label\n", sym->name));
-                AsmErr( SYMBOL_REDEFINITION, name );
-                return( ERROR );
+                EmitErr( SYMBOL_REDEFINITION, name );
+                return( NULL );
             }
             /* ensure that type of symbol is compatible! */
             if ( sym->mem_type != MT_EMPTY &&
                  sym->mem_type != mem_type ) {
                 DebugMsg(("CreateLabel(%s): error, memtype conflict %X-%X\n", sym->name, sym->mem_type, mem_type));
-                AsmErr( SYMBOL_TYPE_CONFLICT, name );
+                EmitErr( SYMBOL_TYPE_CONFLICT, name );
             }
             sym_ext2int( sym );
         } else if( sym->state == SYM_UNDEFINED ) {
@@ -114,10 +114,10 @@ ret_code CreateLabel( const char *name, enum memtype mem_type, struct qualified_
         } else {
             /* v2.04: emit a more distinctive error msg */
             if ( sym->state == SYM_INTERNAL && sym->mem_type == mem_type )
-                AsmErr( SYMBOL_ALREADY_DEFINED, name );
+                EmitErr( SYMBOL_ALREADY_DEFINED, name );
             else
-                AsmErr( SYMBOL_REDEFINITION, name );
-            return( ERROR );
+                EmitErr( SYMBOL_REDEFINITION, name );
+            return( NULL );
         }
         /* add the label to the linked list attached to curr segment */
         /* this allows to reduce the number of passes (see fixup.c) */
@@ -175,7 +175,7 @@ ret_code CreateLabel( const char *name, enum memtype mem_type, struct qualified_
         ModuleInfo.PhaseError = TRUE;
     }
     BackPatch( sym );
-    return( NOT_ERROR );
+    return( sym );
 }
 
 /* LABEL directive.
@@ -186,9 +186,10 @@ ret_code LabelDirective( int i, struct asm_tok tokenarray[] )
 /***********************************************************/
 {
     struct qualified_type ti;
+    struct asym *sym;
 
     if( i != 1 ) {  /* LABEL must be preceded by an ID */
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -208,7 +209,7 @@ ret_code LabelDirective( int i, struct asm_tok tokenarray[] )
                tokenarray[0].string_ptr, ti.mem_type, ti.is_far, ti.is_ptr, ti.symtype ? ti.symtype->name : "NULL" ));
 
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -216,12 +217,24 @@ ret_code LabelDirective( int i, struct asm_tok tokenarray[] )
     if ( ( ti.mem_type == MT_NEAR || ti.mem_type == MT_FAR ) &&
         ti.Ofssize != USE_EMPTY &&
         ModuleInfo.Ofssize != ti.Ofssize ) {
-        AsmError( OFFSET_SIZE_MISMATCH );
+        EmitError( OFFSET_SIZE_MISMATCH );
         return( ERROR );
     }
 
     if ( ModuleInfo.list )
         LstWrite( LSTTYPE_LABEL, 0, NULL );
 
-    return ( CreateLabel( tokenarray[0].string_ptr, ti.mem_type, &ti, FALSE ) );
+    /* v2.08: if label has a true memory type, set total_size and total_length */
+    if ( sym = CreateLabel( tokenarray[0].string_ptr, ti.mem_type, &ti, FALSE ) ) {
+        DebugMsg1(("LabelDirective(%s): label created, memtype=%Xh size=%u\n", sym->name, sym->mem_type, ti.size ));
+        /* sym->isdata must be 0, else the label directive was generated within data_item()
+         * and fields total_size & total_length must not be modified then!
+         */
+        if ( sym->isdata == FALSE && ( sym->mem_type & MT_SPECIAL_MASK ) != MT_ADDRESS ) {
+            sym->total_size = ti.size;
+            sym->total_length = 1;
+        }
+        return( NOT_ERROR );
+    }
+    return( ERROR );
 }

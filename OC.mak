@@ -63,7 +63,7 @@ proj_obj = $(OUTD)\main.o     $(OUTD)\assemble.o $(OUTD)\assume.o  \
            $(OUTD)\hll.o      $(OUTD)\proc.o     $(OUTD)\option.o  \
            $(OUTD)\omf.o      $(OUTD)\omfint.o   $(OUTD)\omffixup.o\
            $(OUTD)\coff.o     $(OUTD)\elf.o      $(OUTD)\bin.o     \
-           $(OUTD)\listing.o  $(OUTD)\fatal.o    $(OUTD)\safeseh.o \
+           $(OUTD)\listing.o  $(OUTD)\safeseh.o \
            $(OUTD)\context.o  $(OUTD)\extern.o   $(OUTD)\simsegm.o \
            $(OUTD)\backptch.o $(OUTD)\msgtext.o  $(OUTD)\tbyte.o   \
            $(OUTD)\dbgcv.o    $(OUTD)\end.o      $(OUTD)\cpumodel.o\

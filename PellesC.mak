@@ -1,31 +1,42 @@
 
-# This makefile creates JWasm Win32 binary with PellesC. Enter
+# This makefile creates the JWasm Win32 or Win64 binary with PellesC. 
+# Enter
 #   pomake -f PellesC.mak
+# to create the Win32 version. Or enter
+#   pomake -f PellesC.mak amd64=1
+# to create the Win64 version.
 #
 # Optionally, with 'pomake -f PellesC.mak DOS' one can additionally
-# create a JWasm DOS binary. This needs the HXDEV package (see HXDIR
-# below).
+# create a JWasm DOS binary (32-bit only. This needs the HXDEV package
+# (see HXDIR below).
 
 name = jwasm
 
 # directory paths to adjust
 # PODIR  - root directory for compiler, linker, include and lib files
 
+!ifndef PODIR
 PODIR  = \PellesC
+!endif
+
+!ifdef AMD64
+TARGET=/Tamd64-coff
+!endif
 
 !ifdef DEBUG
 OUTD=POCD
-extra_c_flags = -Zi -DDEBUG_OUT
+extra_c_flags = -Zi -DDEBUG_OUT $(TARGET)
 LOPTD = /debug
 !else
 OUTD=POCR
-extra_c_flags = -O2 -DNDEBUG
+extra_c_flags = -O2 -DNDEBUG $(TARGET)
 LOPTD =
 !endif
 
 inc_dirs = -IH -I"$(PODIR)\include"
 
 LINK = $(PODIR)\Bin\polink.exe
+LIB = $(PODIR)\Bin\polib.exe
 
 c_flags =-D__NT__ -Ze $(extra_c_flags)
 
@@ -49,7 +60,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
            $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj\
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
-           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj \
+           $(OUTD)/listing.obj  $(OUTD)/safeseh.obj \
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
            $(OUTD)/apiemu.obj   $(OUTD)/dbgcv.obj    $(OUTD)/end.obj     \
@@ -69,12 +80,19 @@ all: $(OUTD) $(OUTD)\$(name).exe $(DOSTARG)
 $(OUTD):
 	@mkdir $(OUTD)
 
-$(OUTD)\$(name).exe : $(proj_obj)
-	$(LINK) $(lflagsw) $(proj_obj) /LIBPATH:$(PODIR)\Lib /LIBPATH:$(PODIR)\Lib\Win /OUT:$@
+$(OUTD)\$(name).exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
+!ifdef AMD64
+	$(LINK) $(lflagsw) $(OUTD)/main.obj $(OUTD)/$(name).lib /LIBPATH:$(PODIR)\Lib /LIBPATH:$(PODIR)\Lib\Win64 /OUT:$@
+!else
+	$(LINK) $(lflagsw) $(OUTD)/main.obj $(OUTD)/$(name).lib /LIBPATH:$(PODIR)\Lib /LIBPATH:$(PODIR)\Lib\Win /OUT:$@
+!endif
 
-$(OUTD)\$(name)d.exe : $(proj_obj)
-	@$(LINK) $(lflagsd) $(HXDIR)\Lib\initw32.obj $(proj_obj) /LIBPATH:$(PODIR)\Lib crt.lib /OUT:$@
+$(OUTD)\$(name)d.exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
+	@$(LINK) $(lflagsd) $(HXDIR)\Lib\initw32.obj $(OUTD)/main.obj $(OUTD)/$(name).lib /LIBPATH:$(PODIR)\Lib crt.lib /OUT:$@
 	@$(HXDIR)\bin\patchpe $*.exe
+
+$(OUTD)\$(name).lib : $(proj_obj)
+	@$(LIB) /out:$(OUTD)\$(name).lib $(proj_obj)
 
 ######
 

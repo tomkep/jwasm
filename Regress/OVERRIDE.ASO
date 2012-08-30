@@ -16,8 +16,8 @@ lbl1:
 	mov eax,[cs:ebx+offset es:lbl1]      ;mf jf
 
 	mov eax,[ebx+FLAT:lbl1]
-	mov eax,[cs:ebx+FLAT:lbl1]           ;mf jf
+	mov eax,[cs:ebx+FLAT:lbl1]           ;mf jf - ok with v2.07a
 	mov eax,[ebx+offset FLAT:lbl1]
-	mov eax,[cs:ebx+offset FLAT:lbl1]    ;mf jf
+	mov eax,[cs:ebx+offset FLAT:lbl1]    ;mf jf - ok with v2.07a
 
 	end

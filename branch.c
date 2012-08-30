@@ -74,7 +74,7 @@ static void jumpExtend( struct code_info *CodeInfo, int far_flag )
     unsigned next_ins_size;
 
     if( Parse_Pass == PASS_2 )
-        AsmWarn( 4, EXTENDING_JUMP );
+        EmitWarn( 4, EXTENDING_JUMP );
 
     DebugMsg(("jumpExtend(far=%u), pass=%u, curr offset=%X, Ofssize=%u\n", far_flag, Parse_Pass + 1, GetCurrOffset(), CodeInfo->Ofssize ));
     if( far_flag ) {
@@ -109,7 +109,7 @@ static void FarCallToNear( struct code_info *CodeInfo )
 /*****************************************************/
 {
     if( Parse_Pass == PASS_2 )
-        AsmWarn( 4, CALL_FAR_TO_NEAR );
+        EmitWarn( 4, CALL_FAR_TO_NEAR );
 
     OutputCodeByte( 0x0E ); /* 0x0E is "PUSH CS" opcode */
     CodeInfo->mem_type = MT_NEAR;
@@ -140,7 +140,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
 
     /* v2.05: just 1 operand possible */
     if ( CurrOpnd != OPND1 ) {
-        AsmError( SYNTAX_ERROR );
+        EmitError( SYNTAX_ERROR );
         return( ERROR );
     }
     if ( opndx->explicit )
@@ -154,7 +154,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
         DebugMsg(("process_branch(%" FX32 "): segment override %s\n", GetCurrOffset(), SegOverride->name ));
         if ( SegOverride && opndx->sym && opndx->sym->segment ) {
             if ( SegOverride != opndx->sym->segment &&  SegOverride != ((struct dsym *)opndx->sym->segment)->e.seginfo->group ) {
-                AsmErr( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS, opndx->sym ? opndx->sym->name : "" );
+                EmitErr( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS, opndx->sym ? opndx->sym->name : "" );
                 return( ERROR );
             }
             /* v2.05: switch to far jmp/call */
@@ -175,7 +175,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
 
         /* Masm rejects: "jump dest must specify a label */
 #if NEEDLABEL
-        AsmError( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL );
+        EmitError( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL );
         return( ERROR );
 #else
         if( IS_JMPCALL( CodeInfo->token ) )
@@ -233,7 +233,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 //else if ( opndx->mem_type == MT_NEAR ) {
                 else if ( opndx->mem_type == MT_NEAR && SegOverride == NULL ) {
                     DebugMsg(("process_branch: error, opndx.mem_type is MT_NEAR\n" ));
-                    AsmError( CANNOT_HAVE_IMPLICIT_FAR_JUMP_OR_CALL_TO_NEAR_LABEL );
+                    EmitError( CANNOT_HAVE_IMPLICIT_FAR_JUMP_OR_CALL_TO_NEAR_LABEL );
                     return( ERROR );
                 }
             }
@@ -242,7 +242,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
         }
     } else if ( state != SYM_UNDEFINED ) {
         DebugMsg(("process_branch: error, sym=%s, state=%u, memtype=%u\n", sym->name, sym->state, sym->mem_type));
-        AsmErr( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL );
+        EmitErr( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL );
         return( ERROR );
     }
 
@@ -293,7 +293,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 if ( opndx->instr == T_SHORT || ( IS_XCX_BRANCH( CodeInfo->token ) ) ) {
                     /* v2.06: added */
                     if( CodeInfo->token == T_CALL ) {
-                        AsmError( CANNOT_USE_SHORT_WITH_CALL );
+                        EmitError( CANNOT_USE_SHORT_WITH_CALL );
                         return( ERROR );
                     }
                     /* v1.96: since JWasm's backpatch strategy is to move from
@@ -304,7 +304,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                     /* v2.06: removed */
                     /* v2.03: added */
                     //if ( addr >= SCHAR_MIN && addr <= SCHAR_MAX ) {
-                    //    AsmError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED );
+                    //    EmitError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED );
                     //    return( ERROR );
                     //}
                     if ( addr < 0 ) {
@@ -312,7 +312,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                         addr = 0 - addr;
                     } else
                         addr -= SCHAR_MAX;
-                    AsmErr( JUMP_OUT_OF_RANGE, addr );
+                    EmitErr( JUMP_OUT_OF_RANGE, addr );
                     return( ERROR );
                 }
                 /* near destination */
@@ -360,7 +360,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                     //} else if( !PhaseError ) {
                     } else {
                         DebugMsg(("%u process_branch: 2, jump out of range, mem_type=%X, curr_ofs=%X, addr=%d\n", Parse_Pass + 1, CodeInfo->mem_type, GetCurrOffset(), addr ));
-                        AsmErr( JUMP_OUT_OF_RANGE, addr );
+                        EmitErr( JUMP_OUT_OF_RANGE, addr );
                         return( ERROR );
                     }
                 }
@@ -431,7 +431,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
         switch( CodeInfo->mem_type ) {
         case MT_NEAR:
             if( opndx->explicit || opndx->instr == T_SHORT ) {
-                AsmError( CANNOT_USE_SHORT_OR_NEAR );
+                EmitError( CANNOT_USE_SHORT_OR_NEAR );
                 return( ERROR );
             }
             /* fall through */
@@ -457,7 +457,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
         default:
             /* cant happen */
             DebugMsg(("process_branch: JMP/CALL far, strange mem_type=%X\n", CodeInfo->mem_type ));
-            AsmError( INVALID_OPERAND_SIZE );
+            EmitError( INVALID_OPERAND_SIZE );
             return( ERROR );
         }
         CodeInfo->opnd[OPND1].InsFixup = CreateFixup( sym, fixup_type, fixup_option );
@@ -467,7 +467,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
     switch( CodeInfo->token ) {
     case T_CALL:
         if( opndx->instr == T_SHORT ) {
-            AsmError( CANNOT_USE_SHORT_WITH_CALL );
+            EmitError( CANNOT_USE_SHORT_WITH_CALL );
             return( ERROR );
         }
         if( CodeInfo->mem_type == MT_EMPTY ) {
@@ -505,7 +505,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
             find_frame( sym );/* added v1.95 (after change in fixup.c */
             break;
         default:
-            AsmError( INVALID_OPERAND_SIZE );
+            EmitError( INVALID_OPERAND_SIZE );
             return( ERROR );
         }
         /* deactivated because there's no override involved here */
@@ -515,7 +515,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
         /* JxCXZ and LOOPxx always require SHORT label */
         if ( IS_XCX_BRANCH( CodeInfo->token ) ) {
             if( CodeInfo->mem_type != MT_EMPTY && opndx->instr != T_SHORT ) {
-                AsmError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED );
+                EmitError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED );
                 return( ERROR );
             }
             CodeInfo->opnd[OPND1].type = OP_I8;
@@ -572,7 +572,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 }
                 /* fall through */
             default: /* is another memtype possible at all? */
-                AsmError( ONLY_SHORT_AND_NEAR_JUMP_DISTANCE_IS_ALLOWED );
+                EmitError( ONLY_SHORT_AND_NEAR_JUMP_DISTANCE_IS_ALLOWED );
                 return( ERROR );
             }
         } else {
@@ -605,7 +605,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 }
                 /* fall through */
             default:
-                AsmError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED );
+                EmitError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED );
                 return( ERROR );
             }
         }

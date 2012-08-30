@@ -2,6 +2,10 @@
 ;--- DUP with initialized structures
 ;--- + macro in initializer
 
+;--- there's a difference between Masm and JWasm
+;--- in Masm, macro TM1() is called ONCE,
+;--- in JWasm, macro TM1() is called 300 times!
+
 	.386
 	.MODEL FLAT, stdcall
 	option casemap:none

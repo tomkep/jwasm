@@ -1,7 +1,9 @@
 
 # This makefile creates the JWasm Win32 binary with either MinGW or Cygwin.
-#  'make -f GccWin.mak'            will use MinGW.
+#  'mingw32-make -f GccWin.mak'    will use MinGW (no MSys needed!).
 #  'make -f GccWin.mak CYGWIN=1'   will use Cygwin.
+
+
 
 name = jwasm
 
@@ -25,7 +27,7 @@ else
 OUTD=MinGWD
 endif
 else
-extra_c_flags = -DNDEBUG -O2
+extra_c_flags = -DNDEBUG -O2 -fomit-frame-pointer
 ifeq ($(CYGWIN),1)
 OUTD=CygwinR
 else
@@ -53,7 +55,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
            $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj\
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
-           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj \
+           $(OUTD)/listing.obj  $(OUTD)/safeseh.obj \
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
            $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj\

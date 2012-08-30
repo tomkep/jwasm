@@ -29,15 +29,10 @@
 ****************************************************************************/
 
 /*
-    if TRMEM is defined, trmem functions are used which will help tracking
-    memory usage.
-*/
+ * if TRMEM is defined, trmem functions are used which will help tracking
+ * memory usage.
+ */
 
-#ifdef __WATCOMC__
-    #include <malloc.h>
-#else
-    #include <stdlib.h>
-#endif
 #if defined(__UNIX__) && defined(__GNUC__)
     #include <sys/mman.h>
 #endif
@@ -45,7 +40,14 @@
 #include "globals.h"
 
 /* FASTMEM is a simple memory alloc approach which allocates chunks of 512 kB
- * and will release it only at MemFini(). */
+ * and will release it only at MemFini().
+ *
+ * May be considered to create an additional "line heap" to store lines of
+ * loop macros and generated code - since this is hierarchical, a simple
+ * Mark/Release mechanism will do the memory management.
+ * currently generated code lines are stored in the C heap, while
+ * loop macro lines go to the "fastmem" heap.
+ */
 #if FASTMEM
  #define BLKSIZE 0x80000
  #ifndef __UNIX__
@@ -59,8 +61,36 @@
  #endif
 #endif
 
+/* what items are stored in the heap?
+ * - symbols + symbol names ( asym, dsym; symbol.c )
+ * - macro lines ( StoreMacro(); macro.c )
+ * - file names ( CurrFName[]; assemble.c )
+ * - temp items + buffers ( omf.c, bin.c, coff.c, elf.c )
+ * - contexts ( context.c )
+ * - codeview debug info ( dbgcv.c )
+ * - library names ( includelib; directiv.c )
+ * - src lines for FASTPASS ( fastpass.c )
+ * - fixups ( fixup.c )
+ * - hll items (reused!) ( .IF, .WHILE, .REPEAT; hll.c )
+ * - one big input buffer ( src line buffer, tokenarray, string buffer; input.c )
+ * - src filenames array ( AddFile(); input.c )
+ * - line number info ( -Zd, -Zi; linnum.c )
+ * - macro parameter array + default values ( macro.c )
+ * - prologue, epilogue macro names ??? ( option.c )
+ * - dll names ( OPTION DLLIMPORT; option.c )
+ * - std queue items ( see queues in struct module_vars; globals.h, queue.c )
+ * - renamed keyword queue ( reswords.c )
+ * - safeseh queue ( safeseh.c )
+ * - segment alias names ( segment.c )
+ * - segment stack ( segment.c )
+ * - segment buffers ( 1024 for omf, else may be HUGE ) ( segment.c )
+ * - segment names for simplified segment directives (simsegm.c )
+ * - strings of text macros ( string.c )
+ * - struct/union/record member items + default values ( types.c )
+ * - procedure prologue argument, debug info ( proc.c )
+ */
+
 #include "memalloc.h"
-#include "fatal.h"
 
 #ifdef TRMEM
 #include <fcntl.h>
@@ -178,7 +208,7 @@ void MemFini( void )
 #ifndef __UNIX__
  #if defined(__OS2__)
         DosFreeMem( pBase );
- #elif defined(__NT__)
+ #elif defined(__NT__) || defined(_WIN64)
         VirtualFree( pBase, 0, MEM_RELEASE );
  #else
         free( pBase );
@@ -195,7 +225,7 @@ void MemFini( void )
 #endif
 }
 
-void *AsmAlloc( size_t size )
+void *LclAlloc( size_t size )
 /***************************/
 {
     void        *ptr;
@@ -203,12 +233,12 @@ void *AsmAlloc( size_t size )
 #if FASTMEM
     size = (size + 3) & ~3;
     if ( currfree < size ) {
-        DebugMsg(("AsmAlloc: new block, req. size=%Xh\n", size ));
+        DebugMsg(("LclAlloc: new block, req. size=%Xh\n", size ));
         if ( size > BLKSIZE-4 ) {
 #ifndef __UNIX__
  #if defined(__OS2__)
             DosAllocMem( (void**)&pCurr, size+4, PAG_COMMIT|PAG_READ|PAG_WRITE);
- #elif defined(__NT__)
+ #elif defined(__NT__) || defined(_WIN64)
             pCurr = (uint_8 *)VirtualAlloc( NULL, size+4, MEM_COMMIT, PAGE_READWRITE );
  #else
             pCurr = malloc( size+4 );
@@ -229,7 +259,7 @@ void *AsmAlloc( size_t size )
 #ifndef __UNIX__
  #if defined(__OS2__)
             DosAllocMem( (void **)&pCurr, BLKSIZE, PAG_COMMIT|PAG_READ|PAG_WRITE );
- #elif defined(__NT__)
+ #elif defined(__NT__) || defined(_WIN64)
             pCurr = (uint_8 *)VirtualAlloc(NULL, BLKSIZE, MEM_COMMIT, PAGE_READWRITE);
  #else
             pCurr = malloc( BLKSIZE );
@@ -249,7 +279,7 @@ void *AsmAlloc( size_t size )
         }
         if ( !pCurr ) {
             currfree = 0;
-            Fatal( FATAL_OUT_OF_MEMORY );
+            Fatal( OUT_OF_MEMORY );
         }
         *(uint_8 * *)pCurr = pBase;
         pBase = pCurr;
@@ -267,25 +297,25 @@ void *AsmAlloc( size_t size )
 #ifdef TRMEM
     ptr = _trmem_alloc( size, _trmem_guess_who(), memHandle );
     memcalls++;
-    DebugMsg(("AsmAlloc(0x%X)=%X cnt=%d\n", size, ptr, memcalls ));
+    DebugMsg(("LclAlloc(0x%X)=%X cnt=%d\n", size, ptr, memcalls ));
 #else
     ptr = malloc( size );
 #endif
     if( ptr == NULL ) {
-        Fatal( FATAL_OUT_OF_MEMORY );
+        Fatal( OUT_OF_MEMORY );
     }
 #endif
     return( ptr );
 }
 
 #if FASTMEM==0
-void AsmFree( void *ptr )
+void LclFree( void *ptr )
 /***********************/
 {
     if( ptr != NULL ) {
 #ifdef TRMEM
         _trmem_free( ptr, _trmem_guess_who(), memHandle );
-        DebugMsg(("AsmFree(0x%X) cnt=%d\n", ptr, memcalls ));
+        DebugMsg(("LclFree(0x%X) cnt=%d\n", ptr, memcalls ));
         memcalls--;
 #else
         free( ptr );
@@ -304,7 +334,7 @@ void *MemAlloc( size_t size )
     DebugMsg(("MemAlloc(0x%X)=%X cnt=%d\n", size, ptr, memcalls ));
 #endif
     if( ptr == NULL ) {
-        Fatal( FATAL_OUT_OF_MEMORY );
+        Fatal( OUT_OF_MEMORY );
     }
     return( ptr );
 }
@@ -328,7 +358,7 @@ void *MemRealloc( void *ptr, size_t size )
 
     new = realloc( ptr, size );
     if( new == NULL && size != 0 ) {
-        Fatal( FATAL_OUT_OF_MEMORY );
+        Fatal( OUT_OF_MEMORY );
     }
     return( new );
 }

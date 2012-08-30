@@ -11,11 +11,11 @@
  */
 
 /* directives field usage:
- * value  = DF_ flags
- * bytval = DRT_ value
- * flags  = RWF_ flags
- * cpu    = cpu flags
- * sflags = depends on DRT_
+ * value  = DF_  flags    SpecialTable.value  uint
+ * bytval = DRT_ value    SpecialTable.bytval uint_8
+ * flags  = RWF_ flags    ResWordTable.flags  uint_8
+ * cpu    = cpu  flags    SpecialTable.cpu    uint_16
+ * sflags = dep. on DRT_  SpecialTable.sflags uint
  */
 
 /* cpu directives */
@@ -137,8 +137,8 @@ res(DOT_ERRIDN,  .erridn,      7, DF_STRPARM|DF_STORE,  DRT_ERRDIR,  0, P_86, CC
 res(DOT_ERRIDNI, .erridni,     8, DF_STRPARM|DF_STORE,  DRT_ERRDIR,  0, P_86, CC_LITARG)
 res(DOT_ERRB,    .errb,        5, DF_STRPARM|DF_STORE,  DRT_ERRDIR,  0, P_86, CC_BLKARG)
 res(DOT_ERRNB,   .errnb,       6, DF_STRPARM|DF_STORE,  DRT_ERRDIR,  0, P_86, CC_BLKARG)
-res(DOT_ERRDEF,  .errdef,      7, DF_NOEXPAND|DF_STORE, DRT_ERRDIR,  0, P_86, CC_SYMARG)
-res(DOT_ERRNDEF, .errndef,     8, DF_NOEXPAND|DF_STORE, DRT_ERRDIR,  0, P_86, CC_SYMARG)
+res(DOT_ERRDEF,  .errdef,      7, DF_STRPARM|DF_STORE,  DRT_ERRDIR,  0, P_86, CC_SYMARG)
+res(DOT_ERRNDEF, .errndef,     8, DF_STRPARM|DF_STORE,  DRT_ERRDIR,  0, P_86, CC_SYMARG)
 
 /* conditional assembly directives, handled by preprocessor */
 
@@ -253,7 +253,7 @@ res(ALIAS,       alias,       5, 0,                          DRT_ALIAS,   0,  P_
 res(ECHO,        echo,        4, DF_NOEXPAND|DF_NOCONCAT,    DRT_ECHO,    0,  P_86, 0)
 res(END,         end,         3, DF_CGEN|DF_NOSTRUC|DF_STORE,DRT_END,     0,  P_86, 0)
 res(EQU,         equ,         3, DF_STRPARM|DF_LABEL,        DRT_EQU,     0,  P_86, 0)
-#if INCLUDEBIN
+#if INCBINSUPP
 res(INCBIN,      incbin,      6, DF_NOSTRUC|DF_PROC|DF_STORE,DRT_INCBIN,  0,  P_86, 0)
 #endif
 res(INCLUDELIB,  includelib, 10, DF_NOCONCAT,                DRT_INCLIB,  0,  P_86, 0)

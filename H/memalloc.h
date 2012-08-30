@@ -38,27 +38,37 @@ extern void *MemRealloc( void *ptr, size_t size );
 extern void MemFree( void *ptr );
 
 #if defined(__WATCOMC__) || defined(__BORLANDC__) || defined(__OCC__)
+
 #define myalloca  alloca
 #include <malloc.h>
+
 #elif defined(__GNUC__) || defined(__TINYC__)
+
 #define myalloca  alloca
+#ifndef __FreeBSD__  /* added v2.08 */
 #include <malloc.h>  /* added v2.07 */
-#elif defined(__PCC__)
-#define myalloca  _alloca
-#include <malloc.h>
-#else
-#define myalloca  _alloca
 #endif
 
-/* AsmAlloc() and AsmFree() are fast variants, which
+#elif defined(__PCC__)
+
+#define myalloca  _alloca
+#include <malloc.h>
+
+#else
+
+#define myalloca  _alloca
+
+#endif
+
+/* LclAlloc() and LclFree() are fast variants, which
  * are to be used for all allocations which aren't "global"
  */
-extern  void    *AsmAlloc( size_t );
+extern  void    *LclAlloc( size_t );
 #if FASTMEM
-/* be careful not to use a function call as argument for AsmFree()! */
-#define AsmFree( p ) ;
+/* be careful not to use a function call as argument for LclFree()! */
+#define LclFree( p ) ;
 #else
-extern  void    AsmFree( void * );
+extern  void    LclFree( void * );
 #endif
 
 #endif

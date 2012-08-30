@@ -47,7 +47,7 @@ extra_c_flags += -obmilrs -s -DNDEBUG
 LOPTD = debug dwarf op symfile
 !endif
 
-lflagsd = $(LOPTD) sys dos op map=$^*, stack=0x5000
+lflagsd = $(LOPTD) sys dos op map=$^*, stack=0x8400
 
 CC=$(WATCOM)\binnt\wcc -q -0 -w3 -zc -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -DAMD64_SUPPORT=0 -DSSE4SUPP=0 -DOWFC_SUPPORT=0 -DDLLIMPORT=0 -DAVXSUPP=0 -zt=12000
 
@@ -68,7 +68,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/input.obj   &
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
            $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj&
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
-           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj &
+           $(OUTD)/listing.obj  $(OUTD)/safeseh.obj &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
            $(OUTD)/msgtext.obj  $(OUTD)/linnum.obj   &
 !if $(DEBUG)

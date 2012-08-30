@@ -304,6 +304,7 @@ struct ReservedWord ResWordTable[] = {
 const uint_8 vex_flags[] = {
     /* flags for the AVX instructions in instruct.h. The order must
      * be equal to the one in instruct.h! ( this is to be improved.)
+     * For a description of the VX_ flags see codegen.h
      */
     VX_NND,      /* VBROADCASTSS   */
     VX_NND,      /* VBROADCASTSD   */
@@ -516,7 +517,7 @@ void RenameKeyword( uint token, const char *newname, uint_8 length )
      */
     if ( ResWordTable[token].name >= resw_strings &&
         ResWordTable[token].name < ( resw_strings + sizeof( resw_strings ) ) ) {
-        rn = AsmAlloc( sizeof( struct rename_node ) );
+        rn = LclAlloc( sizeof( struct rename_node ) );
         rn->next = NULL;
         rn->name = ResWordTable[token].name;
         rn->token = token;
@@ -528,9 +529,9 @@ void RenameKeyword( uint token, const char *newname, uint_8 length )
             renamed_keys.tail = rn;
         }
     } else {
-        AsmFree( (void *)ResWordTable[token].name );
+        LclFree( (void *)ResWordTable[token].name );
     }
-    ResWordTable[token].name = AsmAlloc( length );
+    ResWordTable[token].name = LclAlloc( length );
     /* convert to lowercase? */
     memcpy( (void *)ResWordTable[token].name, newname, length );
     ResWordTable[token].len = length;
@@ -739,13 +740,13 @@ void ResWordsFini( void )
         struct rename_node *tmp = rencurr->next;
         RemoveResWord( rencurr->token );
         /* v2.06: this is the correct name to free */
-        AsmFree( (void *)ResWordTable[rencurr->token].name );
+        LclFree( (void *)ResWordTable[rencurr->token].name );
         ResWordTable[rencurr->token].name = rencurr->name;
         ResWordTable[rencurr->token].len = rencurr->length;
         AddResWord( rencurr->token );
         DebugMsg(("ResWordsFini(): %s restored\n", GetResWName( rencurr->token, NULL ) ));
-        //AsmFree( (void *)rencurr->name ); /* v2.06: this was the wrong one */
-        AsmFree( rencurr );
+        //LclFree( (void *)rencurr->name ); /* v2.06: this was the wrong one */
+        LclFree( rencurr );
         rencurr = tmp;
     }
     renamed_keys.head = NULL;
@@ -767,6 +768,8 @@ void DumpInstrStats( void )
     unsigned            curr = 0;
     unsigned            num[8] = {0,0,0,0,0,0,0,0};
 
+    if ( !fInit )
+        return;
 #if RWLOG
     DebugMsg(("\nReserved Word Hash Table\n"));
     DebugMsg(("Idx keywords\n"));

@@ -34,8 +34,6 @@
 
 #define GetSegm( x )     (struct dsym *)x->segment
 
-extern struct dsym      *CurrSeg;       /* stack of open segments */
-
 extern void             SetSymSegOfs( struct asym * );
 extern int              GetSymOfssize( const struct asym * );
 /* Get current segment's offset */
@@ -56,7 +54,19 @@ extern char             *GetLname( direct_idx );
 extern void             FreeLnameQueue( void );
 
 /* simplified segment functions */
-extern char             *GetCodeSegName( void );
+
+enum sim_seg {
+    SIM_CODE = 0,
+    SIM_STACK,
+    SIM_DATA,
+    SIM_DATA_UN,            /* .DATA? */
+    SIM_FARDATA,
+    SIM_FARDATA_UN,         /* .FARDATA? */
+    SIM_CONST,
+    SIM_LAST
+};
+
+extern char             *SimGetSegName( enum sim_seg );
 extern const char       *GetCodeClass( void );
 extern ret_code         ModelSimSegmInit( int type );
 extern void             ModelSimSegmExit( void );

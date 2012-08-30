@@ -6,6 +6,7 @@
 
 #if AVXSUPP
 /*   tok                    len     cpu */
+/* format: xmm|ymm, xmm|ymm|mem */
 avxins (ADDPD,    vaddpd,    6,     P_AVX, VX_L ) /* L, s */
 avxins (ADDPS,    vaddps,    6,     P_AVX, VX_L ) /* L, s */
 avxins (ADDSD,    vaddsd,    6,     P_AVX, 0 )    /* -, s */
@@ -39,6 +40,7 @@ avxins (CMPPS,    vcmpps,    6,     P_AVX, VX_L ) /* L, s */
 avxins (CMPSD,    vcmpsd,    6,     P_AVX, 0 )    /* -, s */
 avxins (CMPSS,    vcmpss,    6,     P_AVX, 0 )    /* -, s */
 
+/* format: xmm|ymm, xmm|ymm|mem */
 avxins (ANDPD,    vandpd,    6,     P_AVX, VX_L )   /* L, s */
 avxins (ANDPS,    vandps,    6,     P_AVX, VX_L )   /* L, s */
 avxins (ANDNPD,   vandnpd,   7,     P_AVX, VX_L )   /* L, s */
@@ -50,6 +52,7 @@ avxins (COMISS,   vcomiss,   7,     P_AVX, VX_NND ) /* -, ns */
 avxins (XORPD,    vxorpd,    6,     P_AVX, VX_L )   /* L, s */
 avxins (XORPS,    vxorps,    6,     P_AVX, VX_L )   /* L, s */
 
+/* format: xmm|ymm, xmm|ymm|mem */
 avxins (CVTDQ2PD, vcvtdq2pd, 9,     P_AVX, VX_L|VX_NND|VX_HALF ) /* L, ns, 64->128 */
 avxins (CVTDQ2PS, vcvtdq2ps, 9,     P_AVX, VX_L|VX_NND ) /* L, ns */
 //avxins (CVTPD2DQ, vcvtpd2dq, 9,     P_AVX, VX_L|VX_NND ) /* L, ns */
@@ -67,21 +70,22 @@ avxins (CVTSS2SD, vcvtss2sd, 9,     P_AVX, 0 )        /* -, s     */
 avxins (CVTSS2SI, vcvtss2si, 9,     P_AVX, VX_NND )   /* -, ns, W */
 avxins (CVTTSS2SI,vcvttss2si,10,    P_AVX, VX_NND )   /* -, ns, W */
 
+/* format: xmm|ymm, xmm|ymm|mem [, i8] */
 avxins (ADDSUBPD, vaddsubpd, 9,     P_AVX, VX_L )     /* L, s */
 avxins (ADDSUBPS, vaddsubps, 9,     P_AVX, VX_L )     /* L, s */
 avxins (BLENDPD , vblendpd , 8,     P_AVX, VX_L )     /* L, s */
 avxins (BLENDPS , vblendps , 8,     P_AVX, VX_L )     /* L, s */
 avxins (DPPD    , vdppd    , 5,     P_AVX, 0 )        /* -, s */
 avxins (DPPS    , vdpps    , 5,     P_AVX, VX_L )     /* L, s */
-avxins (EXTRACTPS,vextractps,10,    P_AVX, VX_NND )   /* -, ns! */
+avxins (EXTRACTPS,vextractps,10,    P_AVX, VX_NND )   /* -, ns! */ /* format: reg|mem32, xmm|ymm, i8 */
 avxins (HADDPD  , vhaddpd  , 7,     P_AVX, VX_L )     /* L, s */
 avxins (HADDPS  , vhaddps  , 7,     P_AVX, VX_L )     /* L, s */
 avxins (HSUBPD  , vhsubpd  , 7,     P_AVX, VX_L )     /* L, s */
 avxins (HSUBPS  , vhsubps  , 7,     P_AVX, VX_L )     /* L, s */
 avxins (INSERTPS, vinsertps, 9,     P_AVX, 0 )        /* -, s */
-avxins (LDDQU   , vlddqu   , 6,     P_AVX, VX_L|VX_NND ) /* L, ns */
-avxins (LDMXCSR , vldmxcsr , 8,     P_AVX, 0 )        /* -, ns */
-avxins (STMXCSR , vstmxcsr , 8,     P_AVX, 0 )        /* -, ns */
+avxins (LDDQU   , vlddqu   , 6,     P_AVX, VX_L|VX_NND ) /* L, ns */ /* format: xmm|ymm, mem */
+avxins (LDMXCSR , vldmxcsr , 8,     P_AVX, 0 )        /* -, ns */ /* format: mem32 */
+avxins (STMXCSR , vstmxcsr , 8,     P_AVX, 0 )        /* -, ns */ /* format: mem32 */
 
 avxins (MASKMOVDQU,vmaskmovdqu,11,  P_AVX, VX_NND )   /* -, ns */
 avxins (MOVAPD  , vmovapd  ,  7,    P_AVX, VX_L|VX_NND ) /* L, ns */

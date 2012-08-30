@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*  This code is Public Domain. It's new for JWasm.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -20,7 +20,6 @@
 #include "extern.h"
 #include "elf.h"
 #include "elfspec.h"
-#include "fatal.h"
 #include "myassert.h"
 
 #if ELF_SUPPORT
@@ -185,7 +184,7 @@ static uint_32 set_symtab_64( uint_32 entries, struct localname *localshead )
     char      buffer[MAX_ID_LEN + MANGLE_BYTES + 1];
 
     internal_segs[SYMTAB_IDX].size = entries * sizeof( Elf64_Sym );
-    internal_segs[SYMTAB_IDX].data = AsmAlloc( internal_segs[SYMTAB_IDX].size );
+    internal_segs[SYMTAB_IDX].data = LclAlloc( internal_segs[SYMTAB_IDX].size );
     memset( internal_segs[SYMTAB_IDX].data, 0, internal_segs[SYMTAB_IDX].size );
 
     p64 = (Elf64_Sym *)internal_segs[SYMTAB_IDX].data;
@@ -358,7 +357,7 @@ static uint_32 set_symtab_32( uint_32 entries, struct localname *localshead )
     char      buffer[MAX_ID_LEN + MANGLE_BYTES + 1];
 
     internal_segs[SYMTAB_IDX].size = entries * sizeof( Elf32_Sym );
-    internal_segs[SYMTAB_IDX].data = AsmAlloc( internal_segs[SYMTAB_IDX].size );
+    internal_segs[SYMTAB_IDX].data = LclAlloc( internal_segs[SYMTAB_IDX].size );
     memset( internal_segs[SYMTAB_IDX].data, 0, internal_segs[SYMTAB_IDX].size );
 
     p32 = (Elf32_Sym *)internal_segs[SYMTAB_IDX].data;
@@ -558,7 +557,7 @@ static void set_symtab_values( void *hdr )
                     fix->sym->included == FALSE &&
                     fix->sym->public == FALSE ) {
                     fix->sym->included = TRUE;
-                    localscurr = AsmAlloc( sizeof( struct localname ) );
+                    localscurr = LclAlloc( sizeof( struct localname ) );
                     localscurr->next = NULL;
                     localscurr->sym = fix->sym;
                     if (localstail) {
@@ -618,7 +617,7 @@ static void set_symtab_values( void *hdr )
     DebugMsg(("set_symtab_values: creating string table, size=%X\n", strsize));
 
     internal_segs[STRTAB_IDX].size = strsize;
-    internal_segs[STRTAB_IDX].data = AsmAlloc(internal_segs[STRTAB_IDX].size);
+    internal_segs[STRTAB_IDX].data = LclAlloc(internal_segs[STRTAB_IDX].size);
     memset( internal_segs[STRTAB_IDX].data, 0, internal_segs[STRTAB_IDX].size );
     p2 = internal_segs[STRTAB_IDX].data;
     *p2++ = NULLC;
@@ -688,7 +687,7 @@ static void set_shstrtab_values( void )
 
     /* size is set, now alloc the section and fill it */
 
-    internal_segs[SHSTRTAB_IDX].data = AsmAlloc(size);
+    internal_segs[SHSTRTAB_IDX].data = LclAlloc(size);
     p = (char *)internal_segs[SHSTRTAB_IDX].data;
     *p++ = NULLC;
 
@@ -743,8 +742,8 @@ static unsigned int Get_Alignment( struct dsym *curr)
 #if AMD64_SUPPORT
 /* write ELF64 section table */
 
-static int elf_write_section_table64( struct module_info *ModuleInfo, Elf64_Ehdr *hdr, uint offset )
-/**************************************************************************************************/
+static int elf_write_section_table64( struct module_info *modinfo, Elf64_Ehdr *hdr, uint offset )
+/***********************************************************************************************/
 {
     int         i;
     struct dsym *curr;
@@ -831,7 +830,7 @@ static int elf_write_section_table64( struct module_info *ModuleInfo, Elf64_Ehdr
         internal_segs[i].offset = offset;
         shdr64.sh_size = internal_segs[i].size;
         if ( internal_segs[i].type == SHT_SYMTAB ) {
-            shdr64.sh_link = 1 + ModuleInfo->g.num_segs + STRTAB_IDX;
+            shdr64.sh_link = 1 + modinfo->g.num_segs + STRTAB_IDX;
             shdr64.sh_info = start_globals;
             shdr64.sh_addralign = 4;
             shdr64.sh_entsize = sizeof( Elf64_Sym );
@@ -866,7 +865,7 @@ static int elf_write_section_table64( struct module_info *ModuleInfo, Elf64_Ehdr
         curr->e.seginfo->reloc_offset = offset;
         /* size of section in file */
         shdr64.sh_size = curr->e.seginfo->num_relocs * sizeof( Elf64_Rela );
-        shdr64.sh_link = 1 + ModuleInfo->g.num_segs + SYMTAB_IDX;
+        shdr64.sh_link = 1 + modinfo->g.num_segs + SYMTAB_IDX;
         /* set info to the src section index */
         shdr64.sh_info = GetSegIdx( curr->sym.segment );
         shdr64.sh_addralign = 4;
@@ -887,8 +886,8 @@ static int elf_write_section_table64( struct module_info *ModuleInfo, Elf64_Ehdr
 
 /* write ELF32 section table */
 
-static int elf_write_section_table32( struct module_info *ModuleInfo, Elf32_Ehdr *hdr, uint offset )
-/**************************************************************************************************/
+static int elf_write_section_table32( struct module_info *modinfo, Elf32_Ehdr *hdr, uint offset )
+/***********************************************************************************************/
 {
     int         i;
     struct dsym *curr;
@@ -982,7 +981,7 @@ static int elf_write_section_table32( struct module_info *ModuleInfo, Elf32_Ehdr
         internal_segs[i].offset = offset;
         shdr32.sh_size = internal_segs[i].size;
         if ( internal_segs[i].type == SHT_SYMTAB ) {
-            shdr32.sh_link = 1 + ModuleInfo->g.num_segs + STRTAB_IDX;
+            shdr32.sh_link = 1 + modinfo->g.num_segs + STRTAB_IDX;
             shdr32.sh_info = start_globals;
             shdr32.sh_addralign = 4;
             shdr32.sh_entsize = sizeof( Elf32_Sym );
@@ -1017,7 +1016,7 @@ static int elf_write_section_table32( struct module_info *ModuleInfo, Elf32_Ehdr
         curr->e.seginfo->reloc_offset = offset;
         /* size of section in file */
         shdr32.sh_size = curr->e.seginfo->num_relocs * sizeof( Elf32_Rel );
-        shdr32.sh_link = 1 + ModuleInfo->g.num_segs + SYMTAB_IDX;
+        shdr32.sh_link = 1 + modinfo->g.num_segs + SYMTAB_IDX;
         /* set info to the src section index */
         shdr32.sh_info = GetSegIdx( curr->sym.segment );
         shdr32.sh_addralign = 4;
@@ -1037,8 +1036,8 @@ static int elf_write_section_table32( struct module_info *ModuleInfo, Elf32_Ehdr
 
 /* write ELF header + section table
  */
-ret_code elf_write_header( struct module_info *ModuleInfo )
-/*********************************************************/
+ret_code elf_write_header( struct module_info *modinfo )
+/******************************************************/
 {
     //struct dsym  *dir;
     Elf32_Ehdr ehdr32;
@@ -1061,7 +1060,7 @@ ret_code elf_write_header( struct module_info *ModuleInfo )
     extused = FALSE;
 #endif
 
-    switch ( ModuleInfo->header_format ) {
+    switch ( modinfo->header_format ) {
 #if AMD64_SUPPORT
     case HFORMAT_ELF64:
         memset(&ehdr64, 0, sizeof( ehdr64 ) );
@@ -1069,7 +1068,7 @@ ret_code elf_write_header( struct module_info *ModuleInfo )
         ehdr64.e_ident[EI_CLASS] = ELFCLASS64;
         ehdr64.e_ident[EI_DATA] = ELFDATA2LSB;
         ehdr64.e_ident[EI_VERSION] = EV_CURRENT;
-        ehdr64.e_ident[EI_OSABI] = ModuleInfo->osabi;
+        ehdr64.e_ident[EI_OSABI] = modinfo->osabi;
         /* v2.07: set abiversion to 0 */
         //ehdr64.e_ident[EI_ABIVERSION] = EV_CURRENT;
         ehdr64.e_ident[EI_ABIVERSION] = 0;
@@ -1091,12 +1090,12 @@ ret_code elf_write_header( struct module_info *ModuleInfo )
          - .strtab
          - .rel<xxx> entries
          */
-        ehdr64.e_shnum = 1 + ModuleInfo->g.num_segs + 3 + get_num_reloc_sections();
-        ehdr64.e_shstrndx = 1 + ModuleInfo->g.num_segs + SHSTRTAB_IDX;
+        ehdr64.e_shnum = 1 + modinfo->g.num_segs + 3 + get_num_reloc_sections();
+        ehdr64.e_shstrndx = 1 + modinfo->g.num_segs + SHSTRTAB_IDX;
         fseek( CurrFile[OBJ], 0, SEEK_SET );
         if ( fwrite( &ehdr64, 1, sizeof( ehdr64 ), CurrFile[OBJ] ) != sizeof( ehdr64 ) )
             WriteError();
-        elf_write_section_table64( ModuleInfo, &ehdr64,
+        elf_write_section_table64( modinfo, &ehdr64,
                                   sizeof( Elf64_Ehdr ) + ehdr64.e_shnum * ehdr64.e_shentsize );
         break;
 #endif
@@ -1106,7 +1105,7 @@ ret_code elf_write_header( struct module_info *ModuleInfo )
         ehdr32.e_ident[EI_CLASS] = ELFCLASS32;
         ehdr32.e_ident[EI_DATA] = ELFDATA2LSB;
         ehdr32.e_ident[EI_VERSION] = EV_CURRENT;
-        ehdr32.e_ident[EI_OSABI] = ModuleInfo->osabi;
+        ehdr32.e_ident[EI_OSABI] = modinfo->osabi;
         /* v2.07: set abiversion to 0 */
         //ehdr32.e_ident[EI_ABIVERSION] = EV_CURRENT;
         ehdr32.e_ident[EI_ABIVERSION] = 0;
@@ -1128,12 +1127,12 @@ ret_code elf_write_header( struct module_info *ModuleInfo )
          - .strtab
          - .rel<xxx> entries
          */
-        ehdr32.e_shnum = 1 + ModuleInfo->g.num_segs + 3 + get_num_reloc_sections();
-        ehdr32.e_shstrndx = 1 + ModuleInfo->g.num_segs + SHSTRTAB_IDX;
+        ehdr32.e_shnum = 1 + modinfo->g.num_segs + 3 + get_num_reloc_sections();
+        ehdr32.e_shstrndx = 1 + modinfo->g.num_segs + SHSTRTAB_IDX;
         fseek( CurrFile[OBJ], 0, SEEK_SET );
         if ( fwrite( &ehdr32, 1, sizeof( ehdr32 ), CurrFile[OBJ] ) != sizeof( ehdr32 ) )
             WriteError();
-        elf_write_section_table32( ModuleInfo, &ehdr32,
+        elf_write_section_table32( modinfo, &ehdr32,
                                   sizeof( Elf32_Ehdr ) + ehdr32.e_shnum * ehdr32.e_shentsize );
     };
     DebugMsg(("elf_write_header: exit\n"));
@@ -1215,9 +1214,9 @@ static void write_relocs64( struct dsym *curr )
                       fixup->location, fixup->type, fixup->sym->ext_idx, fixup->sym->name));
             elftype = R_X86_64_NONE;
             if ( fixup->type < FIX_LAST ) {
-                AsmErr( INVALID_FIXUP_TYPE, ModuleInfo.fmtopt->formatname, fixup->type, curr->sym.name, fixup->location );
+                EmitErr( INVALID_FIXUP_TYPE, ModuleInfo.fmtopt->formatname, fixup->type, curr->sym.name, fixup->location );
             } else
-                AsmErr( UNKNOWN_FIXUP_TYPE, fixup->type, curr->sym.name, fixup->location );
+                EmitErr( UNKNOWN_FIXUP_TYPE, fixup->type, curr->sym.name, fixup->location );
         }
         /* the low 8 bits of info are type */
         /* the high 24 bits are symbol table index */
@@ -1264,9 +1263,9 @@ static void write_relocs32( struct dsym *curr )
                       fixup->location, fixup->type, fixup->sym->ext_idx, fixup->sym->name));
             elftype = R_386_NONE;
             if ( fixup->type < FIX_LAST ) {
-                AsmErr( INVALID_FIXUP_TYPE, ModuleInfo.fmtopt->formatname, fixup->type, curr->sym.name, fixup->location );
+                EmitErr( INVALID_FIXUP_TYPE, ModuleInfo.fmtopt->formatname, fixup->type, curr->sym.name, fixup->location );
             } else
-                AsmErr( UNKNOWN_FIXUP_TYPE, fixup->type, curr->sym.name, fixup->location );
+                EmitErr( UNKNOWN_FIXUP_TYPE, fixup->type, curr->sym.name, fixup->location );
         }
         /* the low 8 bits of info are type */
         /* the high 24 bits are symbol table index */
@@ -1281,8 +1280,8 @@ static void write_relocs32( struct dsym *curr )
 /* write section contents and fixups
  * this is done after the last step only!
  */
-ret_code elf_write_data( struct module_info *ModuleInfo )
-/*******************************************************/
+ret_code elf_write_data( struct module_info *modinfo )
+/****************************************************/
 {
     struct dsym *curr;
     //int seg_index;
@@ -1320,7 +1319,7 @@ ret_code elf_write_data( struct module_info *ModuleInfo )
             DebugMsg(("elf_write_data(%s): relocs at ofs=%X, size=%X\n", curr->sym.name, curr->e.seginfo->reloc_offset, curr->e.seginfo->num_relocs * sizeof(Elf32_Rel)));
             fseek( CurrFile[OBJ], curr->e.seginfo->reloc_offset, SEEK_SET );
 #if AMD64_SUPPORT
-            if ( ModuleInfo->header_format == HFORMAT_ELF64 )
+            if ( modinfo->header_format == HFORMAT_ELF64 )
                 write_relocs64( curr );
             else
 #endif
@@ -1329,7 +1328,7 @@ ret_code elf_write_data( struct module_info *ModuleInfo )
     }
 #if GNURELOCS
     if ( extused ) {
-        AsmWarn( 2, ELF_GNU_EXTENSIONS_USED );
+        EmitWarn( 2, ELF_GNU_EXTENSIONS_USED );
     }
 #endif
 

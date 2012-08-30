@@ -59,8 +59,7 @@ JWasm Readme
 
     - Readme.txt (this file)
     - a Manual, which describes the differences to Masm. It may be in
-      HTML (Manual.html), Windows HTMLHelp (JWasm.ch*) or ASCII text
-      (Manual.txt) format.
+      HTML (Manual.html) or Windows HTMLHelp (JWasm.ch*) format.
     - History.txt, which describes bugfixes and changes of all JWasm versions.
     - License.txt, which is a copy of the Sybase Open Watcom Public License.
 
@@ -102,26 +101,30 @@ JWasm Readme
 
     name         tool chain used               creates binary for
     ---------------------------------------------------------------
-    Makefile     OW v1.7a-v1.9                 Win32, DOS (32-bit)
-    OWDOS16.MAK  OW v1.7a-v1.9                 DOS (16-bit)
-    OWOS2.MAK    OW v1.7a-v1.9                 OS/2 (32-bit)
-    OWLinux.MAK  OW v1.7a-v1.9                 Linux
+    Makefile     Open Watcom v1.7a-v1.9        Win32, DOS (32-bit)
+    OWDOS16.MAK  Open Watcom v1.7a-v1.9        DOS (16-bit)
+    OWOS2.MAK    Open Watcom v1.7a-v1.9        OS/2 (32-bit)
+    OWLinux.MAK  Open Watcom v1.7a-v1.9        Linux
     MSVC.MAK     VC++ TK 2003/VC++ 2005 EE     Win32 [, DOS (32-bit)]
     PCC.MAK      PCC                           Win32
-    PellesC.MAK  Pelles C v5                   Win32 [, DOS (32-bit)]
+    PellesC.MAK  Pelles C v7                   Win32, Win64
     BCC.MAK      Borland C++ Cmdline Tools     Win32
     GccWin.MAK   GCC, MinGW/Cygwin             Win32
-    GccDos.MAK   GCC, DGPJJ                    DOS (32-bit)
+    GccDos.MAK   GCC, DJGPP                    DOS (32-bit)
     GccUnix.MAK  GCC, FreeBSD/Linux            FreeBSD [, Linux]
     TCC.MAK      Tiny C                        Win32
     OC.MAK       Orange C                      Win32
+    GccWin64.MAK GCC, MinGW-w64                Win64
+    IntelC32.MAK Intel C++ Compiler, MSVC      Win32
+    IntelC64.MAK Intel C++ Compiler, MSVC      Win64
     ---------------------------------------------------------------
-    OWWinDll.MAK OW v1.7a-v1.9                 Win32 (JWasm.dll)
+    OWWinDll.MAK Open Watcom v1.7a-v1.9        Win32 (JWasm.dll)
     MsvcDll.MAK  VC++ TK 2003                  Win32 (JWasm.dll)
 
-     The makefiles which use the OW tool chain are supposed to be run
-    with Open Watcom's WMake, MSVC.MAK should be run with MS NMAKE, 
-    PellesC.MAK expects POMAKE and for Gcc*.MAK GNU make is to be used.
+     The makefiles that use the OW tool chain are supposed to be run
+    with Open Watcom's WMake, MSVC.MAK and IntelC*.mak should be run with
+    MS NMAKE, PellesC.MAK expects POMAKE and for Gcc*.MAK GNU make is to be
+    used.
 
     More detailed information may be found in the makefiles themselves!
 

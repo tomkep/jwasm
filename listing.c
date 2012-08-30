@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*  This code is Public Domain. It's new for JWasm.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -18,7 +18,6 @@
 #include "segment.h"
 #include "tokenize.h"
 #include "macro.h"
-#include "fatal.h"
 #include "fastpass.h"
 #include "listing.h"
 #include "input.h"
@@ -29,6 +28,7 @@
 #define CODEBYTES 9
 #define OFSSIZE 8
 #define PREFFMTSTR "25"
+#define USELSLINE 1 /* also in assemble.c! */
 
 #ifdef __UNIX__
 #define NLSIZ 1
@@ -39,8 +39,6 @@
 #endif
 
 extern uint_32  LastCodeBufSize;
-//extern char     *CurrComment;
-extern char     CurrComment[];
 
 uint_32 list_pos; /* current pos in LST file */
 
@@ -134,7 +132,6 @@ struct lstleft {
 /* write a source line to the listing file
  * global variables used inside:
  *  CurrSource:    the - expanded - source line
- *  CurrComment:   comment part of the source line
  *  CurrSeg:       current segment
  *  GeneratedCode: flag if code is generated
  *  MacroLevel:    macro depth
@@ -150,13 +147,14 @@ void LstWrite( enum lsttype type, uint_32 oldofs, void *value )
     int     len2;
     int     idx;
     int     srcfile;
-    char    *p;
+    char    *p1;
     char    *p2;
+    char    *pSrcline;
     struct lstleft *pll;
     struct lstleft ll;
     char    buffer2[MAX_LINE_LEN]; /* stores text macro value */
 
-    if ( ModuleInfo.list == FALSE || CurrFile[LST] == NULL )
+    if ( ModuleInfo.list == FALSE || CurrFile[LST] == NULL || ( ModuleInfo.line_flags & LOF_LISTED ) )
         return;
     if ( GeneratedCode && ( ModuleInfo.list_generated_code == FALSE ) )
         return;
@@ -173,10 +171,19 @@ void LstWrite( enum lsttype type, uint_32 oldofs, void *value )
     ModuleInfo.line_flags |= LOF_LISTED;
 
     DebugMsg1(("LstWrite: enter, pos=%" FU32 ", GeneratedCode=%u, StructInit=%u, MacroLevel=%u\n", list_pos, GeneratedCode, ModuleInfo.StructInit, MacroLevel ));
+    pSrcline = CurrSource;
 #if FASTPASS
     if ( ( Parse_Pass > PASS_1 ) && UseSavedState ) {
         if ( GeneratedCode == 0 ) {
-            list_pos = LineStoreCurr->list_pos;
+            if ( !( ModuleInfo.line_flags & LOF_SKIPPOS ) )
+                list_pos = LineStoreCurr->list_pos;
+#if USELSLINE /* either use CurrSource + CurrComment or LineStoreCurr->line (see assemble.c, OnePass() */
+            pSrcline = LineStoreCurr->line;
+            if ( ModuleInfo.CurrComment ) { /* if comment was removed, readd it! */
+                *( LineStoreCurr->line + strlen( LineStoreCurr->line ) ) = ';';
+                ModuleInfo.CurrComment = NULL;
+            }
+#endif
             DebugMsg1(("LstWrite: Pass=%u, stored pos=%" FU32 "\n", Parse_Pass+1, list_pos ));
         }
         fseek( CurrFile[LST], list_pos, SEEK_SET );
@@ -260,7 +267,7 @@ void LstWrite( enum lsttype type, uint_32 oldofs, void *value )
             ll.buffer[28] = ' ';
         } else if ( sym->state == SYM_TMACRO ) {
             GetLiteralValue( buffer2, sym->string_ptr );
-            for ( p = buffer2, p2 = &ll.buffer[3], pll = &ll; *p; ) {
+            for ( p1 = buffer2, p2 = &ll.buffer[3], pll = &ll; *p1; ) {
                 if ( p2 >= &pll->buffer[28] ) {
                     struct lstleft *next = myalloca( sizeof( struct lstleft ) );
                     pll->next = next;
@@ -269,12 +276,13 @@ void LstWrite( enum lsttype type, uint_32 oldofs, void *value )
                     memset( pll->buffer, ' ', sizeof( pll->buffer) );
                     p2 = &pll->buffer[3];
                 }
-                *p2++ = *p++;
+                *p2++ = *p1++;
             }
         }
         break;
     case LSTTYPE_MACROLINE:
         ll.buffer[1] = '>';
+        pSrcline = value;
         break;
     case LSTTYPE_LABEL:
         oldofs = GetCurrOffset();
@@ -290,7 +298,8 @@ void LstWrite( enum lsttype type, uint_32 oldofs, void *value )
         }
         break;
     default: /* LSTTYPE_MACRO */
-        if ( *CurrSource == NULLC && CurrComment[0] == NULLC && srcfile == ModuleInfo.srcfile ) {
+        if ( *pSrcline == NULLC && ModuleInfo.CurrComment == NULL && srcfile == ModuleInfo.srcfile ) {
+            DebugMsg1(("LstWrite: type=%u, writing CRLF\n", type ));
             fwrite( NLSTR, 1, NLSIZ, CurrFile[LST] );
             list_pos += NLSIZ;
             return;
@@ -323,31 +332,30 @@ void LstWrite( enum lsttype type, uint_32 oldofs, void *value )
     }
 #endif
     fwrite( ll.buffer, 1, idx, CurrFile[LST] );
-#ifdef DEBUG_OUT
-    DebugMsg1(("LstWrite: writing (%u b) >%s<\n", idx, ll.buffer ));
-#endif
-    list_pos += 8*4;
 
-    p = CurrSource;
-    len = strlen( p );
-    len2 = ( CurrComment[0] ? strlen( CurrComment ) : 0 );
+    len = strlen( pSrcline );
+    len2 = ( ModuleInfo.CurrComment ? strlen( ModuleInfo.CurrComment ) : 0 );
 
-    list_pos += len + len2 + NLSIZ;
+    list_pos += sizeof( ll.buffer ) + len + len2 + NLSIZ;
+    DebugMsg1(("LstWrite: writing (%u b) >%s< [%u/%u], new pos=%" FU32 "\n", idx, ll.buffer, len, len2, list_pos ));
 
     /* write source and comment part */
 #if FASTPASS
     if ( Parse_Pass == PASS_1 || UseSavedState == FALSE ) {
 #endif
         if ( len )
-            fwrite( p, 1, len, CurrFile[LST] );
-        if ( len2 )
-            fwrite( CurrComment, 1, len2, CurrFile[LST] );
+            fwrite( pSrcline, 1, len, CurrFile[LST] );
+        if ( len2 ) {
+            fwrite( ModuleInfo.CurrComment, 1, len2, CurrFile[LST] );
+            DebugMsg1(("LstWrite: writing (%u b) >%s%s<\n", len + len2 + NLSIZ, pSrcline, ModuleInfo.CurrComment ));
+        }
+#ifdef DEBUG_OUT
+        else DebugMsg1(("LstWrite: writing (%u b) >%s<\n", len + NLSIZ, pSrcline ));
+#endif
         fwrite( NLSTR, 1, NLSIZ, CurrFile[LST] );
-        DebugMsg1(("LstWrite: writing (%u b) >%s%s<\n", len + len2 + NLSIZ, p, CurrComment ));
 #if FASTPASS
     }
 #endif
-    DebugMsg1(("LstWrite: new pos=%" FU32 "\n", list_pos ));
 
     /* write optional additional lines.
      * currently works in pass one only.
@@ -378,6 +386,7 @@ void LstPrintf( const char *format, ... )
         va_end( args );
     }
 }
+
 void LstNL( void )
 /****************/
 {
@@ -386,6 +395,23 @@ void LstNL( void )
         list_pos += NLSIZ;
     }
 }
+
+/* set the list file's position
+ * this is only needed if generated code is to be
+ * executed BEFORE the original source line is listed.
+ */
+
+#if FASTPASS
+void LstSetPosition( void )
+/*************************/
+{
+    if( CurrFile[LST] && ( Parse_Pass > PASS_1 ) && UseSavedState && GeneratedCode == 0 ) {
+        list_pos = LineStoreCurr->list_pos;
+        fseek( CurrFile[LST], list_pos, SEEK_SET );
+        ModuleInfo.line_flags |= LOF_SKIPPOS;
+    }
+}
+#endif
 
 static const char *get_seg_align( const struct seg_info *seg, char *buffer )
 /**************************************************************************/
@@ -487,7 +513,7 @@ static const char *GetMemtypeString( const struct asym *sym, char *buffer )
             /* v2.05: added */
             if ( sym->state == SYM_TYPE ) {
                 struct dsym *dir = (struct dsym *)sym;
-                if ( dir->e.structinfo->typekind == TYPE_TYPEDEF ) {
+                if ( dir->sym.typekind == TYPE_TYPEDEF ) {
                     strcat( buffer, " ");
                     if ( sym->target_type )
                         strcat( buffer, sym->target_type->name );
@@ -548,8 +574,8 @@ static void log_struct( const struct asym *sym, const char *name, int_32 ofs )
     dir = (struct dsym *)sym;
 
     /* filter typedefs and records */
-    //if ( dir->e.structinfo->typekind != TYPE_STRUCT &&
-    //     dir->e.structinfo->typekind != TYPE_UNION )
+    //if ( dir->sym.typekind != TYPE_STRUCT &&
+    //     dir->sym.typekind != TYPE_UNION )
     //    return;
 
     si = dir->e.structinfo;
@@ -1012,7 +1038,7 @@ void LstWriteCRef( void )
         switch (syms[i]->state) {
         case SYM_TYPE:
             si = ((struct dsym *)syms[i])->e.structinfo;
-            switch ( si->typekind ) {
+            switch ( syms[i]->typekind ) {
             case TYPE_RECORD:  idx = LQ_RECORDS; break;
             case TYPE_TYPEDEF: idx = LQ_TYPEDEFS;break;
             case TYPE_STRUCT:
@@ -1052,7 +1078,7 @@ void LstWriteCRef( void )
         q->tail = syms[i];
         ((struct dsym *)syms[i])->next = NULL;
     }
-    for ( idx = 0; idx < ( sizeof( cr ) / sizeof (cr[0] ) ); idx++ ) {
+    for ( idx = 0; idx < ( sizeof( cr ) / sizeof(cr[0] ) ); idx++ ) {
         if ( queues[cr[idx].type].head ) {
             if ( cr[idx].capitems ) {
                 const short *ps;
@@ -1113,7 +1139,7 @@ ret_code ListingDirective( int i, struct asm_tok tokenarray[] )
             struct asym *sym;
             while ( tokenarray[i].token != T_FINAL ) {
                 if ( tokenarray[i].token != T_ID ) {
-                    AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+                    EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
                     return( ERROR );
                 }
                 if ( sym = SymLookup( tokenarray[i].string_ptr )) {
@@ -1125,7 +1151,7 @@ ret_code ListingDirective( int i, struct asm_tok tokenarray[] )
                         if ( (i + 1) < Token_Count )
                             i++;
                     } else {
-                        AsmError( EXPECTING_COMMA );
+                        EmitError( EXPECTING_COMMA );
                         return( ERROR );
                     }
                 }
@@ -1158,16 +1184,16 @@ ret_code ListingDirective( int i, struct asm_tok tokenarray[] )
          * struct fields with names page, title, subtitle, subttl.
          */
         if( CurrStruct ) {
-            AsmError( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION );
+            EmitError( STATEMENT_NOT_ALLOWED_INSIDE_STRUCTURE_DEFINITION );
             return( ERROR );
         }
         if ( Parse_Pass == PASS_1 )
-            AsmWarn( 4, DIRECTIVE_IGNORED, tokenarray[i-1].string_ptr );
+            EmitWarn( 4, DIRECTIVE_IGNORED, tokenarray[i-1].string_ptr );
         while ( tokenarray[i].token != T_FINAL) i++;
     }
 
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -1180,7 +1206,7 @@ ret_code ListMacroDirective( int i, struct asm_tok tokenarray[] )
 /***************************************************************/
 {
     if ( tokenarray[i+1].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
         return( ERROR );
     }
 
@@ -1200,7 +1226,7 @@ void LstOpenFile( void )
         int namelen;
         CurrFile[LST] = fopen( CurrFName[LST], "wb" );
         if ( CurrFile[LST] == NULL )
-            Fatal( FATAL_CANNOT_OPEN_FILE, CurrFName[LST], errno );
+            Fatal( CANNOT_OPEN_FILE, CurrFName[LST], ErrnoStr() );
 
         MsgGetJWasmName( buffer );
         list_pos = strlen( buffer );

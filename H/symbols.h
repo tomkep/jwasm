@@ -57,53 +57,55 @@ enum sym_state {
 };
 
 /* v2.04: MT_SHORT removed */
+/* v2.07: MT_ABS (0xC2) removed */
 
 enum memtype {
-    MT_BYTE  = 0x00,
-    MT_SBYTE = 0x40,
-    MT_WORD  = 0x01,
-    MT_SWORD = 0x41,
-    MT_DWORD = 0x03,
-    MT_REAL4 = 0x23,
-    MT_SDWORD= 0x43,
-    MT_FWORD = 0x05,
-    MT_QWORD = 0x07,
-    MT_SQWORD= 0x47,
-    MT_REAL8 = 0x27,
-    MT_TBYTE = 0x09,
-    MT_REAL10= 0x29,
-    MT_OWORD = 0x0F,
+    MT_SIZE_MASK = 0x1F, /* if MT_SPECIAL==0 then bits 0-4 = size - 1 */
+    MT_FLOAT  = 0x20, /* bit 5=1 */
+    MT_SIGNED = 0x40, /* bit 6=1 */
+    MT_BYTE  = 1 - 1,
+    MT_SBYTE = MT_BYTE | MT_SIGNED,
+    MT_WORD  = 2 - 1,
+    MT_SWORD = MT_WORD | MT_SIGNED,
+    MT_DWORD = 4 - 1,
+    MT_SDWORD= MT_DWORD | MT_SIGNED,
+    MT_REAL4 = MT_DWORD | MT_FLOAT,
+    MT_FWORD = 6 - 1,
+    MT_QWORD = 8 - 1,
+    MT_SQWORD= MT_QWORD | MT_SIGNED,
+    MT_REAL8 = MT_QWORD | MT_FLOAT,
+    MT_TBYTE = 10 - 1,
+    MT_REAL10= MT_TBYTE | MT_FLOAT,
+    MT_OWORD = 16 - 1,
 #if AVXSUPP
-    MT_YMMWORD = 0x1F,
+    MT_YMMWORD = 32 - 1,
 #endif
     MT_PROC  = 0x80,
     MT_NEAR  = 0x81,
     MT_FAR   = 0x82,
     MT_EMPTY = 0xC0,
     MT_BITS  = 0xC1,   /* record field */
-    //MT_ABS   = 0xC2, /* v2.07: obsolete */
     MT_PTR   = 0xC3,   /* v2.05: changed, old value 0x83 */
     MT_TYPE  = 0xC4,   /* structured variable */
-    MT_FLOAT   = 0x20, /* bit 5 */
     MT_SPECIAL = 0x80, /* bit 7 */
     MT_SPECIAL_MASK = 0xC0, /* bit 6+7 */
-    MT_SIGNED  = 0x40, /* bit 6=1, bit 7 = 0 */
     MT_ADDRESS = 0x80, /* bit 7=1, bit 6 = 0 */
-    MT_SIZE_MASK = 0x1F
 };
 
 #define IS_SIGNED(x)  (((x) & MT_SPECIAL_MASK) == MT_SIGNED)
 
 /* symbols can be
  * - "labels" (data or code, internal, external, stack)
- *   which have mem_type MT_BYTE..MT_OWORD, MT_NEAR, MT_FAR, MT_PTR
- * - constants (EQU) or assembly time variables (defined by "="),
- *   mem_type is MT_ABS.
- * - types (STRUCT, UNION, TYPEDEF, RECORD) (mem_type = MT_TYPE)
+ *   mem_type is MT_BYTE..MT_OWORD, MT_NEAR, MT_FAR, MT_PTR
+ * - constants (EQU) or assembly time variables ("="),
+ *   mem_type "usually" is MT_EMPTY.
+ * - types (STRUCT, UNION, TYPEDEF, RECORD), mem_type = MT_TYPE
  * - preprocessor items (macros and text macros), which have no
  *   mem_type (MT_EMPTY).
  */
-typedef ret_code (* macro_func)( char *, char * * );
+struct macro_instance;
+
+typedef ret_code (* macro_func)( struct macro_instance *, char *, struct asm_tok * );
 typedef void (* internal_func)( struct asym * );
 
 struct debug_info {
@@ -121,12 +123,12 @@ struct asym {
     struct asym     *next;
     char            *name;         /* symbol name */
     union {
-        int_32         offset;     /* used by SYM_INTERNAL, SYM_TYPE */
-        int_32         value;      /* used by MT_ABS */
+        int_32         offset;     /* used by SYM_INTERNAL (labels), SYM_TYPE */
+        int_32         value;      /* used by SYM_INTERNAL (equates) */
         uint_32        uvalue;     /* v2.01: equates (they are 33-bit!) */
         char           *string_ptr;/* used by SYM_TMACRO */
         struct asym    *substitute;/* v2.04b: used by SYM_ALIAS */
-        macro_func     func_ptr;   /* used by SYM_MACRO */
+        macro_func     func_ptr;   /* used by SYM_MACRO if predefined==1 */
         int_32         max_offset; /* used by SYM_SEG */
         int_32         class_lname_idx;/* used by SYM_CLASS_LNAME */
     };
@@ -156,7 +158,7 @@ struct asym {
 #endif
                     isdata:1;     /* field first_size is valid */
     union {
-        /* for SYM_INTERNAL (memtype != NEAR|FAR|ABS), SYM_STRUCT_FIELD */
+        /* for SYM_INTERNAL (memtype != NEAR|FAR), SYM_STRUCT_FIELD */
         uint_32         first_size;   /* size of 1st initializer in bytes */
         /* for SYM_INTERNAL (memtype == NEAR|FAR),
          * SYM_GRP (Ofssize),
@@ -179,12 +181,12 @@ struct asym {
         };
         /* for SYM_MACRO */
         struct {
-            unsigned char   mac_vararg:1;/* accept additional params */
-            unsigned char   isfunc:1;   /* it's a macro function */
+            unsigned char   mac_vararg:1,/* accept additional params */
+                            isfunc:1,   /* it's a macro function */
 #if MACROLABEL
-            unsigned char   label:1;    /* macro is "label-aware" */
+                            label:1,    /* macro is "label-aware" */
 #endif
-            //unsigned char   runsync:1;  /* run macro synchronous */
+                            purged:1;   /* macro has been PURGEd */
         };
     };
     union {
@@ -200,9 +202,10 @@ struct asym {
         /* for SYM_INTERNAL, SYM_STRUCT_FIELD,
          * SYM_TYPE, SYM_STACK,
          * SYM_EXTERNAL (comm=1)
+         * SYM_TMACRO: size of buffer allocated for the text in string_ptr
          */
         uint_32         total_size;   /* total number of bytes (sizeof) */
-        /* for SYM_INTERNAL, MT_ABS (numeric equates) */
+        /* for SYM_INTERNAL, isequate=1 (numeric equates) */
         int_32          value3264;    /* high bits for equates */
 #if DLLIMPORT
         const char     *dllname;      /* SYM_EXTERNAL (isproc=1) */
@@ -217,11 +220,14 @@ struct asym {
         struct asym    *altname;     /* SYM_EXTERNAL (comm==0): alternative name */
         struct debug_info *debuginfo;/* SYM_INTERNAL (isproc==1): debug info (COFF) */
         internal_func  sfunc_ptr;    /* SYM_INTERNAL+predefined */
-        /* SYM_TYPE: codeview type index (used after assembly steps)
-         * v2.04: moved from first_length, were it didn't work anymore
-         * since the addition of field max_mbr_size.
-         */
-        uint_16        cv_typeref;
+        struct { /* SYM_TYPE */
+            /* codeview type index (used after assembly steps)
+             * v2.04: moved from first_length, were it didn't work anymore
+             * since the addition of field max_mbr_size.
+             */
+            uint_16        cv_typeref;
+            uint_8         typekind;
+        };
     };
 #if (MAX_ID_LEN <= 255)
     uint_8          name_size;
@@ -332,6 +338,7 @@ struct proc_info {
     char                *prologuearg;   /* PROC: prologuearg attribute */
 #if AMD64_SUPPORT
     struct asym         *exc_handler;   /* PROC: exc handler set by FRAME */
+    int                 ReservedStack;  /* win64: additional reserved stack */
 #endif
     uint_32             list_pos;       /* PROC: prologue list pos */
     union {
@@ -371,7 +378,10 @@ struct srcline {
 
 struct macro_info {
     uint_16             parmcnt;    /* no of params */
-    uint_16             localcnt;   /* no of locals */
+    union {
+        uint_16         localcnt;   /* no of locals */
+        uint_16         autoexp;    /* auto-expansion flags if predefined macro */
+    };
     struct mparm_list   *parmlist;  /* array of parameter items */
     struct srcline      *data;      /* prepared macro source lines */
 #ifdef DEBUG_OUT
@@ -398,13 +408,14 @@ enum type_kind {
 };
 
 struct struct_info {
-    struct field_item   *head;
-    struct field_item   *tail;
-#ifdef __WATCOMC__
-    enum type_kind      typekind;
-#else
-    uint_8              typekind;
-#endif
+    struct field_item   *head; /* start of struct's field list */
+    struct field_item   *tail; /* used during parsing of struct only */
+    /* v2.08: typekind moved to struct asym */
+    //#ifdef __WATCOMC__
+    //    enum type_kind      typekind;
+    //#else
+    //    uint_8              typekind;
+    //#endif
     uint_8              alignment;   /* STRUCT: 1,2,4,8,16 or 32 */
     union {
         uint_8          flags;
@@ -460,36 +471,35 @@ struct dsym {
     };
 };
 
+extern  struct asym     *SymAlloc( const char * );
+extern  void            SymFree( struct asym * );
 
+extern  struct asym     *SymCreate( const char * );
+extern  struct asym     *SymLCreate( const char * );
+extern  struct asym     *SymAddGlobal( struct asym * );
+extern  struct asym     *SymAddLocal( struct asym *, const char * );
+extern  struct asym     *SymLookup( const char * );
+extern  struct asym     *SymLookupLabel( const char *, int bDefine );
 
-extern  struct asym     *SymLookup( const char *name );
-extern  struct asym     *SymLookupLabel( const char *name, int bDefine );
-extern  struct asym     *SymSearch( const char *name );
-extern  void            SymSetCmpFunc( void );
+extern  struct asym     *SymFind( const char *name );
+#define SymSearch(x) SymFind(x)
 
-//extern  void            SymTakeOut( const char *name );
-extern  void            SymFree( struct asym *sym);
-//extern  int             SymChangeName( const char *old, const char *new );
-extern  void            SymSetName( struct asym * sym, const char *name );
-extern  struct asym     *SymAddToTable( struct asym *sym );
 extern  void            SymInit( void );
 extern  void            SymFini( void );
 extern  void            SymPassInit( int pass );
 extern  void            SymMakeAllSymbolsPublic( void );
 extern  void            SymGetAll( struct asym ** );
 extern  int             SymEnum( struct asym * *, int * );
-//extern  struct asym     *SymIsType( const char * );
 extern  uint_32         SymGetCount( void );
 
 #ifdef __WATCOMC__
 typedef int (__watcall * StrCmpFunc)(const void *, const void *, unsigned );
 #else
-typedef int (* StrCmpFunc)(const void *, const void *, unsigned );
+typedef int (* StrCmpFunc)(const void *, const void *, size_t );
 #endif
 extern StrCmpFunc SymCmpFunc;
 
-extern  struct asym     *SymCreate( const char *, bool );
-extern  struct asym     *SymLCreate( const char * );
+extern  void            SymSetCmpFunc( void );
 extern  void            SymClearLocal( void );
 extern  void            SymSetLocal( struct asym * );
 extern  void            SymGetLocal( struct asym * );

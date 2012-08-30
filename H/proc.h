@@ -33,6 +33,9 @@
 #define _PROC_H_
 
 extern struct dsym     *CurrProc;      /* current procedure */
+#if AMD64_SUPPORT
+extern struct asym     ReservedStack;  /* max stack space required by INVOKE */
+#endif
 
 /*---------------------------------------------------------------------------*/
 
@@ -45,7 +48,7 @@ extern void             DeleteProc( struct dsym * );
 
 extern ret_code         CopyPrototype( struct dsym *, struct dsym * );
 extern ret_code         RetInstr( int, struct asm_tok[], int );   /* handle RET/IRET within procedures */
-extern void             write_prologue( void );
+extern void             write_prologue( struct asm_tok[] );
 extern void             ProcInit( void );
 
 #endif

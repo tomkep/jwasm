@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*  This code is Public Domain. It's new for JWasm.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -16,6 +16,8 @@
 *               to save such lines during pass one.
 *
 ****************************************************************************/
+
+#include <ctype.h>
 
 #include "globals.h"
 #include "memalloc.h"
@@ -58,19 +60,24 @@ static void SaveState( void )
     DebugMsg(( "SaveState exit\n" ));
 }
 
-void StoreLine( char *srcline, uint_32 list_pos )
-/***********************************************/
+void StoreLine( char *srcline, uint_32 list_pos, int flags )
+/**********************************************************/
 {
-    int i;
+    int i,j;
+    char *p;
 
+#ifdef DEBUG_OUT
+    if ( Options.nofastpass )
+        return;
+#endif
     if ( GeneratedCode ) /* don't store generated lines! */
         return;
     if ( StoreState == FALSE ) /* line store already started? */
         SaveState();
 
     i = strlen( srcline );
-    LineStoreCurr = AsmAlloc( i + sizeof( struct line_item ) );
-    DebugMsg1(("StoreLine(>%s<, listpos=%u): cur=%X\n", srcline, list_pos, LineStoreCurr ));
+    j = ( ( ( flags & 1 ) && ModuleInfo.CurrComment ) ? strlen( ModuleInfo.CurrComment ) : 0 );
+    LineStoreCurr = LclAlloc( i + j + sizeof( struct line_item ) );
     LineStoreCurr->next = NULL;
     LineStoreCurr->lineno = LineNumber;
     if ( MacroLevel ) {
@@ -79,7 +86,19 @@ void StoreLine( char *srcline, uint_32 list_pos )
         LineStoreCurr->srcfile = get_curr_srcfile();
     }
     LineStoreCurr->list_pos = list_pos;
-    memcpy( LineStoreCurr->line, srcline, i + 1 );
+    if ( j ) {
+        memcpy( LineStoreCurr->line, srcline, i );
+        memcpy( LineStoreCurr->line + i, ModuleInfo.CurrComment, j + 1 );
+    } else
+        memcpy( LineStoreCurr->line, srcline, i + 1 );
+
+    DebugMsg1(("StoreLine(>%s<, listpos=%u): cur=%X\n", LineStoreCurr->line, list_pos, LineStoreCurr ));
+
+    /* v2.08: don't store % operator at pos 0 */
+    for ( p = LineStoreCurr->line; *p && isspace(*p); p++ );
+    if (*p == '%' && ( _memicmp( p+1, "OUT", 3 ) || is_valid_id_char( *(p+4) ) ) )
+        *p = ' ';
+
 #ifdef DEBUG_OUT
     if ( Options.print_linestore )
         printf("%s\n", LineStoreCurr->line );
@@ -116,7 +135,7 @@ void SaveVariableState( struct asym *sym )
 
     DebugMsg1(( "SaveVariableState(%s)=%d\n", sym->name, sym->value ));
     sym->saved = TRUE; /* don't try to save this symbol (anymore) */
-    p = AsmAlloc( sizeof( struct equ_item ) );
+    p = LclAlloc( sizeof( struct equ_item ) );
     p->next = NULL;
     p->sym = sym;
     p->lvalue    = sym->value;
@@ -159,7 +178,7 @@ struct line_item *RestoreState( void )
 #if 0
     /* v2.05: AFAICS this can't happen anymore. */
     if ( LineStoreHead == NULL ) {
-        struct line_item *endl = AsmAlloc( sizeof( struct line_item ) + 3 );
+        struct line_item *endl = LclAlloc( sizeof( struct line_item ) + 3 );
         endl->next = NULL;
         endl->srcfile = 0;
         endl->lineno = LineNumber;

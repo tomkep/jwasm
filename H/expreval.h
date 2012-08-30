@@ -81,37 +81,35 @@ struct expr {
         uint_32     uvalue;
         int_64      value64;
         float       fvalue;
+        int         st_idx;         /* EXPR_REG: index if reg is ST */
         uint_8      chararray[16];
     };
     union {
-        char        *string;        /* for EXPR_CONST + strings only */
-        char        *floatstr;      /* for EXPR_FLOAT only */
+        struct asm_tok *quoted_string; /* for EXPR_CONST + quoted strings only */
+        struct asm_tok *float_tok;     /* for EXPR_FLOAT only */
     };
     struct asm_tok  *base_reg;      /* token holding base register */
                                     /* if type is EXPR_REG, it holds register */
     struct asm_tok  *idx_reg;       /* token holding index register */
-    struct asm_tok  *label;         /* token holding the label */
+    struct asm_tok  *label_tok;     /* token holding the label (for INVOKE only) */
     struct asm_tok  *override;      /* token holding the override label */
                                     /* or register */
     enum special_token instr;       /* operator token */
 
     enum exprtype   kind;           /* Type of expression */
     enum memtype    mem_type;       /* memory type if expr is a memory ref. */
-    union {
-        uint_8      scale;          /* scaling factor 1, 2, 4, or 8 - 386 code only */
-        uint_8      st_idx;         /* index if base_reg is a ST register */
-    };
+    uint_8          scale;          /* scaling factor 1, 2, 4, or 8 - 386 code only */
     uint_8          Ofssize;        /* 16,32,64 bit if MT_NEAR, MT_FAR */
     union {
         uint_8      flags1;
         struct {
             unsigned indirect : 1;  /* Whether inside [] or not */
-            unsigned explicit : 1;  /* Whether expression type explicitly given */
+            unsigned explicit : 1;  /* Whether expression type explicitly given (to be removed!) */
             unsigned abs      : 1;  /* external ABS */
             unsigned is_type  : 1;  /* constant is a type */
             unsigned is_opattr: 1;  /* current operator is OPATTR */
             unsigned negative : 1;  /* for EXPR_FLOAT only */
-            unsigned ftype    : 1;  /* for EXPR_FLOAT only (float type) */
+            //unsigned ftype    : 1;  /* for EXPR_FLOAT only (float type) */
             unsigned assumecheck: 1;/* v2.07: for ASSUMEd std registers */
         };
     };

@@ -113,5 +113,6 @@
 "-d8\0"             "Disable backpatching\0"
 "-ls\0"             "Display preprocessed line storage on stdout\0"
 "-pm=<n>\0"         "Stop assembly after <n> passes\0"
+"-sp\0"             "Skip preprocessor step\0"
 #endif
 "\n"

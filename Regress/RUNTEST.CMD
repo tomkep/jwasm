@@ -68,6 +68,12 @@ jwasm -q -win64 PROC641.ASC
 if errorlevel 1 goto end
 ..\tools\jfc -co PROC641.OBJ PROC641.EXP
 
+rem option dllimport
+jwasm -q -coff -Fd DLLIMP.ASC
+if errorlevel 1 goto end
+..\tools\jwlink2 format win pe f DLLIMP.OBJ op q,noreloc
+..\tools\jfc -pe DLLIMP.EXE DLLIMP.EXP
+
 goto end
 
 :coffdbg

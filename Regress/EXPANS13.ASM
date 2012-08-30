@@ -1,7 +1,7 @@
 
-;--- this doesn't work currently
-;--- if a '%' is first character, JWasm does expand everything
-;--- within a quoted string, it doesn't need a '&'.
+;--- this didn't work prior to v2.08,
+;--- if a '%' is first character, JWasm did expand everything
+;--- within a quoted string, it didn't need a '&'.
 
 	.386
 	.model flat, stdcall

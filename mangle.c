@@ -201,7 +201,7 @@ static mangle_func GetMangler( const char *mangle_type )
         }
     }
     if ( mangle_type )
-        AsmErr( UNKNOWN_MANGLER, mangle_type );
+        EmitErr( UNKNOWN_MANGLER, mangle_type );
 
     return( NULL );
 }
@@ -267,7 +267,7 @@ void SetMangler( struct asym *sym, int langtype, const char *mangle_type )
     } else if( sym->mangler == NULL ) {
         sym->mangler = mangler;
     } else if( sym->mangler != mangler ) {
-        AsmErr( CONFLICTING_MANGLER, sym->name );
+        EmitErr( CONFLICTING_MANGLER, sym->name );
     }
 #endif
 }

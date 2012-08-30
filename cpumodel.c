@@ -1,26 +1,6 @@
 /****************************************************************************
 *
-*                            Open Watcom Project
-*
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
-*
-*  ========================================================================
-*
-*    This file contains Original Code and/or Modifications of Original
-*    Code as defined in and that are subject to the Sybase Open Watcom
-*    Public License version 1.0 (the 'License'). You may not use this file
-*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
-*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
-*    provided with the Original Code and Modifications, and is also
-*    available at www.sybase.com/developer/opensource.
-*
-*    The Original Code and all software distributed under the License are
-*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
-*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
-*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
-*    NON-INFRINGEMENT. Please see the License for the specific language
-*    governing rights and limitations under the License.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -41,6 +21,8 @@
 #include "expreval.h"
 #include "fastpass.h"
 #include "listing.h"
+#include "proc.h"
+#include "macro.h"
 
 #include "myassert.h"
 
@@ -50,7 +32,8 @@ extern const char szDgroup[];
 
 /* prototypes */
 
-/* must be sorted like MOD_xxx enum:
+/* the following flags assume the MODEL_xxx enumeration.
+ * must be sorted like MODEL_xxx enum:
  * TINY=1, SMALL=2, COMPACT=3, MEDIUM=4, LARGE=5, HUGE=6, FLAT=7
  */
 const char * const ModelToken[] = {
@@ -74,11 +57,6 @@ static const struct typeinfo ModelAttrValue[] = {
     { OPSYS_DOS,      INIT_OS         },
     { OPSYS_OS2,      INIT_OS         },
 };
-
-/* the following flags assume the MOD_xxx enumeration
- * starts with 0 ( MOD_NONE ) and ends with 7 ( MOD_FLAT ).
- *  MOD_COMPACT = 3, MOD_MEDIUM = 4
- */
 
 static struct asym *sym_CodeSize  ; /* numeric. requires model */
 static struct asym *sym_DataSize  ; /* numeric. requires model */
@@ -109,21 +87,32 @@ static struct asym *AddPredefinedConstant( const char *name, int value )
     return(sym);
 }
 
-static void AddPredefinedText( const char *name, const char *value )
-/******************************************************************/
-{
-    struct asym *sym;
+/* set default wordsize for segment definitions */
 
-    sym = SymSearch( name );
-    if (sym == NULL)
-        sym = SymCreate( name, TRUE );
-    sym->state = SYM_TMACRO;
-    sym->isdefined = TRUE;
-    sym->predefined = TRUE;
-    sym->string_ptr = (char *)value;
+static ret_code SetDefaultOfssize( int size )
+/*******************************************/
+{
+    /* outside any segments? */
+    if( CurrSeg == NULL ) {
+        ModuleInfo.defOfssize = size;
+    }
+    return( SetOfssize() );
 }
 
 /* set memory model, called by ModelDirective()
+ * also set predefined symbols:
+ * - @CodeSize  (numeric)
+ * - @code      (text)
+ * - @DataSize  (numeric)
+ * - @data      (text)
+ * - @stack     (text)
+ * - @Model     (numeric)
+ * - @Interface (numeric)
+ * inactive:
+ * - @fardata   (text)
+ * - @fardata?  (text)
+ * Win64 only:
+ * - @ReservedStack (numeric)
  */
 static void SetModel( void )
 /**************************/
@@ -134,12 +123,17 @@ static void SetModel( void )
 
     DebugMsg1(("SetModel() enter (model=%u)\n", ModuleInfo.model ));
     /* if model is set, it disables OT_SEGMENT of -Zm switch */
-    if ( ModuleInfo.model == MOD_FLAT )
+    if ( ModuleInfo.model == MODEL_FLAT ) {
         ModuleInfo.offsettype = OT_FLAT;
-    else
+#if AMD64_SUPPORT
+        SetDefaultOfssize( ((ModuleInfo.curr_cpu & P_CPU_MASK) >= P_64 ) ? USE64 : USE32 );
+#else
+        SetDefaultOfssize( USE32 );
+#endif
+    } else
         ModuleInfo.offsettype = OT_GROUP;
 
-    PushLineQueue();
+    NewLineQueue();
     ModelSimSegmInit( ModuleInfo.model ); /* create segments in first pass */
     ModelAssumeInit();
 
@@ -161,15 +155,15 @@ static void SetModel( void )
         // SimpleType[ST_PROC].mem_type = MT_NEAR; /* this is default */
     }
     sym_CodeSize = AddPredefinedConstant( "@CodeSize", value );
-    AddPredefinedText( "@code", GetCodeSegName() );
+    AddPredefinedText( "@code", SimGetSegName( SIM_CODE ) );
 
     /* Set @DataSize */
     switch( ModuleInfo.model ) {
-    case MOD_COMPACT:
-    case MOD_LARGE:
+    case MODEL_COMPACT:
+    case MODEL_LARGE:
         value = 1;
         break;
-    case MOD_HUGE:
+    case MODEL_HUGE:
         value = 2;
         break;
     default:
@@ -178,33 +172,37 @@ static void SetModel( void )
     }
     sym_DataSize = AddPredefinedConstant( "@DataSize", value );
 
-    if ( ModuleInfo.model == MOD_FLAT )
-        textvalue = "FLAT";
-    else
-        textvalue = szDgroup;
-
+    textvalue = ( ModuleInfo.model == MODEL_FLAT ? "FLAT" : szDgroup );
     AddPredefinedText( "@data", textvalue );
 
     if ( ModuleInfo.distance == STACK_FAR )
         textvalue = "STACK";
     AddPredefinedText( "@stack", textvalue );
 
+#if 0
+    AddPredefinedText( "@fardata", ( ModuleInfo.model == MODEL_FLAT ? "FLAT" : SimGetSegName( SIM_FARDATA ) ) );
+    AddPredefinedText( "@fardata?", ( ModuleInfo.model == MODEL_FLAT ? "FLAT" : SimGetSegName( SIM_FARDATA_UN ) ) );
+#endif
+
     /* Set @Model and @Interface */
 
     sym_Model     = AddPredefinedConstant( "@Model", ModuleInfo.model );
     sym_Interface = AddPredefinedConstant( "@Interface", ModuleInfo.langtype );
-}
 
-/* set default wordsize for segment definitions */
-
-static ret_code SetDefaultOfssize( int size )
-/*******************************************/
-{
-    /* outside any segments? */
-    if( CurrSeg == NULL ) {
-        ModuleInfo.defOfssize = size;
+#if AMD64_SUPPORT
+    if ( ModuleInfo.defOfssize == USE64 && ModuleInfo.fctype == FCT_WIN64 ) {
+        ReservedStack.mem_type = MT_EMPTY;
+        ReservedStack.state = SYM_INTERNAL;
+        ReservedStack.isdefined = TRUE;
+        ReservedStack.predefined = TRUE;
+#if FASTMEM==0
+        ReservedStack.staticmem = TRUE;
+#endif
+        ReservedStack.variable = TRUE;
+        ReservedStack.name_size = 14; /* sizeof( "@ReservedStack" ) */
+        SymAddGlobal( &ReservedStack );
     }
-    return( SetOfssize() );
+#endif
 }
 
 /* handle .model directive
@@ -220,7 +218,7 @@ static ret_code SetDefaultOfssize( int size )
 ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
 /***********************************************************/
 {
-    enum mod_type model;
+    enum model_type model;
     enum lang_type language;
     enum dist_type distance;
     enum os_type ostype;
@@ -235,7 +233,7 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
      * structure was saved before the .MODEL directive.
      */
     //if( Parse_Pass != PASS_1 ) {
-    if( Parse_Pass != PASS_1 && ModuleInfo.model != MOD_NONE ) {
+    if( Parse_Pass != PASS_1 && ModuleInfo.model != MODEL_NONE ) {
         /* just set the model with SetModel() if pass is != 1.
          * This won't set the language ( which can be modified by
          * OPTION LANGUAGE directive ), but the language in ModuleInfo
@@ -247,20 +245,20 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
 
     i++;
     if ( tokenarray[i].token == T_FINAL ) {
-        AsmError( EXPECTED_MEMORY_MODEL );
+        EmitError( EXPECTED_MEMORY_MODEL );
         return( ERROR );
     }
     /* get the model argument */
     index = FindToken( tokenarray[i].string_ptr, ModelToken, sizeof( ModelToken )/sizeof( ModelToken[0] ) );
     if( index >= 0 ) {
-        if( ModuleInfo.model != MOD_NONE ) {
-            AsmWarn( 2, MODEL_DECLARED_ALREADY );
+        if( ModuleInfo.model != MODEL_NONE ) {
+            EmitWarn( 2, MODEL_DECLARED_ALREADY );
             return( NOT_ERROR );
         }
         model = index + 1;
         i++;
     } else {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -278,8 +276,8 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
                 initv = ModelAttrValue[index].init;
                 switch ( initv ) {
                 case INIT_STACK:
-                    if ( model == MOD_FLAT ) {
-                        AsmError( INVALID_MODEL_PARAM_FOR_FLAT );
+                    if ( model == MODEL_FLAT ) {
+                        EmitError( INVALID_MODEL_PARAM_FOR_FLAT );
                         return( ERROR );
                     }
                     distance = ModelAttrValue[index].value;
@@ -300,22 +298,18 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
     }
     /* everything parsed successfully? */
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
 
-    if ( model == MOD_FLAT ) {
+    if ( model == MODEL_FLAT ) {
         if ( ( ModuleInfo.curr_cpu & P_CPU_MASK) < P_386 ) {
-            AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+            EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
             return( ERROR );
         }
         DefineFlatGroup();
-#if AMD64_SUPPORT
-        SetDefaultOfssize( ((ModuleInfo.curr_cpu & P_CPU_MASK) >= P_64 ) ? USE64 : USE32 );
-#else
-        SetDefaultOfssize( USE32 );
-#endif
     }
+
     ModuleInfo.model = model;
     if ( init & INIT_LANG ) {
         ModuleInfo.langtype = language;
@@ -325,7 +319,9 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
          * to enable the win64 ABI from the source.
          */
         if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_64 )
-            if ( language == LANG_FASTCALL && Options.output_format != OFORMAT_ELF ) {
+            if ( language == LANG_FASTCALL &&
+                model == MODEL_FLAT &&
+                Options.output_format != OFORMAT_ELF ) {
                 DebugMsg(("ModelDirective: FASTCALL type set to WIN64\n"));
                 ModuleInfo.header_format = HFORMAT_WIN64;
                 ModuleInfo.fctype = FCT_WIN64;
@@ -421,7 +417,7 @@ ret_code SetCPU( enum cpu_info newcpu )
     DebugMsg1(("SetCPU: ModuleInfo.curr_cpu=%X, @Cpu=%X\n", ModuleInfo.curr_cpu, ModuleInfo.cpu ));
 
     //MakeCPUConstant( newcpu );
-    if ( ModuleInfo.model == MOD_NONE )
+    if ( ModuleInfo.model == MODEL_NONE )
 #if AMD64_SUPPORT
         if ( ( ModuleInfo.curr_cpu & P_CPU_MASK) >= P_64 ) {
             SetDefaultOfssize( USE64 );
@@ -474,7 +470,7 @@ ret_code CpuDirective( int i, struct asm_tok tokenarray[] )
     i++;
 
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
 

@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*  This code is Public Domain. It's new for JWasm.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -33,17 +33,6 @@
 
 extern const char szDgroup[];
 
-enum sim_seg {
-    SIM_CODE = 0,
-    SIM_STACK,
-    SIM_DATA,
-    SIM_DATA_UN,            /* .DATA? */
-    SIM_FARDATA,
-    SIM_FARDATA_UN,         /* .FARDATA? */
-    SIM_CONST,
-    SIM_LAST
-};
-
 static char *SegmNames[ SIM_LAST ];
 
 static const char * const SegmNamesDef[ SIM_LAST ] = {
@@ -56,10 +45,10 @@ static const char * const SegmCombine[ SIM_LAST ] = {
     "PUBLIC", "STACK", "PUBLIC", "PUBLIC", "PRIVATE", "PRIVATE", "PUBLIC"
 };
 
-char *GetCodeSegName( void )
-/**************************/
+char *SimGetSegName( enum sim_seg segno )
+/***************************************/
 {
-    return( SegmNames[SIM_CODE] );
+    return( SegmNames[segno] );
 }
 
 const char *GetCodeClass( void )
@@ -78,7 +67,7 @@ static void AddToDgroup( enum sim_seg segm, const char *name )
 /************************************************************/
 {
     /* no DGROUP for FLAT or COFF/ELF */
-    if( ModuleInfo.model == MOD_FLAT
+    if( ModuleInfo.model == MODEL_FLAT
 #if COFF_SUPPORT
        || Options.output_format == OFORMAT_COFF
 #endif
@@ -120,7 +109,7 @@ static void SetSimSeg( enum sim_seg segm, const char *name )
     const char *pClass;
 
     if ( ModuleInfo.defOfssize > USE16 ) {
-        if ( ModuleInfo.model == MOD_FLAT )
+        if ( ModuleInfo.model == MODEL_FLAT )
             pUse = "FLAT";
         else
             pUse = "USE32";
@@ -192,8 +181,8 @@ ret_code SimplifiedSegDir( int i, struct asm_tok tokenarray[] )
 
     LstWrite( LSTTYPE_DIRECTIVE, 0, NULL );
 
-    if( ModuleInfo.model == MOD_NONE ) {
-        AsmError( MODEL_IS_NOT_DECLARED );
+    if( ModuleInfo.model == MODEL_NONE ) {
+        EmitError( MODEL_IS_NOT_DECLARED );
         return( ERROR );
     }
 
@@ -207,7 +196,7 @@ ret_code SimplifiedSegDir( int i, struct asm_tok tokenarray[] )
         if( opndx.kind == EXPR_EMPTY )
             opndx.value = DEFAULT_STACK_SIZE;
         else if( opndx.kind != EXPR_CONST ) {
-            AsmError( CONSTANT_EXPECTED );
+            EmitError( CONSTANT_EXPECTED );
             return( ERROR );
         }
     } else {
@@ -224,11 +213,11 @@ ret_code SimplifiedSegDir( int i, struct asm_tok tokenarray[] )
         }
     }
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
-    PushLineQueue();
+    NewLineQueue();
 
     if( type != SIM_STACK )
         close_currseg();  /* emit a "xxx ENDS" line to close current seg */
@@ -240,12 +229,12 @@ ret_code SimplifiedSegDir( int i, struct asm_tok tokenarray[] )
     case SIM_CODE: /* .code */
         SetSimSeg( SIM_CODE, name );
 
-        if( ModuleInfo.model == MOD_TINY ) {
+        if( ModuleInfo.model == MODEL_TINY ) {
             /* v2.05: add the named code segment to DGROUP */
             if ( name )
                 AddToDgroup( SIM_CODE, name );
             name = szDgroup;
-        } else if( ModuleInfo.model == MOD_FLAT ) {
+        } else if( ModuleInfo.model == MODEL_FLAT ) {
             name = "FLAT";
         } else {
             if( name == NULL )
@@ -305,12 +294,12 @@ void SetModelDefaultSegNames( void )
 
     /* option -nt set? */
     if( Options.names[OPTN_TEXT_SEG] ) {
-        SegmNames[SIM_CODE] = AsmAlloc( strlen( Options.names[OPTN_TEXT_SEG] ) + 1 );
+        SegmNames[SIM_CODE] = LclAlloc( strlen( Options.names[OPTN_TEXT_SEG] ) + 1 );
         strcpy( SegmNames[SIM_CODE], Options.names[OPTN_TEXT_SEG] );
     } else {
         if ( SIZE_CODEPTR & ( 1 << ModuleInfo.model ) ) {
             /* for some models, the code segment contains the module name */
-            SegmNames[SIM_CODE] = AsmAlloc( strlen( SegmNamesDef[SIM_CODE] ) + strlen( ModuleInfo.name ) + 1 );
+            SegmNames[SIM_CODE] = LclAlloc( strlen( SegmNamesDef[SIM_CODE] ) + strlen( ModuleInfo.name ) + 1 );
             strcpy( SegmNames[SIM_CODE], ModuleInfo.name );
             strcat( SegmNames[SIM_CODE], SegmNamesDef[SIM_CODE] );
         }
@@ -318,7 +307,7 @@ void SetModelDefaultSegNames( void )
 
     /* option -nd set? */
     if ( Options.names[OPTN_DATA_SEG] ) {
-        SegmNames[SIM_DATA] = AsmAlloc( strlen( Options.names[OPTN_DATA_SEG] ) + 1 );
+        SegmNames[SIM_DATA] = LclAlloc( strlen( Options.names[OPTN_DATA_SEG] ) + 1 );
         strcpy( SegmNames[SIM_DATA], Options.names[OPTN_DATA_SEG] );
     }
     return;
@@ -326,7 +315,7 @@ void SetModelDefaultSegNames( void )
 
 /* Called by SetModel() [.MODEL directive].
  * Initializes simplified segment directives.
- * PushLineQueue() has already been called,
+ * NewLineQueue() has already been called,
  * and the caller will run RunLineQueue() later.
  * Called for each pass.
  */
@@ -336,6 +325,7 @@ ret_code ModelSimSegmInit( int model )
     char buffer[20];
 
     if ( Parse_Pass == PASS_1 ) {
+        DebugMsg1(("ModelSimSegmInit() enter, pass one\n" ));
         /* create default code segment (_TEXT) */
         SetSimSeg( SIM_CODE, NULL );
         EndSimSeg( SIM_CODE );
@@ -345,16 +335,17 @@ ret_code ModelSimSegmInit( int model )
         EndSimSeg( SIM_DATA );
 
         /* create DGROUP for BIN/OMF if model isn't FLAT */
-        if( model != MOD_FLAT &&
+        if( model != MODEL_FLAT &&
             ( Options.output_format == OFORMAT_OMF ||
              Options.output_format == OFORMAT_BIN )) {
             strcpy( buffer, "%s %r %s" );
-            if( model == MOD_TINY ) {
+            if( model == MODEL_TINY ) {
                 strcat( buffer, ", %s" );
                 AddLineQueueX( buffer, szDgroup, T_GROUP, SegmNames[SIM_CODE], SegmNames[SIM_DATA] );
             } else
                 AddLineQueueX( buffer, szDgroup, T_GROUP, SegmNames[SIM_DATA] );
         }
+        DebugMsg1(("ModelSimSegmInit() exit\n" ));
     }
     return( NOT_ERROR );
 }
@@ -366,7 +357,7 @@ void ModelSimSegmExit( void )
 {
     /* a model is set. Close current segment if one is open. */
     if ( CurrSeg ) {
-        PushLineQueue();
+        NewLineQueue();
         close_currseg();
         RunLineQueue();
     }

@@ -73,6 +73,7 @@ struct asm_tok {
     union {
         unsigned char dirtype;    /* T_DIRECTIVE: type */
         unsigned char bytval;     /* T_STYPE: memtype */
+        /* unsigned char regno; *//* T_REG: register number */
         unsigned char precedence; /* T_UNARY_OPERATOR/T_BINARY_OPERATOR */
         char string_delim;        /* T_STRING: string delimiter */
         char floattype;           /* T_FLOAT: 0 or 'r' */
@@ -84,7 +85,8 @@ struct asm_tok {
         unsigned int tokval;      /* index if token is a reserved word */
         unsigned int stringlen;   /* T_STRING: size */
         unsigned int idarg;       /* T_ID: currently not used */
-        unsigned int numlen;      /* T_NUM: size */
+        unsigned int itemlen;     /* T_NUM: size */
+        unsigned int lastidx;     /* T_FINAL: last index (used in RunMacro()) */
     };
     char *tokpos;                 /* points to item in CurrSource */
 };

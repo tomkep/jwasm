@@ -1,7 +1,5 @@
 
 # This makefile creates the JWasm Elf binary for Linux/FreeBSD.
-# In case there are problems with the POSIX names of the low-level
-# io routines (open(), close(), ...), see H/watcomc.h.
 
 TARGET1=jwasm
 
@@ -41,7 +39,7 @@ proj_obj = $(OUTD)/main.o     $(OUTD)/assemble.o $(OUTD)/assume.o  \
            $(OUTD)/hll.o      $(OUTD)/proc.o     $(OUTD)/option.o  \
            $(OUTD)/omf.o      $(OUTD)/omfint.o   $(OUTD)/omffixup.o\
            $(OUTD)/coff.o     $(OUTD)/elf.o      $(OUTD)/bin.o     \
-           $(OUTD)/listing.o  $(OUTD)/fatal.o    $(OUTD)/linnum.o  \
+           $(OUTD)/listing.o  $(OUTD)/linnum.o  \
            $(OUTD)/context.o  $(OUTD)/extern.o   $(OUTD)/simsegm.o \
            $(OUTD)/apiemu.o   $(OUTD)/dbgcv.o    $(OUTD)/end.o     \
            $(OUTD)/backptch.o $(OUTD)/msgtext.o  $(OUTD)/tbyte.o   \

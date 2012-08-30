@@ -26,7 +26,7 @@ TE5	substr FName, 4, @SizeStr(FName)-3	;result "DE"
 TE6	substr FName, 4, @SizeStr(%FName)-3	;result "DEFG"
 
 	db @CatStr(!",TE1,!")	;res: "TE1"
-%	db @CatStr(!",TE4,!")	;res: "TE4" (currently JWasm makes "DEFG"!)
+%	db @CatStr(!",TE4,!")	;res: "TE4" (JWasm prior to v2.08 made "DEFG")
 	db @CatStr(!",%TE4,!")	;res: "DEFG"
 
 	db @CatStr(!",@SubStr(TE1,2),!")	;res: "E1"

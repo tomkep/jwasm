@@ -133,16 +133,16 @@ void GetStdAssumeTable( void *savedstate, struct stdassume_typeinfo *ti )
 }
 
 #if FASTPASS
-void AssumeSaveState( )
-/*********************/
+void AssumeSaveState( void )
+/**************************/
 {
     GetSegAssumeTable( &saved_SegAssumeTable );
     GetStdAssumeTable( &saved_StdAssumeTable, saved_StdTypeInfo );
 }
 #endif
 
-void AssumeInit( )
-/****************/
+void AssumeInit( void )
+/*********************/
 {
     int reg;
 
@@ -165,8 +165,8 @@ void AssumeInit( )
 }
 
 /* generate assume lines after .MODEL directive
- * model is in ModuleInfo.model, it can't be MOD_NONE.
- * PushLineQueue() has already been called
+ * model is in ModuleInfo.model, it can't be MODEL_NONE.
+ * NewLineQueue() has already been called
  */
 void ModelAssumeInit( void )
 /**************************/
@@ -178,7 +178,7 @@ void ModelAssumeInit( void )
 
     /* Generates codes for assume */
     switch( ModuleInfo.model ) {
-    case MOD_FLAT:
+    case MODEL_FLAT:
 #if AMD64_SUPPORT
         if ( ModuleInfo.header_format == HFORMAT_WIN64 )
             pGSassume = szNothing;
@@ -186,12 +186,12 @@ void ModelAssumeInit( void )
         AddLineQueueX( "%r %r:%r,%r:%r,%r:%r,%r:%r,%r:%s,%r:%s",
                   T_ASSUME, T_CS, T_FLAT, T_DS, T_FLAT, T_SS, T_FLAT, T_ES, T_FLAT, T_FS, pFSassume, T_GS, pGSassume );
         break;
-    case MOD_TINY:
-    case MOD_SMALL:
-    case MOD_COMPACT:
-    case MOD_MEDIUM:
-    case MOD_LARGE:
-    case MOD_HUGE:
+    case MODEL_TINY:
+    case MODEL_SMALL:
+    case MODEL_COMPACT:
+    case MODEL_MEDIUM:
+    case MODEL_LARGE:
+    case MODEL_HUGE:
         /* v2.03: no DGROUP for COFF/ELF */
 #if COFF_SUPPORT || ELF_SUPPORT
         if( Options.output_format == OFORMAT_COFF
@@ -201,10 +201,10 @@ void ModelAssumeInit( void )
           )
             break;
 #endif
-        if ( ModuleInfo.model == MOD_TINY )
+        if ( ModuleInfo.model == MODEL_TINY )
             pCS = szDgroup;
         else
-            pCS = GetCodeSegName();
+            pCS = SimGetSegName( SIM_CODE );
 
         if ( ModuleInfo.distance != STACK_FAR )
             pFmt = "%r %r:%s,%r:%s,%r:%s";
@@ -254,7 +254,6 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
     int             size;
     uint_32         flags;
     struct assume_info *info;
-    struct asym     *sym;
     bool            segtable;
     struct qualified_type ti;
 
@@ -285,25 +284,25 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
             }
         }
         if ( info == NULL ) {
-            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
 
         if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < GetCpuSp( reg ) ) {
-            AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+            EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
             return( ERROR );
         }
 
         i++; /* go past register */
 
         if( tokenarray[i].token != T_COLON ) {
-            AsmError( COLON_EXPECTED );
+            EmitError( COLON_EXPECTED );
             return( ERROR );
         }
         i++;
 
         if( tokenarray[i].token == T_FINAL ) {
-            AsmError( SYNTAX_ERROR );
+            EmitError( SYNTAX_ERROR );
             return( ERROR );
         }
 
@@ -342,13 +341,13 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
             size = OperandSize( flags, NULL );
             if ( ( ti.is_ptr == 0 && size != ti.size ) ||
                 ( ti.is_ptr > 0 && size < CurrWordSize ) ) {
-                AsmError( TYPE_IS_WRONG_SIZE_FOR_REGISTER );
+                EmitError( TYPE_IS_WRONG_SIZE_FOR_REGISTER );
                 return( ERROR );
             }
             info->error &= ~(( reg >= T_AH && reg <= T_BH ) ? RH_ERROR : ( flags & OP_R ));
             if ( stdsym[j] == NULL ) {
                 stdsym[j] = CreateTypeSymbol( NULL, "", FALSE );
-                ((struct dsym *)stdsym[j])->e.structinfo->typekind = TYPE_TYPEDEF;
+                stdsym[j]->typekind = TYPE_TYPEDEF;
             }
 
             stdsym[j]->total_size = ti.size;
@@ -365,49 +364,43 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
             info->symbol = stdsym[j];
 
         } else { /* segment register */
-            if( tokenarray[i].token == T_UNARY_OPERATOR &&
-               tokenarray[i].tokval == T_SEG ) {
-                i++;
-            }
-            /* v2.04: check type of argument. Also allow argument
-             * to be another segment register!
-             */
-            if ( tokenarray[i].token == T_ID ) {
-                sym = SymLookup( tokenarray[i].string_ptr );
-                if ( sym == NULL || sym->state == SYM_UNDEFINED ) {
-                    if ( Parse_Pass != PASS_1 ) {
-                        AsmErr( SYMBOL_NOT_DEFINED, tokenarray[i].string_ptr );
-                    }
+            struct expr opnd;
+
+            /* v2.08: read expression with standard evaluator */
+            if( EvalOperand( &i, tokenarray, Token_Count, &opnd, 0 ) == ERROR )
+                return( ERROR );
+            switch ( opnd.kind ) {
+            case EXPR_ADDR:
+                if ( opnd.sym == NULL || opnd.indirect == TRUE || opnd.value ) {
+                    EmitError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
+                    return( ERROR );
+                } else if ( opnd.sym->state == SYM_UNDEFINED ) {
                     /* ensure that directive is rerun in pass 2
                      * so an error msg can be emitted.
                      */
-                    FStoreLine();
-                } else if ( sym->state != SYM_SEG &&
-                           sym->state != SYM_GRP ) {
-                    AsmError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
+                    FStoreLine(0);
+                    info->symbol = opnd.sym;
+                } else if ( ( opnd.sym->state == SYM_SEG || opnd.sym->state == SYM_GRP ) && opnd.instr == EMPTY ) {
+                    info->symbol = opnd.sym;
+                } else if ( opnd.instr == T_SEG ) {
+                    info->symbol = opnd.sym->segment;
+                } else {
+                    EmitError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
                     return( ERROR );
                 }
-                info->flat = FALSE;
-            } else if ( tokenarray[i].token == T_REG &&
-                       ( GetValueSp( tokenarray[i].tokval ) & OP_SR ) ) {
-                sym = SegAssumeTable[ GetRegNo( tokenarray[i].tokval ) ].symbol;
-                info->flat = SegAssumeTable[ GetRegNo( tokenarray[i].tokval ) ].flat;
-            } else if( tokenarray[i].token == T_RES_ID &&
-                      tokenarray[i].tokval == T_FLAT ) {
-                if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
-                    AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
-                    return( ERROR );
+                info->flat = ( info->symbol == &ModuleInfo.flat_grp->sym );
+                break;
+            case EXPR_REG:
+                if ( GetValueSp( opnd.base_reg->tokval ) & OP_SR ) {
+                    info->symbol = SegAssumeTable[ GetRegNo( opnd.base_reg->tokval ) ].symbol;
+                    info->flat = SegAssumeTable[ GetRegNo( opnd.base_reg->tokval ) ].flat;
+                    break;
                 }
-                DefineFlatGroup();
-                info->flat = TRUE;
-                sym = NULL;
-            } else {
-                AsmError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
+            default:
+                EmitError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
                 return( ERROR );
             }
             info->error = FALSE;
-            info->symbol = sym;
-            i++;
         }
 
         /* comma expected */
@@ -415,7 +408,7 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
             break;
     }
     if ( i < Token_Count ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     return( NOT_ERROR );

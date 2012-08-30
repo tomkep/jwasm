@@ -35,7 +35,6 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
-#include "fatal.h"
 #include "msgtext.h"
 #include "dbgcv.h"
 #include "cmdline.h"
@@ -80,6 +79,7 @@ struct global_options Options = {
     /* nobackpatch      */          FALSE,
     /* print_linestore  */          FALSE,
     /* max_passes       */          0,
+    /* skip_preprocessor */         0,
 #endif
     /* names            */          {
         NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -126,7 +126,7 @@ struct global_options Options = {
     /* header_format         */     HFORMAT_NONE,
     /* alignment_default     */     0,
     /* langtype              */     LANG_NONE,
-    /* model                 */     MOD_NONE,
+    /* model                 */     MODEL_NONE,
     /* cpu                   */     P_86,
     /* fastcall type         */     FCT_MSC,
     /* syntax check only     */     FALSE,
@@ -210,13 +210,6 @@ static void SetCpuCmdline( enum cpu_info value, const char *parm )
     Options.cpu &= ~(P_CPU_MASK | P_EXT_MASK | P_PM);
     Options.cpu |= value;
 
-    /* implicitely set model flat if cpu is set to x86-64 via
-     * commandline. This is deactive, because it's intransparent.
-     */
-    //if ( Options.cpu == P_64 )
-    //    if ( Options.model == MOD_NONE )
-    //        Options.model = MOD_FLAT;
-
     for( ; *parm ; parm++ ) {
         if( *parm == 'p' && Options.cpu >= P_286 ) {
             Options.cpu |= P_PM;      /* set privileged mode */
@@ -236,7 +229,7 @@ static void SetCpuCmdline( enum cpu_info value, const char *parm )
             *dest = NULLC;
 #endif
         } else {
-            AsmWarn( 1, CPU_OPTION_INVALID, parm );
+            EmitWarn( 1, CPU_OPTION_INVALID, parm );
             break;
         }
     }
@@ -279,14 +272,14 @@ static void get_fname( int type, const char *token )
     char        ext[_MAX_EXT];
     //char        msgbuf[MAXMSGSIZE];
 
-    DebugMsg(("get_fname( %u, %s ) enter\n", type, token ));
+    DebugMsg(("get_fname( type=%u, >%s< ) enter\n", type, token ));
     _splitpath( token, drive, dir, fname, ext );
     /*
      * If name's ending with a '\' (or '/' in Unix), it's supposed
      * to be a directory name only.
      */
     if( fname[0] == NULLC ) {
-        DebugMsg(("get_fname(%s, %u) name is a directory\n", token, type ));
+        DebugMsg(("get_fname(%u, >%s< ) name is empty or a directory\n", type, token ));
         if ( DefaultDir[type] )
             MemFree( DefaultDir[type]);
         DefaultDir[type] = MemAlloc( strlen( token ) + 1 );
@@ -323,7 +316,7 @@ static void set_option_n_name( int idx, const char *name )
  */
 {
     if ( *name != '.' && !is_valid_id_char( *name ) ) {
-        AsmError( N_OPTION_NEEDS_A_NAME_PARAMETER );
+        EmitError( N_OPTION_NEEDS_A_NAME_PARAMETER );
         return;
     }
 
@@ -367,7 +360,7 @@ static void OPTQUAL Set_Zp( void )
             Options.fieldalign = power;
             return;
         }
-    AsmWarn( 1, INVALID_CMDLINE_VALUE, "-Zp" );
+    EmitWarn( 1, INVALID_CMDLINE_VALUE, "-Zp" );
     return;
 }
 
@@ -424,7 +417,7 @@ static void OPTQUAL Set_W( void )
     if ( OptValue <= 4 )
         Options.warning_level = OptValue;
     else
-        AsmWarn( 1, INVALID_CMDLINE_VALUE, "/W" );
+        EmitWarn( 1, INVALID_CMDLINE_VALUE, "/W" );
 }
 
 static void OPTQUAL Set_ofmt( void )
@@ -537,13 +530,13 @@ static struct cmdloption const cmdl_options[] = {
 #ifdef DEBUG_OUT
     { "ls",     optofs( print_linestore ), Set_True },
 #endif
-    { "mc",     MOD_COMPACT, Set_m },
-    { "mf",     MOD_FLAT,    Set_m },
-    { "mh",     MOD_HUGE,    Set_m },
-    { "ml",     MOD_LARGE,   Set_m },
-    { "mm",     MOD_MEDIUM,  Set_m },
-    { "ms",     MOD_SMALL,   Set_m },
-    { "mt",     MOD_TINY,    Set_m },
+    { "mc",     MODEL_COMPACT, Set_m },
+    { "mf",     MODEL_FLAT,    Set_m },
+    { "mh",     MODEL_HUGE,    Set_m },
+    { "ml",     MODEL_LARGE,   Set_m },
+    { "mm",     MODEL_MEDIUM,  Set_m },
+    { "ms",     MODEL_SMALL,   Set_m },
+    { "mt",     MODEL_TINY,    Set_m },
 #if BIN_SUPPORT
 #if MZ_SUPPORT
     { "mz",     OFORMAT_BIN | (HFORMAT_MZ << 8), Set_ofmt },
@@ -575,6 +568,9 @@ static struct cmdloption const cmdl_options[] = {
     { "Sx",     optofs( listif              ), Set_True },
 #if COFF_SUPPORT
     { "safeseh",optofs( safeseh ),        Set_True },
+#endif
+#ifdef DEBUG_OUT
+    { "sp",     optofs( skip_preprocessor ), Set_True },
 #endif
     { "WX",     0,        Set_WX },
     { "W=#",    0,        Set_W },
@@ -682,12 +678,7 @@ static char *ReadParamFile( const char *name )
     env = NULL;
     file = fopen( name, "rb" );
     if( file == NULL ) {
-#ifdef __SW_BD
-        /* no fatal error if jwasm is loaded as a library */
-        AsmErr( CANNOT_OPEN_FILE, name, errno );
-#else
-        Fatal( FATAL_CANNOT_OPEN_FILE, name, errno );
-#endif
+        EmitErr( CANNOT_OPEN_FILE, name, ErrnoStr() );
         return( NULL );
     }
     len = 0;
@@ -829,7 +820,7 @@ static void ProcessOption( const char **cmdline, char *buffer )
                     if ( *p == NULLC ) {
                         p = getnextcmdstring( cmdline );
                         if ( p == NULL ) {
-                            AsmWarn( 1, MISSING_ARGUMENT_FOR_CMDLINE_OPTION );
+                            EmitWarn( 1, MISSING_ARGUMENT_FOR_CMDLINE_OPTION );
                             return;
                         }
                     }
@@ -843,7 +834,7 @@ static void ProcessOption( const char **cmdline, char *buffer )
         }
     }
 opt_error_exit:
-    AsmWarn( 1, INVALID_CMDLINE_OPTION, *cmdline - 1 );
+    EmitWarn( 1, INVALID_CMDLINE_OPTION, *cmdline - 1 );
     *cmdline = "";
     return;
 }
@@ -931,8 +922,11 @@ char * EXPQUAL ParseCmdline( const char **cmdline, int *pCntArgs )
             str = *cmdline;
             break;
         case '@':
-            if ( rspidx >= MAX_RSP_NESTING )
-                Fatal( FATAL_NESTING_LEVEL_TOO_DEEP );
+            if ( rspidx >= MAX_RSP_NESTING ) {
+                EmitErr( NESTING_LEVEL_TOO_DEEP );
+                *cmdline = "";
+                return( NULL );
+            }
             str++;
 #if 1 /* v2.06: was '0' in v2.05, now '1' again since it didn't work with quoted names */
             if ( rspidx ) {

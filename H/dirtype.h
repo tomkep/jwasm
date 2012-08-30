@@ -56,7 +56,7 @@ res( ALIAS,     AliasDirective )
 res( ECHO,      EchoDirective )
 res( EQU,       EquDirective )
 res( EQUALSGN,  EquDirective ) /* '=' directive */
-#if INCLUDEBIN
+#if INCBINSUPP
 res( INCBIN,    IncBinDirective )
 #endif
 res( INCLIB,    IncludeLibDirective )

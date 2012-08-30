@@ -100,6 +100,12 @@ void MsgInit( void )
 void MsgFini( void )
 /******************/
 {
+#if 0 /* set to 1 to display all error texts and numbers */
+    int i;
+    for ( i = 0; i < MSG_LAST; i++ ) {
+        printf("%3u: %s\n", i, msgtexts[i] );
+    }
+#endif
 }
 
 char *MsgGet( int msgid, char *buffer )
@@ -129,7 +135,7 @@ char *MsgGet( int msgid, char *buffer )
 #else
     if ( msgid < MSG_LAST ) {
         if ( buffer ) {
-            strncpy( buffer, FPTR( msgtexts[msgid] ), MAXMSGSIZE );
+            strcpy( buffer, FPTR( msgtexts[msgid] ) );
             return( buffer );
         } else
             return( (char *) FPTR( msgtexts[msgid] ) );
@@ -154,9 +160,9 @@ void MsgPrintUsage( void )
     const char *p;
     write_logo();
     for ( p = usage; *p != '\n'; ) {
-        const char *p2 = p +strlen(p) + 1;
+        const char *p2 = p + strlen( p ) + 1;
         printf("%-20s %s\n", p, p2 );
-        p = p2 + strlen(p2) + 1;
+        p = p2 + strlen( p2 ) + 1;
     }
 }
 

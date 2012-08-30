@@ -15,5 +15,4 @@
 	fadd st,st(1)(2)
 	fadd st,st(1)+2
 	fadd st,st(1
-
 	end

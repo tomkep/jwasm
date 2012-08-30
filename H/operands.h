@@ -36,6 +36,8 @@
  * v2.04: 2 bits freed ( OP_CR, OP_DR and OP_TR replaced by OP_SPECREG )
  * Also OP_SPECREG, OP_SRxx and OP_STxx moved just behind the other
  * register operands.
+ * Note: register-related flags must be in bits 0-15, because register items
+ * in SpecialTable[] have these bits stored in a uint field (JWASMR!).
  */
 
 enum operand_type {

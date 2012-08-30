@@ -13,7 +13,7 @@
 #define WINBASEAPI __declspec(dllimport)
 #endif
 
-#if 0  //_WIN64
+#ifdef _WIN64
 #define WINAPI __fastcall
 #else
 #define WINAPI __stdcall

@@ -1,26 +1,6 @@
 /****************************************************************************
 *
-*                            Open Watcom Project
-*
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
-*
-*  ========================================================================
-*
-*    This file contains Original Code and/or Modifications of Original
-*    Code as defined in and that are subject to the Sybase Open Watcom
-*    Public License version 1.0 (the 'License'). You may not use this file
-*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
-*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
-*    provided with the Original Code and Modifications, and is also
-*    available at www.sybase.com/developer/opensource.
-*
-*    The Original Code and all software distributed under the License are
-*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
-*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
-*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
-*    NON-INFRINGEMENT. Please see the License for the specific language
-*    governing rights and limitations under the License.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -53,7 +33,6 @@
 #include "fastpass.h"
 #include "listing.h"
 #include "msgtext.h"
-#include "fatal.h"
 #include "myassert.h"
 #include "linnum.h"
 #include "cpumodel.h"
@@ -70,22 +49,29 @@
 #if BIN_SUPPORT
 #include "bin.h"
 #endif
-#ifdef __SW_BD
+
+#if 1 //def __SW_BD
 #include <setjmp.h>
 jmp_buf jmpenv;
 #endif
+
 #ifdef __SW_BD
 #define EXPQUAL __stdcall
 #else
 #define EXPQUAL
 #endif
 
+#define USELSLINE 1 /* must match switch in listing.c! */
+
 extern void             ProcCheckOpen( void );
 extern void             SortSegments( void );
 
 extern uint_32          LastCodeBufSize;
 extern char             *DefaultDir[NUM_FILE_TYPES];
-extern struct asm_tok   *tokenarray;  /* start token buffer */
+extern const char       *ModelToken[];
+#if FASTMEM==0
+extern void             FreeLibQueue();
+#endif
 
 #ifdef DEBUG_OUT
 extern int lq_line;
@@ -113,10 +99,6 @@ const struct format_options coff64_fmtopt = { NULL, COFF64_DISALLOWED, "PE32+" }
 const struct format_options elf64_fmtopt = { elf_init, ELF64_DISALLOWED,  "ELF64"  };
 #endif
 #endif
-
-
-FILE                    *CurrFile[NUM_FILE_TYPES];  /* ASM, ERR, OBJ and LST */
-char                    *CurrFName[NUM_FILE_TYPES];
 
 struct module_info      ModuleInfo;
 unsigned int            Parse_Pass;     /* assembly pass */
@@ -280,7 +262,7 @@ static ret_code WriteContent( void )
     switch ( Options.output_format ) {
     case OFORMAT_OMF:
         //if( ModendRec == NULL ) {
-        //    AsmError( UNEXPECTED_END_OF_FILE );
+        //    EmitError( UNEXPECTED_END_OF_FILE );
         //    return( ERROR );
         //}
         /* -if Zi is set, write symbols and types */
@@ -311,12 +293,12 @@ static ret_code WriteContent( void )
         struct dsym *curr;
         ld = fopen( Options.names[OPTN_LNKDEF_FN], "w" );
         if ( ld == NULL ) {
-            AsmErr( CANNOT_OPEN_FILE, Options.names[OPTN_LNKDEF_FN], errno );
+            EmitErr( CANNOT_OPEN_FILE, Options.names[OPTN_LNKDEF_FN], ErrnoStr() );
             return( ERROR );
         }
         for ( curr = SymTables[TAB_EXT].head; curr != NULL ; curr = curr->next ) {
             DebugMsg(("WriteContent: ext=%s, isproc=%u, weak=%u\n", curr->sym.name, curr->sym.isproc, curr->sym.weak ));
-            if ( curr->sym.isproc && curr->sym.weak == FALSE &&
+            if ( curr->sym.isproc && ( curr->sym.weak == FALSE || curr->sym.iat_used ) &&
                 curr->sym.dllname && *curr->sym.dllname != NULLC ) {
                 int size;
                 Mangle( &curr->sym, StringBufferEnd );
@@ -340,7 +322,7 @@ static ret_code CheckExternal( void )
     for ( curr = SymTables[TAB_EXT].head; curr != NULL ; curr = curr->next )
         if( curr->sym.weak == FALSE || curr->sym.used == TRUE ) {
             DebugMsg(("CheckExternal: error, %s weak=%u\n", curr->sym.name, curr->sym.weak ));
-            AsmErr( FORMAT_DOESNT_SUPPORT_EXTERNALS, curr->sym.name );
+            EmitErr( FORMAT_DOESNT_SUPPORT_EXTERNALS, curr->sym.name );
             return( ERROR );
         }
     return( NOT_ERROR );
@@ -365,9 +347,9 @@ static ret_code WriteHeader( bool initial )
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         if ( curr->e.seginfo->Ofssize == USE16 && curr->sym.max_offset > 0x10000 ) {
             if ( Options.output_format == OFORMAT_OMF )
-                AsmErr( SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
+                EmitErr( SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
             else
-                AsmWarn( 2, SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
+                EmitWarn( 2, SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
         }
     }
 
@@ -406,8 +388,8 @@ static ret_code WriteHeader( bool initial )
             || ModuleInfo.header_format == HFORMAT_PE64
 #endif
            ) {
-            if ( ( rc = CheckExternal() ) == ERROR )
-                break;
+            rc = CheckExternal();
+            break;
         }
 #endif
         coff_write_header( &ModuleInfo );
@@ -485,13 +467,15 @@ static void add_cmdline_tmacros( void )
             value++;
         }
 
+        /* there's no check whether the name is a reserved word!
+         */
         if( is_valid_identifier( name ) == ERROR ) {
             DebugMsg(("add_cmdline_tmacros: name >%s< invalid\n", name ));
-            AsmErr( SYNTAX_ERROR_EX, name );
+            EmitErr( SYNTAX_ERROR_EX, name );
         } else {
             sym = SymSearch( name );
             if ( sym == NULL ) {
-                sym = SymCreate( name, TRUE );
+                sym = SymCreate( name );
                 sym->state = SYM_TMACRO;
             }
             if ( sym->state == SYM_TMACRO ) {
@@ -499,7 +483,7 @@ static void add_cmdline_tmacros( void )
                 sym->predefined = TRUE;
                 sym->string_ptr = value;
             } else
-                AsmErr( SYMBOL_ALREADY_DEFINED, name );
+                EmitErr( SYMBOL_ALREADY_DEFINED, name );
         }
     }
     return;
@@ -529,6 +513,7 @@ static void CmdlParamsInit( int pass )
 #if BUILD_TARGET
     if ( pass == PASS_1 ) {
         struct asym *sym;
+        char *tmp;
         char *p;
 
         _strupr( Options.build_target );
@@ -587,30 +572,33 @@ static void CmdlParamsInit( int pass )
     return;
 }
 
-void WritePreprocessedLine( const char *string, const struct asm_tok tokenarray[] )
-/*********************************************************************************/
+void WritePreprocessedLine( const char *string )
+/**********************************************/
 /* print out preprocessed source lines
  */
 {
     static bool PrintEmptyLine = TRUE;
+    const char *p;
 
+#if 0 /* v2.08: removed, obsolete */
     /* filter some macro specific directives */
     if ( tokenarray[0].token == T_DIRECTIVE &&
          ( tokenarray[0].tokval == T_ENDM ||
            tokenarray[0].tokval == T_EXITM))
         return;
-
     /* don't print generated code - with one exception:
      if the code was generated as a result of structure initialization,
      then do!
      */
     if ( GeneratedCode )
         return;
-
-    if (Token_Count > 0) {
+#endif
+    if ( Token_Count > 0 ) {
+        /* v2.08: don't print a leading % (this char is no longer filtered) */
+        for ( p = string; isspace( *p ); p++ );
+        printf("%s\n", *p == '%' ? p+1 : string );
         PrintEmptyLine = TRUE;
-        printf("%s\n", string);
-    } else if (PrintEmptyLine) {
+    } else if ( PrintEmptyLine ) {
         PrintEmptyLine = FALSE;
         printf("\n");
     }
@@ -628,7 +616,7 @@ void SetMasm510( bool value )
     ModuleInfo.setif2 = value;
 
     if ( value ) {
-        if ( ModuleInfo.model == MOD_NONE ) {
+        if ( ModuleInfo.model == MODEL_NONE ) {
             /* if no model is specified, set OFFSET:SEGMENT */
             ModuleInfo.offsettype = OT_SEGMENT;
             if ( ModuleInfo.langtype == LANG_NONE ) {
@@ -640,41 +628,16 @@ void SetMasm510( bool value )
     return;
 }
 
-extern const char *ModelToken[];
-
-/* memory model has been defined by cmdline option. */
-
-static void GenerateModelLine( enum mod_type model )
-/**************************************************/
-{
-    DebugMsg(( "GenerateModelLine(%u) enter\n", model ));
-
-    /* for FLAT, ensure that a 386 cpu is set */
-    if ( model == MOD_FLAT ) {
-        if ( ( Options.cpu & P_CPU_MASK ) < P_386 )
-            Options.cpu = P_386;
-    }
-    PushLineQueue();
-    /* table ModelToken starts with MOD_TINY, which is index 1" */
-    AddLineQueueX( "%r %s", T_DOT_MODEL, ModelToken[model - 1] );
-}
-
 /* called for each pass */
 
 static void ModulePassInit( void )
 /********************************/
 {
     enum cpu_info cpu = Options.cpu;
+    enum model_type model = Options.model;
 
     DebugMsg(( "ModulePassInit enter\n" ));
     /* set default values not affected by the masm 5.1 compat switch */
-    /* v2.06: Options.langtype isn't modified by -win64 option anymore */
-    if ( Options.langtype != LANG_NONE )
-        ModuleInfo.langtype = Options.langtype;
-#if AMD64_SUPPORT
-    else if ( ModuleInfo.header_format == HFORMAT_WIN64 )
-        ModuleInfo.langtype = LANG_FASTCALL;
-#endif
     ModuleInfo.procs_private = FALSE;
     ModuleInfo.procs_export = FALSE;
     ModuleInfo.offsettype = OT_GROUP;
@@ -683,30 +646,39 @@ static void ModulePassInit( void )
 
 #if FASTPASS
     /* v2.03: don't generate the code if fastpass is active */
-    if ( StoreState == FALSE ) {
+    /* v2.08: query UseSavedState instead of StoreState */
+    //if ( StoreState == FALSE ) {
+    if ( UseSavedState == FALSE ) {
 #endif
+        NewLineQueue(); /* ensure line queue is empty */
+        ModuleInfo.langtype = Options.langtype;
+        ModuleInfo.fctype = Options.fctype;
 #if AMD64_SUPPORT
-        /* ignore -m switch for 64-bit flat formats */
         if ( ModuleInfo.header_format == HFORMAT_WIN64 || ModuleInfo.header_format == HFORMAT_ELF64 ) {
             /* v2.06: force cpu to be at least P_64, without side effect to Options.cpu */
-            if ( ( cpu & P_CPU_MASK ) < P_64 ) {
-                cpu &= ~P_CPU_MASK;
-                cpu |= P_64;
+            if ( ( cpu &  P_CPU_MASK ) < P_64 ) /* enforce cpu to be 64-bit */
+                cpu = P_64;
+            /* ignore -m switch for 64-bit formats.
+             * there's no other model than FLAT possible.
+             */
+            model = MODEL_FLAT; 
+            if ( ModuleInfo.header_format == HFORMAT_WIN64 ) {
+                if ( ModuleInfo.langtype == LANG_NONE ) {
+                    ModuleInfo.langtype = LANG_FASTCALL;
+                }
+                ModuleInfo.fctype = FCT_WIN64;
             }
-            GenerateModelLine( MOD_FLAT );
         } else
 #endif
-            /* memory model been set with -m{s|f|...}? */
-            if ( Options.model != MOD_NONE )
-                GenerateModelLine( Options.model );
-#if AMD64_SUPPORT
-        if ( ModuleInfo.header_format == HFORMAT_WIN64 )
-            ModuleInfo.fctype = FCT_WIN64;
-        else
-#endif
-            ModuleInfo.fctype = Options.fctype;
-        /* v2.06: set cpu here now */
+            /* if model FLAT is to be set, ensure that cpu is compat. */
+            if ( model == MODEL_FLAT && ( cpu & P_CPU_MASK ) < P_386 ) /* cpu < 386? */
+                cpu = P_386;
+
         SetCPU( cpu );
+        /* table ModelToken starts with MODEL_TINY, which is index 1" */
+        if ( model != MODEL_NONE )
+            AddLineQueueX( "%r %s", T_DOT_MODEL, ModelToken[model - 1] );
+
 #if FASTPASS
     }
 #endif
@@ -737,22 +709,15 @@ void RunLineQueue( void )
 /***********************/
 {
     struct input_status oldstat;
-    char old_line_flags = ModuleInfo.line_flags;
-    int currlevel = queue_level;
-    int i;
+    struct asm_tok *tokenarray;
 
     DebugMsg1(( "RunLineQueue() enter\n" ));
     /* v2.03: ensure the current source buffer is still aligned */
-    PushInputStatus( &oldstat );
+    tokenarray = PushInputStatus( &oldstat );
     GeneratedCode++;
-    while ( queue_level >= currlevel ) {
-        while (0 == (i = GetPreprocessedLine( CurrSource, FALSE, tokenarray )));
-        if ( i > 0 )
+    while ( ( Token_Count = GetPreprocessedLine( CurrSource, tokenarray ) ) >= 0 ) {
+        if ( Token_Count )
             ParseLine( tokenarray );
-#ifdef DEBUG_OUT /* this cannot happen because no real file is read here */
-        else if ( i < 0 )
-            break;
-#endif
     }
 #ifdef DEBUG_OUT
     if ( ModuleInfo.EndDirFound == TRUE ) {
@@ -762,7 +727,6 @@ void RunLineQueue( void )
 #endif
     GeneratedCode--;
     PopInputStatus( &oldstat );
-    ModuleInfo.line_flags = old_line_flags;
 
     DebugMsg1(( "RunLineQueue() exit\n" ));
     return;
@@ -774,19 +738,16 @@ void RunLineQueueEx( void )
 /*************************/
 {
     struct input_status oldstat;
-    char old_line_flags = ModuleInfo.line_flags;
-    int currlevel = queue_level;
-    int i;
+    struct asm_tok *tokenarray;
 
     DebugMsg1(( "RunLineQueueEx() enter\n" ));
-    PushInputStatus( &oldstat );
-    while ( queue_level >= currlevel ) {
-        while (0 == (i = GetPreprocessedLine( CurrSource, FALSE, tokenarray )));
-        if ( i > 0 ) {
+    tokenarray = PushInputStatus( &oldstat );
+    while ( ( Token_Count = GetPreprocessedLine( CurrSource, tokenarray ) ) >= 0 ) {
+        if ( Token_Count ) {
             ParseLine( tokenarray );
             /* handle special case 'structure initialization' */
             if ( Options.preprocessor_stdout == TRUE )
-                WritePreprocessedLine( CurrSource, tokenarray );
+                WritePreprocessedLine( CurrSource );
         }
     }
 #ifdef DEBUG_OUT
@@ -796,7 +757,6 @@ void RunLineQueueEx( void )
     lq_line = 0;
 #endif
     PopInputStatus( &oldstat );
-    ModuleInfo.line_flags = old_line_flags;
 
     DebugMsg1(( "RunLineQueueEx() exit\n" ));
     return;
@@ -856,7 +816,7 @@ static void set_ext_idx( void )
             struct fixup *n;
             for( c = curr->sym.fixup ; c; ) {
                 n = c->nextbp;
-                AsmFree( c );
+                LclFree( c );
                 c = n;
             }
         }
@@ -937,7 +897,7 @@ static void scan_globals( void )
             DebugMsg(("scan_globals: %s added to public queue\n", sym->name ));
             continue; /* don't free this item! */
         }
-        AsmFree( curr );
+        LclFree( curr );
     }
     /* the queue is empty now */
     ModuleInfo.g.GlobalQueue.head = NULL;
@@ -962,7 +922,7 @@ static void PassOneChecks( void )
     CondCheckOpen();
 
     if( ModuleInfo.EndDirFound == FALSE )
-        AsmError( END_DIRECTIVE_REQUIRED );
+        EmitError( END_DIRECTIVE_REQUIRED );
 
 #ifdef DEBUG_OUT
     for ( curr = SymTables[TAB_UNDEF].head; curr; curr = curr->next ) {
@@ -1043,6 +1003,7 @@ static void PassOneChecks( void )
  *    <state> is the segment stack, moduleinfo state, ...
  * 2. once the state is saved, all preprocessed lines must be stored.
  *    this can be done here, in OnePass, the line is in <string>.
+ *    Preprocessed macro lines are stored in RunMacro().
  * 3. for subsequent passes do
  *    - restore the state
  *    - read preprocessed lines and feed ParseLine() with it
@@ -1050,7 +1011,6 @@ static void PassOneChecks( void )
 static unsigned long OnePass( void )
 /**********************************/
 {
-    int i;
 
     InputPassInit();
     ModulePassInit();
@@ -1083,32 +1043,40 @@ static unsigned long OnePass( void )
         }
     }
 #endif
+    /* the functions above might have written something to the line queue */
+    if ( is_linequeue_populated() )
+        RunLineQueue();
 #if FASTPASS
     StoreState = FALSE;
     if ( Parse_Pass > PASS_1 && UseSavedState == TRUE ) {
-        /* the functions above might have written something to the line_queue */
-        if ( line_queue )
-            RunLineQueue();
         LineStoreCurr = RestoreState();
         while ( LineStoreCurr && ModuleInfo.EndDirFound == FALSE ) {
+            /* the source line is modified in Tokenize() if it contains a comment! */
+#if USELSLINE==0
             strcpy( CurrSource, LineStoreCurr->line );
+#endif
             set_curr_srcfile( LineStoreCurr->srcfile, LineStoreCurr->lineno );
             /* v2.06: list flags now initialized on the top level */
             ModuleInfo.line_flags = 0;
             MacroLevel = ( LineStoreCurr->srcfile == 0xFFF ? 1 : 0 );
-            DebugMsg1(("OnePass(%u) cur/nxt=%X/%X src=%X.%u mlvl=%u: >%s<\n", Parse_Pass+1, LineStoreCurr, LineStoreCurr->next, LineStoreCurr->srcfile, LineStoreCurr->lineno, MacroLevel, CurrSource ));
-            if ( Token_Count = Tokenize( CurrSource, 0, FALSE ) )
-                ParseLine( tokenarray );
+            DebugMsg1(("OnePass(%u) cur/nxt=%X/%X src=%X.%u mlvl=%u: >%s<\n", Parse_Pass+1, LineStoreCurr, LineStoreCurr->next, LineStoreCurr->srcfile, LineStoreCurr->lineno, MacroLevel, LineStoreCurr->line ));
+            ModuleInfo.CurrComment = NULL; /* v2.08: added (var is never reset because GetTextLine() isn't called) */
+#if USELSLINE
+            if ( Token_Count = Tokenize( LineStoreCurr->line, 0, ModuleInfo.tokenarray, TOK_DEFAULT ) )
+#else
+            if ( Token_Count = Tokenize( CurrSource, 0, ModuleInfo.tokenarray, TOK_DEFAULT ) )
+#endif
+                ParseLine( ModuleInfo.tokenarray );
             LineStoreCurr = LineStoreCurr->next;
         }
     } else
 #endif
-        while ( ModuleInfo.EndDirFound == FALSE ) {
-            while ( 0 == (i = GetPreprocessedLine( CurrSource, FALSE, tokenarray ) ) );
-            if ( i < 0 ) break;
-            ParseLine( tokenarray );
-            if ( Options.preprocessor_stdout == TRUE && Parse_Pass == PASS_1 )
-                WritePreprocessedLine( CurrSource, tokenarray );
+        while ( ModuleInfo.EndDirFound == FALSE && ( ( Token_Count = GetPreprocessedLine( CurrSource, ModuleInfo.tokenarray ) ) >= 0 ) ) {
+            if ( Token_Count ) {
+                ParseLine( ModuleInfo.tokenarray );
+                if ( Options.preprocessor_stdout == TRUE && Parse_Pass == PASS_1 )
+                    WritePreprocessedLine( CurrSource );
+            }
 
         }
 
@@ -1154,16 +1122,25 @@ static void get_module_name( void )
     char dummy[_MAX_EXT];
     char        *p;
 
-    _splitpath( CurrFName[ASM], NULL, NULL, ModuleInfo.name, dummy );
+    /* v2.08: prefer name given by -nm option */
+    if ( Options.names[OPTN_MODULE_NAME] ) {
+        strncpy( ModuleInfo.name, Options.names[OPTN_MODULE_NAME], sizeof( ModuleInfo.name ) );
+        ModuleInfo.name[ sizeof( ModuleInfo.name ) - 1] = NULLC;
+    } else
+        _splitpath( CurrFName[ASM], NULL, NULL, ModuleInfo.name, dummy );
+
     _strupr( ModuleInfo.name );
-    for( p = ModuleInfo.name; *p != '\0'; ++p ) {
+    /* the module name must be a valid identifier, because it's used
+     * as part of a segment name in certain memory models.
+     */
+    for( p = ModuleInfo.name; *p; ++p ) {
         if( !( isalnum( *p ) || ( *p == '_' ) || ( *p == '$' )
             || ( *p == '@' ) || ( *p == '?') ) ) {
             /* it's not a legal character for a symbol name */
             *p = '_';
         }
     }
-    /* first character can't be a number either */
+    /* first character can't be a digit either */
     if( isdigit( ModuleInfo.name[0] ) ) {
         ModuleInfo.name[0] = '_';
     }
@@ -1179,7 +1156,7 @@ static void ModuleInit( void )
                          Options.no_comment_data_in_code_records == FALSE);
     ModuleInfo.g.error_count = 0;
     ModuleInfo.g.warning_count = 0;
-    ModuleInfo.model = MOD_NONE;
+    ModuleInfo.model = MODEL_NONE;
     /* ModuleInfo.distance = STACK_NONE; */
     ModuleInfo.ostype = OPSYS_DOS;
     ModuleInfo.emulator = (Options.floating_point == FPO_EMULATION);
@@ -1217,7 +1194,7 @@ static void ReswTableInit( void )
     }
 
     if ( Options.strict_masm_compat == TRUE ) {
-        DebugMsg(("InitAsm: disable INCBIN + FASTCALL keywords\n"));
+        DebugMsg(("ReswTableInit: disable INCBIN + FASTCALL keywords\n"));
         DisableKeyword( T_INCBIN );
         DisableKeyword( T_FASTCALL );
     }
@@ -1231,22 +1208,22 @@ static void open_files( void )
     /* open ASM file */
     DebugMsg(("open_files() enter\n" ));
 
-    memset( CurrFile, 0, sizeof( CurrFile ) );
+    //memset( CurrFile, 0, sizeof( CurrFile ) );
     /* CurrFile[ASM] = fopen( CurrFName[ASM], "r" ); */
     CurrFile[ASM] = fopen( CurrFName[ASM], "rb" );
     if( CurrFile[ASM] == NULL ) {
-        DebugMsg(("open_files(): fopen(%s) failed\n", CurrFName[ASM] ));
-        Fatal( FATAL_CANNOT_OPEN_FILE, CurrFName[ASM], errno );
+        DebugMsg(("open_files(): cannot open source file, fopen(\"%s\") failed\n", CurrFName[ASM] ));
+        Fatal( CANNOT_OPEN_FILE, CurrFName[ASM], ErrnoStr() );
     }
 
     /* open OBJ file */
     if ( Options.syntax_check_only == FALSE ) {
         CurrFile[OBJ] = fopen( CurrFName[OBJ], "wb" );
         if( CurrFile[OBJ] == NULL ) {
-            DebugMsg(("open_files(): fopen(%s) failed\n", CurrFName[OBJ] ));
-            Fatal( FATAL_CANNOT_OPEN_FILE, CurrFName[OBJ], errno );
+            DebugMsg(("open_files(): cannot open object file, fopen(\"%s\") failed\n", CurrFName[OBJ] ));
+            Fatal( CANNOT_OPEN_FILE, CurrFName[OBJ], ErrnoStr() );
         }
-        DebugMsg(("open_files(): output, fopen(%s) ok\n", CurrFName[OBJ] ));
+        DebugMsg(("open_files(): output, fopen(\"%s\") ok\n", CurrFName[OBJ] ));
     }
 
     return;
@@ -1258,7 +1235,7 @@ void close_files( void )
     /* close ASM file */
     if( CurrFile[ASM] != NULL ) {
         if( fclose( CurrFile[ASM] ) != 0 )
-            Fatal( FATAL_CANNOT_CLOSE_FILE, CurrFName[ASM], errno  );
+            Fatal( CANNOT_CLOSE_FILE, CurrFName[ASM], errno  );
         CurrFile[ASM] = NULL;
     }
 
@@ -1268,7 +1245,7 @@ void close_files( void )
     /* close OBJ file */
     if ( CurrFile[OBJ] != NULL ) {
         if ( fclose( CurrFile[OBJ] ) != 0 )
-            Fatal( FATAL_CANNOT_CLOSE_FILE, CurrFName[OBJ], errno  );
+            Fatal( CANNOT_CLOSE_FILE, CurrFName[OBJ], errno  );
         CurrFile[OBJ] = NULL;
     }
     /* delete the object module if errors occured */
@@ -1333,9 +1310,9 @@ static void SetFilenames( const char *name )
     char ext[_MAX_EXT];
     char path[ _MAX_PATH ];
 
-    DebugMsg(("SetFilenames(%s) enter\n", name ));
-    memset( CurrFName, 0, sizeof( CurrFName ) );
-    CurrFName[ASM] = AsmAlloc( strlen( name ) + 1 );
+    DebugMsg(("SetFilenames(\"%s\") enter\n", name ));
+    //memset( CurrFName, 0, sizeof( CurrFName ) );
+    CurrFName[ASM] = LclAlloc( strlen( name ) + 1 );
     strcpy( CurrFName[ASM], name );
     _splitpath( name, NULL, NULL, fnamesrc, NULL );
     for ( i = ASM+1; i < NUM_FILE_TYPES; i++ ) {
@@ -1355,34 +1332,18 @@ static void SetFilenames( const char *name )
 
             _makepath( path, drive, dir, fname, ext );
         }
-        CurrFName[i] = AsmAlloc( strlen( path ) + 1 );
+        CurrFName[i] = LclAlloc( strlen( path ) + 1 );
         strcpy( CurrFName[i], path );
     }
     return;
 }
-
-#if FASTMEM==0
-/* release the lib queue ( created by INCLUDELIB directive ) */
-
-static void FreeLibQueue( void )
-/******************************/
-{
-    struct qnode *curr;
-    struct qnode *next;
-    for( curr = ModuleInfo.g.LibQueue.head; curr; curr = next ) {
-        next = curr->next;
-        AsmFree( (void *)curr->elmt );
-        AsmFree( curr );
-    }
-}
-#endif
 
 /* init assembler. called once per module */
 
 static void AssembleInit( const char *source )
 /********************************************/
 {
-    DebugMsg(("AssembleInit() enter\n"));
+    DebugMsg(("AssembleInit(\"%s\") enter\n", source ));
 
     MemInit();
     //start_label   = NULL;
@@ -1461,7 +1422,7 @@ static void AssembleFini( void )
         struct line_item *next;
         for ( LineStoreCurr = LineStoreHead; LineStoreCurr; ) {
             next = LineStoreCurr->next;
-            AsmFree( LineStoreCurr );
+            LclFree( LineStoreCurr );
             LineStoreCurr = next;
         }
     }
@@ -1469,7 +1430,7 @@ static void AssembleFini( void )
 #endif
 
     for ( i = 0; i < NUM_FILE_TYPES; i++ ) {
-        AsmFree( CurrFName[i] );
+        LclFree( CurrFName[i] );
         /* v2.05: make sure the pointer for ERR is cleared */
         CurrFName[i] = NULL;
     }
@@ -1488,16 +1449,19 @@ int EXPQUAL AssembleModule( const char *source )
     int                 endtime;
     struct dsym         *dir;
 
-    DebugMsg(("AssembleModule(%s) enter\n", source ));
+    DebugMsg(("AssembleModule(\"%s\") enter\n", source ));
 
     memset( &ModuleInfo, 0, sizeof(ModuleInfo) );
 #ifdef DEBUG_OUT
     ModuleInfo.cref = TRUE; /* enable debug displays */
 #endif
-#ifdef __SW_BD
+#if 1 //def __SW_BD
     /* if compiled as a dll/lib, fatal errors won't exit! */
-    if ( setjmp( jmpenv ) )
+    if ( setjmp( jmpenv ) ) {
+        if ( ModuleInfo.g.file_stack )
+            ClearFileStack(); /* avoid memory leaks! */
         goto done;
+    }
 #endif
 
     AssembleInit( source );
@@ -1528,12 +1492,6 @@ int EXPQUAL AssembleModule( const char *source )
             //scan_globals();
             /* set index field in externals */
             set_ext_idx();
-#ifdef DEBUG_OUT
-#if FASTPASS
-            if ( Options.nofastpass )
-                SkipSavedState();
-#endif
-#endif
             if ( Options.syntax_check_only == FALSE )
                 write_to_file = TRUE;
 
@@ -1573,7 +1531,7 @@ int EXPQUAL AssembleModule( const char *source )
         prev_written = curr_written;
 
         if ( Parse_Pass % 200 == 199 )
-            AsmWarn( 2, ASSEMBLY_PASSES, Parse_Pass+1 );
+            EmitWarn( 2, ASSEMBLY_PASSES, Parse_Pass+1 );
 #ifdef DEBUG_OUT
         if ( Options.max_passes && Parse_Pass == (Options.max_passes - 1) )
             break;
@@ -1624,7 +1582,7 @@ int EXPQUAL AssembleModule( const char *source )
         set_curr_srcfile( 0, tmp );
     }
     if ( ModuleInfo.pCodeBuff ) {
-        AsmFree( ModuleInfo.pCodeBuff );
+        LclFree( ModuleInfo.pCodeBuff );
     }
     DebugMsg(("AssembleModule: finished, cleanup\n"));
 
@@ -1652,7 +1610,7 @@ int EXPQUAL AssembleModule( const char *source )
         LstNL();
         LstCloseFile();
     }
-#ifdef __SW_BD
+#if 1 //def __SW_BD
 done:
 #endif
     AssembleFini();

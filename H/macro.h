@@ -35,18 +35,18 @@
 
 /* functions in expans.c */
 
-//extern ret_code ExpandToken( int count, char * string, int addbrackets, int Equ_Mode );
-extern ret_code ExpandLine( char *, struct asm_tok[] );
-extern void     ExpandLinePart( int, struct asm_tok[], char *, int, int );
-extern int      RunMacro( struct dsym *, char *, char *, int, bool * );
 extern int      GetLiteralValue( char *, const char * );
+extern int      RunMacro( struct dsym *, int, struct asm_tok[], char *, int, bool * );
+extern ret_code ExpandText( char *, struct asm_tok[], unsigned int );
+extern int      ExpandLineItems( char *, int, struct asm_tok[], int, int );
+extern ret_code ExpandLine( char *, struct asm_tok[] );
 
 /* functions in macro.c */
 
 extern struct dsym *CreateMacro( const char * );/* create a macro symbol */
 extern void     ReleaseMacroData( struct dsym * );
 extern void     fill_placeholders( char *, const char *, uint, uint, char * * );
-extern ret_code StoreMacro( int, struct asm_tok[], struct dsym *, bool );  /* store macro content */
+extern ret_code StoreMacro( struct dsym *, int, struct asm_tok[], bool );  /* store macro content */
 extern ret_code MacroInit( int );
 #ifdef DEBUG_OUT
 extern void     MacroFini( void );
@@ -55,6 +55,7 @@ extern void     MacroFini( void );
 /* functions in string.c */
 
 extern struct asym *SetTextMacro( struct asm_tok[], struct asym *, const char *, const char * ); /* EQU for texts */
+extern struct asym *AddPredefinedText( const char *, const char * );
 
 extern void     StringInit( void );
 #ifdef DEBUG_OUT

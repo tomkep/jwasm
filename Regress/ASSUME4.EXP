@@ -1,3 +1,1 @@
-ASSUME4.ASO(20) : Error A2102: Symbol not defined : S1
-ASSUME4.ASO(24) : Error A2102: Symbol not defined : f1
-ASSUME4.ASO(29) : Error A2102: Symbol not defined : f1
+ASSUME4.ASO(21) : Error A2063: Symbol not defined : SDEF.S1

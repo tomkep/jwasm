@@ -30,6 +30,7 @@
 #include "fastpass.h"
 #include "listing.h"
 #include "omf.h"
+#include "macro.h"
 
 #include "myassert.h"
 
@@ -60,8 +61,8 @@ ret_code EchoDirective( int i, struct asm_tok tokenarray[] )
     return( NOT_ERROR );
 }
 
-char *IncludeLibrary( const char *name )
-/**************************************/
+static char *IncludeLibrary( const char *name )
+/*********************************************/
 {
     struct qnode *q;
     char *node;
@@ -79,11 +80,28 @@ char *IncludeLibrary( const char *name )
         if ( strcmp( q->elmt, name ) == 0 )
             return( (char *)q->elmt );
     }
-    node = AsmAlloc( strlen( name ) + 1 );
+    node = LclAlloc( strlen( name ) + 1 );
     strcpy( node, name );
     QAddItem( &ModuleInfo.g.LibQueue, node );
     return( node );
 }
+
+#if FASTMEM==0
+
+/* release the lib queue ( created by INCLUDELIB directive ) */
+
+void FreeLibQueue( void )
+/***********************/
+{
+    struct qnode *curr;
+    struct qnode *next;
+    for( curr = ModuleInfo.g.LibQueue.head; curr; curr = next ) {
+        next = curr->next;
+        LclFree( (void *)curr->elmt );
+        LclFree( curr );
+    }
+}
+#endif
 
 /* directive INCLUDELIB */
 
@@ -100,31 +118,33 @@ ret_code IncludeLibDirective( int i, struct asm_tok tokenarray[] )
     //if ( tokenarray[i].token == T_FINAL || tokenarray[i].token == T_NUM ) {
     if ( tokenarray[i].token == T_FINAL ) {
         /* v2.05: Masm doesn't complain if there's no name, so emit a warning only! */
-        //AsmError( LIBRARY_NAME_MISSING );
+        //EmitError( LIBRARY_NAME_MISSING );
         //return( ERROR );
-        AsmWarn( 2, LIBRARY_NAME_MISSING );
+        EmitWarn( 2, LIBRARY_NAME_MISSING );
     }
 
     if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
         if ( tokenarray[i+1].token != T_FINAL ) {
-            AsmErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
+            EmitErr( SYNTAX_ERROR_EX, tokenarray[i+1].tokpos );
             return( ERROR );
         }
-        name = tokenarray[i].string_ptr;
+        /* v2.08: use GetLiteralValue() */
+        //name = tokenarray[i].string_ptr;
+        name = StringBufferEnd;
+        GetLiteralValue( name, tokenarray[i].string_ptr );
     } else {
         char *p;
         /* regard "everything" behind INCLUDELIB as the library name */
         name = tokenarray[i].tokpos;
-        for ( p = name; *p; p++ );
         /* remove trailing white spaces */
-        for ( p--; p > name && isspace( *p ); *p = NULLC, p-- );
+        for ( p = tokenarray[Token_Count].tokpos - 1; p > name && isspace( *p ); *p = NULLC, p-- );
     }
 
     IncludeLibrary( name );
     return( NOT_ERROR );
 }
 
-#if INCLUDEBIN
+#if INCBINSUPP
 
 /* INCBIN directive */
 
@@ -133,10 +153,9 @@ ret_code IncBinDirective( int i, struct asm_tok tokenarray[] )
 {
     FILE *file;
     //int size;
-    uint fileoffset = 0;
-    uint sizemax = -1;
+    uint_32 fileoffset = 0; /* fixme: should be uint_64 */
+    uint_32 sizemax = -1;
     struct expr opndx;
-    char filename[_MAX_PATH];
 
     DebugMsg(("IncBinDirective enter\n"));
 
@@ -144,23 +163,25 @@ ret_code IncBinDirective( int i, struct asm_tok tokenarray[] )
     /* v2.03: file name may be just a "number" */
     //if ( tokenarray[i].token == T_FINAL || tokenarray[i].token == T_NUM ) {
     if ( tokenarray[i].token == T_FINAL ) {
-        AsmError( EXPECTED_FILE_NAME );
+        EmitError( EXPECTED_FILE_NAME );
         return( ERROR );
     }
 
     if ( tokenarray[i].token == T_STRING ) {
-        if ( tokenarray[i].string_delim == '"' ||
-             tokenarray[i].string_delim == '\'') {
-            strncpy( filename, tokenarray[i].string_ptr+1, tokenarray[i].stringlen );
-            filename[ tokenarray[i].stringlen ] = NULLC;
+
+        /* v2.08: use string buffer to avoid buffer overflow if string is > _MAX_PATH */
+        if ( tokenarray[i].string_delim == '"' || tokenarray[i].string_delim == '\'' ) {
+            memcpy( StringBufferEnd, tokenarray[i].string_ptr+1, tokenarray[i].stringlen );
+            StringBufferEnd[tokenarray[i].stringlen] = NULLC;
         } else if ( tokenarray[i].string_delim == '<' ) {
-            strncpy( filename, tokenarray[i].string_ptr, sizeof( filename ) );
+            /* v2.08: use GetLiteralValue() instead of strncpy() */
+            GetLiteralValue( StringBufferEnd, tokenarray[i].string_ptr );
         } else {
-            AsmError( FILENAME_MUST_BE_ENCLOSED_IN_QUOTES_OR_BRACKETS );
+            EmitError( FILENAME_MUST_BE_ENCLOSED_IN_QUOTES_OR_BRACKETS );
             return( ERROR );
         }
     } else {
-        AsmError( FILENAME_MUST_BE_ENCLOSED_IN_QUOTES_OR_BRACKETS );
+        EmitError( FILENAME_MUST_BE_ENCLOSED_IN_QUOTES_OR_BRACKETS );
         return( ERROR );
     }
     i++;
@@ -171,7 +192,7 @@ ret_code IncBinDirective( int i, struct asm_tok tokenarray[] )
         if ( opndx.kind == EXPR_CONST ) {
             fileoffset = opndx.value;
         } else if ( opndx.kind != EXPR_EMPTY ) {
-            AsmError( CONSTANT_EXPECTED );
+            EmitError( CONSTANT_EXPECTED );
             return( ERROR );
         }
         if ( tokenarray[i].token == T_COMMA ) {
@@ -181,18 +202,18 @@ ret_code IncBinDirective( int i, struct asm_tok tokenarray[] )
             if ( opndx.kind == EXPR_CONST ) {
                 sizemax = opndx.value;
             } else if ( opndx.kind != EXPR_EMPTY ) {
-                AsmError( CONSTANT_EXPECTED );
+                EmitError( CONSTANT_EXPECTED );
                 return( ERROR );
             }
         }
     }
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
 
     if( CurrSeg == NULL ) {
-        AsmError( MUST_BE_IN_SEGMENT_BLOCK );
+        EmitError( MUST_BE_IN_SEGMENT_BLOCK );
         return( ERROR );
     }
 
@@ -200,15 +221,16 @@ ret_code IncBinDirective( int i, struct asm_tok tokenarray[] )
     if ( ModuleInfo.CommentDataInCode )
         omf_OutSelect( TRUE );
 
+    DebugMsg1(("IncBinDirective: filename=%s, offset=%" FU32 ", size=%" FU32 "\n", StringBufferEnd, fileoffset, sizemax ));
+
     /* try to open the file */
-    DebugMsg(("IncBinDirective: filename=%s, offset=%u, size=%u\n", filename, fileoffset, sizemax ));
-    if ( InputQueueFile( filename, &file ) == NOT_ERROR ) {
+    if ( InputQueueFile( StringBufferEnd, &file ) == NOT_ERROR ) {
         /* transfer file content to the current segment. */
         if ( fileoffset )
-            fseek( file, fileoffset, SEEK_SET );
+            fseek( file, fileoffset, SEEK_SET );  /* fixme: use fseek64() */
         for( ; sizemax; sizemax-- ) {
             int ch = fgetc( file );
-            if ((ch == EOF) && feof( file ) )
+            if ( ( ch == EOF ) && feof( file ) )
                 break;
             OutputByte( ch );
         }
@@ -245,7 +267,7 @@ ret_code AliasDirective( int i, struct asm_tok tokenarray[] )
     if ( tokenarray[i].token != T_STRING ||
         tokenarray[i].string_delim != '<' ) {
         DebugMsg(("AliasDirective: first argument is not a literal: %s\n", tokenarray[i].string_ptr ));
-        AsmError( TEXT_ITEM_REQUIRED );
+        EmitError( TEXT_ITEM_REQUIRED );
         return( ERROR );
     }
 
@@ -254,20 +276,20 @@ ret_code AliasDirective( int i, struct asm_tok tokenarray[] )
         //tokenarray[i+1].tokval != T_EQU ||
         tokenarray[i+1].dirtype != DRT_EQUALSGN ) {
         DebugMsg(("AliasDirective: syntax error: %s\n", tokenarray[i+1].string_ptr ));
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
         return( ERROR );
     }
 
     if ( tokenarray[i+2].token != T_STRING ||
         tokenarray[i+2].string_delim != '<' )  {
         DebugMsg(("AliasDirective: second argument is not a literal: %s\n", tokenarray[i+2].string_ptr ));
-        AsmError( TEXT_ITEM_REQUIRED );
+        EmitError( TEXT_ITEM_REQUIRED );
         return( ERROR );
     }
     subst = tokenarray[i+2].string_ptr;
 
     if ( tokenarray[i+3].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i+3].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i+3].string_ptr );
         return( ERROR );
     }
 
@@ -278,17 +300,17 @@ ret_code AliasDirective( int i, struct asm_tok tokenarray[] )
         /* v2.04b: adjusted to new field <substitute> */
         sym2 = SymSearch( subst );
         if ( sym2 == NULL ) {
-            sym2 = SymCreate( subst, TRUE );
+            sym2 = SymCreate( subst );
             sym2->state = SYM_UNDEFINED;
             sym_add_table( &SymTables[TAB_UNDEF], (struct dsym *)sym2 );
         } else if ( sym2->state != SYM_UNDEFINED &&
                    sym2->state != SYM_INTERNAL &&
                    sym2->state != SYM_EXTERNAL ) {
-            AsmErr( MUST_BE_PUBLIC_OR_EXTERNAL, subst );
+            EmitErr( MUST_BE_PUBLIC_OR_EXTERNAL, subst );
             return( ERROR );
         }
         if ( sym == NULL )
-            sym = (struct asym *)SymCreate( tokenarray[i].string_ptr, TRUE );
+            sym = SymCreate( tokenarray[i].string_ptr );
         else
             sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
 
@@ -299,7 +321,7 @@ ret_code AliasDirective( int i, struct asm_tok tokenarray[] )
     }
     if ( sym->state != SYM_ALIAS || ( strcmp( sym->substitute->name, subst ) != 0 )) {
         DebugMsg(("AliasDirective: symbol redefinition\n"));
-        AsmErr( SYMBOL_REDEFINITION, sym->name );
+        EmitErr( SYMBOL_REDEFINITION, sym->name );
         return( ERROR );
     }
 #if COFF_SUPPORT || ELF_SUPPORT
@@ -312,11 +334,11 @@ ret_code AliasDirective( int i, struct asm_tok tokenarray[] )
 #endif
            ) {
             if ( sym->substitute->state == SYM_UNDEFINED ) {
-                AsmErr( SYMBOL_NOT_DEFINED, subst );
+                EmitErr( SYMBOL_NOT_DEFINED, subst );
                 return( ERROR );
             } else if ( sym->substitute->state != SYM_EXTERNAL &&
                        ( sym->substitute->state != SYM_INTERNAL || sym->substitute->public == FALSE ) ) {
-                AsmErr( MUST_BE_PUBLIC_OR_EXTERNAL, subst );
+                EmitErr( MUST_BE_PUBLIC_OR_EXTERNAL, subst );
                 return( ERROR );
             }
         }
@@ -333,10 +355,11 @@ ret_code NameDirective( int i, struct asm_tok tokenarray[] )
     if( Parse_Pass != PASS_1 )
         return( NOT_ERROR );
     /* if a module name is set with -nm, ignore NAME directive! */
-    if( Options.names[OPTN_MODULE_NAME] != NULL )
-        return( NOT_ERROR );
+    /* v2.08: removed, since Options.names isn't touched at all */
+    //if( Options.names[OPTN_MODULE_NAME] != NULL )
+    //    return( NOT_ERROR );
 
-    i++;
+    i++; /* skip directive */
 
     /* improper use of NAME is difficult to see since it is a nop
      therefore some syntax checks are implemented:
@@ -354,15 +377,17 @@ ret_code NameDirective( int i, struct asm_tok tokenarray[] )
           tokenarray[i].tokval == T_TYPEDEF ||
           tokenarray[i].tokval == T_RECORD)) ||
          tokenarray[i].token == T_COLON ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i-1].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i-1].tokpos );
         return( ERROR );
     }
 
-#if 0 /* don't touch Option fields! ( ModuleInfo.name probably? ) */
-    Options.module_name = AsmAlloc( strlen( tokenarray[i].string_ptr ) + 1 );
-    strcpy( Options.module_name, tokenarray[i].string_ptr );
-    DebugMsg(("NameDirective: set name to >%s<\n", Options.module_name));
-#endif
+    /* don't touch Option fields! if anything at all, ModuleInfo.name may be modified.
+     * However, since the directive is ignored by Masm, nothing is done.
+     */
+//  strncpy( ModuleInfo.name, tokenarray[i].string_ptr, sizeof( ModuleInfo.name ) );
+//  ModuleInfo.name[ sizeof( ModuleInfo.name ) - 1] = NULLC;
+//  DebugMsg(("NameDirective: set name to >%s<\n", ModuleInfo.name ));
+    DebugMsg(("NameDirective: ignored name >%s<\n", tokenarray[i].string_ptr ));
     return( NOT_ERROR );
 }
 
@@ -378,22 +403,22 @@ ret_code RadixDirective( int i, struct asm_tok tokenarray[] )
     oldradix = ModuleInfo.radix;
     ModuleInfo.radix = 10;
     i++; /* skip directive token */
-    Tokenize( tokenarray[i].tokpos, i, TRUE );
+    Tokenize( tokenarray[i].tokpos, i, tokenarray, TOK_RESCAN );
     ModuleInfo.radix = oldradix;
     if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR ) {
         return( ERROR );
     }
 
     if ( opndx.kind != EXPR_CONST ) {
-        AsmError( CONSTANT_EXPECTED );
+        EmitError( CONSTANT_EXPECTED );
         return( ERROR );
     }
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     if ( opndx.value > 16 || opndx.value < 2 || opndx.hvalue != 0 ) {
-        AsmError( INVALID_RADIX_TAG );
+        EmitError( INVALID_RADIX_TAG );
         return( ERROR );
     }
 
@@ -409,14 +434,14 @@ ret_code SegOrderDirective( int i, struct asm_tok tokenarray[] )
 /**************************************************************/
 {
     if ( tokenarray[i+1].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i+1].tokpos );
         return( ERROR );
     }
 #if COFF_SUPPORT || ELF_SUPPORT
     if ( Options.output_format != OFORMAT_OMF &&
         Options.output_format != OFORMAT_BIN ) {
         if ( Parse_Pass == PASS_1 )
-            AsmWarn( 2, DIRECTIVE_IGNORED_FOR_COFF, tokenarray[i].string_ptr );
+            EmitWarn( 2, DIRECTIVE_IGNORED_FOR_COFF, tokenarray[i].string_ptr );
     } else {
 #endif
 #if 1 /* v2.05 */

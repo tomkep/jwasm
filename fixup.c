@@ -60,7 +60,7 @@ struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_o
 #endif
     struct fixup     *fixup;
 
-    fixup = AsmAlloc( sizeof( struct fixup ) );
+    fixup = LclAlloc( sizeof( struct fixup ) );
 
     /* add the fixup to the symbol's linked list (used for backpatch)
      * this is done for pass 1 only.
@@ -128,7 +128,7 @@ void FreeFixup( struct fixup *fixup )
             }
         }
     }
-    AsmFree( fixup );
+    LclFree( fixup );
 }
 
 /*
@@ -164,7 +164,7 @@ void store_fixup( struct fixup *fixup, int_32 *pdata )
      * codegen() and data_item().
      */
     if ( ( 1 << fixup->type ) & ModuleInfo.fmtopt->invalid_fixup_type ) {
-        AsmErr( UNSUPPORTED_FIXUP_TYPE,
+        EmitErr( UNSUPPORTED_FIXUP_TYPE,
                ModuleInfo.fmtopt->formatname,
                fixup->sym ? fixup->sym->name : szNull );
         return( ERROR );

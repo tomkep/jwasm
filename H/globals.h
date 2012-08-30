@@ -56,8 +56,8 @@
 #define _memicmp  memicmp
 #endif
 
-#define MAX_LINE_LEN            600     /* no restriction for this number */
-#define MAX_TOKEN               MAX_LINE_LEN / 4  /* max tokens in one line */
+#define MAX_LINE_LEN            600  /* no restriction for this number */
+#define MAX_TOKEN  MAX_LINE_LEN / 4  /* max tokens in one line */
 #define MAX_STRING_LEN          MAX_LINE_LEN - 32 /* must be < MAX_LINE_LEN */
 #define MAX_ID_LEN              247  /* must be < MAX_LINE_LEN */
 #define MAX_STRUCT_ALIGN        32
@@ -65,10 +65,13 @@
 //#define MAX_RESW_LEN            31 /* max length of a reserved word */
 
 #define MAX_IF_NESTING          20 /* IFxx block nesting         */
-#define MAX_TEXTMACRO_NESTING   20
+//#define MAX_TEXTMACRO_NESTING   20
 #define MAX_SEG_NESTING         20 /* limit for segment nesting  */
-#define MAX_QUEUE_NESTING       40 /* "async" macro call nesting */
-#define MAX_SYNC_MACRO_NESTING  20 /* "sync" macro call nesting  */
+#ifdef __I86__
+#define MAX_MACRO_NESTING       20
+#else
+#define MAX_MACRO_NESTING       40 /* macro call nesting  */
+#endif
 #define MAX_STRUCT_NESTING      32 /* limit for "anonymous structs" only */
 
 #define MAX_LNAME              255 /* OMF lnames */
@@ -118,7 +121,7 @@
 #define MACROLABEL   1 /* support LABEL qualifier for macro arg  */
 #define BACKQUOTES   1 /* allow IDs enclosed in `                */
 #define FPIMMEDIATE  1 /* allow float immediates: mov eax,1.0    */
-#define INCLUDEBIN   1 /* support INCBIN directive               */
+#define INCBINSUPP   1 /* support INCBIN directive               */
 #define INTELMOVQ    0 /* 1=MOVQ moves to/from 64-bit registers  */
 #ifndef OWFC_SUPPORT
 #define OWFC_SUPPORT 1 /* support OW fastcall flavor             */
@@ -126,7 +129,8 @@
 #ifndef DLLIMPORT
 #define DLLIMPORT    1 /* support OPTION DLLIMPORT               */
 #endif
-#define MASM_SSE_MEMX 1 /* support 2 mem types for mmx/xmm */
+#define MASM_SSE_MEMX 1 /* support 2 mem types for mmx/xmm       */
+#define PERCENT_OUT 1  /* 1=support %OUT directive               */
 
 /* old Wasm extensions */
 #define PAGE4K       0 /* support 4kB-page OMF segment alignment */
@@ -150,8 +154,8 @@
 
 /* JWasm version info */
 #define _BETA_
-#define _JWASM_VERSION_ "2.07" _BETA_
-#define _JWASM_VERSION_INT_ 207
+#define _JWASM_VERSION_ "2.08" _BETA_
+#define _JWASM_VERSION_INT_ 208
 
 #define NULLC  '\0'
 //#define NULLS  ""
@@ -275,15 +279,15 @@ enum lang_type {
  * the order cannot be changed, it's
  * the value of the predefined @Model symbol.
  */
-enum mod_type {
-    MOD_NONE    = 0,
-    MOD_TINY    = 1,
-    MOD_SMALL   = 2,
-    MOD_COMPACT = 3,
-    MOD_MEDIUM  = 4,
-    MOD_LARGE   = 5,
-    MOD_HUGE    = 6,
-    MOD_FLAT    = 7,
+enum model_type {
+    MODEL_NONE    = 0,
+    MODEL_TINY    = 1,
+    MODEL_SMALL   = 2,
+    MODEL_COMPACT = 3,
+    MODEL_MEDIUM  = 4,
+    MODEL_LARGE   = 5,
+    MODEL_HUGE    = 6,
+    MODEL_FLAT    = 7,
 };
 
 #define SIZE_DATAPTR 0x68 /* far for COMPACT, LARGE, HUGE */
@@ -302,7 +306,9 @@ enum listmacro {
     LM_LISTMACROALL
 };
 
-/* assume values are used as index in codegen.c! */
+/* assume values are used as index in codegen.c / invoke.c.
+ * Order must match the one in special.h. Don't change!
+ */
 enum assume_segreg {
     ASSUME_NOTHING = EMPTY,
     ASSUME_ES = 0,
@@ -512,8 +518,16 @@ enum offset_type {
 enum line_output_flags {
     LOF_LISTED = 1, /* line written to .LST file */
 #if FASTPASS
-    LOF_STORED = 2  /* line stored in line buffer for FASTPASS */
+    LOF_SKIPPOS  = 2, /* suppress setting list_pos */
+    //LOF_STORED = 2  /* line stored in line buffer for FASTPASS */
 #endif
+};
+
+/* flags for win64_flags */
+enum win64_flag_values {
+    W64F_SAVEREGPARAMS = 0x01, /* 1=save register params in shadow space on proc entry */
+    W64F_AUTOSTACKSP   = 0x02, /* 1=calculate required stack space for arguments of INVOKE */
+    W64F_ALL = W64F_SAVEREGPARAMS | W64F_AUTOSTACKSP, /* all valid flags */
 };
 
 struct global_options {
@@ -533,6 +547,7 @@ struct global_options {
     bool        nobackpatch;             /* -d8 option */
     bool        print_linestore;         /* -ls option */
     uint_16     max_passes;              /* -pm option */
+    bool        skip_preprocessor;       /* -sp option */
 #endif
     char        *names[OPTN_LAST];
     struct qitem *queues[OPTQ_LAST];
@@ -569,7 +584,7 @@ struct global_options {
     enum hformat header_format;          /* -mz, -pe options */
     uint_8      fieldalign;              /* -Zp option  */
     enum lang_type langtype;             /* -Gc|d|z option */
-    enum mod_type model;                 /* -mt|s|m|c|l|h|f option */
+    enum model_type model;               /* -mt|s|m|c|l|h|f option */
     enum cpu_info cpu;                   /* -0|1|2|3|4|5|6 & -fp{0|2|3|5|6|c} option */
     enum fastcall_type fctype;           /* -zf0 & -zf1 option */
     bool        syntax_check_only;       /* -Zs option */
@@ -579,6 +594,9 @@ struct global_options {
 };
 
 /* Information about the module */
+
+struct input_queue;
+struct file_list;
 
 struct module_vars {
     unsigned            error_count;     /* total of errors so far */
@@ -597,6 +615,13 @@ struct module_vars {
 #if DLLIMPORT
     struct qdesc        DllQueue;        /* dlls of OPTION DLLIMPORT */
 #endif
+    FILE                *curr_file[NUM_FILE_TYPES];  /* ASM, ERR, OBJ and LST */
+    char                *curr_fname[NUM_FILE_TYPES];
+    struct fname_list   *FNames;         /* array of input files */
+    uint                cnt_fnames;      /* items in FNames array */
+    char                *IncludePath;
+    struct input_queue  *line_queue;     /* line queue */
+    struct file_list    *file_stack;     /* source item (file/macro) stack */
 };
 
 struct format_options;
@@ -612,7 +637,7 @@ struct module_info {
     unsigned            anonymous_label; /* "anonymous label" counter */
     unsigned            hll_label;       /* hll directive label counter */
     enum dist_type      distance;        /* stack distance */
-    enum mod_type       model;           /* memory model */
+    enum model_type     model;           /* memory model */
     enum lang_type      langtype;        /* language */
     enum os_type        ostype;          /* operating system */
     enum hformat        header_format;   /* header format */
@@ -654,7 +679,7 @@ struct module_info {
     //unsigned            flatgrp_idx;     /* index of FLAT group */
     union {
         uint_8          osabi;            /* for ELF */
-        uint_8          win64_saveparams; /* for WIN64 */
+        uint_8          win64_flags;      /* for WIN64 */
     };
     unsigned char       simseg_init;     /* simplified segm dir flags */
     unsigned char       PhaseError;      /* phase error flag */
@@ -663,13 +688,29 @@ struct module_info {
     unsigned char       epiloguemode;
     unsigned char       invoke_exprparm; /* forward refs for INVOKE params? */
     uint                srcfile;         /* is a file stack index */
+    struct dsym         *currseg;        /* currently active segment */
     struct dsym         *flat_grp;       /* magic FLAT group */
     struct asym         *start_label;    /* start label */
     struct fixup        *start_fixup;    /* OMF only */
     uint_32             start_displ;     /* OMF only, displ for start label */
     uint_8              *pCodeBuff;
+    /* input members */
+    char                *currsource;     /* current source line */
+    char                *CurrComment;    /* current comment */
+    struct asm_tok      *tokenarray;     /* start token buffer */
+    char                *stringbufferend;/* start free space in string buffer */
+    int                 token_count;     /* number of tokens in curr line */
     char                name[_MAX_FNAME];/* name of module */
 };
+
+#define CurrSource      ModuleInfo.currsource
+#define Token_Count     ModuleInfo.token_count
+#define StringBufferEnd ModuleInfo.stringbufferend
+#define CurrFile        ModuleInfo.g.curr_file
+#define CurrFName       ModuleInfo.g.curr_fname
+#define FNamesTab       ModuleInfo.g.FNames
+#define CurrSeg         ModuleInfo.currseg
+
 
 struct format_options {
     void (*init)( struct module_info * );
@@ -698,15 +739,13 @@ struct MZDATA {
 extern struct global_options Options;
 extern struct module_info    ModuleInfo;
 extern unsigned int          Parse_Pass;    /* assembly pass */
-extern int                   Token_Count;   /* number of tokens in current line */
 extern unsigned int          GeneratedCode; /* nesting level generated code */
 extern uint_8                MacroLevel;    /* macro nesting level */
 extern bool                  write_to_file; /* 1=write the object module */
 
 /* Information about source, object, listing and error files */
-extern FILE                  *CurrFile[];   /* ASM, ERR, OBJ and LST */
-extern char                  *CurrFName[];  /* ASM, ERR, OBJ and LST */
-
+//extern FILE                  *CurrFile[];   /* ASM, ERR, OBJ and LST */
+//extern char                  *CurrFName[];  /* ASM, ERR, OBJ and LST */
 
 /* functions in assemble.c */
 

@@ -15,7 +15,7 @@ xxx S1 <>
 
 	mov eax, [eax].f1		;undefined symbol f1
 	mov eax, [eax].[ebx] 	;structure field expected
-	mov eax, ds:[0].S1		;operand must be memory expression
+	mov eax, ds:[0].S1		;operand must be a memory expression
 	mov eax, [eax].4		;structure field expected
 	mov eax, [eax].DWORD	;structure field expected
 	mov eax, eax.S1			;invalid use of register
@@ -29,10 +29,10 @@ f1	db ?
 S21 ends
 
 S2 struct
-f2	S11 <>
+f2	S11 <>                   ;Masm ok???, jwasm error
 S2 ends
 
-	mov al,[ebx.S2.S21.f1]
-	mov al,[ebx],S2.S21.f1
+	mov al,[ebx.S2.S21.f1]   ;undefined symbol
+	mov al,[ebx],S2.S21.f1   ;Masm ok???, jwasm error
 
 END

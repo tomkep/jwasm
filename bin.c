@@ -1,11 +1,11 @@
 /****************************************************************************
 *
-*  This code is Public Domain. It's new for JWasm.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
 * Description:  BIN output routines.
-*               Also handles format MZ.
+*               Handles output format -bin, -mz, -pe32 and -pe64
 *
 ****************************************************************************/
 
@@ -17,7 +17,6 @@
 #include "fixup.h"
 #include "omfspec.h"
 #include "bin.h"
-#include "fatal.h"
 #include "listing.h"
 
 #if BIN_SUPPORT
@@ -34,7 +33,7 @@ static uint_32 fileoffset;
 static uint_32 entryoffset;
 static struct asym *entryseg;
 static uint_32 sizehdr;  /* size of MZ header, always 0 for BIN */
-static uint_32 imagestart;
+static uint_32 imagestart; /* start offset (of first segment) */
 
 #if SECTORMAP
 /* these strings are to be moved to msgdef.h */
@@ -201,7 +200,7 @@ static void CalcOffset( struct dsym *curr, bool firstseg )
         grp->sym.total_size = offset;
         /* v2.07: for 16-bit groups, ensure that it fits in 64 kB */
         if ( grp->sym.total_size > 0x10000 && grp->sym.Ofssize == USE16 ) {
-            AsmWarn( 2, GROUP_EXCEEDS_64K, grp->sym.name );
+            EmitWarn( 2, GROUP_EXCEEDS_64K, grp->sym.name );
         }
     }
     DebugMsg(("CalcOffset(%s) exit: seg.fileofs=%" FX32 "h, seg.start_offset=%" FX32 "h, endofs=%" FX32 "h fileoffset=%" FX32 "h\n",
@@ -346,7 +345,8 @@ static ret_code DoFixup( struct dsym *curr )
     for ( fixup = curr->e.seginfo->FixupListHead; fixup; fixup = fixup->nextrlc ) {
         codeptr.db = curr->e.seginfo->CodeBuffer +
             ( fixup->location - curr->e.seginfo->start_loc );
-        if ( fixup->sym && fixup->sym->segment ) {
+        //if ( fixup->sym && fixup->sym->segment ) { /* v2.08: changed */
+        if ( fixup->sym && ( fixup->sym->segment || fixup->sym->variable ) ) {
             /* assembly time variable (also $ symbol) in reloc? */
             /* v2.07: moved inside if-block, using new local var "offset" */
             if ( fixup->sym->variable ) {
@@ -532,7 +532,7 @@ static ret_code DoFixup( struct dsym *curr )
 #endif
         default:
             DebugMsg(("DoFixup(%s, %04" FX32 "): invalid fixup %u\n", curr->sym.name, fixup->location, fixup->type ));
-            AsmErr( INVALID_FIXUP_TYPE, "BIN", fixup->type, curr->sym.name, fixup->location );
+            EmitErr( INVALID_FIXUP_TYPE, "BIN", fixup->type, curr->sym.name, fixup->location );
             //return( ERROR );
         }
     }
@@ -543,8 +543,8 @@ static ret_code DoFixup( struct dsym *curr )
  * this is done after the last step only!
  */
 
-ret_code bin_write_data( struct module_info *ModuleInfo )
-/*************************************š*****************/
+ret_code bin_write_data( struct module_info *modinfo )
+/*************************************š**************/
 {
     struct dsym *curr;
     uint_32 size;
@@ -573,10 +573,10 @@ ret_code bin_write_data( struct module_info *ModuleInfo )
     fileoffset = 0;
     sizehdr = 0;
 #if MZ_SUPPORT
-    if ( ModuleInfo->header_format == HFORMAT_MZ ) {
+    if ( modinfo->header_format == HFORMAT_MZ ) {
         reloccnt = GetSegRelocs( NULL );
         sizehdr = (reloccnt * 4 + mzdata.ofs_fixups + (mzdata.alignment - 1)) & ~(mzdata.alignment-1);
-        hdrbuf = AsmAlloc( sizehdr );
+        hdrbuf = LclAlloc( sizehdr );
         memset( hdrbuf, 0, sizehdr );
         fileoffset = sizehdr;
         DebugMsg(("bin_write_data: MZ format, fixups=%u, sizehdr=%" FX32 "\n", reloccnt, sizehdr ));
@@ -587,7 +587,7 @@ ret_code bin_write_data( struct module_info *ModuleInfo )
 
     /* set starting offsets for all sections */
 
-    if ( ModuleInfo->segorder == SEGORDER_DOSSEG ) {
+    if ( modinfo->segorder == SEGORDER_DOSSEG ) {
         DebugMsg(("bin_write_data: .DOSSEG active\n" ));
         /* for .DOSSEG, regroup segments (CODE, UNDEF, DATA, BSS) */
         for ( segtype = typeorder; *segtype != SEGTYPE_ERROR; segtype++ ) {
@@ -604,7 +604,7 @@ ret_code bin_write_data( struct module_info *ModuleInfo )
         SortSegments();
     } else { /* segment order .SEQ (default) and .ALPHA */
         
-        if ( ModuleInfo->segorder == SEGORDER_ALPHA ) {
+        if ( modinfo->segorder == SEGORDER_ALPHA ) {
             DebugMsg(("bin_write_data: .ALPHA active\n" ));
             SortSegments();
         }
@@ -632,15 +632,15 @@ ret_code bin_write_data( struct module_info *ModuleInfo )
 #endif
     }
     /* v2.04: return if any errors occured during fixup handling */
-    if ( ModuleInfo->g.error_count )
+    if ( modinfo->g.error_count )
         return( ERROR );
 
     /* for plain binaries make sure the start label is at
      * the beginning of the first segment */
-    if ( ModuleInfo->header_format == HFORMAT_NONE ) {
-        if ( ModuleInfo->start_label ) {
-            if ( entryoffset == -1 || entryseg != ModuleInfo->start_label->segment ) {
-                AsmError( START_LABEL_INVALID );
+    if ( modinfo->header_format == HFORMAT_NONE ) {
+        if ( modinfo->start_label ) {
+            if ( entryoffset == -1 || entryseg != modinfo->start_label->segment ) {
+                EmitError( START_LABEL_INVALID );
                 return( ERROR );
             }
         }
@@ -652,7 +652,7 @@ ret_code bin_write_data( struct module_info *ModuleInfo )
 
     /* for MZ format, initialize the header */
 
-    if ( ModuleInfo->header_format == HFORMAT_MZ ) {
+    if ( modinfo->header_format == HFORMAT_MZ ) {
         /* set fields in MZ header */
         pReloc = (uint_16 *)(hdrbuf);
         *(pReloc+0) = 'M' + ('Z' << 8);
@@ -679,29 +679,29 @@ ret_code bin_write_data( struct module_info *ModuleInfo )
             *(pReloc+7) = (addr >> 4) + ((addr & 0xF) ? 1 : 0); /* SS */
             *(pReloc+8) = stack->sym.offset; /* SP */
         } else {
-            AsmWarn( 2, NO_STACK );
+            EmitWarn( 2, NO_STACK );
         }
         *(pReloc+9) = 0; /* checksum */
 
         /* set entry CS:IP if defined */
 
-        if ( ModuleInfo->start_label ) {
+        if ( modinfo->start_label ) {
             uint_32 addr;
-            curr = (struct dsym *)ModuleInfo->start_label->segment;
+            curr = (struct dsym *)modinfo->start_label->segment;
             DebugMsg(("bin_write_data, start_label: offs=%" FX32 "h, seg.offs=%" FX32 "h, group.offs=%" FX32 "h\n",
-                      ModuleInfo->start_label->offset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset : 0 ));
+                      modinfo->start_label->offset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset : 0 ));
             if ( curr->e.seginfo->group ) {
                 addr = curr->e.seginfo->group->offset;
-                *(pReloc+10) = (addr & 0xF ) + curr->e.seginfo->start_offset + ModuleInfo->start_label->offset; /* IP */
+                *(pReloc+10) = (addr & 0xF ) + curr->e.seginfo->start_offset + modinfo->start_label->offset; /* IP */
                 *(pReloc+11) = addr >> 4; /* CS */
             } else {
                 addr = curr->e.seginfo->start_offset;
-                *(pReloc+10) = (addr & 0xF ) + ModuleInfo->start_label->offset; /* IP */
+                *(pReloc+10) = (addr & 0xF ) + modinfo->start_label->offset; /* IP */
                 *(pReloc+11) = addr >> 4; /* CS */
             }
         } else {
-            DebugMsg(("bin_write_data, ModuleInfo->start_label=%p\n", ModuleInfo->start_label ));
-            AsmWarn( 2, NO_START_LABEL );
+            DebugMsg(("bin_write_data, ModuleInfo->start_label=%p\n", modinfo->start_label ));
+            EmitWarn( 2, NO_START_LABEL );
         }
         *(pReloc+12) = mzdata.ofs_fixups;
         DebugMsg(("bin_write_data: MZ, mzdata ofs_fixups=%Xh, alignment=%Xh\n", mzdata.ofs_fixups, mzdata.alignment ));
@@ -726,7 +726,7 @@ ret_code bin_write_data( struct module_info *ModuleInfo )
     }
 #endif
 
-    if ( ModuleInfo->header_format == HFORMAT_MZ ) {
+    if ( modinfo->header_format == HFORMAT_MZ ) {
         if ( fwrite( hdrbuf, 1, sizehdr, CurrFile[OBJ] ) != sizehdr )
             WriteError();
 #if SECTORMAP
@@ -796,7 +796,7 @@ ret_code bin_write_data( struct module_info *ModuleInfo )
     LstPrintf( szLine );
     LstNL();
 #if MZ_SUPPORT
-    if ( ModuleInfo->header_format == HFORMAT_MZ )
+    if ( modinfo->header_format == HFORMAT_MZ )
         sizeheap += sizetotal - sizehdr;
     else
 #endif

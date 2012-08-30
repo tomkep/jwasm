@@ -7,11 +7,13 @@
 
   2. Where is generated code used?
 
-  - invoke directive
-  - hll directives (.if, .else, .while, .repeat, ...)
-  - .model directive
-  - .startup and .exit directives
-  - simplified segment directives (.code, .data, .const, ...)
+  - INVOKE directive
+  - hll directives (.IF, .ELSE, .WHILE, .REPEAT, ...)
+  - .MODEL directive
+  - .STARTUP and .EXIT directives
+  - simplified segment directives (.CODE, .DATA, .CONST, ...)
   - default PROC prologue and epilogue (when a RET/IRET is detected)
   - STRUCT data initialization (slightly peculiar)
+  - ENDP ( in Win64, if procedure has FRAME attribute )
+  - END ( if a segment opened by simplified segment directives is still open )
 

@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*  This code is Public Domain. It's new for JWasm.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -20,7 +20,6 @@
 #include "extern.h"
 #include "coff.h"
 #include "coffspec.h"
-#include "fatal.h"
 #include "input.h"
 #include "myassert.h"
 #include "omfspec.h"
@@ -160,7 +159,7 @@ static uint_32 Coff_AllocString( const char *string, int len )
     uint_32 oldsize = SizeLongNames;
 
     SizeLongNames += len + 1;
-    name = AsmAlloc( len + 1 + sizeof( struct stringitem ) );
+    name = LclAlloc( len + 1 + sizeof( struct stringitem ) );
     name->next = NULL;
     strcpy( name->string, string );
     if ( LongNamesHead ) {
@@ -184,8 +183,8 @@ static uint GetLinnumItems( struct qdesc *q )
 
 /* write COFF section table */
 
-ret_code coff_write_section_table( struct module_info *ModuleInfo )
-/*****************************************************************/
+ret_code coff_write_section_table( struct module_info *modinfo )
+/**************************************************************/
 {
     struct dsym *curr;
     //struct omf_rec  *objr;
@@ -198,15 +197,15 @@ ret_code coff_write_section_table( struct module_info *ModuleInfo )
     uint        size_relocs = 0;
     char        buffer[MAX_LINE_LEN];
 
-    DebugMsg(("coff_write_section_table: enter, sections=%u\n", ModuleInfo->g.num_segs ));
+    DebugMsg(("coff_write_section_table: enter, sections=%u\n", modinfo->g.num_segs ));
 
-    offset = sizeof( IMAGE_FILE_HEADER ) + ModuleInfo->g.num_segs * sizeof( IMAGE_SECTION_HEADER );
+    offset = sizeof( IMAGE_FILE_HEADER ) + modinfo->g.num_segs * sizeof( IMAGE_SECTION_HEADER );
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
 
         seg_index = GetSegIdx( &curr->sym );
         /* v2.04: can't happen */
         //if( curr->sym.state != SYM_SEG ) {
-        //    AsmErr( SEG_NOT_DEFINED, curr->sym.name );
+        //    EmitErr( SEG_NOT_DEFINED, curr->sym.name );
         //    continue;
         //}
         /* if section name is longer than 8 chars, a '/' is stored,
@@ -402,8 +401,8 @@ static uint GetFileAuxEntries( uint_16 file, char * *fname )
  * - entries for relocations (internal)
  * - aliases (weak externals)
  */
-ret_code coff_write_symbols( struct module_info *ModuleInfo )
-/***********************************************************/
+ret_code coff_write_symbols( struct module_info *modinfo )
+/********************************************************/
 {
     struct dsym *curr;
     struct asym *sym;
@@ -763,7 +762,7 @@ static int GetStartLabel( char *buffer, bool msg )
                 ModuleInfo.start_label->langtype != LANG_SYSCALL ) {
                 if ( *ModuleInfo.start_label->name != '_' ) {
                     if ( msg && ( ModuleInfo.header_format != HFORMAT_WIN64 ) )
-                        AsmWarn( 2, LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL, ModuleInfo.start_label->name );
+                        EmitWarn( 2, LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL, ModuleInfo.start_label->name );
                     strcpy( buffer, temp );
                 } else {
                     strcpy( buffer, temp+1 );
@@ -784,8 +783,8 @@ static int GetStartLabel( char *buffer, bool msg )
  * - .debug$S and .debug$T sections if -Zi was set
  */
 
-ret_code coff_write_header( struct module_info *ModuleInfo )
-/**********************************************************/
+ret_code coff_write_header( struct module_info *modinfo )
+/*******************************************************/
 {
     struct dsym *exp;
 #if DLLIMPORT
@@ -793,7 +792,7 @@ ret_code coff_write_header( struct module_info *ModuleInfo )
 #endif
     char buffer[MAX_ID_LEN + MANGLE_BYTES + 1];
 
-    DebugMsg(("coff_write_header: enter, sections=%u\n", ModuleInfo->g.num_segs ));
+    DebugMsg(("coff_write_header: enter, sections=%u\n", modinfo->g.num_segs ));
 
     LongNamesHead = NULL;
     SizeLongNames = sizeof(uint_32);
@@ -821,7 +820,7 @@ ret_code coff_write_header( struct module_info *ModuleInfo )
                  * copy all queue items in ONE buffer
                  */
                 if ( symbols->sym.max_offset ) {
-                    symbols->e.seginfo->CodeBuffer = AsmAlloc( symbols->sym.max_offset );
+                    symbols->e.seginfo->CodeBuffer = LclAlloc( symbols->sym.max_offset );
                     dst = symbols->e.seginfo->CodeBuffer;
                     for ( src = DebugS.head; src; src = ((struct qditem *)src)->next ) {
                         memcpy( dst, src + sizeof( struct qditem ), ((struct qditem *)src)->size );
@@ -829,7 +828,7 @@ ret_code coff_write_header( struct module_info *ModuleInfo )
                     }
                 }
                 if ( types->sym.max_offset ) {
-                    types->e.seginfo->CodeBuffer = AsmAlloc( types->sym.max_offset );
+                    types->e.seginfo->CodeBuffer = LclAlloc( types->sym.max_offset );
                     dst = types->e.seginfo->CodeBuffer;
                     for ( src = DebugT.head; src; src = ((struct qditem *)src)->next ) {
                         memcpy( dst, src + sizeof( struct qditem ), ((struct qditem *)src)->size );
@@ -841,15 +840,15 @@ ret_code coff_write_header( struct module_info *ModuleInfo )
     }
 
     /* if safeSEH procs are defined, add a .sxdata section */
-    if ( ModuleInfo->g.SafeSEHList.head ) {
+    if ( modinfo->g.SafeSEHList.head ) {
         struct qnode *sehp;
         unsigned cnt = 0;
-        if ( sxdata = (struct dsym *)CreateIntSegment( ".sxdata", "", MAX_SEGALIGNMENT, ModuleInfo->Ofssize, FALSE ) ) {
+        if ( sxdata = (struct dsym *)CreateIntSegment( ".sxdata", "", MAX_SEGALIGNMENT, modinfo->Ofssize, FALSE ) ) {
             sxdata->e.seginfo->info = TRUE;
             /* calc the size for this segment */
-            for( sehp = ModuleInfo->g.SafeSEHList.head; sehp ; sehp = sehp->next, cnt++ );
+            for( sehp = modinfo->g.SafeSEHList.head; sehp ; sehp = sehp->next, cnt++ );
             sxdata->sym.max_offset = cnt*4;
-            sxdata->e.seginfo->CodeBuffer = AsmAlloc( cnt*4 );
+            sxdata->e.seginfo->CodeBuffer = LclAlloc( cnt*4 );
             DebugMsg(("coff_write_header: .sxdata section added, size=%u\n", cnt*4));
         }
     }
@@ -875,13 +874,13 @@ ret_code coff_write_header( struct module_info *ModuleInfo )
      - a proc is exported          and/or
      - impdefs are to be written (-Zd)
      */
-    if ( ModuleInfo->start_label != NULL ||
-        ModuleInfo->g.LibQueue.head != NULL ||
+    if ( modinfo->start_label != NULL ||
+        modinfo->g.LibQueue.head != NULL ||
 #if DLLIMPORT
         imp != NULL ||
 #endif
         exp != NULL ) {
-        if ( directives = (struct dsym *)CreateIntSegment( szdrectve, "", MAX_SEGALIGNMENT, ModuleInfo->Ofssize, FALSE ) ) {
+        if ( directives = (struct dsym *)CreateIntSegment( szdrectve, "", MAX_SEGALIGNMENT, modinfo->Ofssize, FALSE ) ) {
             struct dsym *tmp;
             int size = 0;
             struct qnode *q;
@@ -900,7 +899,7 @@ ret_code coff_write_header( struct module_info *ModuleInfo )
                 }
             }
             /* 2. defaultlibs */
-            for( q = ModuleInfo->g.LibQueue.head; q ; q = q->next ) {
+            for( q = modinfo->g.LibQueue.head; q ; q = q->next ) {
                 size += strlen( q->elmt ) + sizeof("-defaultlib:");
                 /* if the name isn't enclosed in double quotes and contains
                  a space, add 2 bytes to enclose it */
@@ -926,7 +925,7 @@ ret_code coff_write_header( struct module_info *ModuleInfo )
             }
 #endif
             directives->sym.max_offset = size;
-            directives->e.seginfo->CodeBuffer = AsmAlloc( size );
+            directives->e.seginfo->CodeBuffer = LclAlloc( size );
             p = directives->e.seginfo->CodeBuffer;
 
             /* copy the data */
@@ -942,14 +941,14 @@ ret_code coff_write_header( struct module_info *ModuleInfo )
                 }
             }
             /* 2. libraries */
-            for( q = ModuleInfo->g.LibQueue.head; q ; q = q->next ) {
+            for( q = modinfo->g.LibQueue.head; q ; q = q->next ) {
                 if ( *(char *)q->elmt != '"' && strchr( q->elmt, ' ' ) )
                     p += sprintf( (char *)p,"-defaultlib:\"%s\" ", q->elmt );
                 else
                     p += sprintf( (char *)p,"-defaultlib:%s ", q->elmt );
             }
             /* 3. entry */
-            if ( ModuleInfo->start_label ) {
+            if ( modinfo->start_label ) {
                 GetStartLabel( buffer, FALSE );
                 p += sprintf( (char *)p, "-entry:%s ", buffer );
             }
@@ -980,12 +979,12 @@ ret_code coff_write_header( struct module_info *ModuleInfo )
         directives->sym.max_offset = size_drectve;
 
 #if AMD64_SUPPORT
-    if ( ModuleInfo->header_format == HFORMAT_WIN64 )
+    if ( modinfo->header_format == HFORMAT_WIN64 )
         ifh.Machine = IMAGE_FILE_MACHINE_AMD64;
     else
 #endif
         ifh.Machine = IMAGE_FILE_MACHINE_I386;
-    ifh.NumberOfSections = ModuleInfo->g.num_segs;
+    ifh.NumberOfSections = modinfo->g.num_segs;
 #ifdef __UNIX__
     time((long *)&ifh.TimeDateStamp);
 #else
@@ -1138,7 +1137,7 @@ static void coff_write_fixups( struct dsym *section, uint_32 *poffset, uint_32 *
             default:
                 DebugMsg(("coff_write_fixups(%s, %Xh): reloc loc=%X type=%u idx=%u sym=%s\n",
                           section->sym.name, offset, fix->location, fix->type, fix->sym->ext_idx, fix->sym->name));
-                AsmErr( UNKNOWN_FIXUP_TYPE, fix->type, section->sym.name, fix->location );
+                EmitErr( UNKNOWN_FIXUP_TYPE, fix->type, section->sym.name, fix->location );
                 continue; /* v2.03: skip this fixup */
                 //break;
             }
@@ -1182,7 +1181,7 @@ static void coff_write_fixups( struct dsym *section, uint_32 *poffset, uint_32 *
             default:
                 DebugMsg(("coff_write_fixups(%s, %Xh): reloc loc=%X type=%u idx=%u sym=%s\n",
                           section->sym.name, offset, fix->location, fix->type, fix->sym->ext_idx, fix->sym->name));
-                AsmErr( UNKNOWN_FIXUP_TYPE, fix->type, section->sym.name, fix->location );
+                EmitErr( UNKNOWN_FIXUP_TYPE, fix->type, section->sym.name, fix->location );
                 continue; /* v2.03: skip this fixup */
                 //break;
             }
@@ -1193,7 +1192,7 @@ static void coff_write_fixups( struct dsym *section, uint_32 *poffset, uint_32 *
             struct asym *sym;
             char buffer[12];
             sprintf( buffer, "$$%06X", fix->offset );
-            sym = SymCreate( buffer, FALSE );
+            sym = SymAlloc( buffer );
             sym->state = fix->sym->state;
             sym->mem_type = fix->sym->mem_type;
             sym->offset = fix->offset;
@@ -1236,32 +1235,32 @@ static void coff_write_fixups( struct dsym *section, uint_32 *poffset, uint_32 *
 /* write section contents and fixups
  * this is done after the last step only!
  */
-ret_code coff_write_data( struct module_info *ModuleInfo )
-/********************************************************/
+ret_code coff_write_data( struct module_info *modinfo )
+/*****************************************************/
 {
     struct dsym *section;
     uint_32 offset = 0;
     int i;
     uint_32 index;
 
-    DebugMsg(("coff_write_data(%s): enter\n", ModuleInfo->name ));
+    DebugMsg(("coff_write_data(%s): enter\n", modinfo->name ));
 
     if ( directives )
         directives->sym.max_offset = size_drectve;
 
     /* calc the current index for the COFF symbol table */
-    index = SetSymbolIndices( ModuleInfo );
+    index = SetSymbolIndices( modinfo );
 
     /* fill the SafeSEH array */
-    if ( ModuleInfo->g.SafeSEHList.head ) {
+    if ( modinfo->g.SafeSEHList.head ) {
         struct qnode *sehp;
         struct qnode *sehp2;
         uint_32 *pdw;
-        for( sehp = ModuleInfo->g.SafeSEHList.head, pdw = (uint_32 *)sxdata->e.seginfo->CodeBuffer; sehp ; sehp = sehp2 ) {
+        for( sehp = modinfo->g.SafeSEHList.head, pdw = (uint_32 *)sxdata->e.seginfo->CodeBuffer; sehp ; sehp = sehp2 ) {
             sehp2 = sehp->next;
             DebugMsg(("coff_write_data: .sxdata value=%08Xh\n", ((struct asym *)sehp->elmt)->ext_idx));
             *pdw++ = ((struct asym *)sehp->elmt)->ext_idx;
-            AsmFree( sehp );
+            LclFree( sehp );
         }
     }
 

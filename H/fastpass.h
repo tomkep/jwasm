@@ -72,16 +72,16 @@ void FastpassInit( void );
 void SegmentSaveState( void );
 void AssumeSaveState( void );
 void ContextSaveState( void );
-void StoreLine( char *, uint_32 );
+void StoreLine( char *, uint_32, int );
 void SkipSavedState( void );
 struct line_item *RestoreState( void );
 void SaveVariableState( struct asym *sym );
 
-#define FStoreLine() if ( Parse_Pass == PASS_1 ) StoreLine( CurrSource, list_pos )
+#define FStoreLine( flags ) if ( Parse_Pass == PASS_1 ) StoreLine( CurrSource, list_pos, flags )
 
 #else
 
-#define FStoreLine()
+#define FStoreLine( flags )
 
 #endif
 

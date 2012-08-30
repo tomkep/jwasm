@@ -92,8 +92,8 @@ extern void cv_write_debug_tables( struct dsym *, struct dsym *);
 
 extern struct qdesc LinnumQueue;    /* queue of line_num_info items */
 
-extern struct fname_list *FNames;
-extern uint       cnt_fnames;
+//extern struct fname_list *FNames;
+//extern uint       cnt_fnames;
 
 extern const char szNull[];
 
@@ -201,7 +201,7 @@ static void PutName( struct omf_rec *objr, const char *name, size_t len )
     /**/myassert( objr != NULL && objr->data != NULL );
 #if MAX_ID_LEN > MAX_ID_LEN_OMF
     if ( len > MAX_ID_LEN_OMF ) {
-        AsmWarn( 1, IDENTIFIER_TOO_LONG );
+        EmitWarn( 1, IDENTIFIER_TOO_LONG );
         len = MAX_ID_LEN_OMF;
     }
 #endif
@@ -222,15 +222,15 @@ static void AllocData( struct omf_rec *objr, size_t len )
 /*******************************************************/
 {
 /**/myassert( objr->data == NULL );
-    objr->data = AsmAlloc( len );
+    objr->data = LclAlloc( len );
     objr->length = len;
 }
 #endif
 
 /* return a group's index */
 
-uint GetGrpIdx( struct asym *sym )
-/********************************/
+uint omf_GetGrpIdx( struct asym *sym )
+/************************************/
 {
     if( sym == NULL )
         return( 0 );
@@ -309,7 +309,7 @@ static int GetLinnumData( struct linnum_data *ldata, bool *need32 )
         if( node->offset > 0xffffUL ) {
             *need32 = TRUE;
         }
-        AsmFree( node );
+        LclFree( node );
     }
     LinnumQueue.head = NULL;
     return( count );
@@ -330,7 +330,7 @@ void omf_write_linnum( void )
         obj.is_32 = need_32;
         obj.d.linnum.num_lines = count;
         obj.d.linnum.lines = (struct linnum_data *)StringBufferEnd;
-        obj.d.linnum.d.base.grp_idx = GetGrpIdx( GetGroup( &CurrSeg->sym ) ); /* fixme ? */
+        obj.d.linnum.d.base.grp_idx = omf_GetGrpIdx( GetGroup( &CurrSeg->sym ) ); /* fixme ? */
         obj.d.linnum.d.base.seg_idx = CurrSeg->e.seginfo->seg_idx;
         obj.d.linnum.d.base.frame = 0; /* fixme ? */
         omf_write_record( &obj );
@@ -427,7 +427,7 @@ static void free_fixup( struct fixup *cur )
 
     while( cur ) {
         next = cur->nextrlc;
-        AsmFree( cur );
+        LclFree( cur );
         cur = next;
     }
 }
@@ -665,7 +665,7 @@ void omf_write_grp( void )
             PutIndex( &grp, segminfo->e.seginfo->seg_idx );
             /* truncate the group record if it comes near 4096! */
             if ( grp.curoff > OBJ_BUFFER_SIZE - 10 ) {
-                AsmWarn( 2, GROUP_TOO_LARGE, curr->sym.name );
+                EmitWarn( 2, GROUP_DEFINITION_TOO_LARGE, curr->sym.name );
                 break;
             }
         }
@@ -1114,21 +1114,28 @@ void omf_write_header( void )
     struct omf_rec obj;
     unsigned    len;
     char        *name;
-    const struct fname_list *fn;
+    //const struct fname_list *fn;
 
     DebugMsg(("omf_write_header() enter\n"));
 
     InitRec( &obj, CMD_THEADR );
+#if 1
+    /* v2.08: use the name given at the cmdline, that's what Masm does.
+     * Masm emits either a relative or a full path, depending on what
+     * was given as filename!
+     */
+    name = CurrFName[ASM];
+#else
     if( Options.names[OPTN_MODULE_NAME] != NULL ) {
         name = Options.names[OPTN_MODULE_NAME];
     } else {
-        /* may be better to use ModuleInfo.name!!! */
         fn = GetFName( ModuleInfo.srcfile );
         name = fn->fullname;
         len = strlen( name );
         name += len;
-        for (;name > fn->fullname && *(name-1) != '/' && *(name-1) != '\\';name--);
+        for (;name > fn->fullname && *(name-1) != '/' && *(name-1) != '\\';name-- );
     }
+#endif
     len = strlen( name );
     AttachData( &obj, StringBufferEnd, len + 1 );
     PutName( &obj, name, len );
@@ -1151,7 +1158,7 @@ ret_code omf_write_autodep( void )
     unsigned        idx;
 
     DebugMsg(("omf_write_autodep() enter\n"));
-    for( idx = 0, curr = FNames; idx < cnt_fnames; idx++, curr++ ) {
+    for( idx = 0, curr = FNamesTab; idx < ModuleInfo.g.cnt_fnames; idx++, curr++ ) {
         DebugMsg(("omf_write_autodep(): write record for %s\n", curr->name ));
         InitRec( &obj, CMD_COMENT );
         obj.d.coment.attr = CMT_TNP;
@@ -1229,7 +1236,7 @@ static void WritePubRec( uint_8 cmd, struct asym *curr_seg, uint count, bool nee
         grp = 0;
     } else {
         seg = GetSegIdx( curr_seg );
-        grp = GetGrpIdx( GetGroup( curr_seg ) );
+        grp = omf_GetGrpIdx( GetGroup( curr_seg ) );
     }
     InitRec( &obj, cmd );
     obj.is_32 = need32;
@@ -1365,7 +1372,7 @@ void omf_write_modend( struct fixup *fixup, uint_32 displ )
 
             if( fixup->frame_type == FRAME_GRP && fixup->frame_datum == 0 ) {
                 /* set the frame to the frame of the corresponding segment */
-                fixup->frame_datum = GetGrpIdx( sym );
+                fixup->frame_datum = omf_GetGrpIdx( sym );
             }
         } else { /* SYM_INTERNAL */
             DebugMsg(("omf_write_modend_fixup(%X): fixup->frame, datum=%u.%u sym->name=%s state=%X segm=%X\n",
@@ -1449,7 +1456,7 @@ void omf_init( struct module_info *ModuleInfo, FILE *objfile )
 /************************************************************/
 {
     DebugMsg(("omf_init enter\n"));
-    file_out = AsmAlloc( sizeof( struct omf_wfile ) + OBJ_BUFFER_SIZE );
+    file_out = LclAlloc( sizeof( struct omf_wfile ) + OBJ_BUFFER_SIZE );
     file_out->file = objfile;
     file_out->cmd = 0;
     return;
@@ -1460,7 +1467,7 @@ void omf_fini( void )
 {
     DebugMsg(("omf_fini enter, file_out=%X\n", file_out ));
     if ( file_out ) {
-        AsmFree( file_out );
+        LclFree( file_out );
         file_out = NULL;
     }
     return;

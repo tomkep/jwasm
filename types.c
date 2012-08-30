@@ -1,31 +1,10 @@
 /****************************************************************************
 *
-*                            Open Watcom Project
-*
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
-*    This file contains Original Code and/or Modifications of Original
-*    Code as defined in and that are subject to the Sybase Open Watcom
-*    Public License version 1.0 (the 'License'). You may not use this file
-*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
-*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
-*    provided with the Original Code and Modifications, and is also
-*    available at www.sybase.com/developer/opensource.
-*
-*    The Original Code and all software distributed under the License are
-*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
-*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
-*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
-*    NON-INFRINGEMENT. Please see the License for the specific language
-*    governing rights and limitations under the License.
-*
-*  ========================================================================
-*
-* Description:  STRUCT, UNION, RECORD and TYPEDEF directives,
-*               virtually rewritten for JWasm.
+* Description:  STRUCT, UNION, RECORD and TYPEDEF directives.
 *
 ****************************************************************************/
 
@@ -76,14 +55,14 @@ struct asym *CreateTypeSymbol( struct asym *sym, const char *name, bool global )
     if ( sym )
         sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
     else
-        sym = SymCreate( name, global );
+        sym = ( global ? SymCreate( name ) : SymAlloc( name ) );
 
     if ( sym ) {
         sym->state = SYM_TYPE;
-        ((struct dsym *)sym)->e.structinfo = si = AsmAlloc( sizeof( struct struct_info ) );
+        ((struct dsym *)sym)->e.structinfo = si = LclAlloc( sizeof( struct struct_info ) );
         si->head = NULL;
         si->tail = NULL;
-        si->typekind = TYPE_NONE;
+        sym->typekind = TYPE_NONE;
         si->alignment = 0;
         si->flags = 0;
     }
@@ -103,7 +82,7 @@ struct asym *SearchNameInStruct( const struct asym *tstruct, const char *name, u
     //    return( SymSearch( name ) );
     //}
     if ( level >= MAX_STRUCT_NESTING ) {
-        AsmError( NESTING_LEVEL_TOO_DEEP );
+        EmitError( NESTING_LEVEL_TOO_DEEP );
         return( NULL );
     }
     level++;
@@ -144,7 +123,7 @@ static bool AreStructsEqual( const struct dsym *newstr, const struct dsym *oldst
     DebugMsg(("AreStructsEqual(%s) enter\n", oldstr->sym.name ));
 
     /* kind of structs must be identical */
-    if ( oldstr->e.structinfo->typekind != newstr->e.structinfo->typekind )
+    if ( oldstr->sym.typekind != newstr->sym.typekind )
         return( FALSE );
 
     for ( ; fold; fold = fold->next, fnew = fnew->next ) {
@@ -195,7 +174,8 @@ ret_code StructDirective( int i, struct asm_tok tokenarray[] )
      */
     if (( CurrStruct == NULL && i != 1 ) ||
         ( CurrStruct != NULL && i != 0 ) ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        DebugMsg(("StructDirective(%s): error: either currstruct or i must be 0\n", tokenarray[i].string_ptr ));
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -232,13 +212,13 @@ ret_code StructDirective( int i, struct asm_tok tokenarray[] )
             if (opndx.kind == EXPR_EMPTY ) {
                 ;
             } else if (opndx.kind != EXPR_CONST ) {
-                AsmError( CONSTANT_EXPECTED );
+                EmitError( CONSTANT_EXPECTED );
             } else if( opndx.value > MAX_STRUCT_ALIGN ) {
-                AsmError( STRUCT_ALIGN_TOO_HIGH );
+                EmitError( STRUCT_ALIGN_TOO_HIGH );
             } else {
                 for( power = 1; power < opndx.value; power <<= 1 );
                 if( power != opndx.value ) {
-                    AsmError( POWER_OF_2 );
+                    EmitError( POWER_OF_2 );
                 } else
                     alignment = opndx.value;
             }
@@ -251,13 +231,14 @@ ret_code StructDirective( int i, struct asm_tok tokenarray[] )
                 (_stricmp( tokenarray[i].string_ptr, "NONUNIQUE" ) == 0 ) ) {
                 /* currently NONUNIQUE is ignored */
                 _strupr( tokenarray[i].string_ptr );
-                AsmWarn( 2, TOKEN_IGNORED, tokenarray[i].string_ptr );
+                EmitWarn( 2, TOKEN_IGNORED, tokenarray[i].string_ptr );
                 i++;
             }
         }
     }
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        DebugMsg(("StructDirective(%s): error: unexpected token %u >%s<\n", tokenarray[i].token, tokenarray[i].tokpos ));
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
 
@@ -326,13 +307,13 @@ ret_code StructDirective( int i, struct asm_tok tokenarray[] )
             CreateTypeSymbol( sym, NULL, CurrStruct != NULL );
         } else if( sym->state == SYM_TYPE && CurrStruct == NULL ) {
             /* was symbol forward referenced? */
-            if ( dir->e.structinfo->typekind != TYPE_NONE ) {
+            if ( dir->sym.typekind != TYPE_NONE ) {
                 /* structure redefinition! */
                 redef_struct = dir;
                 dir = (struct dsym *)CreateTypeSymbol( NULL, name, FALSE );
             }
         } else {
-            AsmErr( SYMBOL_REDEFINITION, sym->name );
+            EmitErr( SYMBOL_REDEFINITION, sym->name );
             return( ERROR );
         }
     }
@@ -341,9 +322,9 @@ ret_code StructDirective( int i, struct asm_tok tokenarray[] )
     dir->sym.offset = 0;
     dir->e.structinfo->isOpen = TRUE;
     if ( cmd == T_UNION )
-        dir->e.structinfo->typekind = TYPE_UNION;
+        dir->sym.typekind = TYPE_UNION;
     else
-        dir->e.structinfo->typekind = TYPE_STRUCT;
+        dir->sym.typekind = TYPE_STRUCT;
 
     if ( CurrStruct )
         dir->e.structinfo->isInline = TRUE;
@@ -401,11 +382,11 @@ ret_code EndstructDirective( int i, struct asm_tok tokenarray[] )
         ;
     } else {
         /* v2.04: error msg improved */
-        //AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        //EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         if ( i == 1)
-            AsmErr( UNMATCHED_BLOCK_NESTING, tokenarray[0].string_ptr );
+            EmitErr( UNMATCHED_BLOCK_NESTING, tokenarray[0].string_ptr );
         else
-            AsmErr( UNMATCHED_BLOCK_NESTING, "" );
+            EmitErr( UNMATCHED_BLOCK_NESTING, "" );
         return( ERROR );
     }
 
@@ -413,7 +394,7 @@ ret_code EndstructDirective( int i, struct asm_tok tokenarray[] )
         if ( SymCmpFunc( tokenarray[0].string_ptr, dir->sym.name, dir->sym.name_size ) != 0 ) {
             /* names don't match */
             DebugMsg(("EndstructDirective: names don't match, i=%u, name=%s - %s\n", i, tokenarray[0].string_ptr, dir->sym.name));
-            AsmErr( UNMATCHED_BLOCK_NESTING, tokenarray[0].string_ptr );
+            EmitErr( UNMATCHED_BLOCK_NESTING, tokenarray[0].string_ptr );
             return( ERROR );
         }
     }
@@ -492,7 +473,7 @@ ret_code EndstructDirective( int i, struct asm_tok tokenarray[] )
     if ( CurrStruct == NULL ) {
         if ( redef_struct ) {
             if ( AreStructsEqual( dir, redef_struct) == FALSE ) {
-                AsmErr( NON_BENIGN_XXX_REDEFINITION, szStructure, dir->sym.name );
+                EmitErr( NON_BENIGN_XXX_REDEFINITION, szStructure, dir->sym.name );
             }
             DebugMsg(("EndstructDirective: delete the redefinition of %s\n", dir->sym.name ));
             SymFree( (struct asym *)dir );
@@ -508,7 +489,7 @@ ret_code EndstructDirective( int i, struct asm_tok tokenarray[] )
     }
     //dir->sym.max_mbr_size = 0;
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
     return( NOT_ERROR );
@@ -527,13 +508,13 @@ static ret_code CheckAnonymousStruct( struct dsym *type )
         if ( *f->sym->name ) {
             sym = SearchNameInStruct((struct asym *)CurrStruct, f->sym->name, &disp, 0 );
             if ( sym ) {
-                AsmErr( SYMBOL_REDEFINITION, sym->name );
+                EmitErr( SYMBOL_REDEFINITION, sym->name );
                 return( ERROR );
             }
         } else if ( f->sym->type ) {
             struct dsym *stype = (struct dsym *)f->sym->type;
-            if ( stype->e.structinfo->typekind == TYPE_STRUCT ||
-                stype->e.structinfo->typekind == TYPE_UNION ) {
+            if ( stype->sym.typekind == TYPE_STRUCT ||
+                stype->sym.typekind == TYPE_UNION ) {
             if ( CheckAnonymousStruct( stype ) == ERROR )
                 return( ERROR );
             }
@@ -565,26 +546,21 @@ struct asym *AddFieldToStruct( int loc, struct asm_tok tokenarray[], const char 
     si = CurrStruct->e.structinfo;
     offset = CurrStruct->sym.offset;
 
-#ifdef DEBUG_OUT
-    if ( name == NULL )
-        DebugMsg1(("AddFieldToStruct(%s): anonymous, curr ofs=%" FU32 ", vartype=%s, size=%" FU32 "\n",
-            CurrStruct->sym.name, offset, vartype ? vartype->sym.name : "NULL", size ));
-    else
-        DebugMsg1(("AddFieldToStruct(%s): name=%s, curr ofs=%" FU32 ", vartype=%s, size=%" FU32 "\n",
-            CurrStruct->sym.name, name, offset, vartype ? vartype->sym.name : "NULL", size ));
-#endif
+    DebugMsg1(("AddFieldToStruct(%s): name=%s, curr ofs=%" FU32 ", vartype=%s, size=%" FU32 "\n",
+               CurrStruct->sym.name, name ? name : "<anonymous>", offset,
+               vartype ? vartype->sym.name : "NULL", size ));
 
     if ( name ) {
         sym = SearchNameInStruct((struct asym *)CurrStruct, name, &disp, 0 );
         if ( sym ) {
-            AsmErr( SYMBOL_ALREADY_DEFINED, sym->name );
+            EmitErr( SYMBOL_ALREADY_DEFINED, sym->name );
             return( NULL );
         }
     } else {
         /* v2.06: check fields of anonymous struct member */
         if ( vartype &&
-            ( vartype->e.structinfo->typekind == TYPE_STRUCT ||
-             vartype->e.structinfo->typekind == TYPE_UNION ) ) {
+            ( vartype->sym.typekind == TYPE_STRUCT ||
+             vartype->sym.typekind == TYPE_UNION ) ) {
             CheckAnonymousStruct( vartype );
         }
         name = "";
@@ -592,7 +568,7 @@ struct asym *AddFieldToStruct( int loc, struct asm_tok tokenarray[], const char 
 
     /* alloc the items needed */
 
-    sym = SymCreate( name, FALSE );
+    sym = SymAlloc( name );
     sym->state = SYM_STRUCT_FIELD;
     sym->isdefined = TRUE;
     sym->mem_type = mem_type;
@@ -600,7 +576,7 @@ struct asym *AddFieldToStruct( int loc, struct asm_tok tokenarray[], const char 
     /* ok to do? */
     // sym->total_size = SizeFromMemtype( mem_type, ModuleInfo.Ofssize );
 
-    f = AsmAlloc( sizeof( struct field_item ) );
+    f = LclAlloc( sizeof( struct field_item ) );
 
     f->next = NULL;
     f->sym = sym;
@@ -609,50 +585,36 @@ struct asym *AddFieldToStruct( int loc, struct asm_tok tokenarray[], const char 
 
         i = strlen( tokenarray[loc].string_ptr ) + 1;
         DebugMsg1(("AddFieldToStruct(%s): type=>%s<\n", CurrStruct->sym.name, tokenarray[loc].string_ptr ));
-        f->initializer = AsmAlloc( i );
+        f->initializer = LclAlloc( i );
         memcpy( f->initializer, tokenarray[loc].string_ptr, i );
 
         /* now add the value to initialize the struct to */
 
-#if 1
         /* v2.03: the initializer value may contain assembly time
          * variables ( $ inside structs is also one ). It's crucial that
          * the variable's CURRENT value is used then.
+         * v2.08: modified. avoid usage of token->string_ptr,
+         * and prefer to use token->tokpos.
          */
         init = StringBufferEnd;
         for ( i = loc+1; tokenarray[i].token != T_FINAL; i++ ) {
-            if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
-                *init++ = '<';
-                strcpy( init, tokenarray[i].string_ptr );
-                init += strlen( init );
-                *init++ = '>';
-            } else {
-                if ( tokenarray[i].token == T_ID ) {
-                    struct asym *sym2 = SymSearch( tokenarray[i].string_ptr );
-                    if ( sym2 && sym2->variable ) {
-                        if ( sym2->predefined && sym2->sfunc_ptr )
-                            sym2->sfunc_ptr( sym2 );
-                        myltoa( sym2->uvalue, init, ModuleInfo.radix, sym2->value3264 < 0, TRUE );
-                    } else {
-                        strcpy( init, tokenarray[i].string_ptr );
-                    }
-                } else {
-                    strcpy( init, tokenarray[i].string_ptr );
+            if ( tokenarray[i].token == T_ID ) {
+                struct asym *sym2 = SymSearch( tokenarray[i].string_ptr );
+                if ( sym2 && sym2->variable ) {
+                    if ( sym2->predefined && sym2->sfunc_ptr )
+                        sym2->sfunc_ptr( sym2 );
+                    myltoa( sym2->uvalue, init, ModuleInfo.radix, sym2->value3264 < 0, TRUE );
+                    init += strlen( init );
+                    *init++= ' ';
+                    continue;
                 }
-                init += strlen( init );
             }
-            if ( tokenarray[i+1].token != T_FINAL )
-                *init++ = ' ';
+            memcpy( init, tokenarray[i].tokpos, tokenarray[i+1].tokpos - tokenarray[i].tokpos );
+            init += tokenarray[i+1].tokpos - tokenarray[i].tokpos;
         }
         *init = NULLC;
-        f->value = AsmAlloc( init - StringBufferEnd + 1 );
+        f->value = LclAlloc( init - StringBufferEnd + 1 );
         strcpy( f->value, StringBufferEnd );
-#else
-        init = tokenarray[loc].pos + i;
-        while ( isspace( *init ) ) init++;
-        f->value = AsmAlloc( strlen( init ) + 1 );
-        strcpy( f->value, init );
-#endif
         DebugMsg1(("AddFieldToStruct(%s): initializer=>%s<\n", CurrStruct->sym.name, f->value ));
 
     } else {
@@ -673,8 +635,8 @@ struct asym *AddFieldToStruct( int loc, struct asm_tok tokenarray[], const char 
      * instead use the size of the "max" member!
      */
     if ( mem_type == MT_TYPE &&
-        ( vartype->e.structinfo->typekind == TYPE_STRUCT ||
-         vartype->e.structinfo->typekind == TYPE_UNION ) ) {
+        ( vartype->sym.typekind == TYPE_STRUCT ||
+         vartype->sym.typekind == TYPE_UNION ) ) {
         size = vartype->sym.max_mbr_size;
     }
 #endif
@@ -706,7 +668,7 @@ struct asym *AddFieldToStruct( int loc, struct asm_tok tokenarray[], const char 
         /* adjust the struct's current offset + size.
          The field's size is added in UpdateStructSize()
          */
-        if ( CurrStruct->e.structinfo->typekind != TYPE_UNION ) {
+        if ( CurrStruct->sym.typekind != TYPE_UNION ) {
             CurrStruct->sym.offset = offset;
             if ( offset > CurrStruct->sym.total_size )
                 CurrStruct->sym.total_size = offset;
@@ -750,7 +712,7 @@ struct asym *AddFieldToStruct( int loc, struct asm_tok tokenarray[], const char 
 ret_code AlignInStruct( int value )
 /*********************************/
 {
-    if ( CurrStruct->e.structinfo->typekind != TYPE_UNION ) {
+    if ( CurrStruct->sym.typekind != TYPE_UNION ) {
         int offset;
         offset = CurrStruct->sym.offset;
         offset = (offset + (value - 1)) & (-value);
@@ -766,7 +728,7 @@ ret_code AlignInStruct( int value )
 void UpdateStructSize( struct asym *sym )
 /***************************************/
 {
-    if ( CurrStruct->e.structinfo->typekind == TYPE_UNION ) {
+    if ( CurrStruct->sym.typekind == TYPE_UNION ) {
         //if ( no_of_bytes > CurrStruct->sym.total_size )
         //    CurrStruct->sym.total_size = no_of_bytes;
         if ( sym->total_size > CurrStruct->sym.total_size )
@@ -779,7 +741,7 @@ void UpdateStructSize( struct asym *sym )
     DebugMsg1(("UpdateStructSize(%s.%s): %s, curr mbr size=%u curr struc/union size=%u\n",
                CurrStruct->sym.name,
                sym->name,
-               CurrStruct->e.structinfo->typekind == TYPE_UNION ? "union" : "struct",
+               CurrStruct->sym.typekind == TYPE_UNION ? "union" : "struct",
                sym->total_size,
                CurrStruct->sym.total_size));
     return;
@@ -790,8 +752,8 @@ void UpdateStructSize( struct asym *sym )
 ret_code SetStructCurrentOffset( int_32 offset )
 /**********************************************/
 {
-    if ( CurrStruct->e.structinfo->typekind == TYPE_UNION ) {
-        AsmError( ORG_NOT_ALLOWED_IN_UNIONS );
+    if ( CurrStruct->sym.typekind == TYPE_UNION ) {
+        EmitError( ORG_NOT_ALLOWED_IN_UNIONS );
         return( ERROR );
     }
     CurrStruct->sym.offset = offset;
@@ -820,7 +782,7 @@ ret_code GetQualifiedType( int *pi, struct asm_tok tokenarray[], struct qualifie
     enum memtype    mem_type;
     int             i = *pi;
     int             distance = FALSE;
-    struct dsym     *dir;
+    struct asym     *sym;
 
     /* convert "directive" PROC to a type qualifier */
     for ( tmp = i; tokenarray[tmp].token != T_FINAL && tokenarray[tmp].token != T_COMMA; tmp++ )
@@ -873,36 +835,36 @@ ret_code GetQualifiedType( int *pi, struct asm_tok tokenarray[], struct qualifie
             if ( pti->symtype == NULL || pti->symtype->state == SYM_UNDEFINED )
                 pti->symtype = CreateTypeSymbol( pti->symtype, tokenarray[i].string_ptr, TRUE );
             else if ( pti->symtype->state != SYM_TYPE ) {
-                AsmErr( INVALID_QUALIFIED_TYPE, tokenarray[i].string_ptr );
+                EmitErr( INVALID_QUALIFIED_TYPE, tokenarray[i].string_ptr );
                 return( ERROR );
             } else {
-                dir = (struct dsym *)pti->symtype;
+                sym = pti->symtype;
                 /* if it's a typedef, simplify the info */
-                if ( dir->e.structinfo->typekind == TYPE_TYPEDEF ) {
-                    pti->is_ptr     += pti->symtype->is_ptr;
-                    if ( pti->symtype->is_ptr == 0 ) {
+                if ( sym->typekind == TYPE_TYPEDEF ) {
+                    pti->is_ptr     += sym->is_ptr;
+                    if ( sym->is_ptr == 0 ) {
                         /* v2.06b: alias types have MT_TYPE, dont use for ptr_memtype! */
-                        //pti->ptr_memtype = pti->symtype->mem_type;
-                        pti->ptr_memtype = ( pti->symtype->mem_type != MT_TYPE ? pti->symtype->mem_type : MT_EMPTY );
+                        //pti->ptr_memtype = sym->mem_type;
+                        pti->ptr_memtype = ( sym->mem_type != MT_TYPE ? sym->mem_type : MT_EMPTY );
                         if ( distance == FALSE && pti->is_ptr == 1 &&
-                            ( pti->symtype->mem_type == MT_NEAR ||
-                             pti->symtype->mem_type == MT_PROC ||
-                             pti->symtype->mem_type == MT_FAR ) )
-                            pti->is_far = pti->symtype->isfar;
-                            if ( pti->symtype->Ofssize != USE_EMPTY )
-                                pti->Ofssize = pti->symtype->Ofssize;
+                            ( sym->mem_type == MT_NEAR ||
+                             sym->mem_type == MT_PROC ||
+                             sym->mem_type == MT_FAR ) )
+                            pti->is_far = sym->isfar;
+                            if ( sym->Ofssize != USE_EMPTY )
+                                pti->Ofssize = sym->Ofssize;
                     } else {
-                        pti->ptr_memtype = pti->symtype->ptr_memtype;
+                        pti->ptr_memtype = sym->ptr_memtype;
                         if ( distance == FALSE && pti->is_ptr == 1 ) {
-                            pti->is_far = pti->symtype->isfar;
-                            if ( pti->symtype->Ofssize != USE_EMPTY )
-                                pti->Ofssize = pti->symtype->Ofssize;
+                            pti->is_far = sym->isfar;
+                            if ( sym->Ofssize != USE_EMPTY )
+                                pti->Ofssize = sym->Ofssize;
                         }
                     }
-                    if ( pti->symtype->mem_type == MT_TYPE )
-                        pti->symtype  = dir->sym.type;
+                    if ( sym->mem_type == MT_TYPE )
+                        pti->symtype  = sym->type;
                     else
-                        pti->symtype  = dir->sym.target_type;
+                        pti->symtype  = sym->target_type;
                 }
             }
             i++;
@@ -912,9 +874,9 @@ ret_code GetQualifiedType( int *pi, struct asm_tok tokenarray[], struct qualifie
     if( type == ERROR ) {
         if ( tokenarray[i].token != T_ID ) {
             if ( tokenarray[i].token == T_FINAL || tokenarray[i].token == T_COMMA )
-                AsmError( QUALIFIED_TYPE_EXPECTED );
+                EmitError( QUALIFIED_TYPE_EXPECTED );
             else {
-                AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+                EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
                 i++;
             }
             return( ERROR );
@@ -923,26 +885,26 @@ ret_code GetQualifiedType( int *pi, struct asm_tok tokenarray[], struct qualifie
         if( pti->symtype == NULL || pti->symtype->state != SYM_TYPE ) {
             DebugMsg(("GetQualifiedType: invalid type : %s\n", tokenarray[i].string_ptr ));
             if ( pti->symtype == NULL || pti->symtype ->state == SYM_UNDEFINED )
-                AsmErr( SYMBOL_NOT_DEFINED, tokenarray[i].string_ptr );
+                EmitErr( SYMBOL_NOT_DEFINED, tokenarray[i].string_ptr );
             else
-                AsmErr( INVALID_QUALIFIED_TYPE, tokenarray[i].string_ptr );
+                EmitErr( INVALID_QUALIFIED_TYPE, tokenarray[i].string_ptr );
             return( ERROR );
         }
-        dir = (struct dsym *)pti->symtype;
-        if ( dir->e.structinfo->typekind == TYPE_TYPEDEF ) {
-            pti->mem_type = pti->symtype->mem_type;
-            pti->is_far   = pti->symtype->isfar;
-            pti->is_ptr   = pti->symtype->is_ptr;
-            pti->Ofssize  = pti->symtype->Ofssize;
-            pti->size     = pti->symtype->total_size;
-            pti->ptr_memtype = pti->symtype->ptr_memtype;
-            if ( pti->symtype->mem_type == MT_TYPE )
-                pti->symtype  = dir->sym.type;
+        sym = pti->symtype;
+        if ( sym->typekind == TYPE_TYPEDEF ) {
+            pti->mem_type = sym->mem_type;
+            pti->is_far   = sym->isfar;
+            pti->is_ptr   = sym->is_ptr;
+            pti->Ofssize  = sym->Ofssize;
+            pti->size     = sym->total_size;
+            pti->ptr_memtype = sym->ptr_memtype;
+            if ( sym->mem_type == MT_TYPE )
+                pti->symtype  = sym->type;
             else
-                pti->symtype  = dir->sym.target_type;
+                pti->symtype  = sym->target_type;
         } else {
             pti->mem_type = MT_TYPE;
-            pti->size = pti->symtype->total_size;
+            pti->size = sym->total_size;
         }
         i++;
     } else {
@@ -977,7 +939,7 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
     DebugMsg1(("TypedefDirective(%d) enter\n", i));
 
     if( i != 1 ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
     name = tokenarray[0].string_ptr;
@@ -993,9 +955,9 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
         /* MASM allows to have the TYPEDEF included multiple times */
         /* but the types must be identical! */
         if ( ( sym->state != SYM_TYPE ) ||
-            ( ((struct dsym *)sym)->e.structinfo->typekind != TYPE_TYPEDEF &&
-             ((struct dsym *)sym)->e.structinfo->typekind != TYPE_NONE ) ) {
-            AsmErr( SYMBOL_REDEFINITION, sym->name );
+            ( sym->typekind != TYPE_TYPEDEF &&
+             sym->typekind != TYPE_NONE ) ) {
+            EmitErr( SYMBOL_REDEFINITION, sym->name );
             return( ERROR );
         }
     }
@@ -1004,7 +966,7 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
     if ( Parse_Pass > PASS_1 )
         return( NOT_ERROR );
     dir = (struct dsym *)sym;
-    dir->e.structinfo->typekind = TYPE_TYPEDEF;
+    dir->sym.typekind = TYPE_TYPEDEF;
 
     /* PROTO is special */
     if ( tokenarray[i].token == T_DIRECTIVE && tokenarray[i].tokval == T_PROTO) {
@@ -1016,7 +978,7 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
         } else if ( sym->mem_type == MT_PROC ) {
             dir2 = (struct dsym *)sym->target_type;
         } else {
-            AsmErr( SYMBOL_TYPE_CONFLICT, sym->name );
+            EmitErr( SYMBOL_TYPE_CONFLICT, sym->name );
             return( ERROR );
         }
         i++;
@@ -1079,7 +1041,7 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
                       sym->is_ptr, ti.is_ptr,
                       sym->Ofssize, ti.Ofssize,
                       sym->ptr_memtype, ti.ptr_memtype ));
-            AsmErr( SYMBOL_TYPE_CONFLICT, name );
+            EmitErr( SYMBOL_TYPE_CONFLICT, name );
             return( ERROR );
         }
     }
@@ -1101,7 +1063,7 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
 
     if ( tokenarray[i].token != T_FINAL ) {
         DebugMsg(("TypedefDirective: unexpected token %u, idx=%u\n", tokenarray[i].token, i));
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -1134,7 +1096,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
 
     DebugMsg1(("RecordDirective(%d) enter\n", i));
     if ( i != 1 ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 #if 0
@@ -1142,7 +1104,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
      * inside a STRUCT, but it will still be global
      */
     if ( StructDef.struct_depth > 0 ) {
-        AsmError( SYNTAX_ERROR );
+        EmitError( SYNTAX_ERROR );
         return( ERROR );
     }
 #endif
@@ -1152,36 +1114,36 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
     if ( sym == NULL || sym->state == SYM_UNDEFINED ) {
         sym = CreateTypeSymbol( sym, name, TRUE );
     } else if ( sym->state == SYM_TYPE &&
-               ( ((struct dsym *)sym)->e.structinfo->typekind == TYPE_RECORD ||
-               ((struct dsym *)sym)->e.structinfo->typekind == TYPE_NONE ) ) {
+               ( sym->typekind == TYPE_RECORD ||
+               sym->typekind == TYPE_NONE ) ) {
         /* v2.04: allow redefinition of record and forward references */
-        if ( Parse_Pass == PASS_1 && ((struct dsym *)sym)->e.structinfo->typekind == TYPE_RECORD ) {
+        if ( Parse_Pass == PASS_1 && sym->typekind == TYPE_RECORD ) {
             oldr = (struct dsym *)sym;
             sym = CreateTypeSymbol( NULL, name, FALSE );
             redef_err = 0;
         }
     } else {
-        AsmErr( SYMBOL_REDEFINITION, name );
+        EmitErr( SYMBOL_REDEFINITION, name );
         return( ERROR );
     }
     sym->isdefined = TRUE;
     if ( Parse_Pass > PASS_1 )
         return( NOT_ERROR );
     dir = (struct dsym *)sym;
-    dir->e.structinfo->typekind = TYPE_RECORD;
+    dir->sym.typekind = TYPE_RECORD;
 
     i++; /* go past RECORD */
 
     num = 0; /* counter for total of bits in record */
     do {
         if ( tokenarray[i].token != T_ID ) {
-            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             break;
         }
         name_loc = i;
         i++;
         if ( tokenarray[i].token != T_COLON ) {
-            AsmError( COLON_EXPECTED );
+            EmitError( COLON_EXPECTED );
             break;
         }
         i++;
@@ -1189,11 +1151,11 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
         if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
             break;
         if ( opndx.kind != EXPR_CONST ) {
-            AsmError( CONSTANT_EXPECTED );
+            EmitError( CONSTANT_EXPECTED );
             opndx.value = 1;
         }
         if ( opndx.value + num > MAXRECBITS ) {
-            AsmErr( TOO_MANY_BITS_IN_RECORD, tokenarray[name_loc].string_ptr );
+            EmitErr( TOO_MANY_BITS_IN_RECORD, tokenarray[name_loc].string_ptr );
             break;
         }
         count = 0;
@@ -1203,7 +1165,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
             i++;
             for( init_loc = i; tokenarray[i].token != T_FINAL && tokenarray[i].token != T_COMMA; i++ );
             if ( init_loc == i ) {
-                AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+                EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
                 break;
             }
             count = tokenarray[i].tokpos - tokenarray[init_loc].tokpos;
@@ -1215,7 +1177,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
                 sym->state != SYM_STRUCT_FIELD ||
                 sym->mem_type != MT_BITS ||
                 sym->total_size != opndx.value ) {
-                AsmErr( NON_BENIGN_XXX_REDEFINITION, szRecord, tokenarray[name_loc].string_ptr );
+                EmitErr( NON_BENIGN_XXX_REDEFINITION, szRecord, tokenarray[name_loc].string_ptr );
                 redef_err++;
                 sym = NULL; /* v2.06: added */
             }
@@ -1224,7 +1186,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
             if ( !sym )
                 break;
             if ( sym->state != SYM_UNDEFINED ) {
-                AsmErr( SYMBOL_REDEFINITION, sym->name );
+                EmitErr( SYMBOL_REDEFINITION, sym->name );
                 break;
             }
             sym->state = SYM_STRUCT_FIELD;
@@ -1234,7 +1196,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
 
         if ( sym ) { /* v2.06: don't add field if there was an error */
             num += opndx.value;
-            f = AsmAlloc( sizeof( struct field_item ) );
+            f = LclAlloc( sizeof( struct field_item ) );
             f->next = NULL;
             f->sym = sym;
             f->value = NULL;
@@ -1246,7 +1208,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
                 dir->e.structinfo->tail = f;
             }
             if ( count ) {
-                f->value = AsmAlloc( count + 1 );
+                f->value = LclAlloc( count + 1 );
                 memcpy( f->value, tokenarray[init_loc].tokpos, count );
                 *(f->value + count) = NULLC;
             }
@@ -1254,7 +1216,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
 
         if ( i < Token_Count ) {
             if ( tokenarray[i].token != T_COMMA || tokenarray[i+1].token == T_FINAL ) {
-                AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+                EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
                 break;
             }
             i++;
@@ -1294,7 +1256,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
     if ( oldr ) {
         if ( redef_err > 0 ||
             AreStructsEqual( dir, oldr ) == FALSE )
-            AsmErr( NON_BENIGN_XXX_REDEFINITION, szRecord, dir->sym.name );
+            EmitErr( NON_BENIGN_XXX_REDEFINITION, szRecord, dir->sym.name );
         /* record can be freed, because the record's fields are global items */
         SymFree( (struct asym *)dir );
     }
@@ -1311,14 +1273,14 @@ void DeleteType( struct dsym *dir )
     DebugMsg(("DeleteType(%s) enter\n", dir->sym.name ));
     for( curr = dir->e.structinfo->head; curr != NULL; curr = next ) {
         /* bitfields field names are global, don't free them here! */
-        if ( dir->e.structinfo->typekind != TYPE_RECORD )
+        if ( dir->sym.typekind != TYPE_RECORD )
             SymFree( curr->sym );
-        AsmFree( curr->initializer );
-        AsmFree( curr->value );
+        LclFree( curr->initializer );
+        LclFree( curr->value );
         next = curr->next;
-        AsmFree( curr );
+        LclFree( curr );
     }
-    AsmFree( dir->e.structinfo );
+    LclFree( dir->e.structinfo );
     return;
 }
 

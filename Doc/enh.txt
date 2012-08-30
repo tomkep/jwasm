@@ -47,6 +47,6 @@
      ENDM
 
      - x is the loop variable, it's a text macro, its value will be
-       the name of the item ( Anonymous members will be skipped ).
+       the name of the item.
      - the "members" are enumerated. For PROCedures, these are the
        parameters, local variables and local labels.

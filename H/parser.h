@@ -263,7 +263,7 @@ struct code_info {
             unsigned char   x86hi_used:1;   /* AH,BH,CH,DH used */
             unsigned char   x64lo_used:1;   /* SPL,BPL,SIL,DIL used */
 #endif
-            unsigned char   undefined:1;    /* v2.06b: struct member is forward ref */
+            unsigned char   undef_sym:1;    /* v2.06b: struct member is forward ref */
         };
     };
 };
@@ -309,6 +309,6 @@ extern void       find_frame( const struct asym *sym );
 extern void       find_frame2( const struct asym *sym );
 extern ret_code   ParseLine( struct asm_tok[] );
 
-extern void       WritePreprocessedLine( const char *, const struct asm_tok[] );
+extern void       WritePreprocessedLine( const char * );
 
 #endif

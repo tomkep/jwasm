@@ -45,15 +45,13 @@
 #include "proc.h"
 #include "fastpass.h"
 #include "listing.h"
-#include "fatal.h"
+#include "myassert.h"
 
-extern bool expansion;
-extern bool DefineProc;
 extern struct ReservedWord  ResWordTable[];
 extern ret_code (* const directive[])( int, struct asm_tok[] );
+extern char inside_comment;
 
 #define REMOVECOMENT 0 /* 1=remove comments from source       */
-#define DETECTEOC 1
 #define DETECTCTRLZ 1
 
 /* FILESEQ: if 1, stores a linked list of source files, ordered
@@ -64,25 +62,37 @@ extern ret_code (* const directive[])( int, struct asm_tok[] );
 
 #define FILESEQ 0
 
-char   *CurrSource;      /* Current Input Line */
-struct asym *FileCur = NULL;
+char   *commentbuffer;
+
+struct asym *FileCur = NULL; /* @FileCur symbol */
 struct asym LineCur = { NULL,"@Line", 0 };
 
-int Token_Count;    /* number of tokens in curr line */
-int queue_level;    /* number of open (macro) queues */
+static int queue_level; /* number of line queues onto the file stack */
 
-
-#if DETECTEOC
-extern char inside_comment;
-#endif
-
-/* MemAlloc() uses the normal C heap functions.
- * AsmAlloc() uses the "fast" replacement if FASTMEM=1.
- * for "line sources" it's best to use the first, since
- * they are very "short-lived".
+/* SrcAlloc() and SrcFree() are used to store/release
+ * "file" items onto the file stack and "line queue" items.
+ *
+ * MemAlloc() uses the normal C heap functions.
+ * LclAlloc() uses the "fast" replacement if FASTMEM=1.
+ * it's probably best to use the first, since "file"
+ * and "line queue" items are "short-lived".
  */
 #define SrcAlloc(x) MemAlloc(x)
 #define SrcFree(x)  MemFree(x)
+
+/* item of a line queue */
+struct line_list {
+    struct line_list *next;
+#ifdef DEBUG_OUT
+    char lineno;
+#endif
+    char line[1];
+};
+
+struct input_queue {
+    struct line_list    *head;
+    struct line_list    *tail;
+};
 
 struct file_list {
     struct file_list    *next;
@@ -93,47 +103,44 @@ struct file_list {
     };
     uint_32             line_num;   /* current line */
     struct asym         *macro;     /* the symbol if it is a macro */
-    uint_16             srcfile;    /* index of file in FNames */
-    unsigned char       hidden:1;
+    uint_16             srcfile;    /* index of file in FNamesTab */
     unsigned char       islinesrc:1;
 };
-
-struct fname_list       *FNames;    /* array of input files */
 
 /* NOTE: the line queue is a simple list of lines.
  if it must be nested, it is converted to a file_list item
  and pushed onto the file stack.
  */
-struct input_queue      *line_queue;    /* line queue */
-static struct file_list *file_stack;    /* source item (file/macro) stack */
-static char             *IncludePath;
-uint                    cnt_fnames;     /* items in FNames array */
+//static struct input_queue *line_queue;  /* line queue */
+//static struct file_list *file_stack;    /* source item (file/macro) stack */
+//static char             *IncludePath;
+#define line_queue  ModuleInfo.g.line_queue
+#define file_stack  ModuleInfo.g.file_stack
+
 #if FILESEQ
 struct qdesc            FileSeq;
 #endif
 
 #ifdef DEBUG_OUT
+struct asm_tok *end_tokenarray;
+char           *end_stringbuf;
 static char currlqline;
-static int cntppl0;
-static int cntppl1;
-static int cntppl2;
+static long cntppl0;
+static long cntppl1;
+static long cntppl2;
+static long cntflines;
+static long cntlines;
 int lq_line;
-int cnttok0;
-int cnttok1;
+long cnttok0;
+long cnttok1;
 #endif
-
-//char *CurrComment;
-char CurrComment[MAX_LINE_LEN];
 
 /* buffer for source lines
  * since the lines are sometimes concatenated
  * the buffer must be a multiple of MAX_LINE_LEN
  */
-#ifdef __I86__
 static char *srclinebuffer;
-#else
-static char srclinebuffer[ MAX_LINE_LEN * MAX_SYNC_MACRO_NESTING ];
-#endif
+char *token_stringbuf;  /* start token string buffer */
 
 /* fixme: add '|| defined(__CYGWIN__)' ? */
 #if defined(__UNIX__)
@@ -194,6 +201,8 @@ static time_t GetFileTimeStamp( const char *filename )
 /* check if a file is in the array of known files.
  * if no, store the file at the array's end.
  * returns array index.
+ * the array is stored in the standard C heap!
+ * the filenames are stored in the "local" heap.
  */
 static uint AddFile( char const *fname )
 /**************************************/
@@ -204,39 +213,39 @@ static uint AddFile( char const *fname )
     char    ext[_MAX_EXT];
 
     DebugMsg(("AddFile(%s) enter\n", fname ));
-    for( index = 0; index < cnt_fnames; index++ ) {
-        if( filecmp( fname, (FNames+index)->fullname ) == 0 )
+    for( index = 0; index < ModuleInfo.g.cnt_fnames; index++ ) {
+        if( filecmp( fname, ( FNamesTab + index )->fullname ) == 0 )
             return( index );
     }
 
     if ( ( index % 64 ) == 0 ) {
-        newfn = (struct fname_list *)SrcAlloc( ( index + 64) * sizeof( struct fname_list ) );
-        if ( FNames ) {
-            memcpy( newfn, FNames, index * sizeof( struct fname_list ) );
-            SrcFree( FNames );
+        newfn = (struct fname_list *)MemAlloc( ( index + 64) * sizeof( struct fname_list ) );
+        if ( FNamesTab ) {
+            memcpy( newfn, FNamesTab, index * sizeof( struct fname_list ) );
+            MemFree( FNamesTab );
         }
-        FNames = newfn;
+        FNamesTab = newfn;
     }
-    cnt_fnames = index + 1;
+    ModuleInfo.g.cnt_fnames = index + 1;
 
     _splitpath( fname, NULL, NULL, name, ext );
 
 #if 0
-    (FNames+index)->mtime = GetFileTimeStamp( fname );
-    (FNames+index)->name = (char *)AsmAlloc( strlen( name ) + strlen( ext ) + 1 );
-    strcpy( (FNames+index)->name, name );
-    strcat( (FNames+index)->name, ext );
-    (FNames+index)->fullname = (char *)AsmAlloc( strlen( fname ) + 1 );
-    strcpy( (FNames+index)->fullname, fname );
+    (FNamesTab+index)->mtime = GetFileTimeStamp( fname );
+    (FNamesTab+index)->name = (char *)LclAlloc( strlen( name ) + strlen( ext ) + 1 );
+    strcpy( (FNamesTab+index)->name, name );
+    strcat( (FNamesTab+index)->name, ext );
+    (FNamesTab+index)->fullname = (char *)LclAlloc( strlen( fname ) + 1 );
+    strcpy( (FNamesTab+index)->fullname, fname );
 #else
-    newfn = FNames + index;
+    newfn = FNamesTab + index;
     /* timestamp needed for autodependancy records only */
     if( Options.line_numbers )
         newfn->mtime = GetFileTimeStamp( fname );
-    newfn->name = (char *)AsmAlloc( strlen( name ) + strlen( ext ) + 1 );
+    newfn->name = (char *)LclAlloc( strlen( name ) + strlen( ext ) + 1 );
     strcpy( newfn->name, name );
     strcat( newfn->name, ext );
-    newfn->fullname = (char *)AsmAlloc( strlen( fname ) + 1 );
+    newfn->fullname = (char *)LclAlloc( strlen( fname ) + 1 );
     strcpy( newfn->fullname, fname );
 #endif
     return( index );
@@ -245,7 +254,7 @@ static uint AddFile( char const *fname )
 const struct fname_list *GetFName( uint index )
 /*********************************************/
 {
-    return( FNames+index );
+    return( FNamesTab+index );
 }
 
 /* free the file array */
@@ -255,13 +264,13 @@ static void FreeFiles( void )
 {
 #if FASTMEM==0
     int i;
-    for ( i = 0; i < cnt_fnames; i++ ) {
-        AsmFree( (FNames+i)->name );
-        AsmFree( (FNames+i)->fullname );
+    for ( i = 0; i < ModuleInfo.g.cnt_fnames; i++ ) {
+        LclFree( (FNamesTab + i)->name );
+        LclFree( (FNamesTab+i)->fullname );
     }
 #endif
-    SrcFree( FNames );
-    FNames = NULL;
+    MemFree( FNamesTab );
+    FNamesTab = NULL;
     return;
 }
 
@@ -292,10 +301,8 @@ void ClearFileStack( void )
 {
     struct file_list   *nextfile;
 
-    if ( line_queue ) {
-        FreeLineQueue( line_queue );
-        line_queue = NULL;
-    }
+    DeleteLineQueue();
+
     /* dont close the last item (which is the main src file) */
     for( ; file_stack->next ; file_stack = nextfile ) {
         nextfile = file_stack->next;
@@ -338,13 +345,15 @@ char *GetTopLine( char *buffer )
     if ( lq_line )
         sprintf( buffer, "(%u)", lq_line );
     else if( file_stack->islinesrc == TRUE )
-        sprintf( buffer, "[%lu]", file_stack->line_num );
+        sprintf( buffer, "[%s.%lu]", file_stack->macro ? file_stack->macro->name : "", file_stack->line_num );
     return( buffer );
 }
 #endif
 
 /* read one line from current source file.
  * returns NULL if EOF has been detected and no char stored in buffer
+ * v2.08: 00 in the stream no longer causes an exit. Hence if the
+ * char occurs in the comment part, everything is ok.
  */
 static char *my_fgets( char *buffer, int max, FILE *fp )
 /******************************************************/
@@ -360,7 +369,11 @@ static char *my_fgets( char *buffer, int max, FILE *fp )
             break; /* don't store CR */
         case '\n':
             /* fall through */
-        case '\0':
+        //case '\0': /* v2.08: */
+#ifdef DEBUG_OUT
+            if ( Parse_Pass == PASS_1 )
+                cntflines++;
+#endif
             *ptr = NULLC;
             return( buffer );
 #if DETECTCTRLZ
@@ -378,7 +391,7 @@ static char *my_fgets( char *buffer, int max, FILE *fp )
         }
         c = getc( fp );
     }
-    AsmErr( LINE_TOO_LONG );
+    EmitErr( LINE_TOO_LONG );
     *(ptr-1) = NULLC;
     return( buffer );
 }
@@ -388,7 +401,7 @@ void AddFileSeq( uint file )
 /**************************/
 {
     struct file_seq *node;
-    node = AsmAlloc( sizeof( struct file_seq ) );
+    node = LclAlloc( sizeof( struct file_seq ) );
     node->next = NULL;
     node->file = file;
     if ( FileSeq.head == NULL )
@@ -411,7 +424,6 @@ static struct file_list *PushLineSource( bool is_linesrc, struct asym *sym )
 
     fl = SrcAlloc( sizeof( struct file_list ) );
     fl->next = file_stack;
-    fl->hidden = FALSE;
     fl->islinesrc = is_linesrc;
     fl->line_num = 0;
     fl->macro = sym;
@@ -426,16 +438,16 @@ static struct file_list *PushLineSource( bool is_linesrc, struct asym *sym )
  * If there's a current line queue, push it onto the file stack.
  */
 
-void PushLineQueue( void )
-/************************/
+void NewLineQueue( void )
+/***********************/
 {
-    DebugMsg1(( "PushLineQueue() enter [line_queue=%X]\n", line_queue ));
+    DebugMsg1(( "NewLineQueue() enter [line_queue=%X]\n", line_queue ));
     if ( line_queue ) {
         struct file_list *fl;
         fl = PushLineSource( TRUE, NULL );
+        queue_level++;
         fl->srcfile = get_curr_srcfile();
         fl->lines = line_queue;
-        fl->hidden = TRUE;
         line_queue = NULL;
     }
 #ifdef DEBUG_OUT
@@ -443,19 +455,20 @@ void PushLineQueue( void )
 #endif
 }
 
-#if 0
-void PopLineQueue( void )
-/***********************/
+void DeleteLineQueue( void )
+/**************************/
 {
-    struct file_list *fl = file_stack;
-    if ( fl->islinesrc && fl->lines->head == NULL ) {
-        queue_level--;
-        file_stack = fl->next;
-        SrcFree( fl->lines );
-        SrcFree( fl );
+    if ( line_queue ) {
+        FreeLineQueue( line_queue );
+        line_queue = NULL;
     }
 }
-#endif
+
+bool is_linequeue_populated( void )
+/*********************************/
+{
+    return( line_queue != NULL );
+}
 
 /* Add a line to the current line queue. */
 
@@ -470,7 +483,6 @@ void AddLineQueue( const char *line )
     if ( line_queue == NULL ) {
         line_queue = SrcAlloc( sizeof( struct input_queue ) );
         line_queue->tail = NULL;
-        queue_level++;
     }
     new = SrcAlloc( sizeof( struct line_list ) + i );
     new->next = NULL;
@@ -499,8 +511,10 @@ void AddLineQueueX( const char *fmt, ... )
     int i;
     long l;
     const char *s;
+    const char *p;
     char buffer[MAX_LINE_LEN];
 
+    //DebugMsg(("AddlineQueueX(%s) enter\n", fmt ));
     va_start( args, fmt );
     for ( s = fmt, d = buffer; *s; s++ ) {
         if ( *s == '%' ) {
@@ -514,13 +528,20 @@ void AddLineQueueX( const char *fmt, ... )
                 d += ResWordTable[i].len;
                 break;
             case 's':
-                strcpy( d, va_arg( args, char * ) );
-                d += strlen( d );
+                p = va_arg( args, char * );
+                i = strlen( p );
+                memcpy( d, p, i );
+                d += i;
+                *d = NULLC;
                 break;
             case 'd':
             case 'u':
             case 'x':
+#ifdef __I86__ /* v2.08: use long only if size(int) is 16-bit */
                 l = va_arg( args, long );
+#else
+                l = va_arg( args, int );
+#endif
                 if ( *s == 'x' ) {
                     myltoa( l, d, 16, FALSE, FALSE );
                     d += strlen( d );
@@ -540,6 +561,7 @@ void AddLineQueueX( const char *fmt, ... )
     }
     *d = NULLC;
     va_end( args );
+    //DebugMsg(("AddlineQueueX() done\n" ));
     AddLineQueue( buffer );
     return;
 }
@@ -549,18 +571,14 @@ void AddLineQueueX( const char *fmt, ... )
  * in case of errors. Param <line> is != 0 when GOTO
  * is handled.
  */
-void PushMacro( struct dsym *macro, struct macro_instance *mi, unsigned line )
+void PushMacro( struct asym *macro, struct macro_instance *mi, unsigned line )
 /****************************************************************************/
 {
     struct file_list *fl;
 
-    DebugMsg1(( "PushMacro(%s), queue level=%u\n", macro->sym.name, queue_level ));
-    if ( queue_level >= MAX_QUEUE_NESTING ) {
-        Fatal( FATAL_NESTING_LEVEL_TOO_DEEP );
-    }
-    fl = PushLineSource( TRUE, &macro->sym );
+    DebugMsg1(( "PushMacro(%s), queue level=%u\n", macro->name, queue_level ));
+    fl = PushLineSource( TRUE, macro );
     fl->mi = mi;
-    //fl->hidden = *sym->name ? FALSE : TRUE; /* v2.0: don't hide loop macros */
     //line_queue = NULL;
     queue_level++;
     fl->line_num = line;
@@ -640,19 +658,24 @@ void print_source_nesting_structure( void )
         return;
 
     for( fl = file_stack; fl->next ; fl = fl->next ) {
-        if( fl->hidden == FALSE ) {
-            if( fl->islinesrc == FALSE ) {
-                PrintNote( NOTE_INCLUDED_BY, tab, "", GetFName( fl->srcfile)->name, fl->line_num );
-            } else if ( fl->macro != NULL ) {
-                char fname[_MAX_FNAME+_MAX_EXT];
-                char fext[_MAX_EXT];
-                if (*(fl->macro->name) == NULLC ) {
-                    PrintNote( NOTE_ITERATION_MACRO_CALLED_FROM, tab, "", "MacroLoop", fl->line_num, fl->macro->value + 1 );
-                } else {
-                    _splitpath( GetFName(((struct dsym *)fl->macro)->e.macroinfo->srcfile)->name, NULL, NULL, fname, fext );
-                    strcat( fname, fext );
-                    PrintNote( NOTE_MACRO_CALLED_FROM, tab, "", fl->macro->name, fl->line_num, fname );
-                }
+        if( fl->islinesrc == FALSE ) {
+            PrintNote( NOTE_INCLUDED_BY, tab, "", GetFName( fl->srcfile)->name, fl->line_num );
+            tab++;
+        } else if ( fl->macro != NULL ) {
+            //char fname[_MAX_FNAME+_MAX_EXT];
+#ifndef __I86__ /* this function may be called on low stack condition */
+            char fname[_MAX_FNAME];
+            char fext[_MAX_EXT];
+#endif
+            if (*(fl->macro->name) == NULLC ) {
+                PrintNote( NOTE_ITERATION_MACRO_CALLED_FROM, tab, "", "MacroLoop", fl->line_num, fl->macro->value + 1 );
+            } else {
+#ifdef __I86__
+                PrintNote( NOTE_MACRO_CALLED_FROM, tab, "", fl->macro->name, fl->line_num, GetFName(((struct dsym *)fl->macro)->e.macroinfo->srcfile)->name, "" ) ;
+#else
+                _splitpath( GetFName(((struct dsym *)fl->macro)->e.macroinfo->srcfile)->name, NULL, NULL, fname, fext );
+                PrintNote( NOTE_MACRO_CALLED_FROM, tab, "", fl->macro->name, fl->line_num, fname, fext );
+#endif
             }
             tab++;
         }
@@ -663,21 +686,20 @@ void print_source_nesting_structure( void )
 /* Scan the include path for a file!
  * variable IncludePath also contains directories set with -I cmdline option
  */
-static FILE *open_file_in_include_path( const char *name, char *fullpath )
-/************************************************************************/
+static FILE *open_file_in_include_path( const char *name, char fullpath[] )
+/*************************************************************************/
 {
     char            *curr;
     char            *next;
     int             i;
     int             namelen;
     FILE            *file = NULL;
-    char            buffer[_MAX_PATH];
 
     while( isspace( *name ) )
         name++;
 
-    curr = IncludePath;
-    namelen= strlen( name );
+    curr = ModuleInfo.g.IncludePath;
+    namelen = strlen( name );
 
     DebugMsg(("open_file_in_include_path(%s) enter\n", name ));
     for ( ; curr; curr = next ) {
@@ -693,24 +715,23 @@ static FILE *open_file_in_include_path( const char *name, char *fullpath )
          * - "empty" entries in PATH
          * - entries which would cause a buffer overflow
          */
-        if ( i == 0 || ( ( i + namelen ) >= sizeof( buffer ) ) )
+        if ( i == 0 || ( ( i + namelen ) >= _MAX_PATH ) )
             continue;
 
-        memcpy( buffer, curr, i );
-        if( buffer[i-1] != '/'
+        memcpy( fullpath, curr, i );
+        if( fullpath[i-1] != '/'
 #if !defined(__UNIX__)
-           && buffer[i-1] != '\\' && buffer[i-1] != ':'
+           && fullpath[i-1] != '\\' && fullpath[i-1] != ':'
 #endif
         ) {
-            buffer[i] = DIR_SEPARATOR;
+            fullpath[i] = DIR_SEPARATOR;
             i++;
         }
-        strcpy( buffer+i, name );
+        strcpy( fullpath+i, name );
 
-        DebugMsg(("open_file_in_include_path: >%s<\n", buffer ));
-        file = fopen( buffer, "rb" );
+        DebugMsg(("open_file_in_include_path: >%s<\n", fullpath ));
+        file = fopen( fullpath, "rb" );
         if( file ) {
-            strcpy( fullpath, buffer );
             break;
         }
     }
@@ -718,7 +739,9 @@ static FILE *open_file_in_include_path( const char *name, char *fullpath )
     return( file );
 }
 
-/* the worker behind the INCLUDE directive */
+/* the worker behind the INCLUDE directive. Also used
+ * by INCBIN and to include the main source file.
+ */
 
 ret_code InputQueueFile( const char *path, FILE * *pfile )
 /********************************************************/
@@ -757,28 +780,25 @@ ret_code InputQueueFile( const char *path, FILE * *pfile )
         }
     }
     if ( file == NULL ) {
-        strcpy( fullpath, path );
-        file = fopen( fullpath, "rb" );
+        fullpath[0] = NULLC;
+        file = fopen( path, "rb" );
         DebugMsg(("InputQueueFile(): file=%X\n", file ));
-        //DebugMsg(("InputQueueFile(): fopen()=%X\n", file ));
-        if( file == NULL &&
-            IncludePath != NULL &&
-            /* don't search include path if an absolute path is given */
-            dir[0] != '\\' && dir[0] != '/') {
-            //file = open_file_in_include_path( path, tmp );
+        /* if the file wasn't found, and include paths have been set,
+         * and NO absolute path is given, then search include dirs */
+        if( file == NULL && ModuleInfo.g.IncludePath != NULL && dir[0] != '\\' && dir[0] != '/' ) {
             file = open_file_in_include_path( path, fullpath );
             DebugMsg(("InputQueueFile(): open_file_in_include_path(%s, %s) returned file=%X\n", path, fullpath, file ));
         }
-    }
-    if( file == NULL ) {
-        AsmErr( CANNOT_OPEN_INCLUDE_FILE, fullpath );
-        return( ERROR );
+        if( file == NULL ) {
+            EmitErr( CANNOT_OPEN_FILE, path, ErrnoStr() );
+            return( ERROR );
+        }
     }
     if ( pfile )
         *pfile = file;
     else {
         fl = PushLineSource( FALSE, NULL );
-        fl->srcfile = AddFile( GetFullPath( fullpath, buffer, sizeof( buffer ) ) );
+        fl->srcfile = AddFile( GetFullPath( fullpath[0] ? fullpath : path, buffer, sizeof( buffer ) ) );
         FileCur->string_ptr = GetFName( fl->srcfile )->name;
 #if FILESEQ
         if ( Options.line_numbers && Parse_Pass == PASS_1 )
@@ -799,45 +819,44 @@ char *GetTextLine( char *buffer )
 
     *buffer = NULLC;
 
-    /* fixme: best location to reset the comment? */
-    CurrComment[0] = NULLC;
-
     /* Check the line_queue first!
      * The line_queue is global and there is ONE only.
      * If it must be nested, it's pushed onto the file stack.
      */
 
     if ( line_queue != NULL ) {
-        /* if there's a line_queue, it can't be empty */
-        inputline = line_queue->head;
-        strcpy( buffer, inputline->line );
-        line_queue->head = inputline->next;
-        SrcFree( inputline );
-        if( line_queue->head == NULL ) {
-            SrcFree( line_queue );
-            line_queue = NULL;
-            queue_level--;
+        if ( inputline = line_queue->head ) {
+            strcpy( buffer, inputline->line );
+            line_queue->head = inputline->next;
+            SrcFree( inputline );
+#ifdef DEBUG_OUT
+            lq_line++;
+            if ( Parse_Pass == PASS_1 ) cntlines++;
+#endif
+            return( buffer );
         }
 #ifdef DEBUG_OUT
-        lq_line++;
+        lq_line = 0;
 #endif
-        return( buffer );
+        SrcFree( line_queue );
+        line_queue = NULL;
+        DebugMsg1(("GetTextLine: end of line queue\n" ));
+        return( NULL );
     }
-#ifdef DEBUG_OUT
-    lq_line = 0;
-#endif
     /* Now check the file stack!
      * items on the file stack may be
      * - pushed line queues ( islinesrc == TRUE && macro == NULL )
      * - macro line queues ( islinesrc == TRUE && macro != NULL )
-     * - assembly include files. ( islinesrc == FALSE )
+     * - assembly files. ( islinesrc == FALSE )
      */
-
     while( 1 ) {
         fl = file_stack;
         if( fl->islinesrc == FALSE ) {
             if( my_fgets( buffer, MAX_LINE_LEN, fl->file ) ) {
                 fl->line_num++;
+#ifdef DEBUG_OUT
+                if ( Parse_Pass == PASS_1 ) cntlines++;
+#endif
                 return( buffer );
             }
             /* EOF of main module reached? */
@@ -848,12 +867,13 @@ char *GetTextLine( char *buffer )
             fclose( fl->file );
             DebugMsg1(("GetTextLine: ***** EOF file %s *****\n", GetFName( fl->srcfile )->name ));
             SrcFree( fl );
+
+            for( fl = file_stack; fl->islinesrc; fl = fl->next );
+            FileCur->string_ptr = GetFName( fl->srcfile)->name;
 #if FILESEQ
             if ( Options.line_numbers && Parse_Pass == PASS_1 )
-                AddFileSeq( file_stack->srcfile );
+                AddFileSeq( fl->srcfile );
 #endif
-            if ( file_stack->islinesrc == FALSE )
-                FileCur->string_ptr = GetFName( file_stack->srcfile)->name;
 
         } else if ( fl->macro ) {
             /* item is a macro */
@@ -867,40 +887,46 @@ char *GetTextLine( char *buffer )
                 } else {
                     strcpy( buffer, fl->mi->currline->line );
                 }
-                DebugMsg1(("GetTextLine: qlevel=%u stack=%p (macro=%s)\n", queue_level, file_stack, fl->macro->name ));
                 fl->mi->currline = fl->mi->currline->next;
                 fl->line_num++;
+#ifdef DEBUG_OUT
+                if ( Parse_Pass == PASS_1 ) cntlines++;
+#endif
                 return( buffer );
             }
             queue_level--;
             file_stack = fl->next;
             SrcFree( fl );
+            DebugMsg1(("GetTextLine: qlvl=%u, end of macro, file stack=%p\n", queue_level, file_stack ));
             break;
         } else {
             /* item is a line queue */
             inputline = fl->lines->head;
-            DebugMsg1(("GetTextLine: qlevel=%u stack=%p inputline=%p\n", queue_level, file_stack, inputline ));
             if( inputline != NULL ) {
                 fl->line_num++;
                 strcpy( buffer, inputline->line );
                 fl->lines->head = inputline->next;
                 SrcFree( inputline );
+#ifdef DEBUG_OUT
+                if ( Parse_Pass == PASS_1 ) cntlines++;
+#endif
                 return( buffer );
             }
             queue_level--;
             file_stack = fl->next;
             SrcFree( fl->lines );
             SrcFree( fl );
+            DebugMsg1(("GetTextLine: qlvl=%u, end of line queue, file stack=%p\n", queue_level, file_stack ));
             break;
         }
-        DebugMsg1(("GetTextLine, new qlevel=%u, stack=%p, buffer=>%s<\n", queue_level, file_stack, buffer ));
     }
-    return( NULL ); /* end of main source file reached */
+    return( NULL ); /* end of main source file or macro reached */
 }
 
 /* add a string to the include path.
  * called for -I cmdline options.
- * the include path is rebuilt for each assembled module
+ * the include path is rebuilt for each assembled module.
+ * it is stored in the standard C heap.
  */
 void AddStringToIncludePath( const char *string )
 /***********************************************/
@@ -914,19 +940,44 @@ void AddStringToIncludePath( const char *string )
     len = strlen( string );
     if ( len == 0 )
         return;
-    if( IncludePath == NULL ) {
-        IncludePath = SrcAlloc( len + 1 );
-        strcpy( IncludePath, string );
+    if( ModuleInfo.g.IncludePath == NULL ) {
+        ModuleInfo.g.IncludePath = MemAlloc( len + 1 );
+        strcpy( ModuleInfo.g.IncludePath, string );
     } else {
-        tmp = IncludePath;
-        IncludePath = SrcAlloc( strlen( tmp ) + sizeof( INC_PATH_DELIM_STR ) +
+        tmp = ModuleInfo.g.IncludePath;
+        ModuleInfo.g.IncludePath = MemAlloc( strlen( tmp ) + sizeof( INC_PATH_DELIM_STR ) +
                                 len + 1 );
-        strcpy( IncludePath, tmp );
-        strcat( IncludePath, INC_PATH_DELIM_STR );
-        strcat( IncludePath, string );
-        SrcFree( tmp );
+        strcpy( ModuleInfo.g.IncludePath, tmp );
+        strcat( ModuleInfo.g.IncludePath, INC_PATH_DELIM_STR );
+        strcat( ModuleInfo.g.IncludePath, string );
+        MemFree( tmp );
     }
 }
+
+#if 0
+/* function to get value of @FileCur.
+ * won't work, because text macros don't use asym.sfunc_ptr
+ */
+static void GetFileCur( struct asym *sym )
+/****************************************/
+{
+    struct file_list *fl;
+
+    for( fl = file_stack; fl && fl->islinesrc; fl = fl->next );
+    sym->string_ptr = GetFName( fl->srcfile )->name;
+    DebugMsg1(("GetFileCur: curr value=%s\n", sym->string_ptr ));
+}
+#endif
+
+#ifdef __I86__
+#define SIZE_SRCLINES     ( MAX_LINE_LEN * 2 )
+#define SIZE_TOKENARRAY   ( sizeof( struct asm_tok ) * MAX_TOKEN )
+#define SIZE_STRINGBUFFER ( MAX_LINE_LEN * 2 )
+#else
+#define SIZE_SRCLINES     ( MAX_LINE_LEN * ( MAX_MACRO_NESTING + 1 ) )
+#define SIZE_TOKENARRAY   ( sizeof( struct asm_tok ) * MAX_TOKEN * MAX_MACRO_NESTING )
+#define SIZE_STRINGBUFFER ( MAX_LINE_LEN * MAX_MACRO_NESTING )
+#endif
 
 /* Initializer, called once for each module. */
 
@@ -939,16 +990,18 @@ void InputInit( void )
     char        dir[_MAX_DIR];
 
     DebugMsg(( "InputInit() enter\n" ));
-    cnt_fnames = 0;
-    FNames = NULL;
-    IncludePath = NULL;
-    file_stack = NULL;
+    //cnt_fnames = 0;
+    //FNamesTab = NULL;
+    //IncludePath = NULL;
+    //file_stack = NULL;
 #if FILESEQ
     FileSeq.head = NULL;
 #endif
     fl = PushLineSource( FALSE, NULL );
     fl->file = CurrFile[ASM];
     fl->srcfile = ModuleInfo.srcfile = AddFile( CurrFName[ASM] );
+    /* setting a function pointer won't work for text macros! */
+    //FileCur->sfunc_ptr = &GetFileCur;
     FileCur->string_ptr = GetFName( fl->srcfile )->name;
 
 #ifdef DEBUG_OUT
@@ -957,6 +1010,8 @@ void InputInit( void )
     cntppl2 = 0;
     cnttok0 = 0;
     cnttok1 = 0;
+    cntflines = 0;
+    cntlines = 0;
 #endif
 
     /* add path of main module to the include path */
@@ -965,11 +1020,17 @@ void InputInit( void )
         _makepath( path, drive, dir, NULL, NULL );
         AddStringToIncludePath( path );
     }
-#ifdef __I86__
-    srclinebuffer = AsmAlloc( MAX_LINE_LEN * MAX_SYNC_MACRO_NESTING );
+
+    srclinebuffer = LclAlloc( SIZE_SRCLINES + SIZE_TOKENARRAY + SIZE_STRINGBUFFER );
+    /* the comment buffer is at the end of the source line buffer */
+    commentbuffer = srclinebuffer + SIZE_SRCLINES - MAX_LINE_LEN;
+    /* behind the comment buffer is the token buffer */
+    ModuleInfo.tokenarray = (struct asm_tok *)( srclinebuffer + SIZE_SRCLINES );
+    token_stringbuf = srclinebuffer + SIZE_SRCLINES + SIZE_TOKENARRAY;
+#ifdef DEBUG_OUT
+    end_tokenarray = (struct asm_tok *)token_stringbuf;
+    end_stringbuf = token_stringbuf + SIZE_STRINGBUFFER;
 #endif
-    /* create token array and token string buffer */
-    CreateTokenBuffer();
     DebugMsg(( "InputInit() exit\n" ));
 }
 
@@ -983,6 +1044,9 @@ void InputPassInit( void )
     file_stack->line_num = 0;
     inside_comment = NULLC;
     CurrSource = srclinebuffer;
+    *CurrSource = NULLC;
+    StringBufferEnd = token_stringbuf;
+    return;
 }
 
 void InputFini( void )
@@ -990,28 +1054,95 @@ void InputFini( void )
 {
 #ifdef DEBUG_OUT
     int   i;
-    for( i = 0; i < cnt_fnames; i++) {
-        DebugMsg(( "InputFini: idx=%u name=%s full=%s\n", i, FNames[i].name, FNames[i].fullname ));
+    for( i = 0; i < ModuleInfo.g.cnt_fnames; i++) {
+        DebugMsg(( "InputFini: idx=%u name=%s full=%s\n", i, FNamesTab[i].name, FNamesTab[i].fullname ));
     }
 #endif
-    DestroyTokenBuffer();
-    if ( IncludePath )
-        SrcFree( IncludePath );
+    if ( ModuleInfo.g.IncludePath )
+        MemFree( ModuleInfo.g.IncludePath );
     FreeFiles();
 #ifdef DEBUG_OUT
-    if ( Options.quiet == FALSE )
-        printf("invokations: GetPreprocessedLine=%u/%u/%u, Tokenize=%u/%u\n", cntppl0, cntppl1, cntppl2, cnttok0, cnttok1 );
+    if ( Options.quiet == FALSE ) {
+        printf("lines read(files)/processed in pass one: %lu / %lu\n", cntflines, cntlines );
+        printf("invokations: GetPreprocessedLine=%lu/%lu/%lu, Tokenize=%lu/%lu\n", cntppl0, cntppl1, cntppl2, cnttok0, cnttok1 );
+    }
 #endif
-#ifdef __I86__
-    AsmFree( srclinebuffer );
+    ModuleInfo.tokenarray = NULL;
+#ifdef DEBUG_OUT
+    token_stringbuf = NULL;
+    StringBufferEnd = NULL;
+    commentbuffer = NULL;
+    CurrSource = NULL;
 #endif
+    LclFree( srclinebuffer );
     /* v2.03: clear file stack to ensure that GetCurrSrcPos()
      * won't find something when called from main().
      */
     file_stack = NULL;
-#ifdef DEBUG_OUT
-    CurrSource = NULL;
+}
+
+struct asm_tok *PushInputStatus( struct input_status *oldstat )
+/*************************************************************/
+{
+    oldstat->token_stringbuf = token_stringbuf;
+    oldstat->token_count = Token_Count;
+    oldstat->currsource = CurrSource;
+    /* if there's a comment, attach it to current source */
+    if ( ModuleInfo.CurrComment ) {
+        int i = strlen( CurrSource );
+        oldstat->CurrComment = CurrSource + i;
+        strcpy( oldstat->CurrComment, ModuleInfo.CurrComment );
+    } else
+        oldstat->CurrComment = NULL;
+    oldstat->line_flags = ModuleInfo.line_flags; /* v2.08 */
+#ifdef __I86__
+    oldstat->tokenarray = ModuleInfo.tokenarray;
+    oldstat->stringbufferend = StringBufferEnd;
+    CurrSource = MemAlloc( MAX_LINE_LEN + SIZE_TOKENARRAY + SIZE_STRINGBUFFER );
+    ModuleInfo.tokenarray = (struct asm_tok *)( CurrSource + MAX_LINE_LEN );
+    token_stringbuf = CurrSource + MAX_LINE_LEN + SIZE_TOKENARRAY;
+#else
+    token_stringbuf = StringBufferEnd;
+    ModuleInfo.tokenarray += Token_Count + 1;
+    CurrSource = GetAlignedPointer( CurrSource, strlen( CurrSource ) );
+    /**/myassert( ( CurrSource + MAX_LINE_LEN ) <= (char *)ModuleInfo.tokenarray );
+    /**/myassert( ( ModuleInfo.tokenarray + sizeof( struct asm_tok ) * MAX_TOKEN ) <= end_tokenarray );
+    /**/myassert( ( token_stringbuf + 2 * MAX_LINE_LEN ) <= end_stringbuf );
 #endif
+    DebugMsg1(("PushInputStatus() stringbuf-tokencnt-currsrc old=%X-%u-%X new=%X-%X-%X\n",
+               oldstat->token_stringbuf, oldstat->token_count, oldstat->currsource,
+               token_stringbuf, ModuleInfo.tokenarray, CurrSource ));
+    return( ModuleInfo.tokenarray );
+}
+
+void PopInputStatus( struct input_status *newstat )
+/*************************************************/
+{
+    DebugMsg1(("PopInputStatus() old=%X-%u-%X new=%X-%u-%X\n",
+               token_stringbuf, Token_Count, CurrSource,
+               newstat->token_stringbuf, newstat->token_count, newstat->currsource ));
+#ifdef __I86__
+    MemFree( CurrSource );
+#else
+    StringBufferEnd = token_stringbuf;
+#endif
+    token_stringbuf = newstat->token_stringbuf;
+    Token_Count = newstat->token_count;
+    CurrSource = newstat->currsource;
+    if ( newstat->CurrComment ) {
+        ModuleInfo.CurrComment = commentbuffer;
+        strcpy( ModuleInfo.CurrComment, newstat->CurrComment );
+        *newstat->CurrComment = NULLC;
+    } else
+        ModuleInfo.CurrComment = NULL;
+#ifdef __I86__
+    StringBufferEnd = newstat->stringbufferend;
+    ModuleInfo.tokenarray = newstat->tokenarray;
+#else
+    ModuleInfo.tokenarray -= Token_Count + 1;
+#endif
+    ModuleInfo.line_flags = newstat->line_flags; /* v2.08 */
+    return;
 }
 
 /* INCLUDE directive.
@@ -1033,7 +1164,7 @@ ret_code IncludeDirective( int i, struct asm_tok tokenarray[] )
     /* v2.03: allow plain numbers as file name argument */
     //if ( tokenarray[i].token == T_FINAL || tokenarray[i].token == T_NUM ) {
     if ( tokenarray[i].token == T_FINAL ) {
-        AsmError( EXPECTED_FILE_NAME );
+        EmitError( EXPECTED_FILE_NAME );
         return( ERROR );
     }
 
@@ -1041,21 +1172,72 @@ ret_code IncludeDirective( int i, struct asm_tok tokenarray[] )
 
     if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
         if ( tokenarray[i+1].token != T_FINAL ) {
-            AsmErr( SYNTAX_ERROR_EX, tokenarray[i+1].string_ptr );
+            EmitErr( SYNTAX_ERROR_EX, tokenarray[i+1].tokpos );
         } else {
-            InputQueueFile( tokenarray[i].string_ptr, NULL );
+            /* v2.08: use GetLiteralValue() to translate the name */
+            GetLiteralValue( StringBufferEnd, tokenarray[i].string_ptr );
+            InputQueueFile( StringBufferEnd, NULL );
         }
     } else {
         char *name;
         char *p;
-        /* if the filename isn't enclosed in <>, use anything which comes
+        /* if the filename isn't enclosed in <>, use anything that comes
          * after INCLUDE
          */
         name = tokenarray[i].tokpos;
-        for ( p = name; *p; p++ );
-        for ( p--; p > name && isspace(*p); *p = NULLC, p-- );
+        for ( p = tokenarray[Token_Count].tokpos - 1; p > name && isspace(*p); *p = NULLC, p-- );
         InputQueueFile( name, NULL );
     }
+    return( NOT_ERROR );
+}
+
+/* Read the current queue until it's done.
+ */
+
+void SkipCurrentQueue( struct asm_tok tokenarray[] )
+/**************************************************/
+{
+    char buffer[MAX_LINE_LEN];
+
+    /* The queue isn't just thrown away, because any
+     * coditional assembly directives found in the source
+     * must be executed.
+     */
+    while ( GetTextLine( buffer ) ) {
+        Tokenize( buffer, 0, tokenarray, TOK_DEFAULT );
+    }
+
+}
+
+/* preprocessor directive or macro procedure is preceded
+ * by a code label.
+ */
+ret_code WriteCodeLabel( char *line, struct asm_tok tokenarray[] )
+/****************************************************************/
+{
+    int oldcnt;
+    int oldtoken;
+    char oldchar;
+
+    if ( tokenarray[0].token != T_ID ) {
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[0].string_ptr );
+        return( ERROR );
+    }
+    /* ensure the listing is written with the FULL source line */
+    if ( CurrFile[LST] ) LstWrite( LSTTYPE_LABEL, 0, NULL );
+    /* v2.04: call ParseLine() to parse the "label" part of the line */
+    oldcnt = Token_Count;
+    oldtoken = tokenarray[2].token;
+    oldchar = *tokenarray[2].tokpos;
+    Token_Count = 2;
+    tokenarray[2].token = T_FINAL;
+    *tokenarray[2].tokpos = NULLC;
+    ParseLine( tokenarray );
+    if ( Options.preprocessor_stdout == TRUE )
+        WritePreprocessedLine( line );
+    Token_Count = oldcnt;
+    tokenarray[2].token = oldtoken;
+    *tokenarray[2].tokpos = oldchar;
     return( NOT_ERROR );
 }
 
@@ -1065,8 +1247,8 @@ ret_code IncludeDirective( int i, struct asm_tok tokenarray[] )
  * 3. (text) macros are expanded by ExpandLine()
  * 4. "preprocessor" directives are executed
  */
-int GetPreprocessedLine( char *line, int Skip, struct asm_tok tokenarray[] )
-/****************************************************************************/
+int GetPreprocessedLine( char *line, struct asm_tok tokenarray[] )
+/****************************************************************/
 {
     int i;
 
@@ -1074,14 +1256,12 @@ int GetPreprocessedLine( char *line, int Skip, struct asm_tok tokenarray[] )
         DebugMsg1(("GetPreprocessedLine: GetTextLine() returned NULL (end of file/macro)\n" ));
         return( -1 ); /* EOF */
     }
+    /* v2.08: moved here from GetTextLine() */
+    ModuleInfo.CurrComment = NULL;
     /* v2.06: moved here from Tokenize() */
     ModuleInfo.line_flags = 0;
-
     /* Token_Count is the number of tokens scanned */
-    Token_Count = Tokenize( line, 0, FALSE );
-
-    if ( Skip )
-        return( Token_Count );
+    Token_Count = Tokenize( line, 0, tokenarray, TOK_DEFAULT );
 
 #ifdef DEBUG_OUT
     cntppl0++;
@@ -1101,17 +1281,22 @@ int GetPreprocessedLine( char *line, int Skip, struct asm_tok tokenarray[] )
         LstWriteSrcLine();
 #endif
 
-    /* expand the line */
-    if ( CurrIfState == BLOCK_ACTIVE ) {
-        /* expand (text) macros. If expansion occured, rescan the line */
-        while ( Token_Count > 0 && ExpandLine( line, tokenarray ) == STRING_EXPANDED ) {
-            DebugMsg1(("GetPreprocessedLine: expanded line is >%s<\n", line));
-            Token_Count = Tokenize( line, 0, TRUE );
-        }
-    }
+#ifdef DEBUG_OUT
+    /* option -np, skip preprocessor? */
+    if ( Options.skip_preprocessor )
+        return( Token_Count );
+#endif
 
     if ( Token_Count == 0 )
         return( 0 );
+
+    /* CurrIfState != BLOCK_ACTIVE && Token_Count == 1 | 3 may happen
+     * if a conditional assembly directive has been detected by Tokenize().
+     * However, it's important NOT to expand then */
+    if ( CurrIfState == BLOCK_ACTIVE ) {
+        if ( ( tokenarray[Token_Count].bytval & TF3_EXPANSION ? ExpandText( line, tokenarray, TRUE ) : ExpandLine( line, tokenarray ) ) != NOT_ERROR )
+            return( 0 );
+    }
 
 #ifdef DEBUG_OUT
     cntppl1++;
@@ -1133,30 +1318,10 @@ int GetPreprocessedLine( char *line, int Skip, struct asm_tok tokenarray[] )
 
         /* if i != 0, then a code label is located before the directive */
         if ( i > 1 ) {
-            int oldcnt;
-            int oldtoken;
-            char oldchar;
-            if ( tokenarray[0].token != T_ID ) {
-                AsmErr( SYNTAX_ERROR_EX, tokenarray[0].string_ptr );
+            if ( ERROR == WriteCodeLabel( line, tokenarray ) )
                 return( 0 );
-            }
-            /* v2.04: call ParseLine() to parse the "label" part of the line */
-            oldcnt = Token_Count;
-            oldtoken = tokenarray[i].token;
-            oldchar = *tokenarray[i].tokpos;
-            Token_Count = i;
-            tokenarray[i].token = T_FINAL;
-            *tokenarray[i].tokpos = NULLC;
-            ParseLine( tokenarray );
-            if ( Options.preprocessor_stdout == TRUE )
-                WritePreprocessedLine( line, tokenarray );
-            Token_Count = oldcnt;
-            tokenarray[i].token = oldtoken;
-            *tokenarray[i].tokpos = oldchar;
         }
-
         directive[tokenarray[i].dirtype]( i, tokenarray );
-
         return( 0 );
     }
 
@@ -1170,20 +1335,20 @@ int GetPreprocessedLine( char *line, int Skip, struct asm_tok tokenarray[] )
              * EQU is a special case:
              * If an EQU directive defines a text equate
              * it MUST be handled HERE and 0 must be returned to the caller.
-             * This will prevent function OnePass() in assemble.c to store the
-             * "preprocessed" line.
-             * Since we cannot decide whether EQU defines a text equate or
+             * This will prevent further processing, nothing will be stored
+             * if FASTPASS is on.
+             * Since one cannot decide whether EQU defines a text equate or
              * a number before it has scanned its argument, we'll have to
-             * handle it in ANY case and if it defines a number, the usual
-             * line processing done in OnePass() has to be emulated here.
+             * handle it in ANY case and if it defines a number, the line
+             * must be stored and, if -EP is set, written to stdout.
              */
             if ( sym = CreateConstant( tokenarray ) ) {
                 if ( sym->state != SYM_TMACRO ) {
 #if FASTPASS
-                    if ( StoreState ) FStoreLine();
+                    if ( StoreState ) FStoreLine(0);
 #endif
                     if ( Options.preprocessor_stdout == TRUE )
-                        WritePreprocessedLine( line, tokenarray );
+                        WritePreprocessedLine( line );
                 }
                 /* v2.03: LstWrite() must be called AFTER StoreLine()! */
                 if ( ModuleInfo.list == TRUE ) {

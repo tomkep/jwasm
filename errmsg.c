@@ -24,12 +24,13 @@
 *
 *  ========================================================================
 *
-* Description:  Diagnostics routines (errors/warnings/notes)
+* Description:  Diagnostics routines: (fatal) errors, warnings, notes
 *
 ****************************************************************************/
 
 #include <stdarg.h>
 #include <ctype.h>
+#include <setjmp.h>
 
 #include "globals.h"
 #include "memalloc.h"
@@ -37,23 +38,17 @@
 #include "input.h"
 #include "tokenize.h"
 #include "macro.h"
-#include "fatal.h"
 #include "msgtext.h"
 #include "listing.h"
 #include "segment.h"
 
 extern void             print_source_nesting_structure( void );
 extern char             banner_printed;
+extern jmp_buf          jmpenv;
 
 //static bool             Errfile_Written;
 //static void             PrtMsg( int severity, int msgnum, va_list args1, va_list args2 );
 //void                    PutMsg( FILE *fp, int severity, int msgnum, va_list args );
-
-void AsmError( int msgnum )
-/*************************/
-{
-    AsmErr( msgnum );
-}
 
 #ifdef DEBUG_OUT
 void DoDebugMsg( const char *format, ... )
@@ -76,7 +71,7 @@ void DoDebugMsg1( const char *format, ... )
 /****************************************/
 {
     va_list args;
-    char buffer[32];
+    char buffer[MAX_LINE_LEN];
 
     if( !Options.debug ) return;
 
@@ -97,13 +92,16 @@ void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
 /*************************************************************/
 {
     int             i,j;
-    char           *type;
-    char            msgbuf[MAXMSGSIZE];
+    char            *type;
+    char            *pMsg;
     char            buffer[MAX_LINE_LEN+128];
 
     if( fp != NULL ) {
 
-        MsgGet( msgnum, msgbuf );
+        if ( severity && ( j = GetCurrSrcPos( buffer ) ) ) {
+            fwrite( buffer, 1, j, fp );
+        }
+        pMsg = MsgGetEx( msgnum );
         switch (severity ) {
         case 1:  type = MsgGetEx( MSG_FATAL_PREFIX );   break;
         case 2:  type = MsgGetEx( MSG_ERROR_PREFIX );   break;
@@ -112,13 +110,9 @@ void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
         }
         if ( type )
             i = sprintf( buffer, "%s A%4u: ", type, severity * 1000 + msgnum );
-        i += vsprintf( buffer+i, msgbuf, args );
+        i += vsprintf( buffer+i, pMsg, args );
         //buffer[i] = NULLC;
 
-        if ( severity && (j = GetCurrSrcPos( msgbuf ))) {
-            fwrite( msgbuf, 1, j, fp );
-        } else
-            j = 0;
         fwrite( buffer, 1, i, fp );
         fwrite( "\n", 1, 1, fp );
 
@@ -128,6 +122,7 @@ void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
              Parse_Pass == PASS_1 &&
              fp == CurrFile[ERR] ) {
             LstWrite( LSTTYPE_DIRECTIVE, GetCurrOffset(), 0 );
+            /* size of "blank" prefix to be explained! */
             LstPrintf( "                           %s", buffer );
             LstNL();
         }
@@ -147,10 +142,10 @@ static void PrtMsg( int severity, int msgnum, va_list args1, va_list args2 )
         if( CurrFile[ERR] == NULL ) {
             /* v2.06: no fatal error anymore if error file cannot be written */
             char *p = CurrFName[ERR];
-            CurrFName[ERR] = NULL; /* set to NULL before AsmErr()! */
+            CurrFName[ERR] = NULL; /* set to NULL before EmitErr()! */
             Options.no_error_disp = FALSE; /* disable -eq! */
-            AsmErr( CANNOT_OPEN_FILE, p, errno );
-            AsmFree( p );
+            EmitErr( CANNOT_OPEN_FILE, p, ErrnoStr() );
+            LclFree( p );
         }
     }
 
@@ -180,13 +175,13 @@ void PrintNote( int msgnum, ... )
     va_end( args2 );
 }
 
-void AsmErr( int msgnum, ... )
-/****************************/
+void EmitErr( int msgnum, ... )
+/*****************************/
 {
     va_list args1, args2;
 
 #ifdef DEBUG_OUT
-    printf( "%s\n", CurrSource );
+    printf( "%s\n", ModuleInfo.tokenarray ? ModuleInfo.tokenarray[0].tokpos : "" );
 #endif
     va_start( args1, msgnum );
     va_start( args2, msgnum );
@@ -196,23 +191,24 @@ void AsmErr( int msgnum, ... )
     ModuleInfo.g.error_count++;
     write_to_file = FALSE;
     print_source_nesting_structure();
-    if( Options.error_limit != -1  &&  ModuleInfo.g.error_count == Options.error_limit+1 ) {
-        PrtMsg( 2, TOO_MANY_ERRORS, args1, args2 );
-        /* Just simulate the END directive, don't do a fatal exit!
-         This allows to continue to assemble further modules.
-         */
-        ModuleInfo.EndDirFound = TRUE;
-    }
+    if( Options.error_limit != -1  &&  ModuleInfo.g.error_count == Options.error_limit+1 )
+        Fatal( TOO_MANY_ERRORS );
 }
 
-void AsmWarn( int level, int msgnum, ... )
-/****************************************/
+void EmitError( int msgnum )
+/**************************/
+{
+    EmitErr( msgnum );
+}
+
+void EmitWarn( int level, int msgnum, ... )
+/*****************************************/
 {
     va_list args1, args2;
 
     if( level <= Options.warning_level ) {
 #ifdef DEBUG_OUT
-        printf( "%s\n", CurrSource );
+        printf( "%s\n", ModuleInfo.tokenarray ? ModuleInfo.tokenarray[0].tokpos : "" );
 #endif
         va_start( args1, msgnum );
         va_start( args2, msgnum );
@@ -228,6 +224,55 @@ void AsmWarn( int level, int msgnum, ... )
         print_source_nesting_structure();
     }
 }
+
+char *ErrnoStr( void )
+/********************/
+{
+    static char buffer[32];
+    return( ( errno == ENOENT ) ? "ENOENT" : myltoa( errno, buffer, 10, FALSE, FALSE ) );
+}
+
+/* fatal error (out of memory, unable to open files for write, ...)
+ * don't use functions which need to alloc memory here!
+ * v2.08: do not exit(), just a longjmp() into AssembleModule().
+ */
+void Fatal( unsigned msg, ... )
+/*****************************/
+{
+    va_list     args;
+
+    va_start( args, msg );
+    PutMsg( errout, 1, msg, args );
+    va_end( args );
+
+    ModuleInfo.g.error_count++;
+    //write_to_file = FALSE;
+
+    /* setjmp() has been called in AssembleModule().
+     * if a fatal error happens outside of this function, longjmp()
+     * is NOT to be used ( virtually may happen for "out of memory" only)
+     */
+    if ( CurrFName[ASM] )
+        longjmp( jmpenv, 2 );
+
+    exit(1);
+}
+
+#if 0
+void SeekError( void )
+/********************/
+{
+    DebugMsg(("SeekError occured\n"));
+    Fatal( FILE_SEEK_ERROR, CurrFName[OBJ], errno );
+};
+#endif
+
+void WriteError( void )
+/*********************/
+{
+    DebugMsg(("WriteError occured\n"));
+    Fatal( FILE_WRITE_ERROR, CurrFName[OBJ], errno );
+};
 
 #ifndef NDEBUG
 

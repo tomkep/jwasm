@@ -1,26 +1,6 @@
 /****************************************************************************
 *
-*                            Open Watcom Project
-*
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
-*
-*  ========================================================================
-*
-*    This file contains Original Code and/or Modifications of Original
-*    Code as defined in and that are subject to the Sybase Open Watcom
-*    Public License version 1.0 (the 'License'). You may not use this file
-*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
-*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
-*    provided with the Original Code and Modifications, and is also
-*    available at www.sybase.com/developer/opensource.
-*
-*    The Original Code and all software distributed under the License are
-*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
-*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
-*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
-*    NON-INFRINGEMENT. Please see the License for the specific language
-*    governing rights and limitations under the License.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -108,33 +88,33 @@ ret_code StartupExitDirective( int i, struct asm_tok tokenarray[] )
 /*****************************************************************/
 {
     int         count;
+    ret_code    rc = NOT_ERROR;
     int         j;
     const struct code_line *p;
     struct expr opndx;
 
-    if ( ModuleInfo.list )
-        LstWriteSrcLine();
+    LstWriteSrcLine();
 
-    if( ModuleInfo.model == MOD_NONE ) {
-        AsmError( MODEL_IS_NOT_DECLARED );
+    if( ModuleInfo.model == MODEL_NONE ) {
+        EmitError( MODEL_IS_NOT_DECLARED );
         return( ERROR );
     }
     if ( ModuleInfo.Ofssize > USE16 ) {
-        AsmErr( DOES_NOT_WORK_WITH_32BIT_SEGMENTS, tokenarray[i].string_ptr );
+        EmitErr( DOES_NOT_WORK_WITH_32BIT_SEGMENTS, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
-    PushLineQueue();
+    NewLineQueue();
 
     switch( tokenarray[i].tokval ) {
     case T_DOT_STARTUP:
         count = 0;
         /* for tiny model, set current PC to 100h. */
-        if ( ModuleInfo.model == MOD_TINY )
+        if ( ModuleInfo.model == MODEL_TINY )
             AddLineQueue( "org 100h" );
         AddLineQueueX( "%s::", szStartAddr );
         if( ModuleInfo.ostype == OPSYS_DOS ) {
-            if ( ModuleInfo.model == MOD_TINY )
+            if ( ModuleInfo.model == MODEL_TINY )
                 ;
             else {
                 if( ModuleInfo.distance == STACK_NEAR ) {
@@ -191,13 +171,13 @@ ret_code StartupExitDirective( int i, struct asm_tok tokenarray[] )
     }
 
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-        return( ERROR );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        rc = ERROR;
     }
 
     RunLineQueue();
 
-    return( NOT_ERROR );
+    return( rc );
 }
 
 /* END directive */
@@ -214,14 +194,18 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
 
     i++; /* skip directive */
 
+    /* v2.08: END may generate code, so write listing first */
+    LstWriteSrcLine();
+
     /* v2.05: first parse the arguments. this allows
      * SegmentModuleExit() later to run generated code.
      */
     if( ModuleInfo.StartupDirectiveFound ) {
         /* start label behind END ignored if .STARTUP has been found */
         if( i < Token_Count && Parse_Pass == PASS_1 ) {
-            AsmWarn( 2, START_ADDRESS_IGNORED );
+            EmitWarn( 2, START_ADDRESS_IGNORED );
         }
+        i = Token_Count + 1;
         tokenarray[i].token = T_ID;
         tokenarray[i].string_ptr = (char *)szStartAddr;
         tokenarray[i+1].token = T_FINAL;
@@ -232,14 +216,14 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
         return( ERROR );
     }
     if( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
 
     if ( CurrStruct ) {
         while ( CurrStruct->next )
             CurrStruct = CurrStruct->next;
-        AsmErr( UNMATCHED_BLOCK_NESTING, CurrStruct->sym.name );
+        EmitErr( UNMATCHED_BLOCK_NESTING, CurrStruct->sym.name );
     }
 
     /* close open segments */
@@ -255,7 +239,7 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
     if( opndx.kind == EXPR_EMPTY ) {
         ;
     } else if ( opndx.sym && ( opndx.sym->state == SYM_UNDEFINED ) ) {
-        AsmErr( SYMBOL_NOT_DEFINED, opndx.sym->name );
+        EmitErr( SYMBOL_NOT_DEFINED, opndx.sym->name );
         return( ERROR );
     } else {
         char error = TRUE;
@@ -279,7 +263,7 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
             DebugMsg(("EndDirective: start address invalid, opndx.kind=%X\n", opndx.kind ));
         }
         if ( error ) {
-            AsmError( CONSTANT_OR_RELOCATABLE_LABEL_EXPECTED );
+            EmitError( OPERAND_MUST_BE_RELOCATABLE );
             return( ERROR );
         }
     }

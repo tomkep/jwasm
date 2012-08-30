@@ -3,6 +3,7 @@
 ;--- jwasm v2.06 (and pred.) accepts 1,2,3,4
 ;--- jwasm v2.07pre rejects 3,4
 ;--- jwasm v2.07 rejects 4 in p1, 2 in p2
+;--- jwasm v2.08 splitted test case (errors in P2 now in assume9.aso)
 
 	.386
 	.model flat
@@ -24,7 +25,6 @@ S3 ENDS
 
 	assume ebx:ptr S2
 	mov eax, [ebx].left      ;1. ok
-	mov eax, [ebx.left]      ;2. rejected (p2)
 ;--- override the ASSUME
 	mov eax, [ebx.S1.lParam] ;3. ok
 	mov eax, [ebx].S1.lParam ;4. rejected (p1)
@@ -32,10 +32,7 @@ S3 ENDS
 	mov eax, [ebx+ecx].left         ;ok
 	mov eax, [ebx+1].left           ;ok
 	mov eax, [ebx][1].left          ;ok
-	mov eax, [ebx.S1.lParam].left   ;rejected (p1)
 	mov eax, S1.lParam[ebx]         ;ok
-	mov eax, S1.lParam[ebx].left    ;rejected (p1)
-	mov eax, S1.lParam[ebx.left]    ;rejected (p2)
 
 	assume ecx:ptr S3
 	mov eax, [ecx][ebx].left        ;ok

@@ -1,6 +1,6 @@
 /****************************************************************************
 *
-*  This code is Public Domain. It's new for JWasm.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -88,7 +88,7 @@ static int GetContextSize( uint_8 flags )
     if ( flags & CONT_ASSUMES )
         return( sizeof( struct context ) );
     /* spare the large assumes context space if not needed */
-    return( sizeof( struct context ) - sizeof ( struct assumes_context ) );
+    return( sizeof( struct context ) - sizeof( struct assumes_context ) );
 }
 
 ret_code ContextDirective( int i, struct asm_tok tokenarray[] )
@@ -131,7 +131,7 @@ ret_code ContextDirective( int i, struct asm_tok tokenarray[] )
     }
 
     if ( tokenarray[i].token != T_FINAL || flags == 0 ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -141,7 +141,7 @@ ret_code ContextDirective( int i, struct asm_tok tokenarray[] )
         /* for POPCONTEXT, check if the items are pushed */
         pcontext = ContextStack;
         if ( pcontext == NULL || ( pcontext->flags & flags ) != flags ) {
-            AsmErr( UNMATCHED_BLOCK_NESTING, tokenarray[start].string_ptr );
+            EmitErr( UNMATCHED_BLOCK_NESTING, tokenarray[start].string_ptr );
             return( ERROR );
         }
         ContextStack = pcontext->next;
@@ -172,12 +172,12 @@ ret_code ContextDirective( int i, struct asm_tok tokenarray[] )
             ModuleInfo.curr_cpu = pcontext->cc.curr_cpu;
         }
 
-        AsmFree( pcontext );
+        LclFree( pcontext );
         break;
     case  T_PUSHCONTEXT:
         DebugMsg(( "PUSHCONTEXT flags=%X\n", flags ));
         /* setup a context item */
-        pcontext = AsmAlloc( GetContextSize( flags) );
+        pcontext = LclAlloc( GetContextSize( flags) );
         pcontext->flags = flags;
 
         if ( flags & CONT_ASSUMES ) {
@@ -226,7 +226,7 @@ void ContextSaveState( void )
 
     saved_numcontexts = i;
     if ( i ) {
-        saved_contexts = AsmAlloc( size );
+        saved_contexts = LclAlloc( size );
         for ( p = ContextStack, p2 = saved_contexts ; p ; p = p->next ) {
             memcpy( p2, p, GetContextSize( p->flags ) );
             p2 = (struct context *)((char *)p2 + GetContextSize ( p->flags ) );
@@ -247,7 +247,7 @@ static void ContextRestoreState( void )
 
     for ( i = saved_numcontexts, p2 = saved_contexts; i ; i-- ) {
         size = GetContextSize( p2->flags );
-        p = AsmAlloc( size );
+        p = LclAlloc( size );
         if ( p3 == NULL )
             ContextStack = p;
         else

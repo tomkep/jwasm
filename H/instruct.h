@@ -728,6 +728,7 @@ ins (PREFETCHT1, prefetcht1, 10,OpCls( M_ANY,    NONE,       NONE ), F_0F,   0, 
 ins (PREFETCHT2, prefetcht2, 10,OpCls( M_ANY,    NONE,       NONE ), F_0F,   0,  no_WDS, 0x18,     0x18,       P_686|P_SSE1,0)
 ins (PAUSE, pause, 5,           OpCls( NONE,     NONE,       NONE ), F_F3,   0,  no_RM,  0x90,     0x00,       P_686|P_SSE2,0)
 
+/* define ADDPD, ADDPS, ADDSD, ADDSS, DIVPD, DIVPS, DIVSD, DIVSS, ... */
 #define arfl( prefix, prefixlc, len, opc )      \
 ins (prefix ## PD, prefixlc ## pd, len,  OpCls( XMM,  XMM_M128,NONE ), F_660F, 1,  no_WDS, opc,   0x00,   P_686|P_SSE2,0) \
 ins (prefix ## PS, prefixlc ## ps, len,  OpCls( XMM,  XMM_M128,NONE ), F_0F,   1,  no_WDS, opc,   0x00,   P_686|P_SSE1,0) \

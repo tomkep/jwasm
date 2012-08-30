@@ -35,27 +35,26 @@
 struct line_status {
     char *input;
     char *output;
+    unsigned int index;
+    char *start;
     char last_token;
-    char is_concat; /* TRUE if line has been concatenated */
+    char flags;     /* v2.08: added */
+    char flags2;    /* v2.08: was global var g_flags */
+    char flags3;    /* v2.08: added */
 };
 
-struct input_status {
-    char *token_stringbuf;
-    char *CurrSource;
-    int Token_Count;
-#ifdef __I86__
-    char *StringBufferEnd;
-    struct asm_tok *tokenarray;
-#endif
+enum tokenize_flags {
+    TOK_DEFAULT = 0x00,  /* default mode - handle conditional assembly */
+    TOK_RESCAN  = 0x01,  /* rescan - ignore conditional assembly */
+    TOK_NOCURLBRACES = 0x02,  /* don't handle {}-literals */
 };
 
-extern char     *StringBufferEnd; /* start free space in string buffer */
+enum tok_flags3 {
+    TF3_ISCONCAT  = 0x01,  /* line was concatenated */
+    TF3_EXPANSION = 0x02,  /* expansion operator % at pos 0 */
+};
 
 extern ret_code GetToken( struct asm_tok *, struct line_status * );
-extern int      Tokenize( char * , unsigned int, int );
-extern void     PushInputStatus( struct input_status * );
-extern void     PopInputStatus( struct input_status * );
-extern void     CreateTokenBuffer( void );
-extern void     DestroyTokenBuffer( void );
+extern int      Tokenize( char * , unsigned int, struct asm_tok *, unsigned int );
 
 #endif

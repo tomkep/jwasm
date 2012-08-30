@@ -50,6 +50,7 @@ const char szNull[] = {"<NULL>"};
 /* v2.03: OutputCodeByte no longer needed */
 #define OutputCodeByte( x ) OutputByte( x )
 
+/* segment order must match the one in special.h */
 enum prefix_reg {
     PREFIX_ES = 0x26,
     PREFIX_CS = 0x2E,
@@ -117,9 +118,9 @@ static void output_opc( struct code_info *CodeInfo )
          then display a more specific error message! */
         if( ins->cpu == P_386 &&
             ( ( InstrTable[ IndexFromToken( CodeInfo->token )].cpu & P_CPU_MASK ) <= P_386 ))
-            AsmError( INSTRUCTION_FORM_REQUIRES_80386 );
+            EmitError( INSTRUCTION_FORM_REQUIRES_80386 );
         else
-            AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+            EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
         //return( ERROR );
     }
 
@@ -153,7 +154,7 @@ static void output_opc( struct code_info *CodeInfo )
             tmp = AP_REPxx;
 
         if( ins->allowed_prefix != tmp ) {
-            AsmError( INSTRUCTION_PREFIX_NOT_ALLOWED );
+            EmitError( INSTRUCTION_PREFIX_NOT_ALLOWED );
         } else
             OutputCodeByte( InstrTable[ IndexFromToken( CodeInfo->prefix.ins )].opcode );
     }
@@ -248,7 +249,7 @@ static void output_opc( struct code_info *CodeInfo )
 #if 1
         if(( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
             DebugMsg(("output_opc: instruction form requires 386\n"));
-            AsmError( INSTRUCTION_FORM_REQUIRES_80386 );
+            EmitError( INSTRUCTION_FORM_REQUIRES_80386 );
             //return( ERROR ); /* v2.06: don't skip instruction */
         }
 #endif
@@ -336,7 +337,7 @@ static void output_opc( struct code_info *CodeInfo )
     /* the REX prefix must be located after the other prefixes */
     if( CodeInfo->prefix.rex != 0 ) {
         if ( CodeInfo->Ofssize != USE64 ) {
-            AsmError( INVALID_OPERAND_SIZE );
+            EmitError( INVALID_OPERAND_SIZE );
         }
         OutputCodeByte( CodeInfo->prefix.rex | 0x40 );
     }
@@ -481,7 +482,7 @@ static void output_data( const struct code_info *CodeInfo, enum operand_type det
             /* v2.07: fixup type check moved here */
             if ( Parse_Pass > PASS_1 )
                 if ( ( 1 << CodeInfo->opnd[index].InsFixup->type ) & ModuleInfo.fmtopt->invalid_fixup_type ) {
-                    AsmErr( UNSUPPORTED_FIXUP_TYPE,
+                    EmitErr( UNSUPPORTED_FIXUP_TYPE,
                            ModuleInfo.fmtopt->formatname,
                            CodeInfo->opnd[index].InsFixup->sym ? CodeInfo->opnd[index].InsFixup->sym->name : szNull );
                     /* don't exit! */
@@ -552,7 +553,7 @@ static void output_3rd_operand( struct code_info *CodeInfo )
         //if( CodeInfo->opnd_type[OPND3] & OP_I ) {
         output_data( CodeInfo, OP_I8, OPND3 );
         //} else {
-        //    AsmError( INVALID_INSTRUCTION_OPERANDS );
+        //    EmitError( INVALID_INSTRUCTION_OPERANDS );
         //    return;
         //}
     } else if( opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type_3rd == OP3_I ) {
@@ -605,10 +606,19 @@ static ret_code match_phase_3( struct code_info *CodeInfo, enum operand_type opn
             else if ( opnd2 & OP_M128 )
                 opnd2 |= OP_M64;
             else if ( ( opnd2 & OP_XMM ) && !( vex_flags[ CodeInfo->token - VEX_START ] & VX_HALF ) ) {
-                AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+                EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                 return( ERROR );
             }
         }
+#if 1
+        /* may be necessary to cover the cases where the first operand is a memory operand
+         * "without size" and the second operand is a ymm register
+         */
+        else if ( CodeInfo->opnd[OPND1].type == OP_M ) {
+            if ( opnd2 & OP_YMM )
+                opnd2 |= OP_XMM;
+        }
+#endif
     }
 #endif
     do  {
@@ -626,7 +636,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, enum operand_type opn
                     /* v2.04: the check has already happened in check_size() or idata_xxx() */
                     //if( Parse_Pass == PASS_1 && !InRange( operand, 1 ) ) {
                     //    DebugMsg(("imm const too large (08): %X\n", operand));
-                    //    AsmWarn( 1, IMMEDIATE_CONSTANT_TOO_LARGE );
+                    //    EmitWarn( 1, IMMEDIATE_CONSTANT_TOO_LARGE );
                     //}
                     CodeInfo->prefix.opsiz = FALSE;
                     opnd2 = OP_I8;
@@ -639,7 +649,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, enum operand_type opn
                     /* v2.04: the check has already happened in check_size() or idata_xxx() */
                     //if( Parse_Pass == PASS_1 && !InRange( operand, 2 ) ) {
                     //    DebugMsg(("imm const too large (16): %X\n", operand));
-                    //    AsmWarn( 1, IMMEDIATE_CONSTANT_TOO_LARGE );
+                    //    EmitWarn( 1, IMMEDIATE_CONSTANT_TOO_LARGE );
                     //}
                     /* 16-bit register, so output 16-bit data */
                     opnd2 = OP_I16;
@@ -673,7 +683,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, enum operand_type opn
                         CodeInfo->prefix.opsiz = CodeInfo->Ofssize ? 0 : 1;
                         break;
                     default:
-                        AsmError( INVALID_INSTRUCTION_OPERANDS );
+                        EmitError( INVALID_INSTRUCTION_OPERANDS );
                         //return( ERROR ); /* v2.06: don't exit */
                     }
                 }
@@ -797,11 +807,11 @@ static ret_code check_operand_2( struct code_info *CodeInfo, enum operand_type o
                 next->first == FALSE )
                 /* skip error if mem op is a forward reference */
                 /* v2.06b: added "undefined" check */
-                if ( CodeInfo->undefined == FALSE &&
+                if ( CodeInfo->undef_sym == FALSE &&
                     ( CodeInfo->opnd[OPND1].InsFixup == NULL ||
                     CodeInfo->opnd[OPND1].InsFixup->sym == NULL ||
                     CodeInfo->opnd[OPND1].InsFixup->sym->state != SYM_UNDEFINED ) )
-                    AsmErr( INSTRUCTION_OPERAND_MUST_HAVE_SIZE );
+                    EmitErr( INSTRUCTION_OPERAND_MUST_HAVE_SIZE );
         }
 
         output_opc( CodeInfo );
@@ -843,7 +853,7 @@ ret_code codegen( struct code_info *CodeInfo, uint_32 oldofs )
 
     /* privileged instructions ok? */
     if( ( CodeInfo->pinstr->cpu & P_PM ) > ( ModuleInfo.curr_cpu & P_PM ) ) {
-        AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+        EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
         return( ERROR );
     }
     opnd1 = CodeInfo->opnd[OPND1].type;
@@ -861,7 +871,7 @@ ret_code codegen( struct code_info *CodeInfo, uint_32 oldofs )
     if ( CodeInfo->token >= VEX_START && ( vex_flags[ CodeInfo->token - VEX_START ] & VX_L ) ) {
         if ( opnd1 & ( OP_YMM | OP_M256 ) ) {
             if ( CodeInfo->opnd[OPND2].type & OP_XMM && !( vex_flags[ CodeInfo->token - VEX_START ] & VX_HALF ) ) {
-                AsmErr( INVALID_INSTRUCTION_OPERANDS );
+                EmitErr( INVALID_INSTRUCTION_OPERANDS );
                 return( ERROR );
             }
             if ( opnd1 & OP_YMM )
@@ -924,7 +934,7 @@ ret_code codegen( struct code_info *CodeInfo, uint_32 oldofs )
     } while ( CodeInfo->pinstr->first == FALSE );
 
     DebugMsg(("codegen: no matching format found\n"));
-    AsmError( INVALID_INSTRUCTION_OPERANDS );
+    EmitError( INVALID_INSTRUCTION_OPERANDS );
     return( ERROR );
 }
 

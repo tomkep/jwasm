@@ -86,4 +86,8 @@ m256 label ymmword
 	vdpps ymm0, ymm1
 	vdpps ymm0, ymm1, eax
 
+	vcvtpd2dq   xmm0, [ebx] 	;untyped memory is to be rejected!
+	vcvttpd2dq  xmm0, [ebx] 	;untyped memory is to be rejected!
+	vcvtpd2ps   xmm0, [ebx] 	;untyped memory is to be rejected!
+
 end

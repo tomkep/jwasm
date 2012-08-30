@@ -46,7 +46,7 @@ static void genfailure( int signo )
 #else
     if (signo != SIGTERM)
 #endif
-        AsmError( GENERAL_FAILURE );
+        EmitError( GENERAL_FAILURE );
     close_files();
     exit( EXIT_FAILURE );
 }
@@ -98,12 +98,14 @@ int main( int argc, char **argv )
 #if WILDCARDS
         if ((fh = _findfirst( Options.names[ASM], &finfo )) == -1 ) {
             DebugMsg(("main: _findfirst(%s) failed\n", Options.names[ASM] ));
-            AsmErr( CANNOT_OPEN_FILE, Options.names[ASM], errno );
+            EmitErr( CANNOT_OPEN_FILE, Options.names[ASM], ErrnoStr() );
             break;
         }
         _splitpath( Options.names[ASM], drv, dir, NULL, NULL );
+        DebugMsg(("main: _splitpath(%s): drv=\"%s\" dir=\"%s\"\n", Options.names[ASM], drv, dir ));
         do {
             _makepath( fname, drv, dir, finfo.name, NULL );
+            DebugMsg(("main: _makepath(\"%s\", \"%s\", \"%s\")=\"%s\"\n", drv, dir, finfo.name, fname ));
             rc = AssembleModule( fname );  /* assemble 1 module */
         } while ( ( _findnext( fh, &finfo ) != -1 ) );
         _findclose( fh );
@@ -116,7 +118,7 @@ int main( int argc, char **argv )
         write_logo();
         printf( MsgGetEx( MSG_USAGE ) );
     } else if ( numFiles == 0 )
-        AsmError( NO_FILENAME_SPECIFIED );
+        EmitError( NO_FILENAME_SPECIFIED );
 
     MsgFini();
     return( 1 - rc ); /* zero if no errors */

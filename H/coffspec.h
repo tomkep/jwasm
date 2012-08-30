@@ -125,12 +125,16 @@ typedef struct _IMAGE_RELOCATION {
 #pragma pack(push,2)
 typedef struct _IMAGE_SYMBOL {
     union {
-        char ShortName[8];
+        /* v2.08 */
+        //char ShortName[8];
+        uint_8 ShortName[8];
         struct {
             uint_32 Short;
             uint_32 Long;
         } Name;
-        unsigned char *LongName[2];
+        /* v2.07: don't use pointers in COFF structures! */
+        //unsigned char *LongName[2];
+        uint_32 LongName[2];
     } N;
     uint_32 Value;
     uint_16 SectionNumber;
@@ -237,7 +241,9 @@ typedef union _IMAGE_AUX_SYMBOL {
     } Sym;
     /* AUX format 4: file entries */
     struct {
-        char Name[IMAGE_SIZEOF_SYMBOL];
+        /* v2.08 */
+        //char Name[IMAGE_SIZEOF_SYMBOL];
+        uint_8 Name[IMAGE_SIZEOF_SYMBOL];
     } File;
     /* AUX format 5: section entries */
     struct {

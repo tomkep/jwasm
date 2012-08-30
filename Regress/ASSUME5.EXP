@@ -1,5 +1,3 @@
-ASSUME5.ASO(30) : Error A2102: Symbol not defined : S1
-ASSUME5.ASO(35) : Error A2271: structure field expected
-ASSUME5.ASO(37) : Error A2271: structure field expected
-ASSUME5.ASO(43) : Error A2102: Symbol not defined : left
-ASSUME5.ASO(44) : Error A2102: Symbol not defined : left
+ASSUME5.ASO(30) : Error A2063: Symbol not defined : S2.S1
+ASSUME5.ASO(40) : Error A2063: Symbol not defined : S3.left
+ASSUME5.ASO(41) : Error A2063: Symbol not defined : S3.left

@@ -40,7 +40,7 @@
 #include "myassert.h"
 
 extern const char szNull[];
-extern uint GetGrpIdx( struct asym *sym );
+extern uint omf_GetGrpIdx( struct asym *sym );
 
 static uint_8 *putIndex( uint_8 *p, uint_16 index )
 /*************************************************/
@@ -200,7 +200,7 @@ static int fill_logref( const struct fixup *fixup, struct logref *lr )
 
     } else if( sym->state == SYM_UNDEFINED ) { /* shouldn't happen */
         DebugMsg(("fill_logref(%X): state of >%s< is SYM_UNDEFINED\n", fixup, sym->name));
-        AsmErr( SYMBOL_NOT_DEFINED, sym->name );
+        EmitErr( SYMBOL_NOT_DEFINED, sym->name );
         return( 0 );
     } else if( sym->state == SYM_GRP ) {
 
@@ -243,20 +243,24 @@ static int fill_logref( const struct fixup *fixup, struct logref *lr )
 
             if( fixup->frame_type == FRAME_GRP && fixup->frame_datum == 0 ) {
                 /* set the frame to the frame of the corresponding segment */
-                lr->frame_datum = GetGrpIdx( sym );
+                lr->frame_datum = omf_GetGrpIdx( sym );
             }
         } else {
             //struct asym *grpsym;
             /* it's a SYM_INTERNAL */
-            DebugMsg(("fill_logref(%X): fixup->frame, datum=%u.%u sym->name=%s state=%X segm=%X\n",
+            DebugMsg(("fill_logref(%X): fixup->frame/datum=%u/%u sym->name=%s state=%X segm=%X\n",
                       fixup, fixup->frame_type, fixup->frame_datum, sym->name, sym->state, sym->segment ));
-            if ( sym->segment == NULL ) { /* shouldn't happen */
-                AsmErr( SEGMENT_MISSING_FOR_FIXUP, sym->name );
+            /* v2.08: don't use info from assembly-time variables */
+            if ( sym->variable ) {
+                lr->target = ( fixup->frame_type == FRAME_GRP ? TARGET_GRP : TARGET_SEG);
+                lr->target_datum = fixup->frame_datum;
+            } else if ( sym->segment == NULL ) { /* shouldn't happen */
+                EmitErr( SEGMENT_MISSING_FOR_FIXUP, sym->name );
                 return ( 0 );
+            } else {
+                lr->target = TARGET_SEG;
+                lr->target_datum = GetSegIdx( sym->segment );
             }
-
-            lr->target = TARGET_SEG;
-            lr->target_datum = GetSegIdx( sym->segment );
         }
 
         if( fixup->frame_type != FRAME_NONE ) {
@@ -349,7 +353,7 @@ size_t OmfFixGenFix( struct fixup *fixup, uint_8 *buf, int type )
         locat1 = ( LOC_MS_BASE_OFFSET_32 << 2 );
         break;
     default:
-        AsmErr( UNSUPPORTED_FIXUP_TYPE,
+        EmitErr( UNSUPPORTED_FIXUP_TYPE,
                ModuleInfo.fmtopt->formatname,
                fixup->sym ? fixup->sym->name : szNull );
         return( 0 );

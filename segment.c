@@ -88,7 +88,6 @@ static const struct typeinfo SegAttrValue[] = {
 static uint             grpdefidx;      /* Number of group definitions   */
 static uint             LnamesIdx;      /* Number of LNAMES definitions  */
 
-struct dsym             *CurrSeg;       /* currently active segment */
 static struct dsym      *SegStack[MAX_SEG_NESTING]; /* stack of open segments */
 static int              stkindex;       /* current top of stack */
 
@@ -211,7 +210,7 @@ void FreeLnameQueue( void )
         if( sym->state == SYM_CLASS_LNAME ) {
             SymFree( sym );
         }
-        AsmFree( curr );
+        LclFree( curr );
     }
 }
 
@@ -255,7 +254,7 @@ static void push_seg( struct dsym *seg )
 {
     //pushitem( &CurrSeg, seg ); /* changed in v1.96 */
     if ( stkindex >= MAX_SEG_NESTING ) {
-        AsmError( NESTING_LEVEL_TOO_DEEP );
+        EmitError( NESTING_LEVEL_TOO_DEEP );
         return;
     }
     SegStack[stkindex] = CurrSeg;
@@ -289,14 +288,14 @@ static direct_idx InsertClassLname( const char *name )
     struct asym *sym;
 
     if( strlen( name ) > MAX_LNAME ) {
-        AsmError( CLASS_NAME_TOO_LONG );
+        EmitError( CLASS_NAME_TOO_LONG );
         return( LNAME_NULL );
     }
 
     /* the classes aren't inserted into the symbol table
      but they are in a queue */
 
-    sym = SymCreate( name, FALSE );
+    sym = SymAlloc( name );
     sym->state = SYM_CLASS_LNAME;
     sym->class_lname_idx = ++LnamesIdx;
 
@@ -350,12 +349,12 @@ static struct dsym *CreateGroup( const char *name )
 
     if( grp == NULL || grp->sym.state == SYM_UNDEFINED ) {
         if ( grp == NULL )
-            grp = (struct dsym *)SymCreate( name, TRUE );
+            grp = (struct dsym *)SymCreate( name );
         else
             sym_remove_table( &SymTables[TAB_UNDEF], grp );
 
         grp->sym.state = SYM_GRP;
-        grp->e.grpinfo = AsmAlloc( sizeof( struct grp_info ) );
+        grp->e.grpinfo = LclAlloc( sizeof( struct grp_info ) );
         grp->e.grpinfo->seglist = NULL;
         //grp->e.grpinfo->grp_idx = 0;
         //grp->e.grpinfo->lname_idx = 0;
@@ -367,7 +366,7 @@ static struct dsym *CreateGroup( const char *name )
         grp->e.grpinfo->lname_idx = ++LnamesIdx;
         AddLnameData( &grp->sym );
     } else if( grp->sym.state != SYM_GRP ) {
-        AsmErr( SYMBOL_REDEFINITION, name );
+        EmitErr( SYMBOL_REDEFINITION, name );
         return( NULL );
     }
     grp->sym.isdefined = TRUE;
@@ -378,13 +377,13 @@ static struct dsym *CreateSegment( struct dsym *seg, const char *name, bool add_
 /**************************************************************************************/
 {
     if ( seg == NULL )
-        seg = (struct dsym *)SymCreate( name, add_global );
+        seg = ( add_global ? (struct dsym *)SymCreate( name ) : (struct dsym *)SymAlloc( name ) );
     else if ( seg->sym.state == SYM_UNDEFINED )
         sym_remove_table( &SymTables[TAB_UNDEF], seg );
 
     if ( seg ) {
         seg->sym.state = SYM_SEG;
-        seg->e.seginfo = AsmAlloc( sizeof( struct seg_info ) );
+        seg->e.seginfo = LclAlloc( sizeof( struct seg_info ) );
         memset( seg->e.seginfo, 0, sizeof( struct seg_info ) );
         seg->e.seginfo->Ofssize = ModuleInfo.defOfssize;
         seg->e.seginfo->alignment = 4; /* this is PARA (2^4) */
@@ -415,10 +414,10 @@ void DeleteGroup( struct dsym *dir )
     for( curr = dir->e.grpinfo->seglist; curr; curr = next ) {
         next = curr->next;
         DebugMsg(("DeleteGroup(%s): free seg_item=%p\n", dir->sym.name, curr ));
-        AsmFree( curr );
+        LclFree( curr );
     }
     DebugMsg(("DeleteGroup(%s): extension %p will be freed\n", dir->sym.name, dir->e.grpinfo ));
-    AsmFree( dir->e.grpinfo );
+    LclFree( dir->e.grpinfo );
     return;
 }
 
@@ -433,7 +432,7 @@ ret_code GrpDir( int i, struct asm_tok tokenarray[] )
 
     /* GROUP directive must be at pos 1, needs a name at pos 0 */
     if( i != 1 ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 #if COFF_SUPPORT || ELF_SUPPORT
@@ -443,7 +442,7 @@ ret_code GrpDir( int i, struct asm_tok tokenarray[] )
         || Options.output_format == OFORMAT_ELF
 #endif
        ) {
-        AsmError( GROUP_DIRECTIVE_INVALID_FOR_COFF );
+        EmitError( GROUP_DIRECTIVE_INVALID_FOR_COFF );
         return( ERROR );
     }
 #endif
@@ -457,7 +456,7 @@ ret_code GrpDir( int i, struct asm_tok tokenarray[] )
 
         /* get segment name */
         if ( tokenarray[i].token != T_ID ) {
-            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
         name = tokenarray[i].string_ptr;
@@ -471,20 +470,20 @@ ret_code GrpDir( int i, struct asm_tok tokenarray[] )
                 if ( grp->e.grpinfo->seglist )
                     seg->e.seginfo->Ofssize = grp->sym.Ofssize;
             } else if( seg->sym.state != SYM_SEG ) {
-                AsmErr( SEGMENT_EXPECTED, name );
+                EmitErr( SEGMENT_EXPECTED, name );
                 return( ERROR );
             } else if( seg->e.seginfo->group != NULL &&
                        seg->e.seginfo->group != &grp->sym ) {
                 /* segment is in another group */
                 DebugMsg(("GrpDir: segment >%s< is in group >%s< already\n", name, seg->e.seginfo->group->name));
-                AsmErr( SEGMENT_IN_ANOTHER_GROUP, name );
+                EmitErr( SEGMENT_IN_ANOTHER_GROUP, name );
                 return( ERROR );
             }
             /* the first segment will define the group's word size */
             if( grp->e.grpinfo->seglist == NULL ) {
                 grp->sym.Ofssize = seg->e.seginfo->Ofssize;
             } else if ( grp->sym.Ofssize != seg->e.seginfo->Ofssize ) {
-                AsmErr( GROUP_SEGMENT_SIZE_CONFLICT, grp->sym.name, seg->sym.name );
+                EmitErr( GROUP_SEGMENT_SIZE_CONFLICT, grp->sym.name, seg->sym.name );
                 return( ERROR );
             }
         } else {
@@ -493,7 +492,7 @@ ret_code GrpDir( int i, struct asm_tok tokenarray[] )
             /* v2.07: check the "segment" field instead of "defined" flag! */
             //if( seg == NULL || seg->sym.state != SYM_SEG ) {
             if( seg == NULL || seg->sym.state != SYM_SEG || seg->sym.segment == NULL ) {
-                AsmErr( SEG_NOT_DEFINED, name );
+                EmitErr( SEG_NOT_DEFINED, name );
                 return( ERROR );
             }
         }
@@ -505,7 +504,7 @@ ret_code GrpDir( int i, struct asm_tok tokenarray[] )
             /* set the segment's grp */
             seg->e.seginfo->group = &grp->sym;
 
-            si = AsmAlloc( sizeof( struct seg_item ) );
+            si = LclAlloc( sizeof( struct seg_item ) );
             si->seg = seg;
             si->next = NULL;
             grp->e.grpinfo->numseg++;
@@ -525,7 +524,7 @@ ret_code GrpDir( int i, struct asm_tok tokenarray[] )
 
         if ( i < Token_Count ) {
             if ( tokenarray[i].token != T_COMMA || tokenarray[i+1].token == T_FINAL ) {
-                AsmErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
+                EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
                 return( ERROR );
             }
             i++;
@@ -544,9 +543,9 @@ ret_code SetOfssize( void )
     } else {
         ModuleInfo.Ofssize = CurrSeg->e.seginfo->Ofssize;
         if( ModuleInfo.Ofssize > USE16 && ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) ) {
-            DebugMsg(("SetOfssize, error: CurrSeg=%Xh, ModuleInfo.Ofssize=%u, curr_cpu=%X, defOfssize=%u\n",
-                      CurrSeg, ModuleInfo.Ofssize, ModuleInfo.curr_cpu, ModuleInfo.defOfssize ));
-            AsmError( INCOMPATIBLE_CPU_MODE_FOR_32BIT_SEGMENT );
+            DebugMsg(("SetOfssize, error: CurrSeg=%s, ModuleInfo.Ofssize=%u, curr_cpu=%X, defOfssize=%u\n",
+                      CurrSeg->sym.name, ModuleInfo.Ofssize, ModuleInfo.curr_cpu, ModuleInfo.defOfssize ));
+            EmitError( INCOMPATIBLE_CPU_MODE_FOR_32BIT_SEGMENT );
             return( ERROR );
         }
     }
@@ -571,7 +570,7 @@ static ret_code CloseSeg( const char *name )
 
     if( CurrSeg == NULL || ( SymCmpFunc( CurrSeg->sym.name, name, CurrSeg->sym.name_size ) != 0 ) ) {
         DebugMsg(("CloseSeg(%s): nesting error, CurrSeg=%s\n", name, CurrSeg ? CurrSeg->sym.name : "(null)" ));
-        AsmErr( BLOCK_NESTING_ERROR, name );
+        EmitErr( BLOCK_NESTING_ERROR, name );
         return( ERROR );
     }
 
@@ -580,7 +579,7 @@ static ret_code CloseSeg( const char *name )
     if ( write_to_file && ( Options.output_format == OFORMAT_OMF ) ) {
 
         //if ( !omf_FlushCurrSeg() ) /* v2: error check is obsolete */
-        //    AsmErr( INTERNAL_ERROR, "CloseSeg", 1 ); /* coding error! */
+        //    EmitErr( INTERNAL_ERROR, "CloseSeg", 1 ); /* coding error! */
         omf_FlushCurrSeg();
         if ( Options.no_comment_data_in_code_records == FALSE )
             omf_OutSelect( FALSE );
@@ -773,7 +772,7 @@ static direct_idx SetSegmentClass( struct asym *seg, const char *classname )
     if ( ((struct dsym *)seg)->e.seginfo->class_name_idx == 1 )
         ((struct dsym *)seg)->e.seginfo->class_name_idx = classidx;
     else if ( ((struct dsym *)seg)->e.seginfo->class_name_idx != classidx ) {
-        AsmErr( SEGDEF_CHANGED, seg->name, MsgGetEx( TXT_CLASS ) );
+        EmitErr( SEGDEF_CHANGED, seg->name, MsgGetEx( TXT_CLASS ) );
         return( ERROR );
     }
     return( classidx );
@@ -792,7 +791,7 @@ struct asym *CreateIntSegment( const char *name, const char *classname, uint_8 a
         if ( seg == NULL || seg->sym.state == SYM_UNDEFINED )
             seg = CreateSegment( seg, name, add_global );
         else if ( seg->sym.state != SYM_SEG ) {
-            AsmErr( SYMBOL_REDEFINITION, name );
+            EmitErr( SYMBOL_REDEFINITION, name );
             return( NULL );
         }
     } else
@@ -822,7 +821,7 @@ ret_code EndsDir( int i, struct asm_tok tokenarray[] )
     }
     /* a label must precede ENDS */
     if( i != 1 ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
     if ( Parse_Pass != PASS_1 ) {
@@ -833,7 +832,7 @@ ret_code EndsDir( int i, struct asm_tok tokenarray[] )
         return( ERROR );
     i++;
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
     }
     return( SetOfssize() );
 }
@@ -848,7 +847,7 @@ static ret_code SetCurrSeg( int i, struct asm_tok tokenarray[] )
     sym = SymSearch( tokenarray[0].string_ptr );
     DebugMsg1(("SetCurrSeg(%s) sym=%p\n", tokenarray[0].string_ptr, sym));
     if ( sym == NULL || sym->state != SYM_SEG ) {
-        AsmErr( SEG_NOT_DEFINED, tokenarray[0].string_ptr );
+        EmitErr( SEG_NOT_DEFINED, tokenarray[0].string_ptr );
         return( ERROR );
     }
     /* v2.04: added */
@@ -914,7 +913,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         return( SetCurrSeg( i, tokenarray ) );
 
     if( i != 1 ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -988,7 +987,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
     } else {
         /* symbol is different kind, error */
         DebugMsg(("SegmentDir(%s): symbol redefinition\n", name ));
-        AsmErr( SYMBOL_REDEFINITION, name );
+        EmitErr( SYMBOL_REDEFINITION, name );
         return( ERROR );
     }
 
@@ -1003,7 +1002,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
             /* string must be delimited by [double]quotes */
             if ( tokenarray[i].string_delim != '"' &&
                 tokenarray[i].string_delim != '\'' ) {
-                AsmErr( SYNTAX_ERROR_EX, token );
+                EmitErr( SYNTAX_ERROR_EX, token );
                 continue;
             }
             /* remove the quote delimiters */
@@ -1020,7 +1019,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
          */
         typeidx = FindToken( token, SegAttrToken, sizeof( SegAttrToken )/sizeof( SegAttrToken[0] ) );
         if( typeidx < 0 ) {
-            AsmErr( UNKNOWN_SEGMENT_ATTRIBUTE, token );
+            EmitErr( UNKNOWN_SEGMENT_ATTRIBUTE, token );
             continue;
         }
         type = &SegAttrValue[typeidx];
@@ -1029,7 +1028,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
          * initialized
          */
         if( initstate & INIT_EXCL_MASK & type->init ) {
-            AsmErr( SEGMENT_ATTRIBUTE_DEFINED_ALREADY, token );
+            EmitErr( SEGMENT_ATTRIBUTE_DEFINED_ALREADY, token );
             continue;
         } else {
             initstate |= type->init; /* mark it initialized */
@@ -1046,24 +1045,24 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         case INIT_ALIGN_PARAM:
             DebugMsg1(("SegmentDir(%s): ALIGN() found\n", name ));
             if ( Options.output_format == OFORMAT_OMF ) {
-                AsmErr( NOT_SUPPORTED_WITH_OMF_FORMAT, tokenarray[i].string_ptr );
+                EmitErr( NOT_SUPPORTED_WITH_OMF_FORMAT, tokenarray[i].string_ptr );
                 i = Token_Count; /* stop further parsing of this line */
                 break;
             }
             i++;
             if ( tokenarray[i].token != T_OP_BRACKET ) {
-                AsmErr( EXPECTED, "(" );
+                EmitErr( EXPECTED, "(" );
                 break;
             }
             i++;
             if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
                 break;
             if ( tokenarray[i].token != T_CL_BRACKET ) {
-                AsmErr( EXPECTED, ")" );
+                EmitErr( EXPECTED, ")" );
                 break;
             }
             if ( opndx.kind != EXPR_CONST ) {
-                AsmError( CONSTANT_EXPECTED );
+                EmitError( CONSTANT_EXPECTED );
                 break;
             }
             /*
@@ -1072,7 +1071,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
              */
             for( temp = 1, temp2 = 0; temp < opndx.value && temp < 8192 ; temp <<= 1, temp2++ );
             if( temp != opndx.value ) {
-                AsmError( POWER_OF_2 );
+                EmitError( POWER_OF_2 );
             }
             dir->e.seginfo->alignment = temp2;
             break;
@@ -1092,7 +1091,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
                     dir->e.seginfo->abs_frame = opndx.value;
                     dir->e.seginfo->abs_offset = 0;
                 } else {
-                    AsmError( CONSTANT_EXPECTED );
+                    EmitError( CONSTANT_EXPECTED );
                 }
             }
             break;
@@ -1100,25 +1099,25 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         case INIT_COMBINE_COMDAT:
             DebugMsg1(("SegmentDir(%s): COMDAT found\n", name ));
             if ( Options.output_format != OFORMAT_COFF ) {
-                AsmErr( NOT_SUPPORTED_WITH_CURR_FORMAT, tokenarray[i].string_ptr );
+                EmitErr( NOT_SUPPORTED_WITH_CURR_FORMAT, tokenarray[i].string_ptr );
                 i = Token_Count; /* stop further parsing of this line */
                 break;
             }
             i++;
             if ( tokenarray[i].token != T_OP_BRACKET ) {
-                AsmErr( EXPECTED, "(" );
+                EmitErr( EXPECTED, "(" );
                 break;
             }
             i++;
             if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
                 break;
             if ( opndx.kind != EXPR_CONST ) {
-                AsmError( CONSTANT_EXPECTED );
+                EmitError( CONSTANT_EXPECTED );
                 i = Token_Count; /* stop further parsing of this line */
                 break;
             }
             if ( opndx.value < 1 || opndx.value > 6 ) {
-                AsmErr( VALUE_NOT_WITHIN_ALLOWED_RANGE, "1-6" );
+                EmitErr( VALUE_NOT_WITHIN_ALLOWED_RANGE, "1-6" );
             } else {
                 /* if value is IMAGE_COMDAT_SELECT_ASSOCIATIVE,
                  * get the associated segment name argument.
@@ -1126,13 +1125,13 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
                 if ( opndx.value == 5 ) {
                     struct asym *sym2;
                     if ( tokenarray[i].token != T_COMMA ) {
-                        AsmError( EXPECTING_COMMA );
+                        EmitError( EXPECTING_COMMA );
                         i = Token_Count; /* stop further parsing of this line */
                         break;
                     }
                     i++;
                     if ( tokenarray[i].token != T_ID ) {
-                        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+                        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
                         i = Token_Count; /* stop further parsing of this line */
                         break;
                     }
@@ -1142,14 +1141,14 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
                         sym2->state != SYM_SEG ||
                         ((struct dsym *)sym2)->e.seginfo->comdat_selection == 0 ||
                         ((struct dsym *)sym2)->e.seginfo->comdat_selection == 5 )
-                        AsmErr( INVALID_ASSOCIATED_SEGMENT, tokenarray[i].string_ptr );
+                        EmitErr( INVALID_ASSOCIATED_SEGMENT, tokenarray[i].string_ptr );
                     else
                         dir->e.seginfo->comdat_number = ((struct dsym *)sym2)->e.seginfo->seg_idx;
                     i++;
                 }
             }
             if ( tokenarray[i].token != T_CL_BRACKET ) {
-                AsmErr( EXPECTED, ")" );
+                EmitErr( EXPECTED, ")" );
                 break;
             }
             dir->e.seginfo->comdat_selection = opndx.value;
@@ -1164,7 +1163,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
                 || type->value == USE64 && ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_64 )
 #endif
                ) {
-                AsmError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+                EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
                 break;
             }
             if ( type->init == INIT_OFSSIZE_FLAT ) {
@@ -1190,7 +1189,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
             DebugMsg1(("SegmentDir(%s): characteristics found\n", name ));
             ; /* characteristics are restricted to COFF/ELF */
             if ( Options.output_format == OFORMAT_OMF || Options.output_format == OFORMAT_BIN ) {
-                AsmErr( NOT_SUPPORTED_WITH_CURR_FORMAT, tokenarray[i].string_ptr );
+                EmitErr( NOT_SUPPORTED_WITH_CURR_FORMAT, tokenarray[i].string_ptr );
             } else
                 dir->e.seginfo->characteristics |= type->value;
             break;
@@ -1198,30 +1197,30 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
             DebugMsg1(("SegmentDir(%s): ALIAS found\n", name ));
             if ( Options.output_format != OFORMAT_COFF &&
                 Options.output_format != OFORMAT_ELF ) {
-                AsmErr( NOT_SUPPORTED_WITH_CURR_FORMAT, tokenarray[i].string_ptr );
+                EmitErr( NOT_SUPPORTED_WITH_CURR_FORMAT, tokenarray[i].string_ptr );
                 i = Token_Count; /* stop further parsing of this line */
                 break;
             }
             i++;
             if ( tokenarray[i].token != T_OP_BRACKET ) {
-                AsmErr( EXPECTED, "(" );
+                EmitErr( EXPECTED, "(" );
                 break;
             }
             i++;
             if ( tokenarray[i].token != T_STRING ||
                 ( tokenarray[i].string_delim != '"' &&
                 tokenarray[i].string_delim != '\'' ) ) {
-                AsmErr( SYNTAX_ERROR_EX, token );
+                EmitErr( SYNTAX_ERROR_EX, token );
                 i = Token_Count; /* stop further parsing of this line */
                 break;
             }
             temp = i;
             i++;
             if ( tokenarray[i].token != T_CL_BRACKET ) {
-                AsmErr( EXPECTED, ")" );
+                EmitErr( EXPECTED, ")" );
                 break;
             }
-            dir->e.seginfo->aliasname = AsmAlloc( tokenarray[temp].stringlen );
+            dir->e.seginfo->aliasname = LclAlloc( tokenarray[temp].stringlen );
             memcpy( dir->e.seginfo->aliasname, tokenarray[temp].string_ptr+1, tokenarray[temp].stringlen );
             *(dir->e.seginfo->aliasname+tokenarray[temp].stringlen) = NULLC;
             break;
@@ -1271,7 +1270,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
             txt = TXT_CHARACTERISTICS;
 
         if ( txt ) {
-            AsmErr( SEGDEF_CHANGED, dir->sym.name, MsgGetEx( txt ) );
+            EmitErr( SEGDEF_CHANGED, dir->sym.name, MsgGetEx( txt ) );
             //return( ERROR ); /* v2: display error, but continue */
         }
 
@@ -1301,11 +1300,11 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
 ret_code SegmentModuleExit( void )
 /********************************/
 {
-    if ( ModuleInfo.model != MOD_NONE )
+    if ( ModuleInfo.model != MODEL_NONE )
         ModelSimSegmExit();
     /* if there's still an open segment, it's an error */
     if ( CurrSeg ) {
-        AsmErr( BLOCK_NESTING_ERROR, CurrSeg->sym.name );
+        EmitErr( BLOCK_NESTING_ERROR, CurrSeg->sym.name );
         /* but close the still open segments anyway */
         while( CurrSeg && ( CloseSeg( CurrSeg->sym.name ) == NOT_ERROR ) );
     }
@@ -1332,7 +1331,7 @@ void SegmentFini( void )
         DebugMsg(("SegmentFini(): segment %s\n", curr->sym.name ));
         for ( fix = curr->e.seginfo->FixupListHead; fix ; ) {
             struct fixup *next = fix->nextrlc;
-            AsmFree( fix );
+            LclFree( fix );
             fix = next;
         }
     }
@@ -1378,7 +1377,7 @@ void SegmentInit( int pass )
 #endif
         symPC.name_size = 1; /* sizeof("$") */
         symPC.list = FALSE; /* don't display the '$' symbol in symbol list */
-        SymAddToTable( &symPC );
+        SymAddGlobal( &symPC );
 
 #if 0 /* v2.03: obsolete, also belongs to simplified segment handling */
         /* set ModuleInfo.code_class */
@@ -1386,7 +1385,7 @@ void SegmentInit( int pass )
             size = strlen( Options.code_class ) + 1;
         else
             size = 4 + 1;
-        ModuleInfo.code_class = AsmAlloc( size );
+        ModuleInfo.code_class = LclAlloc( size );
         if ( Options.code_class )
             strcpy( ModuleInfo.code_class, Options.code_class );
         else
@@ -1418,7 +1417,7 @@ void SegmentInit( int pass )
             }
         }
         if ( buffer_size ) {
-            ModuleInfo.pCodeBuff = AsmAlloc( buffer_size );
+            ModuleInfo.pCodeBuff = LclAlloc( buffer_size );
             DebugMsg(("SegmentInit(%u): total buffer size=%" FX32 ", start=%p\n", pass, buffer_size, ModuleInfo.pCodeBuff ));
         }
     }
@@ -1489,7 +1488,7 @@ void SegmentSaveState( void )
     saved_CurrSeg = CurrSeg;
     saved_stkindex = stkindex;
     if ( stkindex ) {
-        saved_SegStack = AsmAlloc( stkindex * sizeof(struct dsym *) );
+        saved_SegStack = LclAlloc( stkindex * sizeof(struct dsym *) );
         memcpy( saved_SegStack, &SegStack, stkindex * sizeof(struct dsym *) );
     }
 

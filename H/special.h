@@ -16,6 +16,17 @@
  * a full rebuild.
  */
 
+/* field usage:
+ * type   = RWT_ value    SpecialTable.type   uint_8
+ * value  =      flags    SpecialTable.value  uint
+ * bytval =      value    SpecialTable.bytval uint_8
+ * flags  = RWF_ flags    ResWordTable.flags  uint_8
+ * cpu    = cpu  flags    SpecialTable.cpu    uint_16
+ * sflags =               SpecialTable.sflags uint
+ * for registers, the 'value' field contains OP_ flags.
+ * Since this field has type uint, it may be 16-bits wide only.
+ * This is no problem, since all register-related flags are in the low word.
+ */
 /* token str len   type        value    bytval    flags  cpu     sflags */
 
 /* registers AH-BH must be consecutive, start with AH and end with BH */
@@ -47,6 +58,7 @@ res(EBP, ebp, 3, RWT_REG,      OP_R32,     5,       0,   P_386,   SFR_IREG|4)
 res(ESI, esi, 3, RWT_REG,      OP_R32,     6,       0,   P_386,   SFR_IREG|4)
 res(EDI, edi, 3, RWT_REG,      OP_R32,     7,       0,   P_386,   SFR_IREG|4)
 
+/* registers ES-GS must be consecutive */
 res(ES,   es, 2, RWT_REG,      OP_SR86,    0,       0,   P_86,    0)
 res(CS,   cs, 2, RWT_REG,      OP_SR86,    1,       0,   P_86,    0)
 res(SS,   ss, 2, RWT_REG,      OP_SR86,    2,       0,   P_86,    0)

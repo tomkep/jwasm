@@ -38,3 +38,6 @@ AVX2.ASO(84) : Error A2049: Invalid instruction operands
 AVX2.ASO(85) : Error A2049: Invalid instruction operands
 AVX2.ASO(86) : Error A2209: Syntax error: , ymm1
 AVX2.ASO(87) : Error A2049: Invalid instruction operands
+AVX2.ASO(89) : Error A2182: Instruction operand must have size
+AVX2.ASO(90) : Error A2182: Instruction operand must have size
+AVX2.ASO(91) : Error A2182: Instruction operand must have size

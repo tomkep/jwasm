@@ -143,7 +143,7 @@ static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
 #if 0 /* don't display the error at the destination line! */
                     sym->fixup = NULL;
                     DebugMsg(("DoPatch: jump out of range, disp=%d\n", disp ));
-                    AsmErr( JUMP_OUT_OF_RANGE, disp - max_disp );
+                    EmitErr( JUMP_OUT_OF_RANGE, disp - max_disp );
                     return( ERROR );
 #else
                     return( NOT_ERROR ); /* nothing to do */
@@ -217,7 +217,7 @@ static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
             case 2:
             case 4:
                 DebugMsg(("DoPatch: jump out of range, disp=%d\n", disp ));
-                AsmWarn( 4, JUMP_OUT_OF_RANGE, disp - max_disp );
+                EmitWarn( 4, JUMP_OUT_OF_RANGE, disp - max_disp );
                 break;
             }
         }

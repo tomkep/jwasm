@@ -38,7 +38,6 @@
 #include "omfint.h"
 #include "omfspec.h"
 #include "myassert.h"
-#include "fatal.h"
 
 #ifdef __I86__
 #define FFQUAL __near
@@ -196,7 +195,7 @@ static void PutMem( struct omf_wfile *out, const uint_8 *buf, size_t length )
     } else {
         /* this "shouldn't happen". */
         DebugMsg(("PutMem: error, amt(%u) < length(%u)\n", amt, length ));
-        AsmErr( INTERNAL_ERROR, __FILE__, __LINE__ );
+        EmitErr( INTERNAL_ERROR, __FILE__, __LINE__ );
     }
 }
 
@@ -289,7 +288,7 @@ static int FFQUAL writeSegdef( struct omf_wfile *out, struct omf_rec *objr )
     case SEGDEF_ALIGN_4KPAGE:
         acbp |= ALIGN_4KPAGE << 5;
         if ( Parse_Pass == PASS_1 )
-            AsmWarn( 2, NO_4KPAGE_ALIGNED_SEGMENTS );
+            EmitWarn( 2, NO_4KPAGE_ALIGNED_SEGMENTS );
         break;
 #endif
     default:
@@ -331,7 +330,7 @@ static int FFQUAL writeSegdef( struct omf_wfile *out, struct omf_rec *objr )
     PutIndex( out, objr->d.segdef.class_name_idx );
     PutIndex( out, objr->d.segdef.ovl_name_idx );
     //if( objr->d.segdef.access_valid ) {
-    //    AsmError( ACCESS_CLASSES_NOT_SUPPORTED );
+    //    EmitError( ACCESS_CLASSES_NOT_SUPPORTED );
     //}
     WEndRec( out );
     return( 0 );
@@ -607,7 +606,7 @@ static int FFQUAL writeUnexp( struct omf_wfile *out, struct omf_rec *objr )
 /*************************************************************************/
 {
     DebugMsg(("unexpected OMF record type 0x%02X\n", objr->command ));
-    AsmErr( INTERNAL_ERROR, __FILE__, __LINE__ );
+    EmitErr( INTERNAL_ERROR, __FILE__, __LINE__ );
     return( 0 );
 }
 

@@ -20,7 +20,8 @@ MSLINK=1
 
 # directory paths to adjust
 # VCDIR  - root directory for VC compiler, linker, include and lib files
-# W32LIB - directory for Win32 import library files (kernel32.lib)
+# W32LIB - directory for Win32 import library files (kernel32.lib).
+#          Default is WinInc ( may be changed to the MS Platform SDK ).
 # HXDIR  - for DOS=1 only: root directory to search for stub LOADPEX.BIN,
 #          libs DKRNL32S.LIB + IMPHLP.LIB and tool PATCHPE.EXE.
 
@@ -75,10 +76,10 @@ LOPTD = /debug
 lflagsd = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /Libpath:$(HXDIR)\lib /OPT:NOWIN98
 lflagsw = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /OPT:NOWIN98
 
-CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(c_flags)
+CC=$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(c_flags)
 
 .c{$(OUTD)}.obj:
-	$(CC) -Fo$* $<
+	@$(CC) -Fo$* $<
 
 proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
@@ -93,7 +94,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
            $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj\
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
-           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/safeseh.obj \
+           $(OUTD)/listing.obj  $(OUTD)/safeseh.obj \
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
            $(OUTD)/cmdline.obj  $(OUTD)/linnum.obj   $(OUTD)/fastpass.obj\
 !if $(TRMEM)
@@ -117,23 +118,23 @@ $(OUTD):
 
 $(OUTD)\$(name).exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
 !if $(MSLINK)
-	$(linker) @<<
+	@$(linker) @<<
 $(lflagsw) $(OUTD)/main.obj $(OUTD)/$(name).lib
 /LIBPATH:"$(VCDIR)/Lib" "$(W32LIB)/kernel32.lib" /OUT:$@
 <<
 !else
-	jwlink format windows pe file $(OUTD)/main.obj name $@ lib $(OUTD)/$(name).lib libpath "$(VCDIR)/Lib" lib "$(W32LIB)/kernel32.lib" op start=_mainCRTStartup, norelocs, eliminate, map=$(OUTD)/$(name).map
+	@jwlink format windows pe file $(OUTD)/main.obj name $@ lib $(OUTD)/$(name).lib libpath "$(VCDIR)/Lib" lib "$(W32LIB)/kernel32.lib" op start=_mainCRTStartup, norelocs, eliminate, map=$(OUTD)/$(name).map
 !endif
 
 $(OUTD)\$(name)d.exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
 !if $(MSLINK)
-	$(linker) @<<
+	@$(linker) @<<
 $(lflagsd) /NODEFAULTLIB initw32.obj $(OUTD)/main.obj $(OUTD)/$(name).lib /LIBPATH:$(VCDIR)\Lib
 libc.lib oldnames.lib /LIBPATH:$(HXDIR)\Lib dkrnl32s.lib imphlp.lib /STUB:$(HXDIR)\Bin\LOADPEX.BIN
 /OUT:$@ /FIXED:NO
 <<
 !else
-	jwlink @<<
+	@jwlink @<<
 format windows pe file $(OUTD)/main.obj name $@ lib $(OUTD)/$(name).lib
 libpath $(VCDIR)/Lib lib $(HXDIR)/dkrnl32, $(HXDIR)/imphlp op start=_mainCRTStartup, norelocs, eliminate, map=$(OUTD)/$(name).map, stub=$(HXDIR)\Bin\LOADPEX.BIN
 <<
@@ -141,13 +142,13 @@ libpath $(VCDIR)/Lib lib $(HXDIR)/dkrnl32, $(HXDIR)/imphlp op start=_mainCRTStar
 	@$(HXDIR)\bin\patchpe $@
 
 $(OUTD)\$(name).lib : $(proj_obj)
-	@$(lib) /out:$(OUTD)\$(name).lib $(proj_obj)
+	@$(lib) /nologo /out:$(OUTD)\$(name).lib $(proj_obj)
 
 $(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
-	$(CC) -Fo$* msgtext.c
+	@$(CC) -Fo$* msgtext.c
 
 $(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h
-	$(CC) -Fo$* reswords.c
+	@$(CC) -Fo$* reswords.c
 
 ######
 

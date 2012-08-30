@@ -22,4 +22,10 @@ comm v4:dword
 comm v5:word
 	public v5
 
+comm v6:0		;positive value expected
+
+comm ax:word	;invalid identifier
+comm v7,word	;syntax error
+comm v7:44ud	;syntax error
+
 	end

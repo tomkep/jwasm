@@ -51,10 +51,6 @@ enum msgno {
     #define DebugMsg( x )
     #define DebugMsg1( x )
 #endif
-// use DebugMsg((....)) to call it
-
-//#define AsmWarning( errno )   AsmWarn( 0,errno )
-//#define AsmIntErr( x )        printf( "Internal error %d\n", x )
 
 #if defined( __UNIX__ ) || defined ( __SW_BD )
 #define errout stderr
@@ -62,12 +58,17 @@ enum msgno {
 #define errout stdout
 #endif
 
-extern void AsmError( int msgnum );
-extern void AsmErr( int msgnum, ... );
-extern void AsmWarn( int level, int msgnum, ... );
+extern void EmitError( int msgnum );
+extern void EmitErr( int msgnum, ... );
+extern void EmitWarn( int level, int msgnum, ... );
 extern void PrintNote( int msgnum, ... );
+extern char *ErrnoStr( void );
 
+//#define EmitWarning( errno )  EmitWarn( 0,errno )
+//#define EmitIntErr( x )       printf( "Internal error %d\n", x )
 
-#define MAXMSGSIZE 128 /* size of buffer for MsgGet() */
+extern void   Fatal( unsigned msg, ... );
+extern void   SeekError( void );
+extern void   WriteError( void );
 
 #endif

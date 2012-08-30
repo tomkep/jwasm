@@ -26,7 +26,9 @@ extern void LstWriteSrcLine( void );
 extern void LstWriteCRef( void );
 extern void LstPrintf( const char *format, ... );
 extern void LstNL( void );
-
+#if FASTPASS
+extern void LstSetPosition( void );
+#endif
 extern uint_32 list_pos;        /* current LST file position */
 
 #endif

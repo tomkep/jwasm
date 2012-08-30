@@ -32,7 +32,7 @@
 #ifndef _RESWORDS_H_INCLUDED
 #define _RESWORDS_H_INCLUDED
 
-/* structure of items in the "reserved names" table AsmResWord[] */
+/* structure of items in the "reserved names" table ResWordTable[] */
 
 struct ReservedWord {
     short next;              /* index next entry (used for hash table) */

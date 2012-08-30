@@ -39,7 +39,7 @@ extra_c_flags =
 !if $(DEBUG)
 extra_c_flags += -od -d2 -w3 -DDEBUG_OUT
 !else
-extra_c_flags += -obmilrt -s -DNDEBUG
+extra_c_flags += -ox -s -DNDEBUG
 !endif
 
 !if $(DJGPP)
@@ -74,7 +74,7 @@ proj_obj = $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
            $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj&
            $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
-           $(OUTD)/listing.obj  $(OUTD)/fatal.obj    $(OUTD)/cmdline.obj &
+           $(OUTD)/listing.obj  $(OUTD)/cmdline.obj &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
            $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   &
            $(OUTD)/apiemu.obj   $(OUTD)/dbgcv.obj    $(OUTD)/end.obj     &

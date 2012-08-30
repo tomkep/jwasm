@@ -1,6 +1,6 @@
 /***************************************************************************
 *
-*  This code is Public Domain. It's new for JWasm.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -143,7 +143,7 @@ static uint_8 *checkflush( struct dsym *seg, uint_8 *buffer, uint_8 *curr, int s
         switch ( Options.output_format ) {
 #if COFF_SUPPORT
         case OFORMAT_COFF:
-            p = AsmAlloc( (curr - buffer) + sizeof( struct qditem ) );
+            p = LclAlloc( (curr - buffer) + sizeof( struct qditem ) );
             ((struct qditem *)p)->next = NULL;
             ((struct qditem *)p)->size = curr - buffer;
             memcpy( p + sizeof( struct qditem ), buffer, curr - buffer );
@@ -212,7 +212,7 @@ static uint_8 * cv_write_bitfield( struct dsym *types, struct dsym *type, struct
     ((struct cv_typerec_bitfield *)pt)->length = sym->total_size;
     ((struct cv_typerec_bitfield *)pt)->position = sym->offset;
     ((struct cv_typerec_bitfield *)pt)->type = GetTyperef( (struct asym *)type, USE16 );
-    pt += sizeof ( struct cv_typerec_bitfield );
+    pt += sizeof( struct cv_typerec_bitfield );
     return( pt );
 }
 
@@ -234,9 +234,9 @@ static uint_8 * cv_write_type( struct dsym *types, struct asym *sym, uint_8 *pt 
     uint_16     cnt = 0;
 
     /* handle structs, unions and records only */
-    if ( type->e.structinfo->typekind != TYPE_STRUCT &&
-        type->e.structinfo->typekind != TYPE_UNION &&
-        type->e.structinfo->typekind != TYPE_RECORD )
+    if ( type->sym.typekind != TYPE_STRUCT &&
+        type->sym.typekind != TYPE_UNION &&
+        type->sym.typekind != TYPE_RECORD )
         return( pt );
 
     if ( sym->total_size >= 0x8000 )
@@ -252,7 +252,7 @@ static uint_8 * cv_write_type( struct dsym *types, struct asym *sym, uint_8 *pt 
     }
 
     sym->cv_typeref = currtype++;
-    switch ( type->e.structinfo->typekind ) {
+    switch ( type->sym.typekind ) {
     case TYPE_UNION:
         DebugMsg(( "cv_write_type(%Xh, ref=%X): UNION=%s\n", GetTPos(), sym->cv_typeref, sym->name ));
         size = ( sizeof( struct cv_typerec_union ) + typelen + 1 + sym->name_size + 3 ) & ~3;
@@ -281,7 +281,7 @@ static uint_8 * cv_write_type( struct dsym *types, struct asym *sym, uint_8 *pt 
         ((struct cv_typerec_structure *)pt)->tr.leaf = LF_STRUCTURE;
         ((struct cv_typerec_structure *)pt)->count = cnt;
         ((struct cv_typerec_structure *)pt)->field = currtype++;
-        if ( type->e.structinfo->typekind == TYPE_RECORD )
+        if ( type->sym.typekind == TYPE_RECORD )
             ((struct cv_typerec_structure *)pt)->property = 1; /* is "packed" */
         else
             ((struct cv_typerec_structure *)pt)->property = 0;
@@ -324,7 +324,7 @@ static uint_8 * cv_write_type( struct dsym *types, struct asym *sym, uint_8 *pt 
         ((struct cv_typerec_member *)pt)->attribute.noconstruct = 0;
         ((struct cv_typerec_member *)pt)->attribute.reserved = 0;
         if ( typelen == 0 ) {
-            if ( type->e.structinfo->typekind == TYPE_RECORD )
+            if ( type->sym.typekind == TYPE_RECORD )
                 ((struct cv_typerec_member *)pt)->offset = 0;
             else
                 ((struct cv_typerec_member *)pt)->offset = curr->sym->offset;
@@ -362,7 +362,7 @@ static uint_8 * cv_write_symbol( struct dsym *symbols, struct asym *sym, uint_8 
     case SYM_TYPE:
         ((struct cv_symrec_udt *)ps)->sr.size = sizeof( struct cv_symrec_udt ) - sizeof(uint_16) + 1 + sym->name_size;
         ((struct cv_symrec_udt *)ps)->sr.type = S_UDT;
-        if ( ((struct dsym *)sym)->e.structinfo->typekind != TYPE_TYPEDEF ) {
+        if ( sym->typekind != TYPE_TYPEDEF ) {
             ((struct cv_symrec_udt *)ps)->typeref = sym->cv_typeref;
         } else {
             ((struct cv_symrec_udt *)ps)->typeref = GetTyperef( sym, Ofssize );
@@ -471,7 +471,7 @@ static uint_8 * cv_write_symbol( struct dsym *symbols, struct asym *sym, uint_8 
             fixup = CreateFixup( sym, FIX_OFF32_SECREL, OPTJ_NONE );
             store_fixup( fixup, (int_32 *)ps );
             fixup = CreateFixup( sym, FIX_SEG, OPTJ_NONE );
-            fixup->location += sizeof (int_32 );
+            fixup->location += sizeof(int_32 );
             store_fixup( fixup, (int_32 *)ps );
         } else {
 #endif

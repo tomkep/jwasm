@@ -49,6 +49,7 @@
 #include "input.h"
 #include "macro.h"
 #include "types.h"
+#include "fastpass.h"
 
 /*
  the current if-block can be in one of 3 states:
@@ -81,8 +82,8 @@ static const char *GetCurrIfStatString( void )
 #endif
 
 /*
- * this code runs after the first token has been scanned
- * and it is a IFx, ELSEx or ENDIF.
+ * this code runs after the first token has been scanned,
+ * if it is a IFx, ELSEx or ENDIF.
  * updates variables <blocknestlevel> and <falseblocknestlevel>.
 */
 
@@ -109,7 +110,7 @@ void conditional_assembly_prepare( int directive )
             break;
         }
         if( blocknestlevel == MAX_IF_NESTING ) {
-            AsmError( NESTING_LEVEL_TOO_DEEP );
+            EmitError( NESTING_LEVEL_TOO_DEEP );
             break;
         }
         elseoccured &= ~( 1 << blocknestlevel ); /* v2.06: added */
@@ -134,7 +135,7 @@ void conditional_assembly_prepare( int directive )
             }
             /* v2.06: check added to detect multiple ELSE branches */
             if ( elseoccured & ( 1 << ( blocknestlevel - 1 ) ) ) {
-                AsmError( ELSE_CLAUSE_ALREADY_OCCURED_IN_THIS_IF_BLOCK );
+                EmitError( ELSE_CLAUSE_ALREADY_OCCURED_IN_THIS_IF_BLOCK );
                 break;
             }
             /* status may change:
@@ -146,7 +147,7 @@ void conditional_assembly_prepare( int directive )
             if ( directive == T_ELSE )
                 elseoccured |= ( 1 << ( blocknestlevel - 1 ) );
         } else {
-            AsmErr( BLOCK_NESTING_ERROR, GetResWName( directive, NULL ) );
+            EmitErr( BLOCK_NESTING_ERROR, GetResWName( directive, NULL ) );
         }
         break;
     case T_ENDIF:
@@ -158,7 +159,7 @@ void conditional_assembly_prepare( int directive )
             blocknestlevel--;
             CurrIfState = BLOCK_ACTIVE; /* v2.04: added */
         } else {
-            AsmErr( BLOCK_NESTING_ERROR, GetResWName( directive, NULL ) );
+            EmitErr( BLOCK_NESTING_ERROR, GetResWName( directive, NULL ) );
         }
         break;
     }
@@ -209,7 +210,10 @@ static bool check_dif( const char *string1, const char *string2, bool sensitive 
 /*******************************************************************************/
 {
 #if 1
-    /* v2.02: transform to the "visible" format first */
+    /* v2.02: transform to the "visible" format first.
+     * that's because the '!' character is often optional
+     * and must be ignored then.
+     */
     char s1[MAX_LINE_LEN];
     char s2[MAX_LINE_LEN];
 
@@ -267,7 +271,7 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
             return( ERROR );
 #if 0 /* v2.05: obsolete */
         if ( opndx.sym && opndx.sym->state == SYM_UNDEFINED ) {
-            AsmErr( SYMBOL_NOT_DEFINED, opndx.sym->name );
+            EmitErr( SYMBOL_NOT_DEFINED, opndx.sym->name );
         } else
 #endif
         if ( opndx.kind == EXPR_CONST )
@@ -277,9 +281,9 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
             /* v2.07: Masm doesn't accept a relocatable item,
              * so emit at least a warning!
              */
-            AsmWarn( 2, CONSTANT_EXPECTED );
+            EmitWarn( 2, CONSTANT_EXPECTED );
         } else {
-            AsmError( CONSTANT_EXPECTED );
+            EmitError( CONSTANT_EXPECTED );
             return( ERROR );
         }
         if ( directive == T_IF || directive == T_ELSEIF )
@@ -291,23 +295,23 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
         string1 = tokenarray[i].string_ptr;
         if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
             if ( tokenarray[i].token == T_ID && SymSearch( string1 ) == NULL )
-                AsmErr( SYMBOL_NOT_DEFINED, string1 );
+                EmitErr( SYMBOL_NOT_DEFINED, string1 );
             else
-                AsmError( TEXT_ITEM_REQUIRED );
+                EmitError( TEXT_ITEM_REQUIRED );
             return( ERROR );
         }
         i++;
         if ( tokenarray[i].token != T_COMMA ) {
-            AsmError( EXPECTING_COMMA );
+            EmitError( EXPECTING_COMMA );
             return( ERROR );
         }
         i++;
         string2 = tokenarray[i].string_ptr;
         if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
             if ( tokenarray[i].token == T_ID && SymSearch( string2 ) == NULL )
-                AsmErr( SYMBOL_NOT_DEFINED, string2 );
+                EmitErr( SYMBOL_NOT_DEFINED, string2 );
             else
-                AsmError( TEXT_ITEM_REQUIRED );
+                EmitError( TEXT_ITEM_REQUIRED );
             return( ERROR );
         }
         i++;
@@ -334,9 +338,9 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
 
         if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
             if ( tokenarray[i].token == T_ID && SymSearch( string1 ) == NULL )
-                AsmErr( SYMBOL_NOT_DEFINED, string1 );
+                EmitErr( SYMBOL_NOT_DEFINED, string1 );
             else
-                AsmError( TEXT_ITEM_REQUIRED );
+                EmitError( TEXT_ITEM_REQUIRED );
             return( ERROR );
         }
         i++;
@@ -353,7 +357,7 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
         break;
     case CC_PASS2: /* [ELSE]IF2 */
         if ( ModuleInfo.setif2 == FALSE ) {
-            AsmError( IF2_NOT_ALLOWED );
+            EmitError( IF2_NOT_ALLOWED );
             break;
         }
         /* v2.04: changed */
@@ -403,7 +407,7 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
             i++;
         }
         if ( tokenarray[i].token != T_FINAL ) {
-            AsmWarn( 2, IFDEF_EXPECTS_SYMBOL_ARGUMENT, tokenarray[i-1].tokpos );
+            EmitWarn( 2, IFDEF_EXPECTS_SYMBOL_ARGUMENT, tokenarray[i-1].tokpos );
             while ( tokenarray[i].token != T_FINAL ) i++;
         }
         if ( directive == T_IFNDEF || directive == T_ELSEIFNDEF )
@@ -415,7 +419,7 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
     }
 
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
 
@@ -475,7 +479,7 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
         else if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE )
             opndx.value += opndx.sym->offset;
         else {
-            AsmError( CONSTANT_EXPECTED );
+            EmitError( CONSTANT_EXPECTED );
             return( ERROR );
         }
         if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
@@ -493,7 +497,7 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
         }
 
         if ( errmsg != EMPTY )
-            AsmErr( errmsg, opndx.value, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
+            EmitErr( errmsg, opndx.value, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
         break;
     case CC_SYMARG: /* .ERR[N]DEF */
         /* these directives are defined with flag DF_NOEXPAND,
@@ -507,8 +511,12 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
             } while ( tokenarray[i].token == T_DOT || tokenarray[i].token == T_ID );
             if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
                 /* v2.05: added */
-                ExpandLinePart( i, tokenarray, tokenarray[i].tokpos, TRUE, FALSE );
+                /* v2.08: obsolete, the expansion occurs in the preprocessor.
+                 * See ExpandLine() in expans.c
+                 */
+                //ExpandLineItems( tokenarray[i].tokpos, i, tokenarray, TRUE, FALSE );
                 i++;
+                /* Masm seems to accept anything as text */
                 if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
                     errtxt = i++;
                 }
@@ -541,7 +549,7 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
                 if ( tokenarray[j].token == T_ID )
                     j++;
                 else if ( tokenarray[j].token != T_FINAL && tokenarray[j].token != T_COMMA ) {
-                    AsmErr( SYNTAX_ERROR_EX, tokenarray[j].string_ptr );
+                    EmitErr( SYNTAX_ERROR_EX, tokenarray[j].string_ptr );
                     return( ERROR );
                 }
                 size = tokenarray[j].tokpos - tokenarray[idloc].tokpos;
@@ -554,13 +562,13 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
             if ( sym && sym->state == SYM_UNDEFINED )
                 sym = NULL;
 
-            /* Masm ignores the optional errtxt! */
+            /* Masm "usually" ignores the optional errtxt! */
             if( direct == T_DOT_ERRDEF && sym != NULL )
-                AsmErr( FORCED_DEF, tmpbuffer );
+                EmitErr( FORCED_DEF, tmpbuffer );
             else if( direct == T_DOT_ERRNDEF && sym == NULL )
-                AsmErr( FORCED_NOT_DEF, tmpbuffer );
+                EmitErr( FORCED_NOT_DEF, tmpbuffer );
         } else {
-            AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
         break;
@@ -568,9 +576,9 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
         string1 = tokenarray[i].string_ptr;
         if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
             if ( tokenarray[i].token == T_ID && SymSearch( string1 ) == NULL )
-                AsmErr( SYMBOL_NOT_DEFINED, string1 );
+                EmitErr( SYMBOL_NOT_DEFINED, string1 );
             else
-                AsmError( TEXT_ITEM_REQUIRED );
+                EmitError( TEXT_ITEM_REQUIRED );
             return( ERROR );
         }
         i++;
@@ -587,29 +595,29 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
         else if ( direct == T_DOT_ERRNB && !check_blank( string1 ) )
             errmsg = FORCED_NOT_BLANK;
         if ( errmsg != EMPTY )
-            AsmErr( errmsg, string1, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
+            EmitErr( errmsg, string1, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
         break;
     case CC_LITARG: /* .ERRDIF[I], .ERRIDN[I] */
         string1 = tokenarray[i].string_ptr;
         if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
             if ( tokenarray[i].token == T_ID && SymSearch( string1 ) == NULL )
-                AsmErr( SYMBOL_NOT_DEFINED, string1 );
+                EmitErr( SYMBOL_NOT_DEFINED, string1 );
             else
-                AsmError( TEXT_ITEM_REQUIRED );
+                EmitError( TEXT_ITEM_REQUIRED );
             return( ERROR );
         }
         i++;
         if ( tokenarray[i].token != T_COMMA ) {
-            AsmError( EXPECTING_COMMA );
+            EmitError( EXPECTING_COMMA );
             return( ERROR );
         }
         i++;
         string2 = tokenarray[i].string_ptr;
         if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
             if ( tokenarray[i].token == T_ID && SymSearch( string2 ) == NULL )
-                AsmErr( SYMBOL_NOT_DEFINED, string2 );
+                EmitErr( SYMBOL_NOT_DEFINED, string2 );
             else
-                AsmError( TEXT_ITEM_REQUIRED );
+                EmitError( TEXT_ITEM_REQUIRED );
             return( ERROR );
         }
         i++;
@@ -640,11 +648,11 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
                 errmsg = FORCED_IDN;
         }
         if ( errmsg != EMPTY )
-            AsmErr( errmsg, string1, string2, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
+            EmitErr( errmsg, string1, string2, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
         break;
     case CC_PASS2: /* .ERR2 */
         if ( ModuleInfo.setif2 == FALSE ) {
-            AsmError( IF2_NOT_ALLOWED );
+            EmitError( IF2_NOT_ALLOWED );
             return( ERROR );
         }
     case CC_PASS1: /* .ERR1 */
@@ -654,11 +662,11 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
         }
         if ( Parse_Pass == PASS_1 )
             break;
-        AsmErr( FORCED_ERR, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
+        EmitErr( FORCED_ERR, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
         break;
     }
     if ( tokenarray[i].token != T_FINAL ) {
-        AsmErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         return( ERROR );
     }
     return( NOT_ERROR );
@@ -668,7 +676,7 @@ void CondCheckOpen( void )
 /************************/
 {
     if( blocknestlevel > 0 ) {
-        AsmErr( BLOCK_NESTING_ERROR, "if-else" );
+        EmitErr( BLOCK_NESTING_ERROR, "if-else" );
     }
     return;
 }
