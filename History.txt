@@ -1,6 +1,13 @@
 
    Changelog
 
+   09/07/2012, v2.08a:
+
+   -  result of a macro function was expanded further even if the final result
+      was to be enclosed in <> (see regression test expans36.asm).
+   -  expansion of EXITM argument wasn't handled fully Masm-compatible in v2.08
+      if it contained one or more '!' (see regression test expans37.asm).
+
    08/29/2012, v2.08:
 
    Bugfixes:

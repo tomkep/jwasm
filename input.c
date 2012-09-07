@@ -877,6 +877,7 @@ char *GetTextLine( char *buffer )
 
         } else if ( fl->macro ) {
             /* item is a macro */
+            fl->mi->currline = ( fl->mi->currline ? fl->mi->currline->next : fl->mi->startline );
             if ( fl->mi->currline ) {
                 /* if line contains placeholders, replace them by current values */
                 if ( fl->mi->currline->ph_count ) {
@@ -887,7 +888,6 @@ char *GetTextLine( char *buffer )
                 } else {
                     strcpy( buffer, fl->mi->currline->line );
                 }
-                fl->mi->currline = fl->mi->currline->next;
                 fl->line_num++;
 #ifdef DEBUG_OUT
                 if ( Parse_Pass == PASS_1 ) cntlines++;

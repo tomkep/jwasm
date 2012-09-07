@@ -557,13 +557,15 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
      * may be redefined within the macro! Hence copy all values that are
      * needed later in the while loop to macro_instance!
      */
-    mi.startline = mi.currline = info->data;
+    mi.startline = info->data;
+    mi.currline = NULL; /* v2.08a */
     mi.parmcnt = info->parmcnt;
 
     /* v2.03: no processing if macro has no lines */
     /* v2.08: addprefix is obsolete */
     //if ( mi.currline || addprefix ) {
-    if ( mi.currline ) {
+    //if ( mi.currline ) {
+    if ( mi.startline ) { /* v2.08a */
         struct input_status oldstat;
         struct asm_tok *tarray;
 
@@ -622,7 +624,13 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
                             EmitErr( SYNTAX_ERROR_EX, tarray[2].tokpos );
                         else if ( out ) { /* return value buffer may be NULL ( loop directives ) */
                             //GetLiteralValue( out, tarray[1].string_ptr );
-                            strcpy( out, tarray[1].string_ptr );
+                            //strcpy( out, tarray[1].string_ptr );
+                            /* v2.08a */
+                            if ( mi.currline->ph_count ) {
+                                GetLiteralValue( out, tarray[1].string_ptr );
+                            } else {
+                                strcpy( out, tarray[1].string_ptr );
+                            }
                         }
                     }
                     DebugMsg1(("RunMacro(%s): EXITM, result=>%s<, suffix=>%s<\n",
@@ -672,10 +680,14 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
                     SkipCurrentQueue( tarray );
                     /* v2.05: MacroLevel isn't touched anymore inside the loop */
                     //MacroLevel--;
-                    if ( lnode && lnode->next ) {
+                    /* v2.08a */
+                    //if ( lnode && lnode->next ) {
+                    if ( lnode ) {
                         DebugMsg1(("RunMacro(%s): GOTO, found label >%s<\n", macro->sym.name, ptr));
                         //NewLineQueue();
-                        mi.currline = lnode->next;
+                        /* v2.08a */
+                        //mi.currline = lnode->next;
+                        mi.currline = lnode;
                         PushMacro( &macro->sym, &mi, i );
                         continue;
                     }
@@ -1099,7 +1111,8 @@ static ret_code ExpandToken( char *line, int *pi, struct asm_tok tokenarray[], i
                             return( ERROR );
                         DebugMsg1(("ExpandToken(%s, addbr=%u): macro function expanded to >%s<\n", sym->name, addbrackets, buffer));
                         /* expand text, but don't if macro was at position 0 (might be a text macro definition directive */
-                        if ( tmp && ( ERROR == ExpandTMacro( buffer, tokenarray, equmode, 0 ) ) )
+                        /* v2.08a: !addbrackets condition added */
+                        if ( tmp && (!addbrackets) && ( ERROR == ExpandTMacro( buffer, tokenarray, equmode, 0 ) ) )
                             return( ERROR );
                         /* get size of string to replace ( must be done before AddTokens() */
                         size = ( tokenarray[i-1].tokpos + 1) - tokenarray[tmp].tokpos;
@@ -1142,7 +1155,7 @@ static ret_code ExpandToken( char *line, int *pi, struct asm_tok tokenarray[], i
                         }
                         buffer[0] = NULLC; /* nothing should be returned, just to be safe */
                         DebugMsg1(("ExpandToken(%s): macro proc to be expanded\n", sym->name ));
-                        i = RunMacro( (struct dsym *)sym, ++i, tokenarray, buffer, 0, &is_exitm );
+                        i = RunMacro( (struct dsym *)sym, ++i, tokenarray, buffer, ( i == 1 ? 0 : -1), &is_exitm );
                         DebugMsg1(("ExpandToken(%s): macro proc called\n", sym->name));
                         if ( i == -1 )
                             return( ERROR );
