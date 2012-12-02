@@ -21,7 +21,7 @@
 #include "equate.h"
 #include "fixup.h"
 #include "mangle.h"
-#include "labels.h"
+#include "label.h"
 #include "input.h"
 #include "expreval.h"
 #include "types.h"
@@ -117,13 +117,17 @@ static struct asym *CreateComm( struct asym *sym, const char *name )
     return( sym );
 }
 
-static struct asym *CreateProto( int i, struct asm_tok tokenarray[], const char *name )
-/*************************************************************************************/
+/* create a prototype.
+ * used by PROTO, EXTERNDEF and EXT[E]RN directives.
+ */
+
+static struct asym *CreateProto( int i, struct asm_tok tokenarray[], const char *name, enum lang_type langtype )
+/**************************************************************************************************************/
 {
     struct asym      *sym;
     struct dsym      *dir;
 
-    DebugMsg1(("CreateProto( %u, %s )\n", i, name ? name : "NULL" ));
+    DebugMsg1(("CreateProto( i=%u, name=%s, lang=%u )\n", i, name ? name : "NULL", langtype ));
     sym = SymSearch( name );
 
     /* the symbol must be either NULL or state
@@ -135,7 +139,8 @@ static struct asym *CreateProto( int i, struct asm_tok tokenarray[], const char 
     if( sym == NULL ||
        sym->state == SYM_UNDEFINED ||
        (sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->isproc == FALSE )) {
-        sym = CreateProc( sym, name, FALSE );
+        if ( NULL == ( sym = CreateProc( sym, name, SYM_EXTERNAL ) ) )
+            return( NULL ); /* name was probably invalid */
     } else if ( sym->isproc == FALSE ) {
         EmitErr( SYMBOL_REDEFINITION, sym->name );
         return( NULL );
@@ -159,10 +164,10 @@ static struct asym *CreateProto( int i, struct asm_tok tokenarray[], const char 
     sym->isproc = TRUE;
 
     if ( Parse_Pass == PASS_1 ) {
-        if ( ExamineProc( i, tokenarray, dir, FALSE ) == ERROR )
+        if ( ParseProc( i, tokenarray, dir, FALSE, langtype ) == ERROR )
             return( NULL );
 #if DLLIMPORT
-        sym->dllname = ModuleInfo.CurrDll;
+        sym->dll = ModuleInfo.CurrDll;
 #endif
     } else {
         sym->isdefined = TRUE;
@@ -231,8 +236,8 @@ ret_code ExterndefDirective( int i, struct asm_tok tokenarray[] )
              * CreateProto() will either define a SYM_EXTERNAL or fail
              * if there's a syntax error or symbol redefinition.
              */
-            sym = CreateProto( i + 1, tokenarray, token );
-#if 0
+            sym = CreateProto( i + 1, tokenarray, token, langtype );
+#if 0 /* global queue is obsolete */
             if ( sym && sym->isglobal == FALSE ) {
                 sym->isglobal = TRUE;
                 QAddItem( &ModuleInfo.g.GlobalQueue, sym );
@@ -257,7 +262,7 @@ ret_code ExterndefDirective( int i, struct asm_tok tokenarray[] )
 
             /* v2.05: added to accept type prototypes */
             if ( ti.is_ptr == 0 && ti.symtype && ti.symtype->isproc ) {
-                CreateProc( sym, NULL, FALSE );
+                CreateProc( sym, NULL, SYM_EXTERNAL );
                 CopyPrototype( (struct dsym *)sym, (struct dsym *)ti.symtype );
                 ti.mem_type = ti.symtype->mem_type;
                 ti.symtype = NULL;
@@ -333,7 +338,7 @@ ret_code ExterndefDirective( int i, struct asm_tok tokenarray[] )
              * Masm doesn't warn.
              */
             if ( langtype != LANG_NONE && sym->langtype != langtype )
-                EmitWarn( 3, SYMBOL_REDEFINITION, sym->name );
+                EmitWarn( 3, LANGUAGE_ATTRIBUTE_CONFLICT, sym->name );
         }
         sym->isdefined = TRUE;
 
@@ -368,7 +373,7 @@ ret_code ExterndefDirective( int i, struct asm_tok tokenarray[] )
 }
 
 /* PROTO directive.
- * <name> PROTO <params> is virtually the same as
+ * <name> PROTO <params> is semantically identical to:
  * EXTERNDEF <name>: PROTO <params>
  */
 
@@ -387,7 +392,7 @@ ret_code ProtoDirective( int i, struct asm_tok tokenarray[] )
         return( ERROR );
     }
 
-    return( CreateProto( i + 1, tokenarray, tokenarray[0].string_ptr ) ? NOT_ERROR : ERROR );
+    return( CreateProto( 2, tokenarray, tokenarray[0].string_ptr, ModuleInfo.langtype ) ? NOT_ERROR : ERROR );
 }
 
 /* helper for EXTERN directive.
@@ -558,15 +563,15 @@ ret_code ExternDirective( int i, struct asm_tok tokenarray[] )
         } else if ( tokenarray[i].token == T_DIRECTIVE && tokenarray[i].tokval == T_PROTO ) {
             /* dont scan this line further */
             /* CreateProto() will define a SYM_EXTERNAL */
-            sym = CreateProto( i + 1, tokenarray, token );
+            sym = CreateProto( i + 1, tokenarray, token, langtype );
             DebugMsg1(("ExternDirective(%s): CreateProto()=%X\n", token, sym));
             if ( sym == NULL )
                 return( ERROR );
-            else if ( sym->state == SYM_EXTERNAL ) {
+            if ( sym->state == SYM_EXTERNAL ) {
                 sym->weak = FALSE;
-                HandleAltname( altname, sym );
-                return( NOT_ERROR );
+                return( HandleAltname( altname, sym ) );
             } else {
+                /* unlike EXTERNDEF, EXTERN doesn't allow a PROC for the same name */
                 EmitErr( SYMBOL_REDEFINITION, sym->name );
                 return( ERROR );
             }
@@ -590,7 +595,8 @@ ret_code ExternDirective( int i, struct asm_tok tokenarray[] )
 
             /* v2.05: added to accept type prototypes */
             if ( ti.is_ptr == 0 && ti.symtype && ti.symtype->isproc ) {
-                CreateProc( sym, NULL, FALSE );
+                CreateProc( sym, NULL, SYM_EXTERNAL );
+                sym->weak = FALSE; /* v2.09: reset the weak bit that has been set inside CreateProc() */
                 CopyPrototype( (struct dsym *)sym, (struct dsym *)ti.symtype );
                 ti.mem_type = ti.symtype->mem_type;
                 ti.symtype = NULL;
@@ -849,6 +855,15 @@ struct asym *GetPublicData( void * *vp )
         struct asym *sym = (struct asym *)(*curr)->elmt;
         if ( sym->state == SYM_INTERNAL )
             return ( sym );
+        /* v2.09: also return undefined symbols. this may be
+         * the case for assembly time variables. A full second
+         * pass will be done.
+         */
+        if ( sym->state == SYM_UNDEFINED ) {
+            DebugMsg(("GetPublicData: sym=%s has state SYM_UNDEFINED\n", sym->name ));
+            return ( sym );
+        }
+        DebugMsg(("GetPublicData: sym=%s skipped, state=%u\n", sym->name, sym->state ));
 #if 0 //FASTPASS  /* v2.04: this is now done in PassOneCheck() */
         /* skip anything not EXTERNAL, also COMMs and EXTERNs */
         if ( sym->state != SYM_EXTERNAL || sym->weak == FALSE ) {
@@ -892,6 +907,7 @@ ret_code PublicDirective( int i, struct asm_tok tokenarray[] )
     char                skipitem;
     enum lang_type      langtype;
 
+    DebugMsg1(("PublicDirective(%u) enter\n", i));
     i++; /* skip PUBLIC directive */
 #if MANGLERSUPP
     mangle_type = Check4Mangler( &i, tokenarray );
@@ -909,7 +925,7 @@ ret_code PublicDirective( int i, struct asm_tok tokenarray[] )
         /* get the symbol name */
         token = tokenarray[i++].string_ptr;
 
-        DebugMsg1(("PublicDirective(%s)\n", token ));
+        DebugMsg1(("PublicDirective: sym=%s\n", token ));
 
         /* Add the public name */
         sym = SymSearch( token );
@@ -970,7 +986,7 @@ ret_code PublicDirective( int i, struct asm_tok tokenarray[] )
                 if ( (i + 1) < Token_Count )
                     i++;
             } else {
-                EmitError( EXPECTING_COMMA );
+                EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
                 return( ERROR );
             }
 

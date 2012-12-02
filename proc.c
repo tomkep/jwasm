@@ -17,7 +17,7 @@
 #include "extern.h"
 #include "equate.h"
 #include "fixup.h"
-#include "labels.h"
+#include "label.h"
 #include "input.h"
 #include "tokenize.h"
 #include "expreval.h"
@@ -70,8 +70,8 @@ static UNWIND_CODE      unw_code[128];
 #endif
 
 #if AMD64_SUPPORT
-/* fields: next, name, segment, offset/value */
-struct asym ReservedStack = { NULL,"@ReservedStack", 0 };   /* max stack space required by INVOKE */
+/* @ReservedStack symbol */
+struct asym *sym_ReservedStack = NULL; /* max stack space required by INVOKE */
 #endif
 
 /* tables for FASTCALL support */
@@ -388,6 +388,7 @@ ret_code LocalDir( int i, struct asm_tok tokenarray[] )
     int         cnt;
     int         sizestd;
     int         sizexmm;
+    int         adjdisp = FALSE;
 #endif
     struct qualified_type ti;
     int         align = CurrWordSize;
@@ -414,8 +415,12 @@ ret_code LocalDir( int i, struct asm_tok tokenarray[] )
 
     i++; /* go past LOCAL */
 #if AMD64_SUPPORT
-    if ( info->isframe ) {
+    /* v2.09: if stack space is to be reserved for INVOKE, start displacement has also to be adjusted */
+    //if ( info->isframe ) {
+    if ( info->isframe || ( ModuleInfo.fctype == FCT_WIN64 && ( ModuleInfo.win64_flags & W64F_AUTOSTACKSP ) ) ) {
         uint_16 *regs = info->regslist;
+        DebugMsg1(("LocalDir: adjust local displacement\n" ));
+        adjdisp = TRUE;
         sizexmm = 0;
         sizestd = 0;
         /* adjust start displacement for Win64 FRAME procs.
@@ -547,7 +552,7 @@ ret_code LocalDir( int i, struct asm_tok tokenarray[] )
 
 #if AMD64_SUPPORT
         /* v2.07: add the alignment here! */
-        if ( info->isframe && ( info->localsize == 0 ) ) {
+        if ( adjdisp && ( info->localsize == 0 ) ) {
             if ( sizexmm == 0 && ( displ & 0xf ) )
                 info->localsize = 8 - ( local->sym.total_size & 0x7 );
         }
@@ -561,7 +566,7 @@ ret_code LocalDir( int i, struct asm_tok tokenarray[] )
         DebugMsg1(("LocalDir(%s): aligned local total=%X\n", name, info->localsize));
 
 #if AMD64_SUPPORT
-        if ( info->isframe )
+        if ( adjdisp )
             local->sym.offset = - ( info->localsize + displ );
         else
 #endif
@@ -589,8 +594,9 @@ ret_code LocalDir( int i, struct asm_tok tokenarray[] )
     return( NOT_ERROR );
 }
 
-/* parse parameters of a PROC/PROTO
- * i=token buffer index
+/* parse parameters of a PROC/PROTO.
+ * Called in pass one only.
+ * i=start parameters
  */
 
 static ret_code ParseParams( int i, struct asm_tok tokenarray[], struct dsym *proc, bool IsPROC )
@@ -785,7 +791,7 @@ static ret_code ParseParams( int i, struct asm_tok tokenarray[], struct dsym *pr
             } else
                 paracurr = paracurr->nextparam;
 
-        } else if ( proc->e.procinfo->init == TRUE ) {
+        } else if ( proc->e.procinfo->init_done == TRUE ) {
             /* second definition has more parameters than first */
             DebugMsg(("ParseParams: different param count\n"));
             EmitErr( CONFLICTING_PARAMETER_DEFINITION, "" );
@@ -877,7 +883,7 @@ static ret_code ParseParams( int i, struct asm_tok tokenarray[], struct dsym *pr
         }
     } /* end for */
 
-    if ( proc->e.procinfo->init == TRUE ) {
+    if ( proc->e.procinfo->init_done == TRUE ) {
         if ( paracurr ) {
             /* first definition has more parameters than second */
             DebugMsg(("ParseParams: a param is left over, cntParam=%u\n", cntParam));
@@ -934,21 +940,29 @@ static ret_code ParseParams( int i, struct asm_tok tokenarray[], struct dsym *pr
 }
 
 /*
- * create a PROC type
- * i = start position of attributes
+ * parse a function prototype - called in pass 1 only.
+ * the syntax is used by:
+ * - PROC directive:      <name> PROC ...
+ * - PROTO directive:     <name> PROTO ...
+ * - EXTERN[DEF] directive: EXTERN[DEF] <name>: PROTO ...
+ * - TYPEDEF directive:   <name> TYPEDEF PROTO ...
+ *
+ * i = start index of attributes
+ * IsPROC: TRUE for PROCs, FALSE for everything else
+ *
  * strategy to set default value for "offset size" (16/32):
  * 1. if current model is FLAT, use 32, else
  * 2. use the current segment's attribute
  * 3. if no segment is set, use cpu setting
  */
 
-ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, bool IsPROC )
-/****************************************************************************************/
+ret_code ParseProc( int i, struct asm_tok tokenarray[], struct dsym *proc, bool IsPROC, enum lang_type langtype )
+/***************************************************************************************************************/
 {
     char            *token;
     uint_16         *regist;
     //int             type;
-    enum lang_type  langtype;
+    //enum lang_type  langtype;
     enum memtype    newmemtype;
     uint_8          newofssize;
 #if FASTPASS
@@ -1018,7 +1032,7 @@ ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, boo
     if ( proc->sym.mem_type != MT_EMPTY &&
         ( proc->sym.mem_type != newmemtype ||
          GetSymOfssize( &proc->sym ) != newofssize ) ) {
-        DebugMsg(("ExamineProc: error, memtype changed, old-new memtype=%X-%X, ofssize=%X-%X\n", proc->sym.mem_type, newmemtype, proc->sym.Ofssize, newofssize));
+        DebugMsg(("ParseProc: error, memtype changed, old-new memtype=%X-%X, ofssize=%X-%X\n", proc->sym.mem_type, newmemtype, proc->sym.Ofssize, newofssize));
         if ( proc->sym.mem_type == MT_NEAR || proc->sym.mem_type == MT_FAR )
             EmitError( PROC_AND_PROTO_CALLING_CONV_CONFLICT );
         else {
@@ -1032,11 +1046,16 @@ ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, boo
     }
 
     /* 2. attribute is <langtype> */
-    langtype = ModuleInfo.langtype; /* set the default value */
+    /* v2.09: the default language value is now a function argument. This is because
+     * EXTERN[DEF] allows to set the language attribute by:
+     * EXTERN[DEF] <langtype> <name> PROTO ...
+     * ( see CreateProto() in extern.c )
+     */
+    //langtype = ModuleInfo.langtype; /* set the default value */
     GetLangType( &i, tokenarray, &langtype ); /* optionally overwrite the value */
     /* has language changed? */
     if ( proc->sym.langtype != LANG_NONE && proc->sym.langtype != langtype ) {
-        DebugMsg(("ExamineProc: error, language changed, %u - %u\n", proc->sym.langtype, langtype ));
+        DebugMsg(("ParseProc: error, language changed, %u - %u\n", proc->sym.langtype, langtype ));
         EmitError( PROC_AND_PROTO_CALLING_CONV_CONFLICT );
     } else
         proc->sym.langtype = langtype;
@@ -1095,7 +1114,7 @@ ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, boo
 #else
                     } else if ( _stricmp( tokenarray[idx].string_ptr, "LOADDS") == 0 ) {
 #endif
-                        if ( ModuleInfo.model == MODEL_FLAT && Parse_Pass == PASS_1 ) {
+                        if ( ModuleInfo.model == MODEL_FLAT ) {
                             EmitWarn( 2, LOADDS_IGNORED_IN_FLAT_MODEL );
                         } else
                             proc->e.procinfo->loadds = TRUE;
@@ -1121,7 +1140,11 @@ ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, boo
         tokenarray[i].token == T_RES_ID &&
         tokenarray[i].tokval == T_FRAME ) {
         /* v2.05: don't accept FRAME for ELF */
-        if ( Options.output_format != OFORMAT_COFF ) {
+        if ( Options.output_format != OFORMAT_COFF
+#if PE_SUPPORT
+            && ModuleInfo.sub_format != SFORMAT_PE
+#endif
+           ) {
             EmitErr( NOT_SUPPORTED_WITH_CURR_FORMAT, GetResWName( T_FRAME, NULL ) );
             return( ERROR );
         }
@@ -1157,7 +1180,7 @@ ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, boo
         int cnt;
         int j;
         if ( !IsPROC ) {/* not for PROTO! */
-            DebugMsg(("ExamineProc: USES found in PROTO\n"));
+            DebugMsg(("ParseProc: USES found in PROTO\n"));
             EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
         }
         i++;
@@ -1165,7 +1188,7 @@ ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, boo
         for ( cnt = 0, j = i; tokenarray[j].token == T_REG; j++, cnt++ );
 
         if ( cnt == 0 ) {
-            DebugMsg(("ExamineProc: no registers for regslist\n"));
+            DebugMsg(("ParseProc: no registers for regslist\n"));
             EmitErr( SYNTAX_ERROR_EX, tokenarray[i-1].tokpos );
         } else {
             regist = LclAlloc( (cnt + 1) * sizeof( uint_16 ) );
@@ -1191,16 +1214,17 @@ ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, boo
     if ( tokenarray[i].token == T_COMMA )
         i++;
 
-    DebugMsg1(("ExamineProc(%s): i=%u, Token_Count=%u, CurrWordSize=%u\n", proc->sym.name, i, Token_Count, CurrWordSize ));
+    DebugMsg1(("ParseProc(%s): i=%u, Token_Count=%u, CurrWordSize=%u\n", proc->sym.name, i, Token_Count, CurrWordSize ));
 
-    /* are there parameters at all? */
     if( i >= Token_Count ) {
-        if ( proc->e.procinfo->init == TRUE && proc->e.procinfo->paralist != NULL )
+        /* procedure has no parameters at all */
+        if ( proc->e.procinfo->paralist != NULL )
             EmitErr( CONFLICTING_PARAMETER_DEFINITION, "" );
-    } else if( proc->sym.langtype == LANG_NONE ) {
-        EmitError( LANG_MUST_BE_SPECIFIED );
-        return ( ERROR );
-    } else  {
+    } else {
+        if( proc->sym.langtype == LANG_NONE ) {
+            EmitError( LANG_MUST_BE_SPECIFIED );
+            return ( ERROR );
+        }
         /* v2.05: set PROC's vararg flag BEFORE params are scanned! */
         if ( tokenarray[Token_Count - 1].token == T_RES_ID &&
             tokenarray[Token_Count - 1].tokval == T_VARARG )
@@ -1213,16 +1237,16 @@ ret_code ExamineProc( int i, struct asm_tok tokenarray[], struct dsym *proc, boo
             ;//return( ERROR );
     }
 
-    proc->e.procinfo->init = TRUE;
-    DebugMsg1(("ExamineProc(%s): memtype=%Xh parasize=%u\n", proc->sym.name, proc->sym.mem_type, proc->e.procinfo->parasize));
+    proc->e.procinfo->init_done = TRUE;
+    DebugMsg1(("ParseProc(%s): memtype=%Xh parasize=%u\n", proc->sym.name, proc->sym.mem_type, proc->e.procinfo->parasize));
 
     return( NOT_ERROR );
 }
 
-/* create a proc item.
+/* create a proc ( internal[=PROC] or external[=PROTO] ) item.
  * sym is either NULL, or has type SYM_UNDEFINED or SYM_EXTERNAL */
 
-struct asym *CreateProc( struct asym *sym, const char *name, unsigned char IsPROC )
+struct asym *CreateProc( struct asym *sym, const char *name, enum sym_state state )
 /*********************************************************************************/
 {
     if ( sym == NULL )
@@ -1232,12 +1256,9 @@ struct asym *CreateProc( struct asym *sym, const char *name, unsigned char IsPRO
 
     if ( sym ) {
         struct proc_info *info;
-        if ( IsPROC )
-            sym->state = SYM_INTERNAL;
-        else {
+        sym->state = state;
+        if ( state != SYM_INTERNAL ) {
             sym->seg_ofssize = ModuleInfo.Ofssize;
-            sym->state = SYM_EXTERNAL;
-            sym->weak = TRUE;
         }
         info = LclAlloc( sizeof( struct proc_info ) );
         ((struct dsym *)sym)->e.procinfo = info;
@@ -1249,26 +1270,27 @@ struct asym *CreateProc( struct asym *sym, const char *name, unsigned char IsPRO
         info->localsize = 0;
         info->prologuearg = NULL;
         info->flags = 0;
-        if ( *(sym->name) )
-            if ( sym->state == SYM_INTERNAL )
-                /* v2.04: don't use sym_add_table() and thus
-                 * free the <next> member field!
-                 */
-                if ( SymTables[TAB_PROC].head == NULL )
-                    SymTables[TAB_PROC].head = SymTables[TAB_PROC].tail = (struct dsym *)sym;
-                else {
-                    SymTables[TAB_PROC].tail->nextproc = (struct dsym *)sym;
-                    SymTables[TAB_PROC].tail = (struct dsym *)sym;
-                }
-            else
-                sym_add_table( &SymTables[TAB_EXT], (struct dsym *)sym ); /* EXTERNAL */
-
-        if ( IsPROC ) {
+        switch ( sym->state ) {
+        case SYM_INTERNAL:
+            /* v2.04: don't use sym_add_table() and thus
+             * free the <next> member field!
+             */
+            if ( SymTables[TAB_PROC].head == NULL )
+                SymTables[TAB_PROC].head = SymTables[TAB_PROC].tail = (struct dsym *)sym;
+            else {
+                SymTables[TAB_PROC].tail->nextproc = (struct dsym *)sym;
+                SymTables[TAB_PROC].tail = (struct dsym *)sym;
+            }
             procidx++;
             if ( Options.line_numbers ) {
                 sym->debuginfo = LclAlloc( sizeof( struct debug_info ) );
                 sym->debuginfo->file = get_curr_srcfile();
             }
+            break;
+        case SYM_EXTERNAL:
+            sym->weak = TRUE;
+            sym_add_table( &SymTables[TAB_EXT], (struct dsym *)sym );
+            break;
         }
     }
     return( sym );
@@ -1369,7 +1391,7 @@ ret_code ProcDir( int i, struct asm_tok tokenarray[] )
 
         oldpubstate = sym ? sym->public : FALSE;
         if( sym == NULL || sym->state == SYM_UNDEFINED ) {
-            sym = CreateProc( sym, name, TRUE );
+            sym = CreateProc( sym, name, SYM_INTERNAL );
             is_global = FALSE;
         } else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
             /* PROTO or EXTERNDEF item */
@@ -1386,7 +1408,7 @@ ret_code ProcDir( int i, struct asm_tok tokenarray[] )
                  * this will be SYM_INTERNAL */
                 /* v2.03: don't call dir_free(), it'll clear field Ofssize */
                 //dir_free( (struct dsym *)sym );
-                sym = CreateProc( sym, name, TRUE );
+                sym = CreateProc( sym, name, SYM_INTERNAL );
             }
         } else {
             /* Masm won't reject a redefinition if "certain" parameters
@@ -1402,13 +1424,12 @@ ret_code ProcDir( int i, struct asm_tok tokenarray[] )
 
         SymClearLocal();
 
-        /* ExamineProc() will use CurrProc variable! */
+        /* CurrProc must be set, it's used inside SymFind() and SymLCreate()! */
         CurrProc = (struct dsym *)sym;
-        if( ExamineProc( i, tokenarray, (struct dsym *)sym, TRUE ) == ERROR ) {
+        if( ParseProc( i, tokenarray, (struct dsym *)sym, TRUE, ModuleInfo.langtype ) == ERROR ) {
             CurrProc = NULL;
             return( ERROR );
         }
-
         /* v2.04: added */
         if ( is_global && Options.masm8_proc_visibility )
             sym->public = TRUE;
@@ -1485,7 +1506,7 @@ ret_code ProcDir( int i, struct asm_tok tokenarray[] )
             AddLinnumDataRef( 0 );
         else
 #endif
-            AddLinnumDataRef( LineNumber );
+            AddLinnumDataRef( GetLineNumber() );
     }
 
     BackPatch( sym );
@@ -1552,7 +1573,7 @@ static void WriteSEHData( struct dsym *proc )
     if ( unw_segs_defined )
         AddLineQueueX("%s %r", segname, T_SEGMENT );
     else {
-        AddLineQueueX("%s %r align(%u) flat readonly 'DATA'", segname, T_SEGMENT, 8 );
+        AddLineQueueX("%s %r align(%u) flat read 'DATA'", segname, T_SEGMENT, 8 );
         AddLineQueue("$xdatasym label near");
     }
     xdataofs = 0;
@@ -1599,7 +1620,7 @@ static void WriteSEHData( struct dsym *proc )
     if ( simplespec )
         AddLineQueueX( "%s %r", segname, T_SEGMENT );
     else
-        AddLineQueueX( "%s %r align(%u) flat readonly 'DATA'", segname, T_SEGMENT, 4 );
+        AddLineQueueX( "%s %r align(%u) flat read 'DATA'", segname, T_SEGMENT, 4 );
     /* write the .pdata stuff ( type IMAGE_RUNTIME_FUNCTION_ENTRY )*/
     AddLineQueueX( "dd %r %s, %r %s+0%xh, %r $xdatasym+0%xh",
                   T_IMAGEREL, proc->sym.name,
@@ -1631,14 +1652,14 @@ static void ProcFini( struct dsym *proc )
     }
 
     /* v2.03: for W3+, check for unused params and locals */
-    if ( Options.warning_level > 2 ) {
+    if ( Options.warning_level > 2 && Parse_Pass == PASS_1 ) {
         struct dsym *curr;
         for ( curr = proc->e.procinfo->paralist; curr; curr = curr->nextparam ) {
-            if ( curr->sym.used == FALSE && Parse_Pass == PASS_1 )
+            if ( curr->sym.used == FALSE )
                 EmitWarn( 3, PROCEDURE_ARGUMENT_OR_LOCAL_NOT_REFERENCED, curr->sym.name );
         }
         for ( curr = proc->e.procinfo->locallist; curr; curr = curr->nextlocal ) {
-            if ( curr->sym.used == FALSE && Parse_Pass == PASS_1 )
+            if ( curr->sym.used == FALSE )
                 EmitWarn( 3, PROCEDURE_ARGUMENT_OR_LOCAL_NOT_REFERENCED, curr->sym.name );
         }
     }
@@ -1647,7 +1668,7 @@ static void ProcFini( struct dsym *proc )
     if ( Parse_Pass == PASS_1 &&
         ModuleInfo.fctype == FCT_WIN64 &&
         ( ModuleInfo.win64_flags & W64F_AUTOSTACKSP ) ) {
-        proc->e.procinfo->ReservedStack = ReservedStack.value;
+        proc->e.procinfo->ReservedStack = sym_ReservedStack->value;
         DebugMsg1(("ProcFini(%s): localsize=%u ReservedStack=%u\n", proc->sym.name, proc->e.procinfo->localsize, proc->e.procinfo->ReservedStack ));
     }
 
@@ -1717,7 +1738,11 @@ ret_code ExcFrameDirective( int i, struct asm_tok tokenarray[] )
 
     DebugMsg(("ExcFrameDirective(%s) enter\n", tokenarray[i].string_ptr ));
     /* v2.05: accept directives for windows only */
-    if ( Options.output_format != OFORMAT_COFF ) {
+    if ( Options.output_format != OFORMAT_COFF
+#if PE_SUPPORT
+        && ModuleInfo.sub_format != SFORMAT_PE
+#endif
+       ) {
         EmitErr( NOT_SUPPORTED_WITH_CURR_FORMAT, GetResWName( tokenarray[i].tokval, NULL ) );
         return( ERROR );
     }
@@ -1933,8 +1958,7 @@ static ret_code write_userdef_prologue( struct asm_tok tokenarray[] )
     int                 flags = CurrProc->sym.langtype; /* set bits 0-2 */
     uint_16             *regs;
     char                reglst[128];
-    char                buffer[128+128];
-    char                retvalue[MAX_LINE_LEN]; /* stores literal returned by RunMacro() */
+    char                buffer[MAX_LINE_LEN];
 
 #if FASTPASS
     if ( Parse_Pass > PASS_1 && UseSavedState )
@@ -1962,6 +1986,16 @@ static ret_code write_userdef_prologue( struct asm_tok tokenarray[] )
 
     //flags |= CurrProc->sym.export ? 0 : 0x80; /* bit 7: 1 if export */
 
+    dir = (struct dsym *)SymSearch( ModuleInfo.proc_prologue );
+    if ( dir == NULL || dir->sym.state != SYM_MACRO || dir->sym.isfunc != TRUE ) {
+        EmitError( PROLOGUE_MUST_BE_MACRO_FUNC );
+        return( ERROR );
+    }
+
+    /* if -EP is on, emit "prologue: none" */
+    if ( Options.preprocessor_stdout )
+        printf( "option prologue:none\n" );
+
     p = reglst;
     if ( info->regslist ) {
         regs = info->regslist;
@@ -1974,37 +2008,23 @@ static ret_code write_userdef_prologue( struct asm_tok tokenarray[] )
     }
     *p = NULLC;
 
-    dir = (struct dsym *)SymSearch( ModuleInfo.proc_prologue );
-    if ( dir == NULL || dir->sym.state != SYM_MACRO || dir->sym.isfunc != TRUE ) {
-        EmitError( PROLOGUE_MUST_BE_MACRO_FUNC );
-        return( ERROR );
-    }
-
-    /* if -EP is on, emit "prologue: none" */
-    if ( Options.preprocessor_stdout )
-        printf( "option prologue:none\n" );
-
-#if 0
     /* v2.07: make this work with radix != 10 */
-    //sprintf( buffer,"%s(%s, %u, %u, %u, <<%s>>, <%s>)", ModuleInfo.proc_prologue,
-    sprintf( buffer,"%s(%s, 0%XH, 0%XH, 0%XH, <<%s>>, <%s>)", ModuleInfo.proc_prologue,
-             CurrProc->sym.name, flags, info->parasize, info->localsize,
-            reglst, info->prologuearg ? info->prologuearg : "" );
-#else
-    sprintf( buffer,"(%s, 0%XH, 0%XH, 0%XH, <<%s>>, <%s>)",
+    /* leave a space at pos 0 of buffer, because the buffer is used for
+     * both macro arguments and EXITM return value.
+     */
+    sprintf( buffer," (%s, 0%XH, 0%XH, 0%XH, <<%s>>, <%s>)",
              CurrProc->sym.name, flags, info->parasize, info->localsize,
             reglst, info->prologuearg ? info->prologuearg : "" );
     i = Token_Count + 1;
     Token_Count = Tokenize( buffer, i, tokenarray, TOK_RESCAN );
-#endif
-    //RunMacro( dir, buffer, retvalue, FALSE, &is_exitm );
-    RunMacro( dir, i, tokenarray, retvalue, -1, &is_exitm );
+
+    RunMacro( dir, i, tokenarray, buffer, 0, &is_exitm );
     Token_Count = i - 1;
-    DebugMsg(("write_userdef_prologue: macro %s returned >%s<\n", ModuleInfo.proc_prologue, retvalue));
+    DebugMsg(("write_userdef_prologue: macro %s returned >%s<\n", ModuleInfo.proc_prologue, buffer ));
 
     if ( Parse_Pass == PASS_1 ) {
         struct dsym *curr;
-        len = atoi(retvalue) - info->localsize;
+        len = atoi( buffer ) - info->localsize;
         for ( curr = info->locallist; curr; curr = curr->nextlocal ) {
             curr->sym.offset -= len;
         }
@@ -2015,7 +2035,7 @@ static ret_code write_userdef_prologue( struct asm_tok tokenarray[] )
 
 #if AMD64_SUPPORT
 
-/* save up to 4 register parameters for WIN64 fastcall */
+/* OPTION WIN64:1 - save up to 4 register parameters for WIN64 fastcall */
 
 static void win64_SaveRegParams( struct proc_info *info )
 /*******************************************************/
@@ -2031,6 +2051,8 @@ static void win64_SaveRegParams( struct proc_info *info )
             else
                 AddLineQueueX( "mov [%r+%u], %r", T_RSP, 8 + i * 8, ms64_regs[i] );
             param = param->nextparam;
+        } else { /* v2.09: else branch added */
+            AddLineQueueX( "mov [%r+%u], %r", T_RSP, 8 + i * 8, ms64_regs[i] );
         }
     }
     return;
@@ -2045,6 +2067,7 @@ static ret_code write_win64_default_prologue( struct proc_info *info )
     uint_16             *regist;
     int                 sizestd = 0;
     int                 sizexmm = 0;
+    int                 resstack = ( ( ModuleInfo.win64_flags & W64F_AUTOSTACKSP ) ? sym_ReservedStack->value : 0 );
 
     DebugMsg1(("write_win64_default_prologue enter\n"));
     NewLineQueue();
@@ -2107,7 +2130,7 @@ static ret_code write_win64_default_prologue( struct proc_info *info )
 
     /* alloc space for local variables and align the stack. */
     //if( info->localsize + sizestd ) {
-    if( info->localsize + sizestd + ReservedStack.value ) {
+    if( info->localsize + sizestd + resstack ) {
 
         /* align the stack if necessary. */
         if ( ( sizestd && (!(info->localsize & 0xF ) ) ) ||
@@ -2119,7 +2142,7 @@ static ret_code write_win64_default_prologue( struct proc_info *info )
          * SUB  RSP, localsize
          * .ALLOCSTACK localsize
          */
-        if ( ReservedStack.value ) {
+        if ( resstack ) {
             AddLineQueueX( "sub %r, %d + @ReservedStack", T_RSP, NUMQUAL info->localsize );
             AddLineQueueX( "%r %d + @ReservedStack", T_DOT_ALLOCSTACK, NUMQUAL info->localsize );
         } else {
@@ -2177,8 +2200,12 @@ static ret_code write_default_prologue( void )
 /********************************************/
 {
     struct proc_info    *info;
+    uint_16             *regist;
     uint_8              oldlinenumbers;
-    //int                 align = CurrWordSize;
+    int                 cnt;
+#if AMD64_SUPPORT
+    int                 resstack = 0;
+#endif
 
     info = CurrProc->e.procinfo;
 
@@ -2189,6 +2216,8 @@ static ret_code write_default_prologue( void )
             return( write_win64_default_prologue( info ) );
         return( NOT_ERROR );
     }
+    if ( ModuleInfo.Ofssize == USE64 && ModuleInfo.fctype == FCT_WIN64 && ( ModuleInfo.win64_flags & W64F_AUTOSTACKSP ) )
+        resstack = sym_ReservedStack->value;
 #endif
     /* default processing. if no params/locals are defined, continue */
     if( info->forceframe == FALSE &&
@@ -2196,12 +2225,13 @@ static ret_code write_default_prologue( void )
        info->stackparam == FALSE &&
        info->is_vararg == FALSE &&
 #if AMD64_SUPPORT
-       ReservedStack.value == 0 &&
+       resstack == 0 &&
 #endif
        info->regslist == NULL )
         return( NOT_ERROR );
 
     info->localsize = ROUND_UP( info->localsize, CurrWordSize );
+    regist = info->regslist;
     NewLineQueue();
 
 #if AMD64_SUPPORT
@@ -2223,7 +2253,13 @@ static ret_code write_default_prologue( void )
         AddLineQueueX( "mov %r, %r", basereg[ModuleInfo.Ofssize], stackreg[ModuleInfo.Ofssize] );
     }
 #if AMD64_SUPPORT
-    if( ReservedStack.value ) {
+    if( resstack ) {
+        /* in this case, push the USES registers BEFORE the stack space is reserved */
+        if ( regist ) {
+            for( cnt = *regist++; cnt; cnt--, regist++ )
+                AddLineQueueX( "push %r", *regist );
+            regist = NULL;
+        }
         /* if no framepointer was pushed, add 8 to align stack on OWORD */
         if( !(info->localsize || info->stackparam || info->is_vararg || info->forceframe ))
             AddLineQueueX( "sub %r, 8 + @ReservedStack", stackreg[ModuleInfo.Ofssize] );
@@ -2249,9 +2285,7 @@ static ret_code write_default_prologue( void )
     }
 
     /* Push the USES registers */
-    if ( info->regslist ) {
-        uint_16 *regist = info->regslist;
-        int cnt;
+    if ( regist ) {
         for( cnt = *regist++; cnt; cnt--, regist++ ) {
             AddLineQueueX( "push %r", *regist );
         }
@@ -2289,7 +2323,7 @@ void write_prologue( struct asm_tok tokenarray[] )
 #if AMD64_SUPPORT
     if ( ModuleInfo.fctype == FCT_WIN64 && ( ModuleInfo.win64_flags & W64F_AUTOSTACKSP ) ) {
         /* in pass one init reserved stack with 4*8 to force stack frame creation */
-        ReservedStack.value = ( Parse_Pass == PASS_1 ? 4 * sizeof( uint_64 ) : CurrProc->e.procinfo->ReservedStack );
+        sym_ReservedStack->value = ( Parse_Pass == PASS_1 ? 4 * sizeof( uint_64 ) : CurrProc->e.procinfo->ReservedStack );
     }
 #endif
     /* there are 3 cases:
@@ -2428,6 +2462,9 @@ static void write_default_epilogue( void )
 /****************************************/
 {
     struct proc_info   *info;
+#if AMD64_SUPPORT
+    int resstack = 0;
+#endif
 
     info = CurrProc->e.procinfo;
 
@@ -2436,6 +2473,14 @@ static void write_default_epilogue( void )
         if ( ModuleInfo.frame_auto )
             write_win64_default_epilogue( info );
         return;
+    }
+    if ( ModuleInfo.Ofssize == USE64 && ModuleInfo.fctype == FCT_WIN64 && ( ModuleInfo.win64_flags & W64F_AUTOSTACKSP ) ) {
+        resstack  = sym_ReservedStack->value;
+        /* if no framepointer was pushed, add 8 to align stack on OWORD */
+        if( !(info->localsize || info->stackparam || info->is_vararg || info->forceframe ))
+            AddLineQueueX( "add %r, 8 + @ReservedStack", stackreg[ModuleInfo.Ofssize] );
+        else
+            AddLineQueueX( "add %r, %d + @ReservedStack", stackreg[ModuleInfo.Ofssize], NUMQUAL info->localsize );
     }
 #endif
 
@@ -2450,7 +2495,7 @@ static void write_default_epilogue( void )
        info->stackparam == FALSE &&
        info->is_vararg == FALSE &&
 #if AMD64_SUPPORT
-       ReservedStack.value == 0 &&
+       resstack == 0 &&
 #endif
        info->forceframe == FALSE )
         return;
@@ -2458,6 +2503,11 @@ static void write_default_epilogue( void )
     /* restore registers e/sp and e/bp.
      * emit either "leave" or "mov e/sp,e/bp, pop e/bp".
      */
+#if AMD64_SUPPORT
+    if( !(info->localsize || info->stackparam || info->is_vararg || info->forceframe ))
+        ;
+    else
+#endif
     if( info->pe_type ) {
         AddLineQueue( "leave" );
     } else  {
@@ -2543,8 +2593,7 @@ static ret_code write_userdef_epilogue( bool flag_iret, struct asm_tok tokenarra
     if ( Options.preprocessor_stdout )
         printf( "option epilogue:none\n" );
 
-    //RunMacro( dir, buffer, NULL, FALSE, &is_exitm );
-    RunMacro( dir, i, tokenarray, NULL, -1, &is_exitm );
+    RunMacro( dir, i, tokenarray, NULL, 0, &is_exitm );
     Token_Count = i - 1;
     return( NOT_ERROR );
 }
@@ -2662,6 +2711,9 @@ void ProcInit( void )
     CurrProc  = NULL;
     procidx = 1;
     DefineProc = FALSE;
+    /* v2.09: reset prolog and epilog mode */
+    ModuleInfo.prologuemode = PEM_DEFAULT;
+    ModuleInfo.epiloguemode = PEM_DEFAULT;
     /* v2.06: no forward references in INVOKE if -Zne is set */
     ModuleInfo.invoke_exprparm = ( Options.strict_masm_compat ? EXPF_NOLCREATE : 0 );
 #if AMD64_SUPPORT

@@ -96,7 +96,9 @@ ret_code OrgDirective( int i, struct asm_tok tokenarray[] )
 
     DebugMsg1(("OrgDirective(%u) enter\n", i));
     i++;
-    if ( ( ERROR == EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) ) )
+    /* v2.09: if -Zne is set, don't allow forward reference in ORG argument */
+    //if ( ( ERROR == EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) ) )
+    if ( ( ERROR == EvalOperand( &i, tokenarray, Token_Count, &opndx, Options.strict_masm_compat ? EXPF_NOLCREATE : 0 ) ) )
         return( ERROR );
     if ( tokenarray[i].token != T_FINAL ) {
         EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
@@ -111,8 +113,7 @@ ret_code OrgDirective( int i, struct asm_tok tokenarray[] )
             return( ERROR );
         }
 #if FASTPASS
-        if ( StoreState == FALSE )
-            FStoreLine(0);
+        if ( StoreState == FALSE ) FStoreLine(0);
 #endif
         /* v2.04: added */
         if ( Parse_Pass == PASS_1 && CurrSeg->e.seginfo->FixupListHead )
@@ -187,10 +188,11 @@ void AlignCurrOffset( int value )
     }
 }
 
+#define align_value opndx.value
+
 ret_code AlignDirective( int i, struct asm_tok tokenarray[] )
 /***********************************************************/
 {
-    int_32 align_val;
     int seg_align;
     struct expr opndx;
     uint_32 CurrAddr;
@@ -201,30 +203,29 @@ ret_code AlignDirective( int i, struct asm_tok tokenarray[] )
     switch( tokenarray[i].tokval ) {
     case T_ALIGN:
         i++;
-        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOLCREATE ) == ERROR )
             return( ERROR );
         if ( opndx.kind == EXPR_CONST ) {
-            int power;
-            align_val = opndx.value;
+            int_32 power;
             /* check that the parm is a power of 2 */
-            for( power = 1; power < align_val; power <<= 1 );
-            if( power != align_val ) {
-                EmitError( POWER_OF_2 );
+            for( power = 1; power < align_value; power <<= 1 );
+            if( power != align_value ) {
+                EmitErr( POWER_OF_2, align_value );
                 return( ERROR );
             }
         } else if ( opndx.kind == EXPR_EMPTY ) { /* ALIGN without argument? */
             /* v2.03: special STRUCT handling was missing */
             if ( CurrStruct )
-                align_val = CurrStruct->e.structinfo->alignment;
+                align_value = CurrStruct->e.structinfo->alignment;
             else
-                align_val = GetCurrSegAlign();
+                align_value = GetCurrSegAlign();
         } else {
             EmitError( CONSTANT_EXPECTED );
             return( ERROR );
         }
         break;
     case T_EVEN:
-        align_val = 2;
+        align_value = 2;
         i++;
         break;
     }
@@ -235,20 +236,19 @@ ret_code AlignDirective( int i, struct asm_tok tokenarray[] )
 
     /* ALIGN/EVEN inside a STRUCT definition? */
     if ( CurrStruct )
-        return( AlignInStruct( align_val ));
+        return( AlignInStruct( align_value ));
 
 #if FASTPASS
-    if ( StoreState == FALSE )
-        FStoreLine(0);
+    if ( StoreState == FALSE ) FStoreLine(0);
 #endif
     seg_align = GetCurrSegAlign(); /* # of bytes */
     if( seg_align <= 0 ) {
         EmitError( MUST_BE_IN_SEGMENT_BLOCK );
         return( ERROR );
     }
-    if( align_val > seg_align ) {
+    if( align_value > seg_align ) {
         if ( Parse_Pass == PASS_1 )
-            EmitWarn( 1, ALIGN_TOO_HIGH, myltoa( align_val, buffer, 10, FALSE, FALSE ) );
+            EmitWarn( 1, ALIGN_TOO_HIGH, myltoa( align_value, buffer, 10, FALSE, FALSE ) );
         //return( ERROR ); /* v2.0: don't exit */
     }
     /* v2.04: added, Skip backpatching after ALIGN occured */
@@ -257,10 +257,10 @@ ret_code AlignDirective( int i, struct asm_tok tokenarray[] )
     /* find out how many bytes past alignment we are & add the remainder */
     /* store temp. value */
     CurrAddr = GetCurrOffset();
-    seg_align = CurrAddr % align_val;
+    seg_align = CurrAddr % align_value;
     if( seg_align ) {
-        align_val -= seg_align;
-        fill_in_objfile_space( align_val );
+        align_value -= seg_align;
+        fill_in_objfile_space( align_value );
     }
     if ( CurrFile[LST] ) {
         LstWrite( LSTTYPE_DATA, CurrAddr, NULL );

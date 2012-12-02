@@ -1140,11 +1140,20 @@ insn(STOSQ, 1,                  OpCls( M64,      NONE,       NONE ), F_48,   0, 
 insx(PEXTRQ, pextrq, 6,         OpCls( R64_M64,  XMM,        I8_U ), F_660F3A,0, no_WDS, 0x16,     0x00,       P_64|P_SSE4,0,        RWF_X64)
 insx(PINSRQ, pinsrq, 6,         OpCls( XMM,      R64_M64,    I8_U ), F_660F3A,1, no_WDS, 0x22,     0x00,       P_64|P_SSE4,0,        RWF_X64)
 #endif
-
 insx(SWAPGS, swapgs, 6,         OpCls( NONE,     NONE,       NONE ), F_0F,   0,  0,      0x01,     0xF8,       P_64,       0,        RWF_X64)
 insx(SYSCALL_, syscall, 7,      OpCls( NONE,     NONE,       NONE ), F_0F,   0,  no_RM,  0x05,     0x00,       P_64,       0,        RWF_X64)
 insx(SYSRET, sysret, 6,         OpCls( NONE,     NONE,       NONE ), F_0F,   0,  no_RM,  0x07,     0x00,       P_64,       0,        RWF_X64)
+#if 0 /* v2.09: added, inactive ( not supported by ML64 v8,9,10 ) */
+insx(FXRSTOR64, fxrstor64, 9,   OpCls( M_ANY,    NONE,       NONE ), F_480F, 0,  no_WDS, 0xAE,     0x08,       P_64,       0,        RWF_X64)
+insx(FXSAVE64, fxsave64, 8,     OpCls( M_ANY,    NONE,       NONE ), F_480F, 0,  no_WDS, 0xAE,     0x00,       P_64,       0,        RWF_X64)
+#if SSE4SUPP
+insx(XRSTOR64, xrstor64, 8,     OpCls( M_ANY,    NONE,       NONE ), F_480F, 0,  no_WDS, 0xAE,     0x28,       P_64|P_SSE4,0,        RWF_X64)
+insx(XSAVE64, xsave64, 7,       OpCls( M_ANY,    NONE,       NONE ), F_480F, 0,  no_WDS, 0xAE,     0x20,       P_64|P_SSE4,0,        RWF_X64)
+insx(XSAVEOPT64, xsaveopt64, 10,OpCls( M_ANY,    NONE,       NONE ), F_480F, 0,  no_WDS, 0xAE,     0x30,       P_64|P_SSE4,0,        RWF_X64)
 #endif
+#endif
+#endif
+
 #if SSE4SUPP
 /* SSE4.1 */
 ins (BLENDPD, blendpd, 7,       OpCls( XMM,      XMM_M128, I8_U ), F_660F3A, 1,  no_WDS, 0x0D,     0x00,       P_686|P_SSE4, 0)
@@ -1218,6 +1227,32 @@ ins (XSAVE, xsave, 5,           OpCls( M_ANY,    NONE,       NONE ), F_0F,   0, 
 ins (XSAVEOPT, xsaveopt, 8,     OpCls( M_ANY,    NONE,       NONE ), F_0F,   0,  no_WDS, 0xAE,     0x30,     P_686|P_SSE4,0)
 ins (XGETBV, xgetbv, 6,         OpCls( NONE,     NONE,       NONE ), F_0F,   0,  no_WDS, 0x01,     0xD0,     P_686|P_SSE4,0)
 ins (XSETBV, xsetbv, 6,         OpCls( NONE,     NONE,       NONE ), F_0F,   0,  no_WDS, 0x01,     0xD1,     P_686p|P_SSE4,0)
+#endif
+#if VMXSUPP
+/* v2.09: added */
+ins (VMCALL,  vmcall,  6,       OpCls( NONE,     NONE,       NONE ), F_0F,   0,  0,      0x01,     0xC1,     P_686, 0)
+ins (VMLAUNCH,vmlaunch,8,       OpCls( NONE,     NONE,       NONE ), F_0F,   0,  0,      0x01,     0xC2,     P_686p,0)
+ins (VMRESUME,vmresume,8,       OpCls( NONE,     NONE,       NONE ), F_0F,   0,  0,      0x01,     0xC3,     P_686p,0)
+ins (VMXOFF,  vmxoff,  6,       OpCls( NONE,     NONE,       NONE ), F_0F,   0,  0,      0x01,     0xC4,     P_686p,0)
+ins (VMPTRLD, vmptrld, 7,       OpCls( M64,      NONE,       NONE ), F_0F,   0,  no_WDS, 0xC7,     0x30,     P_686p,0)
+ins (VMPTRST, vmptrst, 7,       OpCls( M64,      NONE,       NONE ), F_0F,   0,  no_WDS, 0xC7,     0x38,     P_686p,0)
+ins (VMCLEAR, vmclear, 7,       OpCls( M64,      NONE,       NONE ), F_660F, 0,  no_WDS, 0xC7,     0x30,     P_686p,0)
+ins (VMXON,   vmxon,   5,       OpCls( M64,      NONE,       NONE ), F_F30F, 0,  no_WDS, 0xC7,     0x30,     P_686p,0)
+ins (VMREAD,  vmread,  6,       OpCls( R32_M32,  R32,        NONE ), F_0F,   0,  no_WDS, 0x78,     0x00,     P_686p,0)
+ins (VMWRITE, vmwrite, 7,       OpCls( R32,      R32_M32,    NONE ), F_0F,   1,  no_WDS, 0x79,     0x00,     P_686p,0)
+ins (INVEPT,  invept,  6,       OpCls( RGT16,    M128,       NONE ), F_660F38,1, no_WDS, 0x80,     0x00,     P_686p,0)
+ins (INVVPID, invvpid, 7,       OpCls( RGT16,    M128,       NONE ), F_660F38,1, no_WDS, 0x81,     0x00,     P_686p,0)
+#endif
+#if SVMSUPP
+/* v2.09: added, but inactive */
+ins (VMRUN,   vmrun,   5,       OpCls( A,        NONE,       NONE ), F_0F,   0,  no_WDS, 0x01,     0xD8,     P_686p,0)
+ins (VMMCALL, vmmcall, 7,       OpCls( NONE,     NONE,       NONE ), F_0F,   0,  0,      0x01,     0xD9,     P_686, 0)
+ins (VMLOAD,  vmload,  6,       OpCls( A,        NONE,       NONE ), F_0F,   0,  no_WDS, 0x01,     0xDA,     P_686p,0)
+ins (VMSAVE,  vmsave,  6,       OpCls( A,        NONE,       NONE ), F_0F,   0,  no_WDS, 0x01,     0xDB,     P_686p,0)
+ins (STGI,    stgi,    4,       OpCls( NONE,     NONE,       NONE ), F_0F,   0,  0,      0x01,     0xDC,     P_686p,0)
+ins (CLGI,    clgi,    4,       OpCls( NONE,     NONE,       NONE ), F_0F,   0,  0,      0x01,     0xDD,     P_686p,0)
+ins (SKINIT,  skinit,  6,       OpCls( A,        NONE,       NONE ), F_0F,   0,  no_WDS, 0x01,     0xDE,     P_686p,0)
+ins (INVLPGA, invlpga, 7,       OpCls( A,        R32,        NONE ), F_0F,   0,  no_WDS, 0x01,     0xDF,     P_686p,0)
 #endif
 #if AVXSUPP
 /* VBROADCASTSS is first VEX encoded instruction (VEX_START in parser.h).

@@ -41,4 +41,8 @@ insn(PUSH, 1,                   OpCls( I8,      NONE,     NONE ), 0,       0,  R
 insn(PUSH, 2,                   OpCls( I,       NONE,     NONE ), 0,       0,  R_in_OP,0x68,     0x00,       P_186,       0)
 insn(PUSH, 3,                   OpCls( M16_M64, NONE,     NONE ), 0,       0,  0,      0xFF,     0x30,       P_86,        0)
 insn(PUSH, 4,                   OpCls( SR386,   NONE,     NONE ), F_0F,    1,  R_in_OP,0x80,     0x00,       P_386,       0)
+#if VMXSUPP /* v2.09: added */
+ins (VMREAD,  vmread,  6,       OpCls( R64_M64, R64,      NONE ), F_0F,    0,  no_WDS, 0x78,     0x00,       P_686p,      0)
+ins (VMWRITE, vmwrite, 7,       OpCls( R64,     R64_M64,  NONE ), F_0F,    1,  no_WDS, 0x79,     0x00,       P_686p,      0)
+#endif
 #endif

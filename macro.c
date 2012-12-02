@@ -255,7 +255,7 @@ char *RenderMacroLine( const char *src )
      * the index field. for debug log, convert it to a readable format.
      */
     char *dst;
-    static char buffer[MAX_LINE_LEN];
+    static char buffer[MAX_LINE_LEN]; /* debug only */
 
     for ( dst = buffer; *src; src++, dst++ ) {
         if (*src == PLACEHOLDER_CHAR ) {
@@ -408,7 +408,9 @@ ret_code StoreMacro( struct dsym *macro, int i, struct asm_tok tokenarray[], boo
         }
 
         /* add the macro line to the listing file */
-        if ( ModuleInfo.list && store_data ) {
+        /* v2.09: don't make listing depend on store_data */
+        //if ( ModuleInfo.list && store_data ) {
+        if ( ModuleInfo.list ) {
             ModuleInfo.line_flags &= ~LOF_LISTED;
             LstWrite( LSTTYPE_MACROLINE, 0, buffer );
         }
@@ -449,7 +451,9 @@ ret_code StoreMacro( struct dsym *macro, int i, struct asm_tok tokenarray[], boo
             while ( *ls.input && *ls.input != ';' ) {
                 ls.flags3 = 0;
                 GetToken( &tok[1], &ls );
-                if ( ( ls.flags3 & TF3_ISCONCAT ) && ModuleInfo.list && store_data ) {
+                /* v2.09: don't query store_data */
+                //if ( ( ls.flags3 & TF3_ISCONCAT ) && ModuleInfo.list && store_data ) {
+                if ( ( ls.flags3 & TF3_ISCONCAT ) && ModuleInfo.list ) {
                     ModuleInfo.line_flags &= ~LOF_LISTED;
                     LstWrite( LSTTYPE_MACROLINE, 0, ls.input );
                 }

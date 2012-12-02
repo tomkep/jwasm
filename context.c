@@ -227,6 +227,7 @@ void ContextSaveState( void )
     saved_numcontexts = i;
     if ( i ) {
         saved_contexts = LclAlloc( size );
+        DebugMsg(( "ContextSaveState: saved_contexts=%X\n", saved_contexts ));
         for ( p = ContextStack, p2 = saved_contexts ; p ; p = p->next ) {
             memcpy( p2, p, GetContextSize( p->flags ) );
             p2 = (struct context *)((char *)p2 + GetContextSize ( p->flags ) );

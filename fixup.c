@@ -61,6 +61,10 @@ struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_o
     struct fixup     *fixup;
 
     fixup = LclAlloc( sizeof( struct fixup ) );
+#ifdef TRMEM
+    printf("CreateFixup, pass=%u: %X sym=%s\n", Parse_Pass, fixup, sym ? sym->name : "NULL" );
+    fixup->marker = 'XF';
+#endif
 
     /* add the fixup to the symbol's linked list (used for backpatch)
      * this is done for pass 1 only.
@@ -70,8 +74,8 @@ struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_o
         if ( Options.nobackpatch == FALSE )
 #endif
         if ( sym ) { /* changed v1.96 */
-            fixup->nextbp = sym->fixup;
-            sym->fixup = fixup;
+            fixup->nextbp = sym->bp_fixup;
+            sym->bp_fixup = fixup;
         }
         /* v2.03: in pass one, create a linked list of
          * fixup locations for a segment. This is to improve
@@ -185,7 +189,7 @@ void store_fixup( struct fixup *fixup, int_32 *pdata )
              * Also, in 64-bit, pdata may be a int_64 pointer (FIX_OFF64)!
              */
 #if AMD64_SUPPORT
-            if ( ModuleInfo.header_format == HFORMAT_ELF64 ) {
+            if ( ModuleInfo.defOfssize == USE64 ) {
 #if 0
                 /* this won't work currently because fixup.offset may have to
                  * save *(int_64) pdata, but it is 32-bit only!
@@ -211,7 +215,7 @@ void store_fixup( struct fixup *fixup, int_32 *pdata )
         /* Djgpp's COFF variant needs special handling for
          * - at least - relative and direct 32-bit offsets.
          */
-        if ( fixup->sym && ModuleInfo.header_format == HFORMAT_DJGPP ) {
+        if ( fixup->sym && ModuleInfo.header_format == SFORMAT_DJGPP ) {
             if ( fixup->type == FIX_RELOFF32 ) { /* probably also for 16-bit */
                 *pdata -= ( fixup->location + 4 );
             } else if ( fixup->type == FIX_OFF32 ) {

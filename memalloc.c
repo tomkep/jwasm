@@ -151,6 +151,9 @@ uint_32 mymmap_size = 0;   /* size in bytes */
 #endif
 
 #if FASTMEM
+struct linked_list {
+    void *next;
+};
 static uint_8 *pBase; /* start list of 512 kB blocks */
 static uint_8 *pCurr; /* points into current block */
 static int currfree;  /* free memory left in current block */
@@ -204,7 +207,8 @@ void MemFini( void )
         printf("memory used: %u kB\n", (blocks * BLKSIZE - currfree) / 1024);
 #endif
     while (pBase) {
-        uint_8 * pNext = *((uint_8 * *)pBase);
+        //uint_8 *pNext = *((uint_8 * *)pBase);
+        uint_8 *pNext = ((struct linked_list *)pBase)->next;
 #ifndef __UNIX__
  #if defined(__OS2__)
         DosFreeMem( pBase );
@@ -231,26 +235,27 @@ void *LclAlloc( size_t size )
     void        *ptr;
 
 #if FASTMEM
-    size = (size + 3) & ~3;
+    //size = (size + 3) & ~3;
+    size = (size + sizeof(void *)-1) & ~(sizeof(void *)-1);
     if ( currfree < size ) {
         DebugMsg(("LclAlloc: new block, req. size=%Xh\n", size ));
-        if ( size > BLKSIZE-4 ) {
+        if ( size > BLKSIZE - sizeof( struct linked_list ) ) {
 #ifndef __UNIX__
  #if defined(__OS2__)
-            DosAllocMem( (void**)&pCurr, size+4, PAG_COMMIT|PAG_READ|PAG_WRITE);
+            DosAllocMem( (void**)&pCurr, size + sizeof( struct linked_list ), PAG_COMMIT|PAG_READ|PAG_WRITE);
  #elif defined(__NT__) || defined(_WIN64)
-            pCurr = (uint_8 *)VirtualAlloc( NULL, size+4, MEM_COMMIT, PAGE_READWRITE );
+            pCurr = (uint_8 *)VirtualAlloc( NULL, size + sizeof( struct linked_list ), MEM_COMMIT, PAGE_READWRITE );
  #else
-            pCurr = malloc( size+4 );
+            pCurr = malloc( size + sizeof( struct linked_list ) );
  #endif
 #else
  #if defined(__GNUC__)
-            mymmap_size = size+4;
+            mymmap_size = size + sizeof( struct linked_list );
             pCurr = (char *)mmap( 0, mymmap_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0 );
             if ( pCurr == MAP_FAILED )
                 pCurr = NULL;
  #else
-            mymmap.size = size+4;
+            mymmap.size = size + sizeof( struct linked_list );
             pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
  #endif
 #endif
@@ -275,15 +280,16 @@ void *LclAlloc( size_t size )
             pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
  #endif
 #endif
-            currfree = BLKSIZE - sizeof(uint_8 *);
+            currfree = BLKSIZE - sizeof( struct linked_list );
         }
         if ( !pCurr ) {
             currfree = 0;
             Fatal( OUT_OF_MEMORY );
         }
-        *(uint_8 * *)pCurr = pBase;
+        //*(uint_8 * *)pCurr = pBase;
+        ((struct linked_list *)pCurr)->next = pBase;
         pBase = pCurr;
-        pCurr += sizeof(uint_8 *);
+        pCurr += sizeof( struct linked_list );
 #ifdef DEBUG_OUT
         blocks++;
 #endif

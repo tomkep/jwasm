@@ -15,6 +15,7 @@ JWasm Readme
     COFF       -coff      MS Win32 object format
     WIN64      -win64     MS Win64 object format
     MZ         -mz        DOS native binary format (.EXE)
+    PE         -pe        Win32/Win64 PE binary format
     ELF32      -elf       Linux 32-bit object format
     ELF64      -elf64     Linux 64-bit object format
     DJGPP      -djgpp     Djgpp's 32-bit COFF variant (optional).
@@ -44,8 +45,9 @@ JWasm Readme
       - doesn't support long filenames
       - doesn't support Open Watcom fastcall register convention
       - supports OMF, BIN and MZ output formats only
-      - no support for 64-bit, SSE4 and AVX.
-      - no support for OPTION DLLIMPORT.
+      - no support for 64-bit, SSSE3, SSE4 and AVX.
+      - no support for OPTION variants that are specific for 
+        COFF, ELF or 64-bit.
 
     Memory requirements depend on the source which is assembled. The source
     itself is not kept in memory, but the symbol table is, and this table
@@ -53,7 +55,21 @@ JWasm Readme
     That's why JWASMR.EXE might be unable to assemble large sources.
 
 
-    3. Documentation
+    3. Installation
+
+    The precompiled binaries are supplied as a compressed file. The simplest
+    and best approach to "install" JWasm is to create a directory named JWasm,
+    copy the compressed file ( i.e. jwasm205w.zip ) into this directory and
+    "unzip" it. If you want to run JWasm without having to type the full path
+    name, you'll either have to add the JWasm directory to your PATH
+    environment variable or to copy the JWasm binary to a directory that's
+    included in your PATH.
+     If you want to deinstall JWasm, delete the JWasm directory. If you had
+    added the directory to your PATH environment variable, remove it from
+    there.
+
+
+    4. Documentation
 
     JWasm's documentation consists of
 
@@ -64,13 +80,13 @@ JWasm Readme
     - License.txt, which is a copy of the Sybase Open Watcom Public License.
 
 
-    4. Samples
+    5. Samples
 
     The binary packages contain samples in subdirectory SAMPLES.
 
-    For output formats other than BIN or MZ, JWasm's output has to be
-    linked to create an executable binary. Select one of the following
-    linkers:
+    For output formats other than BIN, MZ or PE, JWasm's output has to be
+    linked to create an executable binary. The following set of linkers
+    have been verified to cooperate with JWasm:
 
     Format  Linker    Comment
     -------------------------------------------------------------
@@ -94,7 +110,7 @@ JWasm Readme
     to the MS COFF linker name.
 
 
-    5. How to Create the JWasm Binaries
+    6. How to Create the JWasm Binaries
 
      JWasm is written in C. The following Makefiles are supplied
     in the source package: 
@@ -105,9 +121,9 @@ JWasm Readme
     OWDOS16.MAK  Open Watcom v1.7a-v1.9        DOS (16-bit)
     OWOS2.MAK    Open Watcom v1.7a-v1.9        OS/2 (32-bit)
     OWLinux.MAK  Open Watcom v1.7a-v1.9        Linux
-    MSVC.MAK     VC++ TK 2003/VC++ 2005 EE     Win32 [, DOS (32-bit)]
+    Msvc.MAK     VC++ TK 2003/VC++ 2005 EE     Win32 [, DOS (32-bit)]
+    Msvc64.MAK   VC++ 2010                     Win64
     PCC.MAK      PCC                           Win32
-    PellesC.MAK  Pelles C v7                   Win32, Win64
     BCC.MAK      Borland C++ Cmdline Tools     Win32
     GccWin.MAK   GCC, MinGW/Cygwin             Win32
     GccDos.MAK   GCC, DJGPP                    DOS (32-bit)
@@ -120,6 +136,7 @@ JWasm Readme
     ---------------------------------------------------------------
     OWWinDll.MAK Open Watcom v1.7a-v1.9        Win32 (JWasm.dll)
     MsvcDll.MAK  VC++ TK 2003                  Win32 (JWasm.dll)
+    PellesC.MAK  Pelles C v7                   Win32, Win64 (*)
 
      The makefiles that use the OW tool chain are supposed to be run
     with Open Watcom's WMake, MSVC.MAK and IntelC*.mak should be run with
@@ -131,8 +148,11 @@ JWasm Readme
      The default settings in Makefile will create both the Win32 and
     32bit-DOS binaries of JWasm.
 
+    (*): PellesC creates a slightly incompatible JWasm binary ( the least
+         significant bit of floats may differ from what Masm emits.
 
-    6. Using JWasm with Visual Studio
+
+    7. Using JWasm with Visual Studio
 
     a) VS 2005/2008
 
@@ -142,15 +162,12 @@ JWasm Readme
 
     b) VS 2010
 
-    - Unzip file VS2010CustomBuildRule.zip. The result a 3 files with
-      extensions .props, .targets and .xml.
-    - Copy those files to MSBUILD's build customization directory, which
-      usually is found at 
-
-      C:\Program Files (x86)\MSBuild\Microsoft.Cpp\v4.0\BuildCustomizations
+    - Unzip file VS2010CustomBuildRule.zip. The result are 3 files,
+      jwasm.props, jwasm.targets and jwasm.xml.
+    - Copy those files to MSBUILD's build customization directory.
 
 
-    7. Contributors
+    8. Contributors
 
     These people contributed to JWasm ( additions, bugfixes, bug reports):
 

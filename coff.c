@@ -61,14 +61,14 @@ static struct dsym *sxdata;    /* section for safe exception handler data */
 static struct dsym *symbols;   /* .debug$S section if -Zi is set */
 static struct dsym *types;     /* .debug$T section if -Zi is set */
 
-static IMAGE_FILE_HEADER ifh;
+static struct IMAGE_FILE_HEADER ifh;
 
 static struct stringitem *LongNamesHead;
 static struct stringitem *LongNamesTail;
 static uint_32 SizeLongNames;
 static uint_32 sectionstart; /* symbol table index start sections */
 static struct asym *lastproc;    /* used if -Zd is set */
-static char *srcname; /* name of source module (name + extension) */
+static char *dot_file_value; /* value of .file symbol (isn't written by Masm v8+) */
 
 #if SETDATAPOS
 static uint_32 data_pos;
@@ -111,10 +111,10 @@ enum cvs_flags {
 };
 
 static const struct conv_section cst[] = {
-    { 5, CSF_GRPCHK, "_TEXT", ".text" },
-    { 5, CSF_GRPCHK, "_DATA", ".data" },
+    { 5, CSF_GRPCHK, "_TEXT", ".text"  },
+    { 5, CSF_GRPCHK, "_DATA", ".data"  },
     { 5, CSF_GRPCHK, "CONST", ".rdata" },
-    { 4, 0, "_BSS", ".bss" }
+    { 4, 0,          "_BSS",  ".bss"   }
 };
 
 /* translate section names:
@@ -124,15 +124,15 @@ static const struct conv_section cst[] = {
  * CONST -> .rdata
  */
 
-static char * CoffConvertSectionName( struct asym *sym )
-/******************************************************/
+char *CoffConvertSectionName( struct asym *sym )
+/**********************************************/
 {
     int i;
     static char coffname[MAX_ID_LEN+1];
 
 #if DJGPP_SUPPORT
     /* DJGPP won't be happy with .rdata segment name */
-    if( ModuleInfo.header_format == HFORMAT_DJGPP && ( strcmp( sym->name, "CONST" ) == 0 ) ) {
+    if( ModuleInfo.header_format == SFORMAT_DJGPP && ( strcmp( sym->name, "CONST" ) == 0 ) ) {
         return( ".const" );
     }
 #endif
@@ -140,7 +140,7 @@ static char * CoffConvertSectionName( struct asym *sym )
         if ( memcmp( sym->name, cst[i].src, cst[i].len ) == 0 ) {
             if ( sym->name[cst[i].len] == NULLC )
                 return( (char *)cst[i].dst );
-            else if ( ( cst[i].flags & CSF_GRPCHK )  && sym->name[cst[i].len] == '$' ) {
+            else if ( ( cst[i].flags & CSF_GRPCHK ) && sym->name[cst[i].len] == '$' ) {
                 strcpy( coffname, cst[i].dst );
                 strcat( coffname, sym->name+cst[i].len );
                 return( coffname );
@@ -188,18 +188,17 @@ ret_code coff_write_section_table( struct module_info *modinfo )
 {
     struct dsym *curr;
     //struct omf_rec  *objr;
-    char        *p;
+    //char        *p;
     struct fixup *fix;
     uint        seg_index;
     uint        offset;
     uint        len;
-    IMAGE_SECTION_HEADER ish;
+    struct IMAGE_SECTION_HEADER ish;
     uint        size_relocs = 0;
-    char        buffer[MAX_LINE_LEN];
 
     DebugMsg(("coff_write_section_table: enter, sections=%u\n", modinfo->g.num_segs ));
 
-    offset = sizeof( IMAGE_FILE_HEADER ) + modinfo->g.num_segs * sizeof( IMAGE_SECTION_HEADER );
+    offset = sizeof( struct IMAGE_FILE_HEADER ) + modinfo->g.num_segs * sizeof( struct IMAGE_SECTION_HEADER );
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
 
         seg_index = GetSegIdx( &curr->sym );
@@ -212,17 +211,17 @@ ret_code coff_write_section_table( struct module_info *modinfo )
          followed by a number in ascii which is the offset for the string table
          */
         if ( curr->e.seginfo->aliasname ) /* v2.07: ALIAS name defined? */
-            strcpy( buffer, curr->e.seginfo->aliasname );
+            strcpy( StringBufferEnd, curr->e.seginfo->aliasname );
         else
-            strcpy( buffer, CoffConvertSectionName(&curr->sym) );
-        len = strlen( buffer );
+            strcpy( StringBufferEnd, CoffConvertSectionName(&curr->sym) );
+        len = strlen( StringBufferEnd );
         if ( len <= IMAGE_SIZEOF_SHORT_NAME )
-            strncpy( ish.Name, buffer, IMAGE_SIZEOF_SHORT_NAME );
+            strncpy( ish.Name, StringBufferEnd, IMAGE_SIZEOF_SHORT_NAME );
         else
-            sprintf( ish.Name, "/%u", Coff_AllocString( buffer, len ) );
+            sprintf( ish.Name, "/%u", Coff_AllocString( StringBufferEnd, len ) );
 
         /* v2.04: what is the old line supposed to do? */
-        //ish.Misc.PhysicalAddress = offset - (size_relocs + sizeof(IMAGE_FILE_HEADER) + ModuleInfo->g.num_segs * sizeof(IMAGE_SECTION_HEADER));
+        //ish.Misc.PhysicalAddress = offset - (size_relocs + sizeof(struct IMAGE_FILE_HEADER) + ModuleInfo->g.num_segs * sizeof(struct IMAGE_SECTION_HEADER));
         ish.Misc.PhysicalAddress = 0;
 
         ish.VirtualAddress = 0;
@@ -235,7 +234,11 @@ ret_code coff_write_section_table( struct module_info *modinfo )
         ish.Characteristics = 0;
 
         if ( curr->e.seginfo->info ) {
-            ish.Characteristics = ( IMAGE_SCN_LNK_INFO | IMAGE_SCN_CNT_INITIALIZED_DATA );
+            /* v2.09: set "remove" flag for .drectve section, as it was done in v2.06 and earlier */
+            if ( curr == directives )
+                ish.Characteristics = ( IMAGE_SCN_LNK_INFO | IMAGE_SCN_LNK_REMOVE );
+            else
+                ish.Characteristics = ( IMAGE_SCN_LNK_INFO | IMAGE_SCN_CNT_INITIALIZED_DATA );
         } else {
             if ( curr->e.seginfo->alignment != MAX_SEGALIGNMENT ) /* ABS not possible */
                 ish.Characteristics |= (uint_32)(curr->e.seginfo->alignment + 1) << 20;
@@ -255,7 +258,7 @@ ret_code coff_write_section_table( struct module_info *modinfo )
                 ish.PointerToRawData = 0;
             } else if ( curr->e.seginfo->readonly ) {
                 ish.Characteristics |= IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ;
-            } else if (( p = GetLname( curr->e.seginfo->class_name_idx ) ) && strcmp( p, "CONST" ) == 0) {
+            } else if ( curr->e.seginfo->clsym && strcmp( curr->e.seginfo->clsym->name, "CONST" ) == 0 ) {
                 ish.Characteristics |= IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ;
             } else
                 ish.Characteristics |= IMAGE_SCN_CNT_INITIALIZED_DATA | IMAGE_SCN_MEM_READ | IMAGE_SCN_MEM_WRITE;
@@ -359,7 +362,9 @@ static short CoffGetClass( const struct asym *sym )
     else if ( sym->variable == TRUE ) /* assembly time variable in fixup */
         return( IMAGE_SYM_CLASS_LABEL );
 #endif
-    else if ( sym->mem_type == MT_NEAR )/* added v2.0 */
+    /* v2.09: don't declare private procs as label */
+    //else if ( sym->mem_type == MT_NEAR )/* added v2.0 */
+    else if ( sym->mem_type == MT_NEAR && sym->isproc == FALSE )
         return( IMAGE_SYM_CLASS_LABEL );
 
     return( IMAGE_SYM_CLASS_STATIC );
@@ -372,7 +377,7 @@ static void update_header( FILE *file )
 {
     if ( ifh.NumberOfSymbols )
         ifh.PointerToSymbolTable =
-            sizeof(IMAGE_FILE_HEADER) + ModuleInfo.g.num_segs * sizeof(IMAGE_SECTION_HEADER) + coff_raw_data;
+            sizeof(struct IMAGE_FILE_HEADER) + ModuleInfo.g.num_segs * sizeof(struct IMAGE_SECTION_HEADER) + coff_raw_data;
     fseek( file, 0, SEEK_SET);
     if ( fwrite( &ifh, 1, sizeof(ifh), file ) != sizeof(ifh) )
         WriteError();
@@ -433,7 +438,7 @@ ret_code coff_write_symbols( struct module_info *modinfo )
         ifh.NumberOfSymbols++;
     }
 
-    /* .file entry (optionally disabled by -zlf) */
+    /* .file item (optionally disabled by -zlf) */
 
     if ( Options.no_file_entry == FALSE ) {
         strncpy( is.N.ShortName, ".file", IMAGE_SIZEOF_SHORT_NAME );
@@ -445,7 +450,7 @@ ret_code coff_write_symbols( struct module_info *modinfo )
         is.Type = IMAGE_SYM_TYPE_NULL;
         is.StorageClass = IMAGE_SYM_CLASS_FILE;
 
-        p = srcname;
+        p = dot_file_value;
         i = strlen( p );
         is.NumberOfAuxSymbols = i / sizeof(IMAGE_AUX_SYMBOL) + (i % sizeof(IMAGE_AUX_SYMBOL) ? 1 : 0);
         if ( fwrite( &is, 1, sizeof(is), CurrFile[OBJ] ) != sizeof(is) )
@@ -761,7 +766,7 @@ static int GetStartLabel( char *buffer, bool msg )
                 ModuleInfo.start_label->langtype != LANG_STDCALL &&
                 ModuleInfo.start_label->langtype != LANG_SYSCALL ) {
                 if ( *ModuleInfo.start_label->name != '_' ) {
-                    if ( msg && ( ModuleInfo.header_format != HFORMAT_WIN64 ) )
+                    if ( msg && ( ModuleInfo.fctype != FCT_WIN64 ) )
                         EmitWarn( 2, LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL, ModuleInfo.start_label->name );
                     strcpy( buffer, temp );
                 } else {
@@ -797,12 +802,14 @@ ret_code coff_write_header( struct module_info *modinfo )
     LongNamesHead = NULL;
     SizeLongNames = sizeof(uint_32);
 
-    srcname = CurrFName[ASM];
-    srcname += strlen( srcname );
-    while ( srcname > CurrFName[ASM] &&
-           *(srcname-1) != '/' &&
-           *(srcname-1) != '\\') srcname--;
-
+    /* get value for .file symbol */
+    dot_file_value = CurrFName[ASM];
+#if 0 /* v2.09: always add the name in CurrFName[ASM] */
+    dot_file_value += strlen( dot_file_value );
+    while ( dot_file_value > CurrFName[ASM] &&
+           *(dot_file_value-1) != '/' &&
+           *(dot_file_value-1) != '\\') dot_file_value--;
+#endif
     /* if -Zi is set, add .debug$S and .debug$T sections */
     if ( Options.debug_symbols ) {
         if ( symbols = (struct dsym *)CreateIntSegment( szCVSymbols, "", 0, USE32, TRUE ) ) {
@@ -865,7 +872,7 @@ ret_code coff_write_header( struct module_info *modinfo )
     if ( Options.write_impdef && !Options.names[OPTN_LNKDEF_FN] )
         for ( imp = SymTables[TAB_EXT].head; imp; imp = imp->next )
             if ( imp->sym.isproc && ( imp->sym.weak == FALSE || imp->sym.iat_used == TRUE ) )
-                if ( imp->sym.dllname && *imp->sym.dllname )
+                if ( imp->sym.dll && *imp->sym.dll->name )
                     break;
 #endif
     /* add a .drectve section if
@@ -912,20 +919,24 @@ ret_code coff_write_header( struct module_info *modinfo )
             /* 4. impdefs */
             for( tmp = imp; tmp ; tmp = tmp->next ) {
                 if ( tmp->sym.isproc && ( tmp->sym.weak == FALSE || tmp->sym.iat_used == TRUE ) &&
-                    tmp->sym.dllname && *tmp->sym.dllname ) {
+                    tmp->sym.dll && *tmp->sym.dll->name ) {
                     /* format is:
                      * "-import:<mangled_name>=<module_name>.<unmangled_name>" or
                      * "-import:<mangled_name>=<module_name>"
                      */
                     size += sizeof("-import:");
                     size += Mangle( &tmp->sym, buffer );
-                    size += 1 + strlen( tmp->sym.dllname );
+                    size += 1 + strlen( tmp->sym.dll->name );
                     size += 1 + tmp->sym.name_size;
                 }
             }
 #endif
             directives->sym.max_offset = size;
-            directives->e.seginfo->CodeBuffer = LclAlloc( size );
+            /* v2.09: allocate 1 byte more, because sprintf() is used, which
+             * adds a NULLC.
+             */
+            //directives->e.seginfo->CodeBuffer = LclAlloc( size );
+            directives->e.seginfo->CodeBuffer = LclAlloc( size + 1 );
             p = directives->e.seginfo->CodeBuffer;
 
             /* copy the data */
@@ -956,12 +967,12 @@ ret_code coff_write_header( struct module_info *modinfo )
             /* 4. impdefs */
             for( tmp = imp; tmp ; tmp = tmp->next ) {
                 if ( tmp->sym.isproc && ( tmp->sym.weak == FALSE || tmp->sym.iat_used == TRUE ) &&
-                    tmp->sym.dllname && *tmp->sym.dllname ) {
+                    tmp->sym.dll && *tmp->sym.dll->name ) {
                     strcpy( p, "-import:" );
                     p += 8;
                     p += Mangle( &tmp->sym, p );
                     *p++ = '=';
-                    strcpy( p, tmp->sym.dllname );
+                    strcpy( p, tmp->sym.dll->name );
                     p += strlen( p );
                     *p++ = '.';
                     memcpy( p, tmp->sym.name, tmp->sym.name_size );
@@ -979,7 +990,7 @@ ret_code coff_write_header( struct module_info *modinfo )
         directives->sym.max_offset = size_drectve;
 
 #if AMD64_SUPPORT
-    if ( modinfo->header_format == HFORMAT_WIN64 )
+    if ( modinfo->defOfssize == USE64 )
         ifh.Machine = IMAGE_FILE_MACHINE_AMD64;
     else
 #endif
@@ -1033,7 +1044,7 @@ static uint_32 SetSymbolIndices( struct module_info *ModuleInfo )
     /* count AUX entries for .file. Depends on sizeof filename */
 
     if ( Options.no_file_entry == FALSE ) {
-        i = strlen( srcname );
+        i = strlen( dot_file_value );
         index += i / sizeof( IMAGE_AUX_SYMBOL ) + 1;
         if ( i % sizeof( IMAGE_AUX_SYMBOL ) )
             index++;
@@ -1097,7 +1108,6 @@ static void coff_write_fixups( struct dsym *section, uint_32 *poffset, uint_32 *
 
     for ( fix = section->e.seginfo->FixupListHead; fix ; fix = fix->nextrlc ) {
 #if AMD64_SUPPORT
-        //if ( ModuleInfo.header_format == HFORMAT_WIN64 ) {
         if ( section->e.seginfo->Ofssize == USE64 ) {
             switch ( fix->type ) {
             case FIX_VOID:

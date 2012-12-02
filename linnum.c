@@ -81,12 +81,12 @@ void AddLinnumDataRef( uint_32 line_num )
                 dmyproc->offset;
         }
         sprintf( procname, "$$$%05u", procidx );
-        DebugMsg(("AddLinnumDataRef: generating proc=%s\n", procname ));
+        DebugMsg(("AddLinnumDataRef: searching proc=%s\n", procname ));
         dmyproc = SymSearch( procname );
 
         /* in pass 1, create the proc */
         if ( dmyproc == NULL ) {
-            dmyproc = CreateProc( NULL, procname, TRUE );
+            dmyproc = CreateProc( NULL, procname, SYM_INTERNAL );
             DebugMsg(("AddLinnumDataRef: new proc %s created\n", procname ));
             dmyproc->isproc = TRUE; /* fixme: should be set inside CreateProc */
             dmyproc->included = TRUE;
@@ -103,7 +103,7 @@ void AddLinnumDataRef( uint_32 line_num )
             if ( write_to_file == TRUE ) {
                 curr = LclAlloc( sizeof( struct line_num_info ) );
                 curr->sym = dmyproc;
-                curr->line_number = LineNumber;
+                curr->line_number = GetLineNumber();
                 curr->file = get_curr_srcfile();
                 curr->number = 0;
                 DebugMsg(("AddLinnumDataRef: sym=%s (#=%u.%u)\n", curr->sym->name, curr->file, curr->line_number ));
@@ -124,10 +124,13 @@ void AddLinnumDataRef( uint_32 line_num )
     curr = LclAlloc( sizeof( struct line_num_info ) );
     curr->number = line_num;
     if ( line_num == 0 ) { /* happens for COFF only */
+#if COFF_SUPPORT
         /* changed v2.03 (CurrProc might have been NULL) */
         /* if ( Options.output_format == OFORMAT_COFF && CurrProc->sym.public == FALSE ) { */
-#if COFF_SUPPORT
-        if ( Options.output_format == OFORMAT_COFF && CurrProc && CurrProc->sym.public == FALSE ) {
+        /* v2.09: avoid duplicates, check for pass 1 */
+        //if ( Options.output_format == OFORMAT_COFF && CurrProc && CurrProc->sym.public == FALSE ) {
+        if ( Parse_Pass == PASS_1 &&
+            Options.output_format == OFORMAT_COFF && CurrProc && CurrProc->sym.public == FALSE ) {
             CurrProc->sym.included = TRUE;
             AddPublicData( (struct asym *)CurrProc );
         }
@@ -138,7 +141,7 @@ void AddLinnumDataRef( uint_32 line_num )
             curr->sym = (struct asym *)CurrProc;
         else
             curr->sym = (struct asym *)dmyproc;
-        curr->line_number = LineNumber;
+        curr->line_number = GetLineNumber();
         curr->file        = get_curr_srcfile();
         /* set the function's size! */
         if ( dmyproc ) {

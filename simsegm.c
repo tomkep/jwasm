@@ -140,8 +140,12 @@ static void SetSimSeg( enum sim_seg segm, const char *name )
              * directives. Masm behaves differently: the attributes
              * of the simplified segment directives have highest priority.
              */
-            sym = SymSearch( name );
-            if ( sym && sym->state == SYM_SEG && ((struct dsym *)sym)->e.seginfo->lname_idx != 0 )
+            if ( Parse_Pass == PASS_1 ) {
+                sym = SymSearch( name );
+                if ( sym && sym->state == SYM_SEG && ((struct dsym *)sym)->e.seginfo->lname_idx != 0 )
+                    ModuleInfo.simseg_defd |= ( 1 << segm );
+            }
+            if ( ModuleInfo.simseg_defd & ( 1 << segm ) )
                 pFmt = "%s %r";
         }
     } else {
@@ -324,7 +328,9 @@ ret_code ModelSimSegmInit( int model )
 {
     char buffer[20];
 
-    if ( Parse_Pass == PASS_1 ) {
+    ModuleInfo.simseg_init = 0; /* v2.09: reset init flags */
+    /* v2.09: execute always, to make a proper listing if fastpass is off */
+    //if ( Parse_Pass == PASS_1 ) {
         DebugMsg1(("ModelSimSegmInit() enter, pass one\n" ));
         /* create default code segment (_TEXT) */
         SetSimSeg( SIM_CODE, NULL );
@@ -336,8 +342,11 @@ ret_code ModelSimSegmInit( int model )
 
         /* create DGROUP for BIN/OMF if model isn't FLAT */
         if( model != MODEL_FLAT &&
-            ( Options.output_format == OFORMAT_OMF ||
-             Options.output_format == OFORMAT_BIN )) {
+           ( Options.output_format == OFORMAT_OMF
+#if BIN_SUPPORT
+            || Options.output_format == OFORMAT_BIN
+#endif
+           )) {
             strcpy( buffer, "%s %r %s" );
             if( model == MODEL_TINY ) {
                 strcat( buffer, ", %s" );
@@ -346,7 +355,7 @@ ret_code ModelSimSegmInit( int model )
                 AddLineQueueX( buffer, szDgroup, T_GROUP, SegmNames[SIM_DATA] );
         }
         DebugMsg1(("ModelSimSegmInit() exit\n" ));
-    }
+    //}
     return( NOT_ERROR );
 }
 

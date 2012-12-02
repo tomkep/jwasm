@@ -53,27 +53,27 @@ static uint_8 *putIndex( uint_8 *p, uint_16 index )
     return( p );
 }
 
-static uint_8 *put16( uint_8 *p, uint_16 word )
-/*********************************************/
-{
-
-    WriteU16( p, word );
-    return( p + 2 );
-}
-
-static uint_8 *put32( uint_8 *p, uint_32 dword )
+static uint_8 *put16( uint_8 *p, uint_16 value )
 /**********************************************/
 {
 
-    WriteU32( p, dword );
-    return( p + 4 );
+    WriteU16( p, value );
+    return( p + sizeof( uint_16 ) );
+}
+
+static uint_8 *put32( uint_8 *p, uint_32 value )
+/**********************************************/
+{
+
+    WriteU32( p, value );
+    return( p + sizeof( uint_32 ) );
 }
 
 static uint_8 *putFrameDatum( uint_8 *p, uint_8 method, uint_16 datum )
 /*********************************************************************/
 {
 
-/**/myassert( p != NULL );
+    /**/myassert( p != NULL );
     switch( method ) {
     case FRAME_SEG:
     case FRAME_GRP:
@@ -89,7 +89,7 @@ static uint_8 *putFrameDatum( uint_8 *p, uint_8 method, uint_16 datum )
 static uint_8 *putTargetDatum( uint_8 *p, uint_8 method, uint_16 datum )
 /**********************************************************************/
 {
-/**/myassert( p != NULL );
+    /**/myassert( p != NULL );
     if( ( method & 0x03 ) == TARGET_ABSWD ) {
         return( put16( p, datum ) );
     }
@@ -112,9 +112,9 @@ static size_t OmfFixGenLRef( struct logref *lr, uint_8 *buf, int type )
     uint_8  *p;
     uint_8  target;
 
-/**/myassert( lr != NULL );
-/**/myassert( buf != NULL );
-/**/myassert( type == FIX_GEN_INTEL || type == FIX_GEN_MS386 );
+    /**/myassert( lr != NULL );
+    /**/myassert( buf != NULL );
+    /**/myassert( type == FIX_GEN_INTEL || type == FIX_GEN_MS386 );
 
     /*
         According to the discussion on p102 of the Intel OMF document, we
@@ -146,9 +146,10 @@ static size_t OmfFixGenPRef( struct physref *ref, uint_8 *buf, int type )
 {
     uint_8  *p;
 
-/**/myassert( ref != NULL );
-/**/myassert( buf != NULL );
-/**/myassert( type == FIX_GEN_INTEL || type == FIX_GEN_MS386 );
+    /**/myassert( ref != NULL );
+    /**/myassert( buf != NULL );
+    /**/myassert( type == FIX_GEN_INTEL || type == FIX_GEN_MS386 );
+
     p = put16( buf, ref->frame );
     p = put16( p, ref->offset );
     return( p - buf );
@@ -161,9 +162,11 @@ static size_t OmfFixGenPRef( struct physref *ref, uint_8 *buf, int type )
 size_t OmfFixGenRef( union logphys *ref, int is_logical, uint_8 *buf, int type )
 /******************************************************************************/
 {
-/**/myassert( ref != NULL );
-/**/myassert( buf != NULL );
-/**/myassert( type == FIX_GEN_INTEL || type == FIX_GEN_MS386 );
+
+    /**/myassert( ref != NULL );
+    /**/myassert( buf != NULL );
+    /**/myassert( type == FIX_GEN_INTEL || type == FIX_GEN_MS386 );
+
     if( is_logical ) {
         return( OmfFixGenLRef( &ref->log, buf, type ) );
     }
@@ -172,19 +175,15 @@ size_t OmfFixGenRef( union logphys *ref, int is_logical, uint_8 *buf, int type )
 
 /* fill a logref from a fixup's info */
 
-static int fill_logref( const struct fixup *fixup, struct logref *lr )
-/********************************************************************/
+static int omf_fill_logref( const struct fixup *fixup, struct logref *lr )
+/************************************************************************/
 {
     struct asym      *sym;
 
     sym = fixup->sym; /* may be NULL! */
 
-#ifdef DEBUG_OUT
-    if ( sym )
-        DebugMsg(("fill_logref(%X): sym=%s, state=%u, fixup->type=%u\n", fixup, sym->name, sym->state, fixup->type ));
-    else
-        DebugMsg(("fill_logref(%X): sym=NULL, fixup->type=%u\n", fixup, fixup->type ));
-#endif
+    DebugMsg1(("omf_fill_logref(%X): sym=%s, state=%u, fixup->type=%u\n",
+              fixup, sym ? sym->name : "NULL", sym ? sym->state : 0, fixup->type ));
 
     /*------------------------------------*/
     /* Determine the Target and the Frame */
@@ -199,12 +198,14 @@ static int fill_logref( const struct fixup *fixup, struct logref *lr )
         lr->frame = FRAME_TARG;
 
     } else if( sym->state == SYM_UNDEFINED ) { /* shouldn't happen */
-        DebugMsg(("fill_logref(%X): state of >%s< is SYM_UNDEFINED\n", fixup, sym->name));
+
+        DebugMsg(("omf_fill_logref(%X): state of >%s< is SYM_UNDEFINED\n", fixup, sym->name ));
         EmitErr( SYMBOL_NOT_DEFINED, sym->name );
         return( 0 );
+
     } else if( sym->state == SYM_GRP ) {
 
-        DebugMsg(("fill_logref(%X): GROUP %s\n", fixup, sym->name));
+        DebugMsg1(("omf_fill_logref(%X): GROUP %s\n", fixup, sym->name));
 
         lr->target = TARGET_GRP;
         lr->target_datum = ((struct dsym *)sym)->e.grpinfo->grp_idx;
@@ -218,7 +219,7 @@ static int fill_logref( const struct fixup *fixup, struct logref *lr )
 
     } else if( sym->state == SYM_SEG ) {
 
-        DebugMsg(("fill_logref(%X): SEG %s\n", fixup, sym->name));
+        DebugMsg1(("omf_fill_logref(%X): SEG %s\n", fixup, sym->name));
 
         lr->target = TARGET_SEG;
         lr->target_datum = GetSegIdx( sym );
@@ -236,10 +237,10 @@ static int fill_logref( const struct fixup *fixup, struct logref *lr )
 
         lr->frame_datum = fixup->frame_datum;
         if( sym->state == SYM_EXTERNAL ) {
-            DebugMsg(("fill_logref(%X): EXTERNAL %s\n", fixup, sym->name));
+            DebugMsg1(("omf_fill_logref(%X): EXTERNAL %s\n", fixup, sym->name));
 
             lr->target = TARGET_EXT;
-            lr->target_datum = sym->ext_idx;
+            lr->target_datum = sym->ext_idx1;
 
             if( fixup->frame_type == FRAME_GRP && fixup->frame_datum == 0 ) {
                 /* set the frame to the frame of the corresponding segment */
@@ -248,7 +249,7 @@ static int fill_logref( const struct fixup *fixup, struct logref *lr )
         } else {
             //struct asym *grpsym;
             /* it's a SYM_INTERNAL */
-            DebugMsg(("fill_logref(%X): fixup->frame/datum=%u/%u sym->name=%s state=%X segm=%X\n",
+            DebugMsg1(("omf_fill_logref(%X): fixup->frame/datum=%u/%u sym->name=%s state=%X segm=%X\n",
                       fixup, fixup->frame_type, fixup->frame_datum, sym->name, sym->state, sym->segment ));
             /* v2.08: don't use info from assembly-time variables */
             if ( sym->variable ) {
@@ -363,7 +364,7 @@ size_t OmfFixGenFix( struct fixup *fixup, uint_8 *buf, int type )
     lr.is_secondary = TRUE;
     lr.target_offset = 0;
 
-    if ( fill_logref( fixup, &lr ) == 0 )
+    if ( omf_fill_logref( fixup, &lr ) == 0 )
         return( 0 );
 
     /* calculate the fixup's location in current LEDATA */

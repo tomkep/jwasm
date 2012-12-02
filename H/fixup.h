@@ -57,16 +57,22 @@ enum fixup_types {
  * COFF: set bit 1, 4, 9, 10, 11
  *  ELF: set bit 8, 9, 10, 11
  */
+#if BIN_SUPPORT
 #define BIN_DISALLOWED 0x0000
+#endif
 #define OMF_DISALLOWED 0x0000
+#if COFF_SUPPORT
 /* exclude RELOFF8, OFF8, PTR16, PTR32, HIBYTE */
 #define COFF32_DISALLOWED 0x0E12
 /* exclude RELOFF8, OFF8, PTR16, PTR32, HIBYTE */
 #define COFF64_DISALLOWED 0x0E12
+#endif
+#if ELF_SUPPORT
 /* exclude SEG, PTR16, PTR32, HIBYTE */
 #define ELF32_DISALLOWED  0x0F00
 /* exclude SEG, PTR16, PTR32, HIBYTE */
 #define ELF64_DISALLOWED  0x0F00
+#endif
 
 /* fixups are also used for backpatching of forward references in pass one.
  * the instructions which depend on the distance are CALL, JMP, PUSH <imm>.
@@ -89,6 +95,9 @@ enum fixup_options {
 struct fixup {
     struct fixup         *nextbp;       /* PASS 1: linked list backpatch */
     struct fixup         *nextrlc;      /* PASS >1: linked list relocs */
+#ifdef TRMEM
+    uint_16              marker;
+#endif
     uint_32              offset;        /* symbol's offset */
     uint_32              location;      /* location of fixup */
     enum fixup_types     type;

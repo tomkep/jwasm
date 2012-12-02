@@ -75,9 +75,11 @@ struct global_options Options = {
     /* warning_error    */          FALSE,
 #ifdef DEBUG_OUT
     /* debug            */          FALSE,
-    /* nofastpass       */          FALSE,
     /* nobackpatch      */          FALSE,
+#if FASTPASS
+    /* nofastpass       */          FALSE,
     /* print_linestore  */          FALSE,
+#endif
     /* max_passes       */          0,
     /* skip_preprocessor */         0,
 #endif
@@ -123,7 +125,7 @@ struct global_options Options = {
     /* safeseh               */     FALSE,
     /* ignore_include        */     FALSE,
     /* output_format         */     OFORMAT_OMF,
-    /* header_format         */     HFORMAT_NONE,
+    /* sub_format            */     SFORMAT_NONE,
     /* alignment_default     */     0,
     /* langtype              */     LANG_NONE,
     /* model                 */     MODEL_NONE,
@@ -424,7 +426,7 @@ static void OPTQUAL Set_ofmt( void )
 /**********************************/
 {
     Options.output_format = OptValue & 0xff;
-    Options.header_format = OptValue >> 8;
+    Options.sub_format = OptValue >> 8;
 }
 
 static void OPTQUAL Set_zcm( void ) { Options.no_cdecl_decoration = FALSE; }
@@ -443,12 +445,14 @@ static void OPTQUAL Set_d6( void )
     ModuleInfo.cref = TRUE; /* enable debug displays */
     DebugMsg(( "debugging output on\n" ));
 }
+#if FASTPASS
 static void OPTQUAL Set_d7( void )
 /********************************/
 {
     Options.nofastpass = TRUE;
     DebugMsg(( "FASTPASS disabled\n" ));
 }
+#endif
 static void OPTQUAL Set_d8( void )
 /********************************/
 {
@@ -475,7 +479,7 @@ struct  cmdloption {
 static struct cmdloption const cmdl_options[] = {
     { "?",      0,        Set_h },
 #if BIN_SUPPORT
-    { "bin",    OFORMAT_BIN | (HFORMAT_NONE << 8), Set_ofmt },
+    { "bin",    OFORMAT_BIN | (SFORMAT_NONE << 8), Set_ofmt },
 #endif
 #if BUILD_TARGET
     { "bt=$",   0,        Set_bt },
@@ -484,23 +488,25 @@ static struct cmdloption const cmdl_options[] = {
     { "Cu",     0,        Set_Cu },
     { "Cx",     0,        Set_Cx },
 #if COFF_SUPPORT
-    { "coff",   OFORMAT_COFF | (HFORMAT_NONE << 8), Set_ofmt },
+    { "coff",   OFORMAT_COFF | (SFORMAT_NONE << 8), Set_ofmt },
 #endif
     { "c",      0,        Set_c },
 #ifdef DEBUG_OUT
     { "d6",     0,        Set_d6 },
+#if FASTPASS
     { "d7",     0,        Set_d7 },
+#endif
     { "d8",     0,        Set_d8 },
 #endif
 #if COFF_SUPPORT && DJGPP_SUPPORT
-    { "djgpp",  OFORMAT_COFF | (HFORMAT_DJGPP << 8), Set_ofmt },
+    { "djgpp",  OFORMAT_COFF | (SFORMAT_DJGPP << 8), Set_ofmt },
 #endif
     { "D^$",    0,        Set_D },
 #if ELF_SUPPORT
 #if AMD64_SUPPORT
-    { "elf64",  OFORMAT_ELF | (HFORMAT_ELF64 << 8), Set_ofmt },
+    { "elf64",  OFORMAT_ELF | (SFORMAT_64BIT << 8), Set_ofmt },
 #endif
-    { "elf",    OFORMAT_ELF | (HFORMAT_NONE << 8), Set_ofmt },
+    { "elf",    OFORMAT_ELF | (SFORMAT_NONE << 8), Set_ofmt },
 #endif
     { "EP",     0,        Set_EP },
     { "eq",     optofs( no_error_disp ),        Set_True },
@@ -524,11 +530,14 @@ static struct cmdloption const cmdl_options[] = {
     { "Fw=^@",  0,        Set_Fw },
     { "Gc",     LANG_PASCAL,  Set_G },
     { "Gd",     LANG_C,       Set_G },
+    { "Gr",     LANG_FASTCALL,Set_G },
     { "Gz",     LANG_STDCALL, Set_G },
     { "h",      0,        Set_h },
     { "I=^@",   0,        Set_I },
 #ifdef DEBUG_OUT
+#if FASTPASS
     { "ls",     optofs( print_linestore ), Set_True },
+#endif
 #endif
     { "mc",     MODEL_COMPACT, Set_m },
     { "mf",     MODEL_FLAT,    Set_m },
@@ -539,7 +548,7 @@ static struct cmdloption const cmdl_options[] = {
     { "mt",     MODEL_TINY,    Set_m },
 #if BIN_SUPPORT
 #if MZ_SUPPORT
-    { "mz",     OFORMAT_BIN | (HFORMAT_MZ << 8), Set_ofmt },
+    { "mz",     OFORMAT_BIN | (SFORMAT_MZ << 8), Set_ofmt },
 #endif
 #endif
     { "nc=$",   OPTN_CODE_CLASS,    Set_n },
@@ -547,15 +556,12 @@ static struct cmdloption const cmdl_options[] = {
     { "nm=$",   OPTN_MODULE_NAME,   Set_n },
     { "nt=$",   OPTN_TEXT_SEG,      Set_n },
     { "nologo", 0,        Set_nologo },
-    { "omf",    OFORMAT_OMF | (HFORMAT_NONE << 8), Set_ofmt },
+    { "omf",    OFORMAT_OMF | (SFORMAT_NONE << 8), Set_ofmt },
 #if COCTALS
     { "o",      optofs( allow_c_octals ),   Set_True },
 #endif
 #if PE_SUPPORT
-    { "pe32",   OFORMAT_COFF | (HFORMAT_PE32 << 8), Set_ofmt },
-#if AMD64_SUPPORT
-    { "pe64",   OFORMAT_COFF | (HFORMAT_PE64 << 8), Set_ofmt },
-#endif
+    { "pe",     OFORMAT_BIN | (SFORMAT_PE << 8), Set_ofmt },
 #endif
 #ifdef DEBUG_OUT
     { "pm=#",   0,        Set_pm },
@@ -575,7 +581,7 @@ static struct cmdloption const cmdl_options[] = {
     { "WX",     0,        Set_WX },
     { "W=#",    0,        Set_W },
 #if AMD64_SUPPORT
-    { "win64",  OFORMAT_COFF | (HFORMAT_WIN64 << 8), Set_ofmt },
+    { "win64",  OFORMAT_COFF | (SFORMAT_64BIT << 8), Set_ofmt },
 #endif
     { "w",      0,        Set_w },
     { "X",      optofs( ignore_include ), Set_True },

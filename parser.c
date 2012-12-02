@@ -38,7 +38,7 @@
 #include "fixup.h"
 #include "expreval.h"
 #include "types.h"
-#include "labels.h"
+#include "label.h"
 #include "segment.h"
 #include "assume.h"
 #include "proc.h"
@@ -208,9 +208,14 @@ int SizeFromRegister( int registertoken )
 #endif
 }
 
-/* get size from memory type
- * is32 param used only for MT_NEAR/MT_FAR
+/* get size from memory type */
+
+/* MT_PROC memtype is set ONLY in typedefs ( state=SYM_TYPE, typekind=TYPE_TYPEDEF)
+ * and makes the type a PROTOTYPE. Due to technical (obsolete?) restrictions the
+ * prototype data is stored in another symbol and is referenced in the typedef's
+ * target_type member.
  */
+
 int SizeFromMemtype( enum memtype mem_type, int Ofssize, struct asym *type )
 /**************************************************************************/
 {
@@ -228,8 +233,10 @@ int SizeFromMemtype( enum memtype mem_type, int Ofssize, struct asym *type )
         DebugMsg1(("SizeFromMemtype( MT_FAR, Ofssize=%u )=%u\n", Ofssize, ( 2 << Ofssize ) + 2 ));
         return ( ( 2 << Ofssize ) + 2 );
     case MT_PROC:
-        DebugMsg1(("SizeFromMemtype( MT_PROC, Ofssize=%u )=%u\n", Ofssize, ( 2 << Ofssize ) + ( ( SIZE_CODEPTR & ( 1 << ModuleInfo.model ) ) ? 2 : 0 ) ));
-        return( ( 2 << Ofssize ) + ( ( SIZE_CODEPTR & ( 1 << ModuleInfo.model ) ) ? 2 : 0 ) );
+        DebugMsg1(("SizeFromMemtype( MT_PROC, Ofssize=%u, type=%s )=%u\n", Ofssize, type->name, ( 2 << Ofssize ) + ( type->isfar ? 2 : 0 ) ));
+        /* v2.09: use type->isfar setting */
+        //return( ( 2 << Ofssize ) + ( ( SIZE_CODEPTR & ( 1 << ModuleInfo.model ) ) ? 2 : 0 ) );
+        return( ( 2 << Ofssize ) + ( type->isfar ? 2 : 0 ) );
     case MT_PTR:
         DebugMsg1(("SizeFromMemtype( MT_PTR, Ofssize=%u )=%u\n", Ofssize, ( 2 << Ofssize ) + ( ( SIZE_DATAPTR & ( 1 << ModuleInfo.model ) ) ? 2 : 0 ) ));
         return( ( 2 << Ofssize ) + ( ( SIZE_DATAPTR & ( 1 << ModuleInfo.model ) ) ? 2 : 0 ) );
@@ -1312,16 +1319,24 @@ static void Set_Memtype( struct code_info *CodeInfo, enum memtype mem_type )
          */
         else if ( IS_MEMTYPE_SIZ( mem_type, sizeof( uint_64 ) ) ) {
             switch( CodeInfo->token ) {
-            case T_CMPXCHG8B:
             case T_PUSH: /* for PUSH/POP, REX_W isn't needed (no 32-bit variants in 64-bit mode) */
             case T_POP:
+            case T_CMPXCHG8B:
+#if VMXSUPP
+            case T_VMPTRLD:
+            case T_VMPTRST:
+            case T_VMCLEAR:
+            case T_VMXON:
+#endif
                 break;
             default:
                 /* don't set REX for opcodes that accept memory operands
                  * of any size.
                  */
-                if ( opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type[OPND1] == OP_M_ANY )
+                if ( opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type[OPND1] == OP_M_ANY ) {
+                    //printf( "Set_Memtype: OP_M_ANY detected, file=%s, instr=%s\n", CurrFName[ASM], GetResWName( CodeInfo->token, NULL ) );
                     break;
+                }
                 /* don't set REX for FPU opcodes */
                 if ( CodeInfo->pinstr->cpu & P_FPU_MASK )
                     break;
@@ -1384,11 +1399,11 @@ static void Set_Memtype( struct code_info *CodeInfo, enum memtype mem_type )
          * accepted in 16-bit code
          */
         else if ( IS_MEMTYPE_SIZ( mem_type, sizeof(uint_64) ) ) {
-            if ( opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type[OPND1] == OP_M_ANY )
+            if ( opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type[OPND1] == OP_M_ANY ) {
+                //printf( "Set_Memtype: OP_M_ANY detected, file=%s, instr=%s\n", CurrFName[ASM], GetResWName( CodeInfo->token, NULL ) );
+            } else if ( CodeInfo->pinstr->cpu & ( P_FPU_MASK | P_EXT_MASK ) ) {
                 ;
-            else if ( CodeInfo->pinstr->cpu & ( P_FPU_MASK | P_EXT_MASK ) )
-                ;
-            else if ( CodeInfo->token != T_CMPXCHG8B )
+            } else if ( CodeInfo->token != T_CMPXCHG8B )
                 /* setting REX.W will cause an error in codegen */
                 CodeInfo->prefix.rex |= REX_W;
         }
@@ -1438,7 +1453,9 @@ static ret_code memory_operand( struct code_info *CodeInfo, unsigned CurrOpnd, s
         int size;
         if ( opndx->Ofssize == USE_EMPTY && sym )
             opndx->Ofssize = GetSymOfssize( sym );
-        size = SizeFromMemtype( opndx->mem_type, opndx->Ofssize, NULL );
+        /* v2.09: use opndx->type ( for MT_PROC ) */
+        //size = SizeFromMemtype( opndx->mem_type, opndx->Ofssize, NULL );
+        size = SizeFromMemtype( opndx->mem_type, opndx->Ofssize, opndx->type );
         MemtypeFromSize( size, &opndx->mem_type );
     }
 
@@ -2530,6 +2547,13 @@ static ret_code check_size( struct code_info *CodeInfo, const struct expr opndx[
     case T_VCVTSS2SI:
     case T_VCVTTSS2SI:
 #endif
+#if VMXSUPP /* v2.09: added */
+    case T_INVEPT:
+    case T_INVVPID:
+#endif
+#if SVMSUPP /* v2.09: added */
+    case T_INVLPGA:
+#endif
         break;
 #if AVXSUPP
     case T_VCVTPD2DQ:
@@ -2593,27 +2617,24 @@ static ret_code check_size( struct code_info *CodeInfo, const struct expr opndx[
               ) {
                 return( NOT_ERROR );
             }
-        } else if( ( op1 & OP_M ) || ( op2 & OP_M ) ) {
-            /*
-             * one operand is a memory reference.
-             * if address mode is indirect and the other operand is AX/EAX/RAX,
-             * don't use the short format (opcodes A0-A3).
-             */
+        } else if( ( op1 & OP_M ) || ( op2 & OP_M ) ) { /* one operand a memory reference? */
+
             if ( CodeInfo->isdirect == FALSE ) {
+                /* address mode is indirect. if the other operand is AL/AX/EAX/RAX,
+                 * don't use the short format (opcodes A0-A3) - it exists for direct
+                 * addressing only. Reset OP_A flag!
+                 */
                 if( CodeInfo->opnd[OPND1].type & OP_A ) {
-                    /* short form exists for direct addressing only, change OP_A to OP_R! */
                     CodeInfo->opnd[OPND1].type &= ~OP_A;
-                    DebugMsg1(("check_size: op1 changed to %X\n", CodeInfo->opnd[OPND1].type ));
+                    DebugMsg1(("check_size: OP_A flag reset, op1=%X\n", CodeInfo->opnd[OPND1].type ));
                 } else if ( CodeInfo->opnd[OPND2].type & OP_A ) {
-                    /* short form exists for direct addressing only, change OP_A to OP_R! */
                     CodeInfo->opnd[OPND2].type &= ~OP_A;
-                    DebugMsg1(("check_size: op2 changed to %X\n", CodeInfo->opnd[OPND2].type ));
+                    DebugMsg1(("check_size: OP_A flag reset, op2=%X\n", CodeInfo->opnd[OPND2].type ));
                 }
-            }
 #if AMD64_SUPPORT
-            else if ( CodeInfo->Ofssize == USE64 ) {
-                /* for 64bit, direct addressing with AL/AX/EAX/RAX (opc A0-A3)
-                 * expect a full 64-bit moffs. There's currently no syntax
+            } else if ( CodeInfo->Ofssize == USE64 ) {
+                /* for 64bit, opcodes A0-A3 ( direct memory addressing with AL/AX/EAX/RAX )
+                 * are followed by a full 64-bit moffs. There's currently no syntax
                  * available to allow this variant, so the OP_A flag must be
                  * reset.
                  */
@@ -2622,14 +2643,8 @@ static ret_code check_size( struct code_info *CodeInfo, const struct expr opndx[
                 } else if ( CodeInfo->opnd[OPND2].type & OP_A ) {
                     CodeInfo->opnd[OPND2].type &= ~OP_A;
                 }
-            }
 #endif
-        /* v2.06: moves to/from special regs are now marked with
-         * F_0FNO66 in instruct.h, making this branch obsolete.
-         */
-        //} else if( ( op1 & OP_RSPEC ) || ( op2 & OP_RSPEC ) ) {
-        //    CodeInfo->prefix.opsiz = FALSE;
-        //    return( rc ); /* v1.96: removed */
+            }
         }
         /* fall through */
     default:
@@ -2886,10 +2901,7 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
                 return( ERROR );
             }
             /* must be done BEFORE FStoreLine()! */
-            if( DefineProc == TRUE ) {
-                if ( dirflags & DF_PROC )
-                    write_prologue( tokenarray );
-            }
+            if( DefineProc == TRUE && ( dirflags & DF_PROC ) ) write_prologue( tokenarray );
 #if FASTPASS
             if ( StoreState || ( dirflags & DF_STORE ) ) {
                 /* v2.07: the comment must be stored as well
@@ -2941,7 +2953,7 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
         case T_ID:
             DebugMsg1(("ParseLine: T_ID >%s<\n", tokenarray[i].string_ptr ));
             if( sym = IsType( tokenarray[i].string_ptr ) ) {
-                return( data_dir( i, tokenarray, (struct dsym *)sym ) );
+                return( data_dir( i, tokenarray, sym ) );
             }
             break;
         default:
@@ -3137,9 +3149,15 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
                     EmitErr( INVALID_INSTRUCTION_OPERANDS );
                     return( ERROR );
                 }
+                /* fixme: check if there's an operand behind OPND2 at all!
+                 * if no, there's no point to continue with switch (opndx[].kind).
+                 */
+                /* flag VX_DST is set if an immediate is expected as operand 3 */
                 if ( ( vex_flags[CodeInfo.token - VEX_START] & VX_DST ) &&
                     ( opndx[OPND3].kind == EXPR_CONST ) ) {
+                    DebugMsg1(("ParseLine(%s,%u): avx VX_DST, op3.kind=CONST (value=%u), numops=%u\n", instr, CurrOpnd, opndx[OPND3].kind, opndx[OPND3].value, j ));
                     if ( opndx[OPND1].base_reg ) {
+                        /* first operand register is moved to vexregop */
                         /* handle VEX.NDD */
                         CodeInfo.vexregop = opndx[OPND1].base_reg->bytval + 1;
                         memcpy( &opndx[OPND1], &opndx[CurrOpnd], sizeof( opndx[0] ) * 3 );
@@ -3149,7 +3167,7 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
                     }
                 } else {
                     unsigned flags = GetValueSp( opndx[CurrOpnd].base_reg->tokval );
-                    DebugMsg1(("ParseLine(%s,%u): avx operand, flags=%X ci.type[0]=%X\n", instr, CurrOpnd, flags, CodeInfo.opnd[OPND1].type ));
+                    DebugMsg1(("ParseLine(%s,%u): avx operand, flags=%X ci.type[0]=%X numops=%u\n", instr, CurrOpnd, flags, CodeInfo.opnd[OPND1].type, j ));
 #if 1
                     /* v2.08: no error here if first op is an untyped memory reference
                      * note that OP_M includes OP_M128, but not OP_M256 (to be fixed?)
@@ -3165,6 +3183,8 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
                         EmitErr( INVALID_INSTRUCTION_OPERANDS );
                         return( ERROR );
                     }
+                    /* second operand register is moved to vexregop */
+                    /* to be fixed: CurrOpnd is always OPND2, so use this const here */
                     CodeInfo.vexregop = opndx[CurrOpnd].base_reg->bytval + 1;
                     memcpy( &opndx[CurrOpnd], &opndx[CurrOpnd+1], sizeof( opndx[0] ) * 2 );
                 }
@@ -3226,6 +3246,29 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
     if ( CodeInfo.pinstr->allowed_prefix == AP_REP ||
          CodeInfo.pinstr->allowed_prefix == AP_REPxx ) {
         HandleStringInstructions( &CodeInfo, opndx );
+#if SVMSUPP /* v2.09, not active because a bit too hackish yet - it "works", though. */
+    } else if ( CodeInfo.token >= T_VMRUN && CodeInfo.token <= T_INVLPGA && CodeInfo.pinstr->opclsidx ) {
+        /* the size of the first operand is to trigger the address size byte 67h,
+         * not the operand size byte 66h!
+         */
+        CodeInfo.prefix.adrsiz = CodeInfo.prefix.opsiz;
+        CodeInfo.prefix.opsiz = 0;
+        /* the first op must be EAX/AX or RAX/EAX. The operand class
+         * used in the instruction table is OP_A ( which is AL/AX/EAX/RAX ).
+         */
+        if ( ( CodeInfo.opnd[OPND1].type & ( CodeInfo.Ofssize == USE64 ? OP_R64 | OP_R32 : OP_R32 | OP_R16 ) ) == 0 ) {
+            EmitErr( INVALID_INSTRUCTION_OPERANDS );
+            return( ERROR );
+        }
+        /* the INVLPGA instruction has a fix second operand (=ECX). However, there's no
+         * operand class for ECX alone. So it has to be ensured here that the register IS ecx.
+         */
+        if ( CodeInfo.token == T_INVLPGA )
+            if ( ( CodeInfo.rm_byte & BIT_345 ) != ( 1 << 3 ) ) { /* ECX is register 1 */
+                EmitErr( INVALID_INSTRUCTION_OPERANDS );
+                return( ERROR );
+            }
+#endif
     } else {
         if( CurrOpnd > 1 ) {
             /* v1.96: check if a third argument is ok */
@@ -3265,9 +3308,14 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
         }
 #if AMD64_SUPPORT
         if ( CodeInfo.Ofssize == USE64 ) {
+
             //if ( CodeInfo.x86hi_used && ( CodeInfo.x64lo_used || CodeInfo.prefix.rex & 7 ))
             if ( CodeInfo.x86hi_used && CodeInfo.prefix.rex )
                 EmitError( INVALID_USAGE_OF_AHBHCHDH );
+
+            /* for some instructions, the "wide" flag has to be removed selectively.
+             * this is to be improved - by a new flag in struct instr_item.
+             */
             switch ( CodeInfo.token ) {
             case T_PUSH:
             case T_POP:
@@ -3277,6 +3325,10 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
                 break;
             case T_CALL:
             case T_JMP:
+#if VMXSUPP /* v2.09: added */
+            case T_VMREAD:
+            case T_VMWRITE:
+#endif
                 /* v2.02: previously rex-prefix was cleared entirely,
                  * but bits 0-2 are needed to make "call rax" and "call r8"
                  * distinguishable!

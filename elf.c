@@ -607,7 +607,7 @@ static void set_symtab_values( void *hdr )
 #endif
 
 #if AMD64_SUPPORT
-    if ( ModuleInfo.header_format == HFORMAT_ELF64 )
+    if ( ModuleInfo.defOfssize == USE64 )
         strsize = set_symtab_64( entries, localshead );
     else
 #endif
@@ -673,7 +673,7 @@ static void set_shstrtab_values( void )
         if ( curr->e.seginfo->FixupListHead )
             size += strlen( p ) +
 #if AMD64_SUPPORT
-                (( ModuleInfo.header_format == HFORMAT_ELF64 ) ? sizeof(".rela") : sizeof(".rel"));
+                (( ModuleInfo.defOfssize == USE64 ) ? sizeof(".rela") : sizeof(".rel"));
 #else
                 sizeof(".rel");
 #endif
@@ -705,7 +705,7 @@ static void set_shstrtab_values( void )
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         if ( curr->e.seginfo->FixupListHead ) {
 #if AMD64_SUPPORT
-            strcpy( p, (( ModuleInfo.header_format == HFORMAT_ELF64 ) ? ".rela": ".rel") );
+            strcpy( p, (( ModuleInfo.defOfssize == USE64 ) ? ".rela": ".rel") );
 #else
             strcpy( p, ".rel" );
 #endif
@@ -714,7 +714,7 @@ static void set_shstrtab_values( void )
             p += strlen( p ) + 1;
         }
     }
-    myassert( size == p - internal_segs[SHSTRTAB_IDX].data );
+    myassert( size == p - (char *)internal_segs[SHSTRTAB_IDX].data );
     DebugMsg(("set_shstrtab_values: size=%X\n", size));
     return;
 }
@@ -747,7 +747,6 @@ static int elf_write_section_table64( struct module_info *modinfo, Elf64_Ehdr *h
 {
     int         i;
     struct dsym *curr;
-    char        *clname;
     uint_8      *p;
     //uint        offset;
     uint        entrysize;
@@ -786,7 +785,7 @@ static int elf_write_section_table64( struct module_info *modinfo, Elf64_Ehdr *h
             shdr64.sh_flags = SHF_ALLOC;
         } else if ( curr->e.seginfo->info == TRUE ) { /* v2.07:added */
             shdr64.sh_type = SHT_NOTE;
-        } else if (( clname = GetLname( curr->e.seginfo->class_name_idx ) ) && strcmp( clname, "CONST" ) == 0 ) {
+        } else if ( curr->e.seginfo->clsym && strcmp( curr->e.seginfo->clsym->name, "CONST" ) == 0 ) {
             shdr64.sh_flags = SHF_ALLOC; /* v2.07: added */
         } else {
             shdr64.sh_flags = SHF_WRITE | SHF_ALLOC;
@@ -891,7 +890,6 @@ static int elf_write_section_table32( struct module_info *modinfo, Elf32_Ehdr *h
 {
     int         i;
     struct dsym *curr;
-    char        *clname;
     uint_8      *p;
     //uint        offset;
     uint        entrysize;
@@ -929,7 +927,7 @@ static int elf_write_section_table32( struct module_info *modinfo, Elf32_Ehdr *h
             shdr32.sh_flags = SHF_ALLOC;
         } else if ( curr->e.seginfo->info == TRUE ) { /* v2.07:added */
             shdr32.sh_type = SHT_NOTE;
-        } else if (( clname = GetLname( curr->e.seginfo->class_name_idx ) ) && strcmp( clname, "CONST" ) == 0 ) {
+        } else if ( curr->e.seginfo->clsym && strcmp( curr->e.seginfo->clsym->name, "CONST" ) == 0 ) {
             shdr32.sh_flags = SHF_ALLOC; /* v2.07: added */
         } else {
             shdr32.sh_flags = SHF_WRITE | SHF_ALLOC;
@@ -1060,15 +1058,15 @@ ret_code elf_write_header( struct module_info *modinfo )
     extused = FALSE;
 #endif
 
-    switch ( modinfo->header_format ) {
+    switch ( modinfo->defOfssize ) {
 #if AMD64_SUPPORT
-    case HFORMAT_ELF64:
+    case USE64:
         memset(&ehdr64, 0, sizeof( ehdr64 ) );
         memcpy(&ehdr64.e_ident, ELF_SIGNATURE, ELF_SIGNATURE_LEN);
         ehdr64.e_ident[EI_CLASS] = ELFCLASS64;
         ehdr64.e_ident[EI_DATA] = ELFDATA2LSB;
         ehdr64.e_ident[EI_VERSION] = EV_CURRENT;
-        ehdr64.e_ident[EI_OSABI] = modinfo->osabi;
+        ehdr64.e_ident[EI_OSABI] = modinfo->elf_osabi;
         /* v2.07: set abiversion to 0 */
         //ehdr64.e_ident[EI_ABIVERSION] = EV_CURRENT;
         ehdr64.e_ident[EI_ABIVERSION] = 0;
@@ -1105,7 +1103,7 @@ ret_code elf_write_header( struct module_info *modinfo )
         ehdr32.e_ident[EI_CLASS] = ELFCLASS32;
         ehdr32.e_ident[EI_DATA] = ELFDATA2LSB;
         ehdr32.e_ident[EI_VERSION] = EV_CURRENT;
-        ehdr32.e_ident[EI_OSABI] = modinfo->osabi;
+        ehdr32.e_ident[EI_OSABI] = modinfo->elf_osabi;
         /* v2.07: set abiversion to 0 */
         //ehdr32.e_ident[EI_ABIVERSION] = EV_CURRENT;
         ehdr32.e_ident[EI_ABIVERSION] = 0;
@@ -1319,7 +1317,7 @@ ret_code elf_write_data( struct module_info *modinfo )
             DebugMsg(("elf_write_data(%s): relocs at ofs=%X, size=%X\n", curr->sym.name, curr->e.seginfo->reloc_offset, curr->e.seginfo->num_relocs * sizeof(Elf32_Rel)));
             fseek( CurrFile[OBJ], curr->e.seginfo->reloc_offset, SEEK_SET );
 #if AMD64_SUPPORT
-            if ( modinfo->header_format == HFORMAT_ELF64 )
+            if ( modinfo->defOfssize == USE64 )
                 write_relocs64( curr );
             else
 #endif
@@ -1344,7 +1342,7 @@ ret_code elf_write_data( struct module_info *modinfo )
 void elf_init( struct module_info *ModuleInfo )
 /*********************************************/
 {
-    ModuleInfo->osabi = ELFOSABI_LINUX;
+    ModuleInfo->elf_osabi = ELFOSABI_LINUX;
     return;
 }
 

@@ -84,6 +84,7 @@ static void SetValue( struct asym *sym, struct expr *opndx )
             sym->type = opndx->sym->type;
         }
         sym->offset = opndx->sym->offset + opndx->value;
+        sym->value3264 = 0; /* v2.09: added */
         sym->segment = opndx->sym->segment;
     }
     return;
@@ -99,7 +100,7 @@ static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
     struct asym         *sym;
     const char          *name = tokenarray[0].string_ptr;
     int                 i = 2;
-    struct expr         opndx;
+    struct expr         opnd;
 
     DebugMsg1(( "CreateAssemblyTimeVariable(%s) enter\n", name ));
 
@@ -108,44 +109,60 @@ static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
         //tokenarray[3].token == T_FINAL &&
         //tokenarray[2].itemlen <= 8 ) {
         tokenarray[3].token == T_FINAL ) {
-        //opndx.llvalue = tokenarray[2].value64;
-        //opndx.llvalue = *(uint_64 *)(tokenarray[2].string_ptr - sizeof(uint_64) );
-        myatoi128( tokenarray[i].string_ptr, &opndx.llvalue, tokenarray[i].numbase, tokenarray[i].itemlen );
+        //opnd.llvalue = tokenarray[2].value64;
+        //opnd.llvalue = *(uint_64 *)(tokenarray[2].string_ptr - sizeof(uint_64) );
+        myatoi128( tokenarray[i].string_ptr, &opnd.llvalue, tokenarray[i].numbase, tokenarray[i].itemlen );
     check_number:
-        opndx.kind = EXPR_CONST;
-        opndx.mem_type = MT_EMPTY; /* v2.07: added */
+        opnd.kind = EXPR_CONST;
+        opnd.mem_type = MT_EMPTY; /* v2.07: added */
         /* v2.08: check added. the number must be 32-bit */
-        if ( opndx.hlvalue != 0 ||
-            opndx.value64 < minintvalues[ModuleInfo.Ofssize] ||
-            opndx.value64 > maxintvalues[ModuleInfo.Ofssize] ) {
-            EmitConstError( &opndx );
+        if ( opnd.hlvalue != 0 ||
+            opnd.value64 < minintvalues[ModuleInfo.Ofssize] ||
+            opnd.value64 > maxintvalues[ModuleInfo.Ofssize] ) {
+            EmitConstError( &opnd );
             return( NULL );
         }
     } else {
-        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
+        /* v2.09: don't create not-(yet)-defined symbols. Example:
+         * E1 = E1 or 1
+         * must NOT create E1.
+         */
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opnd, 0 ) == ERROR )
             return( NULL );
         if( tokenarray[i].token != T_FINAL ) {
             EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( NULL );
         }
-        /* a relocatable item (EXPR_ADDR) is accepted if it is guess of the
-         * expression evaluator, which encountered a forward ref */
-        if( opndx.kind != EXPR_CONST &&
-           ( opndx.kind != EXPR_ADDR ||
-            opndx.indirect == TRUE ||
-            ( opndx.sym != NULL && opndx.sym->state != SYM_INTERNAL && opndx.sym->state != SYM_UNDEFINED ) ) ) {
-            DebugMsg(( "CreateAssemblyTimeVariable(%s) kind=%u sym=%p state=%u\n", name, opndx.kind, opndx.sym, opndx.sym ? opndx.sym->state : 0 ));
-            EmitError( CONSTANT_EXPECTED );
+
+        /* expression may be a constant or a relocatable item.
+         * v2.09: kind may be EXPR_CONST and still include an undefined symbol.
+         * This is caused by MakeConst() in expreval.c. Brackets changed so
+         * opnd.sym is also checked for opnd.kind == EXPR_CONST.
+         */
+        if( opnd.kind != EXPR_CONST &&
+           ( opnd.kind != EXPR_ADDR || opnd.indirect == TRUE ) ||
+            ( opnd.sym != NULL && opnd.sym->state != SYM_INTERNAL ) ) {
+            DebugMsg(( "CreateAssemblyTimeVariable(%s) kind=%u sym=%p state=%u\n", name, opnd.kind, opnd.sym, opnd.sym ? opnd.sym->state : 0 ));
+            /* v2.09: no error if argument is a forward reference,
+             * but don't create the variable either. Will enforce an
+             * error if referenced symbol is still undefined in pass 2.
+             */
+            if( opnd.sym && opnd.sym->state == SYM_UNDEFINED && opnd.indirect == FALSE ) {
+#if FASTPASS
+                if ( StoreState == FALSE ) FStoreLine(0); /* make sure this line is evaluated in pass two */
+#endif
+            } else
+                EmitError( CONSTANT_EXPECTED );
             return( NULL );
         }
 
         /* v2.08: accept any result that fits in 64-bits from expression evaluator */
-        if ( opndx.hlvalue != 0 ) {
-            EmitConstError( &opndx );
+        if ( opnd.hlvalue != 0 ) {
+            EmitConstError( &opnd );
             return( NULL );
         }
         /* for quoted strings, the same restrictions as for plain numbers apply */
-        if ( opndx.quoted_string )
+        if ( opnd.quoted_string )
             goto check_number;
     }
 
@@ -163,19 +180,23 @@ static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
         //sym->variable  = TRUE;
     } else if ( sym->state != SYM_INTERNAL ||
                ( sym->variable == FALSE &&
-                ( opndx.uvalue != sym->uvalue || opndx.hvalue != sym->value3264 ) ) ) {
+                ( opnd.uvalue != sym->uvalue || opnd.hvalue != sym->value3264 ) ) ) {
         EmitErr( SYMBOL_REDEFINITION, sym->name );
         return( NULL );
     }
 #if FASTPASS
     /* v2.04a regression in v2.04. Do not save the variable when it
      * is defined the first time */
-    if ( StoreState && sym->saved == FALSE && sym->isdefined == TRUE ) {
+    if ( StoreState && sym->issaved == FALSE && sym->isdefined == TRUE ) {
         SaveVariableState( sym );
     }
 #endif
     sym->variable = TRUE;
-    SetValue( sym, &opndx );
+    /* v2.09: allow internal variables to be set */
+    if ( sym->predefined && sym->sfunc_ptr )
+        sym->sfunc_ptr( sym, &opnd );
+    else
+        SetValue( sym, &opnd );
     DebugMsg1(( "CreateAssemblyTimeVariable(%s) memtype=%Xh value=%d\n", name, sym->mem_type, sym->value ));
     return( sym );
 }
@@ -196,7 +217,7 @@ struct asym *CreateVariable( const char *name, int value )
     if( sym == NULL ) {
         sym = SymCreate( name );
 #if FASTPASS
-        sym->saved = FALSE;
+        sym->issaved = FALSE;
 #endif
     } else if ( sym->state == SYM_UNDEFINED ) {
         sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
@@ -205,7 +226,9 @@ struct asym *CreateVariable( const char *name, int value )
         return( NULL );
     }
 #if FASTPASS
-    if ( StoreState && sym->saved == FALSE ) {
+    /* v2.09: don't save variable when it is defined the first time */
+    //if ( StoreState && sym->saved == FALSE ) {
+    if ( StoreState && sym->issaved == FALSE && sym->isdefined == TRUE ) {
         SaveVariableState( sym );
     }
 #endif
@@ -247,6 +270,10 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
 
     sym = SymSearch( name );
 
+    /* if a literal follows, the equate MUST be(come) a text macro */
+    if ( tokenarray[2].token == T_STRING && tokenarray[2].string_delim == '<' )
+        return ( SetTextMacro( tokenarray, sym, name, NULL ) );
+
     if( sym == NULL ||
        sym->state == SYM_UNDEFINED ||
        ( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) ) {
@@ -271,16 +298,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
 
     /* try to evaluate the expression */
 
-    if ( tokenarray[2].token == T_STRING && tokenarray[2].string_delim == '<' ) {
-
-        /* the simplest case: value is a literal. define a text macro! */
-        if ( tokenarray[3].token != T_FINAL ) {
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[3].string_ptr );
-            return( NULL );
-        }
-        return ( SetTextMacro( tokenarray, sym, name, tokenarray[2].string_ptr ) );
-
-    } else if ( tokenarray[2].token == T_NUM && Token_Count == 3 ) {
+    if ( tokenarray[2].token == T_NUM && Token_Count == 3 ) {
 
         p = tokenarray[2].string_ptr;
     do_single_number:
@@ -327,6 +345,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
 
         /* v2.08: if it's a quoted string, handle it like a plain number */
         if ( opnd.quoted_string ) {
+            i--; /* v2.09: added; regression in v2.08 and v2.08a */
             goto check_single_number;
         }
 
@@ -335,8 +354,9 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
     /* what is an acceptable 'number' for EQU?
      * 1. a numeric value - if magnitude is <= 64 (or 32, if it's a plain number)
      *    This includes struct fields.
-     * 2. an address - if it is direct and doesn't contain an external reference.
-     * Anything else will be stored as a text macro.
+     * 2. an address - if it is direct, has a label and is of type SYM_INTERNAL -
+     *    that is, no forward references, no seg, groups, externals;
+     *    Anything else will be stored as a text macro.
      * v2.04: large parts rewritten.
      */
     if ( rc != ERROR &&
@@ -384,7 +404,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
         //}
         sym->variable = FALSE;
         SetValue( sym, &opnd );
-        DebugMsg1(("CreateConstant(%s): memtype=%Xh value=%" I64X_SPEC " isproc=%u variable=%u\n", name, sym->mem_type, sym->value, sym->value3264, sym->isproc, sym->variable ));
+        DebugMsg1(("CreateConstant(%s): memtype=%Xh value=%" I64X_SPEC " isproc=%u variable=%u type=%s\n", name, sym->mem_type, sym->value, sym->value3264, sym->isproc, sym->variable, sym->type ? sym->type->name : "NULL" ));
         return( sym );
     }
     DebugMsg1(("CreateConstant(%s): calling SetTextMacro() [MI.Ofssize=%u]\n", name, ModuleInfo.Ofssize ));

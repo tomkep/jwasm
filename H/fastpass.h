@@ -76,8 +76,9 @@ void StoreLine( char *, uint_32, int );
 void SkipSavedState( void );
 struct line_item *RestoreState( void );
 void SaveVariableState( struct asym *sym );
+void FreeLineStore( void );
 
-#define FStoreLine( flags ) if ( Parse_Pass == PASS_1 ) StoreLine( CurrSource, list_pos, flags )
+#define FStoreLine( flags ) if ( Parse_Pass == PASS_1 ) StoreLine( CurrSource, list_pos, flags ); else
 
 #else
 

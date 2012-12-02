@@ -25,7 +25,7 @@
 #include "hll.h"
 #include "context.h"
 #include "types.h"
-#include "labels.h"
+#include "label.h"
 #include "macro.h"
 #include "extern.h"
 #include "fixup.h"
@@ -64,7 +64,6 @@ jmp_buf jmpenv;
 #define USELSLINE 1 /* must match switch in listing.c! */
 
 extern void             ProcCheckOpen( void );
-extern void             SortSegments( void );
 
 extern uint_32          LastCodeBufSize;
 extern char             *DefaultDir[NUM_FILE_TYPES];
@@ -77,13 +76,12 @@ extern void             FreeLibQueue();
 extern int lq_line;
 #endif
 
-/* fields: next, name, segment, offset/value */
-struct asym WordSize = { NULL,"@WordSize", 0 };
-
-/* names for output formats. order must match enum oformat */
+/* parameters for output formats. order must match enum oformat */
 static const struct format_options formatoptions[] = {
-    { NULL,     BIN_DISALLOWED,  "BIN"  },
-    { NULL,     OMF_DISALLOWED,  "OMF"  },
+#if BIN_SUPPORT
+    { bin_init, BIN_DISALLOWED,  "BIN"  },
+#endif
+    { omf_init, OMF_DISALLOWED,  "OMF"  },
 #if COFF_SUPPORT
     { NULL,     COFF32_DISALLOWED, "COFF" },
 #endif
@@ -91,14 +89,6 @@ static const struct format_options formatoptions[] = {
     { elf_init, ELF32_DISALLOWED,  "ELF"  },
 #endif
 };
-#if AMD64_SUPPORT
-#if COFF_SUPPORT
-const struct format_options coff64_fmtopt = { NULL, COFF64_DISALLOWED, "PE32+" };
-#endif
-#if ELF_SUPPORT
-const struct format_options elf64_fmtopt = { elf_init, ELF64_DISALLOWED,  "ELF64"  };
-#endif
-#endif
 
 struct module_info      ModuleInfo;
 unsigned int            Parse_Pass;     /* assembly pass */
@@ -268,7 +258,10 @@ static ret_code WriteContent( void )
         /* -if Zi is set, write symbols and types */
         if ( Options.debug_symbols )
             omf_write_debug_tables();
-        omf_write_modend( ModuleInfo.start_fixup, ModuleInfo.start_displ );
+        omf_write_modend( ModuleInfo.g.start_fixup, ModuleInfo.start_displ );
+#if FASTMEM==0
+        LclFree( ModuleInfo.g.start_fixup );
+#endif
         break;
 #if COFF_SUPPORT
     case OFORMAT_COFF:
@@ -299,10 +292,10 @@ static ret_code WriteContent( void )
         for ( curr = SymTables[TAB_EXT].head; curr != NULL ; curr = curr->next ) {
             DebugMsg(("WriteContent: ext=%s, isproc=%u, weak=%u\n", curr->sym.name, curr->sym.isproc, curr->sym.weak ));
             if ( curr->sym.isproc && ( curr->sym.weak == FALSE || curr->sym.iat_used ) &&
-                curr->sym.dllname && *curr->sym.dllname != NULLC ) {
+                curr->sym.dll && *(curr->sym.dll->name) != NULLC ) {
                 int size;
                 Mangle( &curr->sym, StringBufferEnd );
-                size = sprintf( CurrSource, "import '%s'  %s.%s\n", StringBufferEnd, curr->sym.dllname, curr->sym.name );
+                size = sprintf( CurrSource, "import '%s'  %s.%s\n", StringBufferEnd, curr->sym.dll->name, curr->sym.name );
                 if ( fwrite( CurrSource, 1, size, ld ) != size )
                     WriteError();
             }
@@ -314,7 +307,7 @@ static ret_code WriteContent( void )
     return( NOT_ERROR );
 }
 
-#if BIN_SUPPORT || PE_SUPPORT
+#if BIN_SUPPORT
 static ret_code CheckExternal( void )
 /***********************************/
 {
@@ -328,6 +321,61 @@ static ret_code CheckExternal( void )
     return( NOT_ERROR );
 }
 #endif
+
+/* sort segments ( a simple bubble sort )
+ * type = 0: sort by fileoffset (.DOSSEG )
+ * type = 1: sort by name ( .ALPHA )
+ * type = 2: sort by segment type+name ( PE format ). member lname_idx is misused here for "type"
+ */
+
+void SortSegments( int type )
+/***************************/
+{
+    bool changed = TRUE;
+    bool swap;
+    struct dsym *curr;
+    //int index = 1;
+
+    while ( changed == TRUE ) {
+        struct dsym *prev = NULL;
+        changed = FALSE;
+        for( curr = SymTables[TAB_SEG].head; curr && curr->next ; prev = curr, curr = curr->next ) {
+            swap = FALSE;
+            switch (type ) {
+            case 0:
+                if ( curr->e.seginfo->fileoffset > curr->next->e.seginfo->fileoffset )
+                    swap = TRUE;
+                break;
+            case 1:
+                if ( strcmp( curr->sym.name, curr->next->sym.name ) > 0 )
+                    swap = TRUE;
+                break;
+            case 2:
+                if ( curr->e.seginfo->lname_idx > curr->next->e.seginfo->lname_idx ||
+                    ( curr->e.seginfo->lname_idx == curr->next->e.seginfo->lname_idx &&
+                    ( _stricmp( curr->sym.name, curr->next->sym.name ) > 0 ) ) )
+                    swap = TRUE;
+                break;
+            }
+            if ( swap ) {
+                struct dsym *tmp = curr->next;
+                changed = TRUE;
+                if ( prev == NULL ) {
+                    SymTables[TAB_SEG].head = tmp;
+                } else {
+                    prev->next = tmp;
+                }
+                curr->next = tmp->next;
+                tmp->next = curr;
+            }
+        }
+    }
+
+    /* v2.7: don't change segment indices! They're stored in fixup.frame_datum */
+    //for ( curr = SymTables[TAB_SEG].head; curr ; curr = curr->next ) {
+    //    curr->e.seginfo->seg_idx = index++;
+    //}
+}
 
 /*
  * write the OMF/COFF/ELF header
@@ -363,7 +411,7 @@ static ret_code WriteHeader( bool initial )
             if( ModuleInfo.segorder == SEGORDER_DOSSEG )
                 omf_write_dosseg();
             else if( ModuleInfo.segorder == SEGORDER_ALPHA )
-                SortSegments();
+                SortSegments( 1 );
             omf_write_lib();
             omf_write_lnames();
         }
@@ -371,7 +419,7 @@ static ret_code WriteHeader( bool initial )
         if ( initial == TRUE ) {
             omf_write_grp();
             omf_write_extdef();
-            omf_write_comdef();
+            //omf_write_comdef(); /* v2.09: comdef is called in extdef */
             omf_write_alias();
         }
         omf_write_public( initial );
@@ -382,16 +430,6 @@ static ret_code WriteHeader( bool initial )
         break;
 #if COFF_SUPPORT
     case OFORMAT_COFF:
-#if PE_SUPPORT
-        if ( ModuleInfo.header_format == HFORMAT_PE32
-#if AMD64_SUPPORT
-            || ModuleInfo.header_format == HFORMAT_PE64
-#endif
-           ) {
-            rc = CheckExternal();
-            break;
-        }
-#endif
         coff_write_header( &ModuleInfo );
         coff_write_section_table( &ModuleInfo );
         break;
@@ -418,6 +456,8 @@ static ret_code WriteHeader( bool initial )
 }
 
 #define is_valid_first_char( ch )  ( isalpha(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' || ch=='.' )
+
+/* check name of text macros defined via -D option */
 
 static int is_valid_identifier( char *id )
 /****************************************/
@@ -527,23 +567,23 @@ static void CmdlParamsInit( int pass )
         sym->predefined = TRUE;
 
         p = NULL;
-        if( stricmp( Options.build_target, "DOS" ) == 0 ) {
+        if( _stricmp( Options.build_target, "DOS" ) == 0 ) {
             p = "__MSDOS__";
-        } else if( stricmp( Options.build_target, "NETWARE" ) == 0 ) {
+        } else if( _stricmp( Options.build_target, "NETWARE" ) == 0 ) {
             if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ) {
                 p = "__NETWARE_386__";
             } else {
                 /* do nothing ... __NETWARE__ already defined */
             }
-        } else if( stricmp( Options.build_target, "WINDOWS" ) == 0 ) {
+        } else if( _stricmp( Options.build_target, "WINDOWS" ) == 0 ) {
             if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ) {
                 p = "__WINDOWS_386__";
             } else {
                 /* do nothing ... __WINDOWS__ already defined */
             }
-        } else if( stricmp( Options.build_target, "QNX" ) == 0 ) {
+        } else if( _stricmp( Options.build_target, "QNX" ) == 0 ) {
             p = "__UNIX__";
-        } else if( stricmp( Options.build_target, "LINUX" ) == 0 ) {
+        } else if( _stricmp( Options.build_target, "LINUX" ) == 0 ) {
             p = "__UNIX__";
         }
         if ( p ) {
@@ -635,6 +675,9 @@ static void ModulePassInit( void )
 {
     enum cpu_info cpu = Options.cpu;
     enum model_type model = Options.model;
+#if DLLIMPORT
+    struct dsym *curr;
+#endif
 
     DebugMsg(( "ModulePassInit enter\n" ));
     /* set default values not affected by the masm 5.1 compat switch */
@@ -654,20 +697,16 @@ static void ModulePassInit( void )
         ModuleInfo.langtype = Options.langtype;
         ModuleInfo.fctype = Options.fctype;
 #if AMD64_SUPPORT
-        if ( ModuleInfo.header_format == HFORMAT_WIN64 || ModuleInfo.header_format == HFORMAT_ELF64 ) {
+        if ( ModuleInfo.sub_format == SFORMAT_64BIT ) {
             /* v2.06: force cpu to be at least P_64, without side effect to Options.cpu */
             if ( ( cpu &  P_CPU_MASK ) < P_64 ) /* enforce cpu to be 64-bit */
                 cpu = P_64;
             /* ignore -m switch for 64-bit formats.
              * there's no other model than FLAT possible.
              */
-            model = MODEL_FLAT; 
-            if ( ModuleInfo.header_format == HFORMAT_WIN64 ) {
-                if ( ModuleInfo.langtype == LANG_NONE ) {
-                    ModuleInfo.langtype = LANG_FASTCALL;
-                }
-                ModuleInfo.fctype = FCT_WIN64;
-            }
+            model = MODEL_FLAT;
+            if ( ModuleInfo.langtype == LANG_NONE && Options.output_format == OFORMAT_COFF )
+                ModuleInfo.langtype = LANG_FASTCALL;
         } else
 #endif
             /* if model FLAT is to be set, ensure that cpu is compat. */
@@ -703,6 +742,12 @@ static void ModulePassInit( void )
 #if PROCALIGN
     ModuleInfo.procalign = 0;
 #endif
+#if DLLIMPORT
+    /* if OPTION DLLIMPORT was used, reset all iat_used flags */
+    if ( ModuleInfo.g.DllQueue )
+        for ( curr = SymTables[TAB_EXT].head; curr; curr = curr->next )
+            curr->sym.iat_used = FALSE;
+#endif
 }
 
 void RunLineQueue( void )
@@ -732,7 +777,9 @@ void RunLineQueue( void )
     return;
 }
 
-/* this is called by InitializeStructure(), which is a special case */
+#if 0 /* v2.09: obsolete, struct initialization does no longer generate code */
+
+/* this is called by InitStructuredVar(), which is a special case */
 
 void RunLineQueueEx( void )
 /*************************/
@@ -761,105 +808,7 @@ void RunLineQueueEx( void )
     DebugMsg1(( "RunLineQueueEx() exit\n" ));
     return;
 }
-
-/*
- * set index field for EXTERN/PROTO/COMM.
- * This is called after PASS 1 has been finished.
- */
-
-static void set_ext_idx( void )
-/*****************************/
-{
-    struct dsym *curr;
-    uint        index = 0;
-
-    DebugMsg(("set_ext_idx() enter\n"));
-    /* scan ALIASes for COFF/ELF */
-#if FASTPASS
-#if COFF_SUPPORT || ELF_SUPPORT
-    if ( Options.output_format == OFORMAT_COFF
-#if ELF_SUPPORT
-        || Options.output_format == OFORMAT_ELF
 #endif
-       ) {
-        for( curr = SymTables[TAB_ALIAS].head ; curr != NULL ;curr = curr->next ) {
-            struct asym *sym;
-            sym = curr->sym.substitute;
-            /* check if symbol is external or public */
-            if ( sym == NULL ||
-                ( sym->state != SYM_EXTERNAL &&
-                 ( sym->state != SYM_INTERNAL || sym->public == FALSE ))) {
-                SkipSavedState();
-                break;
-            }
-            /* make sure it becomes a strong external */
-            if ( sym->state == SYM_EXTERNAL )
-                sym->used = TRUE;
-        }
-    }
-#endif
-#endif
-
-    /* scan the EXTERN/EXTERNDEF items */
-
-    for( curr = SymTables[TAB_EXT].head ; curr != NULL ;curr = curr->next ) {
-        /* v2.01: externdefs which have been "used" become "strong" */
-        if ( curr->sym.used )
-            curr->sym.weak = FALSE;
-        /* skip COMM and unused EXTERNDEF/PROTO items. */
-        if (( curr->sym.iscomm == TRUE ) || ( curr->sym.weak == TRUE ))
-            continue;
-#if FASTPASS==0
-        /* v2.05: clear fixup list (used for backpatching in pass one) */
-        if ( curr->sym.fixup ) {
-            struct fixup *c;
-            struct fixup *n;
-            for( c = curr->sym.fixup ; c; ) {
-                n = c->nextbp;
-                LclFree( c );
-                c = n;
-            }
-        }
-#endif
-        index++;
-        curr->sym.ext_idx = index;
-        /* optional alternate symbol must be INTERNAL or EXTERNAL.
-         * COFF ( and ELF? ) also wants internal symbols public.
-         */
-#if FASTPASS
-        if ( curr->sym.altname ) {
-            if ( curr->sym.altname->state == SYM_INTERNAL ) {
-#if COFF_SUPPORT || ELF_SUPPORT
-                /* for COFF/ELF, the altname must be public or external */
-                if ( curr->sym.altname->public == FALSE &&
-                    ( Options.output_format == OFORMAT_COFF
-#if ELF_SUPPORT
-                     || Options.output_format == OFORMAT_ELF
-#endif
-                    ) ) {
-                    SkipSavedState();
-                }
-#endif
-            } else if ( curr->sym.altname->state != SYM_EXTERNAL ) {
-                /* do not use saved state, scan full source in second pass */
-                SkipSavedState();
-            }
-        }
-#endif
-    }
-
-    /* now scan the COMM items */
-
-    for( curr = SymTables[TAB_EXT].head; curr != NULL; curr = curr->next ) {
-        if ( curr->sym.iscomm == FALSE )
-            continue;
-        index++;
-        curr->sym.ext_idx = index;
-    }
-
-    DebugMsg(("set_ext_idx() exit\n"));
-    return;
-}
 
 #if 0 /* v2.07: removed */
 /* scan - and clear - global queue (EXTERNDEFs).
@@ -909,12 +858,15 @@ static void scan_globals( void )
 static void PassOneChecks( void )
 /*******************************/
 {
-#if FASTPASS || defined(DEBUG_OUT)
     struct dsym *curr;
-#endif
+    struct dsym *next;
 #if FASTPASS
     struct qnode *q;
 #endif
+#ifdef DEBUG_OUT
+    int cntUnusedExt = 0;
+#endif
+
     /* check for open structures and segments has been done inside the
      * END directive handling already */
     ProcCheckOpen();
@@ -977,9 +929,100 @@ static void PassOneChecks( void )
             }
     }
 #endif
+
+    /* scan ALIASes for COFF/ELF */
+
+#if COFF_SUPPORT || ELF_SUPPORT
+    if ( Options.output_format == OFORMAT_COFF
+#if ELF_SUPPORT
+        || Options.output_format == OFORMAT_ELF
+#endif
+       ) {
+        for( curr = SymTables[TAB_ALIAS].head ; curr != NULL ;curr = curr->next ) {
+            struct asym *sym;
+            sym = curr->sym.substitute;
+            /* check if symbol is external or public */
+            if ( sym == NULL ||
+                ( sym->state != SYM_EXTERNAL &&
+                 ( sym->state != SYM_INTERNAL || sym->public == FALSE ))) {
+                SkipSavedState();
+                break;
+            }
+            /* make sure it becomes a strong external */
+            if ( sym->state == SYM_EXTERNAL )
+                sym->used = TRUE;
+        }
+    }
 #endif
 
+#endif /* FASTPASS */
+
+    /* scan the EXTERN/EXTERNDEF items */
+
+    for( curr = SymTables[TAB_EXT].head ; curr; curr = next ) {
+        next = curr->next;
+        /* v2.01: externdefs which have been "used" become "strong" */
+        if ( curr->sym.used )
+            curr->sym.weak = FALSE;
+        /* remove unused EXTERNDEF/PROTO items from queue. */
+        if ( curr->sym.weak == TRUE
+#if DLLIMPORT
+            && curr->sym.iat_used == FALSE
+#endif
+           ) {
+            sym_remove_table( &SymTables[TAB_EXT], curr );
 #ifdef DEBUG_OUT
+            cntUnusedExt++;
+#endif
+            continue;
+        }
+
+#if FASTMEM==0
+        /* v2.05: clear fixup list (used for backpatching in pass one) */
+        if ( curr->sym.bp_fixup ) {
+            struct fixup *c;
+            struct fixup *n;
+            for( c = curr->sym.bp_fixup ; c; ) {
+                n = c->nextbp;
+                LclFree( c );
+                c = n;
+            }
+            curr->sym.bp_fixup = NULL;
+        }
+#endif
+
+        if ( curr->sym.iscomm == TRUE )
+            continue;
+        /* optional alternate symbol must be INTERNAL or EXTERNAL.
+         * COFF ( and ELF? ) also wants internal symbols to be public
+         * ( which is reasonable, since the linker won't know private
+         * symbols and hence will search for a symbol of that name
+         * "elsewhere" ).
+         */
+#if FASTPASS
+        if ( curr->sym.altname ) {
+            if ( curr->sym.altname->state == SYM_INTERNAL ) {
+#if COFF_SUPPORT || ELF_SUPPORT
+                /* for COFF/ELF, the altname must be public or external */
+                if ( curr->sym.altname->public == FALSE &&
+                    ( Options.output_format == OFORMAT_COFF
+#if ELF_SUPPORT
+                     || Options.output_format == OFORMAT_ELF
+#endif
+                    ) ) {
+                    SkipSavedState();
+                }
+#endif
+            } else if ( curr->sym.altname->state != SYM_EXTERNAL ) {
+                /* do not use saved state, scan full source in second pass */
+                SkipSavedState();
+            }
+        }
+#endif
+    }
+
+#ifdef DEBUG_OUT
+    DebugMsg(("PassOneChecks: removed unused externals: %u\n", cntUnusedExt ));
     DebugMsg(("PassOneChecks: forward references:\n"));
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         int i;
@@ -988,7 +1031,7 @@ static void PassOneChecks( void )
         struct fixup * fix;
         for ( i = 0, j = 0, sym = curr->e.seginfo->labels;sym;sym = (struct asym *)((struct dsym *)sym)->next ) {
             i++;
-            for ( fix = sym->fixup; fix ; fix = fix->nextbp, j++ );
+            for ( fix = sym->bp_fixup; fix ; fix = fix->nextbp, j++ );
         }
         DebugMsg(("PassOneChecks: segm=%s, labels=%u forward refs=%u\n", curr->sym.name, i, j));
     }
@@ -1015,7 +1058,7 @@ static unsigned long OnePass( void )
     InputPassInit();
     ModulePassInit();
     SymPassInit( Parse_Pass );
-    LabelsInit();
+    LabelInit();
     SegmentInit( Parse_Pass );
     ContextInit( Parse_Pass );
     ProcInit();
@@ -1146,12 +1189,14 @@ static void get_module_name( void )
     }
 }
 
-/* called by AssembleInit(), once per source module
- * symbol table has been initialized
+/* called by AssembleInit(), once per source module.
+ * symbol table has been initialized here.
  */
 static void ModuleInit( void )
 /****************************/
 {
+    ModuleInfo.sub_format = Options.sub_format;
+    ModuleInfo.fmtopt = &formatoptions[Options.output_format];
     ModuleInfo.CommentDataInCode = (Options.output_format == OFORMAT_OMF &&
                          Options.no_comment_data_in_code_records == FALSE);
     ModuleInfo.g.error_count = 0;
@@ -1170,6 +1215,7 @@ static void ModuleInit( void )
     memset( SymTables, 0, sizeof( SymTables[0] ) * TAB_LAST );
     if ( ModuleInfo.fmtopt->init )
         ModuleInfo.fmtopt->init( &ModuleInfo );
+
     return;
 }
 
@@ -1277,8 +1323,12 @@ static char *GetExt( int type )
     case OBJ:
 #if BIN_SUPPORT
         if ( Options.output_format == OFORMAT_BIN )
-#if MZ_SUPPORT
-            if ( ModuleInfo.header_format == HFORMAT_MZ )
+#if MZ_SUPPORT || PE_SUPPORT
+            if ( Options.sub_format == SFORMAT_MZ
+#if PE_SUPPORT
+                || Options.sub_format == SFORMAT_PE
+#endif
+               )
                 return("EXE");
             else
 #endif
@@ -1352,15 +1402,6 @@ static void AssembleInit( const char *source )
     GeneratedCode = 0;
     LinnumQueue.head = NULL;
 
-    ModuleInfo.header_format = Options.header_format;
-#if AMD64_SUPPORT
-    if ( Options.header_format == HFORMAT_WIN64 )
-        ModuleInfo.fmtopt = &coff64_fmtopt;
-    else if ( Options.header_format == HFORMAT_ELF64 )
-        ModuleInfo.fmtopt = &elf64_fmtopt;
-    else
-#endif
-    ModuleInfo.fmtopt = &formatoptions[Options.output_format];
     SetFilenames( source );
 
 #if FASTPASS
@@ -1373,10 +1414,6 @@ static void AssembleInit( const char *source )
     ReswTableInit();
     SymInit();
     InputInit();
-
-    if ( Options.output_format == OFORMAT_OMF ) {
-        omf_init( &ModuleInfo, CurrFile[OBJ] );
-    }
 
     ModuleInit();
     CondInit();
@@ -1414,18 +1451,7 @@ static void AssembleFini( void )
 
 #if FASTPASS
 #if FASTMEM==0
-    /* this is debugging code only. Usually FASTPASS and FASTMEM
-     * are both either TRUE or FALSE.
-     * It's active if both DEBUG and TRMEM is set in Makefile.
-     */
-    {
-        struct line_item *next;
-        for ( LineStoreCurr = LineStoreHead; LineStoreCurr; ) {
-            next = LineStoreCurr->next;
-            LclFree( LineStoreCurr );
-            LineStoreCurr = next;
-        }
-    }
+    FreeLineStore();
 #endif
 #endif
 
@@ -1487,11 +1513,6 @@ int EXPQUAL AssembleModule( const char *source )
             if ( Options.all_symbols_public )
                 SymMakeAllSymbolsPublic();
 
-            /* convert EXTERNDEFs into EXTERNs, PUBLICs or nothing */
-            /* v2.07: removed */
-            //scan_globals();
-            /* set index field in externals */
-            set_ext_idx();
             if ( Options.syntax_check_only == FALSE )
                 write_to_file = TRUE;
 
@@ -1570,7 +1591,7 @@ int EXPQUAL AssembleModule( const char *source )
     } /* end for() */
 
     if ( ( Parse_Pass > PASS_1 ) && write_to_file ) {
-        uint_32 tmp = LineNumber;
+        uint_32 tmp = GetLineNumber();
         set_curr_srcfile( 0, 0 ); /* no line reference for errors/warnings */
         if ( Options.output_format == OFORMAT_OMF ) {
             WriteContent();
@@ -1597,7 +1618,7 @@ int EXPQUAL AssembleModule( const char *source )
 
     sprintf( CurrSource, MsgGetEx( MSG_ASSEMBLY_RESULTS ),
              GetFName( ModuleInfo.srcfile )->name,
-             LineNumber,
+             GetLineNumber(),
              Parse_Pass + 1,
              endtime - starttime,
              ModuleInfo.g.warning_count,

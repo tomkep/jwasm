@@ -3,10 +3,19 @@
  * The full declarations can be found in MS PSDK, WinNT.h.
  */
 
+/* Machine values */
 #define IMAGE_FILE_MACHINE_I386  0x014c /* Intel 386 or later processors */
 #define IMAGE_FILE_MACHINE_AMD64 0x8664 /* AMD64 (K8)                    */
 
-typedef struct _IMAGE_FILE_HEADER {
+/* Characteristics flags */
+#define IMAGE_FILE_RELOCS_STRIPPED           0x0001  // no relocations
+#define IMAGE_FILE_EXECUTABLE_IMAGE          0x0002  // is executable
+#define IMAGE_FILE_LINE_NUMS_STRIPPED        0x0004  // no line nunber info
+#define IMAGE_FILE_LOCAL_SYMS_STRIPPED       0x0008  // no local symbols
+#define IMAGE_FILE_LARGE_ADDRESS_AWARE       0x0020  // App can handle >2gb addresses
+#define IMAGE_FILE_32BIT_MACHINE             0x0100  // 32 bit word machine.
+
+struct IMAGE_FILE_HEADER {
     uint_16 Machine;
     uint_16 NumberOfSections;
     uint_32 TimeDateStamp;
@@ -14,11 +23,11 @@ typedef struct _IMAGE_FILE_HEADER {
     uint_32 NumberOfSymbols;
     uint_16 SizeOfOptionalHeader;
     uint_16 Characteristics;
-} IMAGE_FILE_HEADER;
+};
 
 #define IMAGE_SIZEOF_SHORT_NAME 8
 
-typedef struct _IMAGE_SECTION_HEADER {
+struct IMAGE_SECTION_HEADER {
     char Name[IMAGE_SIZEOF_SHORT_NAME];
     union {
         uint_32 PhysicalAddress;
@@ -32,7 +41,7 @@ typedef struct _IMAGE_SECTION_HEADER {
     uint_16 NumberOfRelocations;
     uint_16 NumberOfLinenumbers;
     uint_32 Characteristics;
-} IMAGE_SECTION_HEADER;
+};
 
 #define IMAGE_NUMBEROF_DIRECTORY_ENTRIES 16
 

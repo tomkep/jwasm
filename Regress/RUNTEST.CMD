@@ -7,7 +7,9 @@ for %%f in (*.asz) do call :lnkomf %%f
 call :safeseh
 call :coff
 call :coffdbg
+rem ifdef calls jwasmr ( won't run in 64-bit Windows )
 call :ifdef
+call :pe
 exit
 
 :cmpbin
@@ -51,6 +53,10 @@ jwasm -q -coff SEGALIAS.ASC
 if errorlevel 1 goto end
 ..\tools\jfc -co SEGALIAS.OBJ SEGALIAS.EXP
 
+rem ALIGN and characteristics segment attributes
+jwasm -q -coff -eq SEGALIGN.ASC
+..\tools\jfc SEGALIGN.ERR SEGALIGN.EXP
+
 rem 64-bit dll
 jwasm -q -coff DLL64.ASC
 if errorlevel 1 goto end
@@ -68,11 +74,19 @@ jwasm -q -win64 PROC641.ASC
 if errorlevel 1 goto end
 ..\tools\jfc -co PROC641.OBJ PROC641.EXP
 
+jwasm -q -coff PROC643.ASC
+if errorlevel 1 goto end
+..\tools\jfc -co PROC643.OBJ PROC643.EXP
+
 rem option dllimport
 jwasm -q -coff -Fd DLLIMP.ASC
 if errorlevel 1 goto end
 ..\tools\jwlink2 format win pe f DLLIMP.OBJ op q,noreloc
 ..\tools\jfc -pe DLLIMP.EXE DLLIMP.EXP
+
+rem unsupported directives in COFF
+jwasm -q -coff -eq UNSUPP1.ASC
+..\tools\jfc UNSUPP1.ERR UNSUPP1.EXP
 
 goto end
 
@@ -86,6 +100,11 @@ goto end
 ..\owdos16r\jwasmr -q -zlc -zld ISDEF.ASC
 if errorlevel 1 goto end
 ..\tools\jfc ISDEF.OBJ ISDEF.EXP
+goto end
+
+:pe
+jwasm -q -pe PE1.ASC
+..\tools\jfc -pe PE1.EXE PE1.EXP
 goto end
 
 :end

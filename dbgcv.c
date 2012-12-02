@@ -42,9 +42,9 @@ static uint_16 GetTyperef( struct asym *sym, uint_8 Ofssize )
 /***********************************************************/
 {
     union cv_typeref_u value = { CV_PDS_SPECIAL_NO_TYPE, 0, CV_PDT_SPECIAL, CV_PDM_DIRECT, 0 };
-    int size = SizeFromMemtype( sym->mem_type, Ofssize, sym->type );
 
     if ( ( sym->mem_type & MT_SPECIAL ) == 0 && sym->mem_type != MT_FWORD ) {
+        int size = SizeFromMemtype( sym->mem_type, Ofssize, sym->type );
         if ( sym->mem_type & MT_FLOAT ) {
             value.s.type = CV_PDT_REAL;
             switch ( size ) {
@@ -187,14 +187,14 @@ static void PadBytes( uint_8 *curr, uint_8 *base )
 static unsigned GetFieldListSize( struct dsym *type )
 /***************************************************/
 {
-    struct field_item  *curr;
+    struct sfield  *curr;
     unsigned    size = 0;
     unsigned    numsize;
     for ( curr = type->e.structinfo->head; curr; curr = curr->next ) {
         numsize = 0;
-        if ( curr->sym->offset >= 0x8000 )
+        if ( curr->sym.offset >= 0x8000 )
             numsize = sizeof( uint_32 );
-        size += sizeof( struct cv_typerec_member ) + numsize + curr->sym->name_size + 1;
+        size += sizeof( struct cv_typerec_member ) + numsize + curr->sym.name_size + 1;
         size = ( size + 3 ) & ~3;
     }
     return( size );
@@ -227,7 +227,7 @@ static uint_8 * cv_write_type( struct dsym *types, struct asym *sym, uint_8 *pt 
 {
     struct dsym *type = (struct dsym *)sym;
     uint_8      *tmp;
-    struct field_item  *curr;
+    struct sfield  *curr;
     int         typelen = 0;
     int         i;
     int         size;
@@ -244,10 +244,10 @@ static uint_8 * cv_write_type( struct dsym *types, struct asym *sym, uint_8 *pt 
 
     /* Count the member fields. If a member's type is unknown, create it! */
     for ( curr = type->e.structinfo->head; curr; curr = curr->next, cnt++ ) {
-        if ( curr->sym->mem_type == MT_TYPE && curr->sym->type->cv_typeref == 0 ) {
-            pt = cv_write_type( types, curr->sym->type, pt );
-        } else if ( curr->sym->mem_type == MT_BITS && curr->sym->cv_typeref == 0 ) {
-            pt = cv_write_bitfield( types, type, curr->sym, pt );
+        if ( curr->sym.mem_type == MT_TYPE && curr->sym.type->cv_typeref == 0 ) {
+            pt = cv_write_type( types, curr->sym.type, pt );
+        } else if ( curr->sym.mem_type == MT_BITS && curr->sym.cv_typeref == 0 ) {
+            pt = cv_write_bitfield( types, type, &curr->sym, pt );
         }
     }
 
@@ -311,12 +311,12 @@ static uint_8 * cv_write_type( struct dsym *types, struct asym *sym, uint_8 *pt 
     /* add the struct's members to the fieldlist */
     for ( i = cnt, curr = type->e.structinfo->head; i; curr = curr->next, i-- ) {
         typelen = 0;
-        if ( curr->sym->offset >= 0x8000 )
+        if ( curr->sym.offset >= 0x8000 )
             typelen += sizeof( uint_32 );
-        size = ( sizeof( struct cv_typerec_member ) + typelen + 1 + curr->sym->name_size + 3 ) & ~3;
+        size = ( sizeof( struct cv_typerec_member ) + typelen + 1 + curr->sym.name_size + 3 ) & ~3;
         pt = checkflush( types, (uint_8 *)CurrSource, pt, size );
         ((struct cv_typerec_member *)pt)->leaf = LF_MEMBER;
-        ((struct cv_typerec_member *)pt)->type = GetTyperef( curr->sym, USE16 );
+        ((struct cv_typerec_member *)pt)->type = GetTyperef( &curr->sym, USE16 );
         ((struct cv_typerec_member *)pt)->attribute.access = CV_ATTR_ACC_PUBLIC;
         ((struct cv_typerec_member *)pt)->attribute.mprop = CV_ATTR_MPR_VANILLA;
         ((struct cv_typerec_member *)pt)->attribute.pseudo = 0;
@@ -327,16 +327,16 @@ static uint_8 * cv_write_type( struct dsym *types, struct asym *sym, uint_8 *pt 
             if ( type->sym.typekind == TYPE_RECORD )
                 ((struct cv_typerec_member *)pt)->offset = 0;
             else
-                ((struct cv_typerec_member *)pt)->offset = curr->sym->offset;
+                ((struct cv_typerec_member *)pt)->offset = curr->sym.offset;
             tmp = pt + sizeof( struct cv_typerec_member );
         } else {
             ((struct cv_typerec_member *)pt)->offset = LF_ULONG;
             tmp = pt + sizeof( struct cv_typerec_member );
-            *(uint_32 *)tmp = curr->sym->offset;
+            *(uint_32 *)tmp = curr->sym.offset;
             tmp += sizeof( uint_32 );
         }
-        DebugMsg(( "cv_write_type(%Xh): MEMBER=%s, typeref=%X\n", GetTPos(), curr->sym->name, ((struct cv_typerec_member *)pt)->type ));
-        SetPrefixName( tmp, curr->sym->name, curr->sym->name_size );
+        DebugMsg(( "cv_write_type(%Xh): MEMBER=%s, typeref=%X\n", GetTPos(), curr->sym.name, ((struct cv_typerec_member *)pt)->type ));
+        SetPrefixName( tmp, curr->sym.name, curr->sym.name_size );
         PadBytes( tmp, (uint_8 *)CurrSource );
         pt += size;
     }

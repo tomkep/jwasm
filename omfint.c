@@ -288,7 +288,7 @@ static int FFQUAL writeSegdef( struct omf_wfile *out, struct omf_rec *objr )
     case SEGDEF_ALIGN_4KPAGE:
         acbp |= ALIGN_4KPAGE << 5;
         if ( Parse_Pass == PASS_1 )
-            EmitWarn( 2, NO_4KPAGE_ALIGNED_SEGMENTS );
+            EmitWarn( 2, NO_4KPAGE_ALIGNED_SEGMENTS_IN_MS386 ); /* 4k align is a Phar Lab peculiarity */
         break;
 #endif
     default:
@@ -668,7 +668,7 @@ void omf_write_record( struct omf_rec *objr )
 /*******************************************/
 {
     /**/myassert( objr != NULL && objr->command >= CMD_MIN_CMD && objr->command <= CMD_MAX_CMD + 1 );
-    DebugMsg(("omf_write_record( %p ) cmd=%X data=%p length=%u\n", objr, objr->command, objr->data, objr->length ));
+    DebugMsg1(("omf_write_record( %p ) cmd=%X data=%p length=%u\n", objr, objr->command, objr->data, objr->length ));
     objr->curoff = 0;
     //jumpTable[ JUMP_INDEX(objr->command) ] ( file_out, objr );
     myFuncs[ func_index[JUMP_INDEX(objr->command) ] ] ( file_out, objr );

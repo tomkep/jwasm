@@ -129,9 +129,9 @@ ret_code IncludeLibDirective( int i, struct asm_tok tokenarray[] )
             return( ERROR );
         }
         /* v2.08: use GetLiteralValue() */
-        //name = tokenarray[i].string_ptr;
-        name = StringBufferEnd;
-        GetLiteralValue( name, tokenarray[i].string_ptr );
+        //name = StringBufferEnd;
+        //GetLiteralValue( name, tokenarray[i].string_ptr );
+        name = tokenarray[i].string_ptr;
     } else {
         char *p;
         /* regard "everything" behind INCLUDELIB as the library name */
@@ -175,7 +175,8 @@ ret_code IncBinDirective( int i, struct asm_tok tokenarray[] )
             StringBufferEnd[tokenarray[i].stringlen] = NULLC;
         } else if ( tokenarray[i].string_delim == '<' ) {
             /* v2.08: use GetLiteralValue() instead of strncpy() */
-            GetLiteralValue( StringBufferEnd, tokenarray[i].string_ptr );
+            //GetLiteralValue( StringBufferEnd, tokenarray[i].string_ptr );
+            memcpy( StringBufferEnd, tokenarray[i].string_ptr, tokenarray[i].stringlen+1 );
         } else {
             EmitError( FILENAME_MUST_BE_ENCLOSED_IN_QUOTES_OR_BRACKETS );
             return( ERROR );
@@ -437,11 +438,17 @@ ret_code SegOrderDirective( int i, struct asm_tok tokenarray[] )
         EmitErr( SYNTAX_ERROR_EX, tokenarray[i+1].tokpos );
         return( ERROR );
     }
-#if COFF_SUPPORT || ELF_SUPPORT
-    if ( Options.output_format != OFORMAT_OMF &&
-        Options.output_format != OFORMAT_BIN ) {
+#if COFF_SUPPORT || ELF_SUPPORT || PE_SUPPORT
+    if ( Options.output_format == OFORMAT_COFF
+#if ELF_SUPPORT
+        || Options.output_format == OFORMAT_ELF
+#endif
+#if PE_SUPPORT
+        || ( Options.output_format == OFORMAT_BIN && ModuleInfo.sub_format == SFORMAT_PE )
+#endif
+       ) {
         if ( Parse_Pass == PASS_1 )
-            EmitWarn( 2, DIRECTIVE_IGNORED_FOR_COFF, tokenarray[i].string_ptr );
+            EmitWarn( 2, NOT_SUPPORTED_WITH_CURR_FORMAT, _strupr( tokenarray[i].string_ptr ) );
     } else {
 #endif
 #if 1 /* v2.05 */
@@ -454,7 +461,7 @@ ret_code SegOrderDirective( int i, struct asm_tok tokenarray[] )
         default:          ModuleInfo.segorder = SEGORDER_SEQ;     break;
         }
 #endif
-#if COFF_SUPPORT || ELF_SUPPORT
+#if COFF_SUPPORT || ELF_SUPPORT || PE_SUPPORT
     }
 #endif
     return( NOT_ERROR );

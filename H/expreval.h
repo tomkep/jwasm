@@ -88,22 +88,22 @@ struct expr {
         struct asm_tok *quoted_string; /* for EXPR_CONST + quoted strings only */
         struct asm_tok *float_tok;     /* for EXPR_FLOAT only */
     };
-    struct asm_tok  *base_reg;      /* token holding base register */
-                                    /* if type is EXPR_REG, it holds register */
-    struct asm_tok  *idx_reg;       /* token holding index register */
-    struct asm_tok  *label_tok;     /* token holding the label (for INVOKE only) */
-    struct asm_tok  *override;      /* token holding the override label */
-                                    /* or register */
+    struct asm_tok  *base_reg;      /* EXPR_ADDR: base register token */
+                                    /* EXPR_REG: register token */
+    struct asm_tok  *idx_reg;       /* EXPR_ADDR: index register token */
+    struct asm_tok  *label_tok;     /* token holding the label (used inside expreval only) */
+    struct asm_tok  *override;      /* EXPR_ADDR: token holding the override label */
+                                    /* or segment register */
     enum special_token instr;       /* operator token */
 
     enum exprtype   kind;           /* Type of expression */
     enum memtype    mem_type;       /* memory type if expr is a memory ref. */
-    uint_8          scale;          /* scaling factor 1, 2, 4, or 8 - 386 code only */
+    uint_8          scale;          /* EXPR_ADDR: scaling factor 1, 2, 4, or 8 - 386 code only */
     uint_8          Ofssize;        /* 16,32,64 bit if MT_NEAR, MT_FAR */
     union {
         uint_8      flags1;
         struct {
-            unsigned indirect : 1;  /* Whether inside [] or not */
+            unsigned indirect : 1;  /* indirect addressing used */
             unsigned explicit : 1;  /* Whether expression type explicitly given (to be removed!) */
             unsigned abs      : 1;  /* external ABS */
             unsigned is_type  : 1;  /* constant is a type */

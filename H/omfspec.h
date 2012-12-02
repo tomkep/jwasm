@@ -76,10 +76,12 @@ enum {
     ALIGN_DWORD         = 5,        /* relocatable seg - dword aligned  */
     ALIGN_LTRELOC       = 6,        /* load-time relocatable segment    */
    /* this encountered in 386 object files only. */
+#if PAGE4K
     ALIGN_4KPAGE        = 6,        /* relocatable seg - 4k page aligned*/
     ALIGN_PAGE4K        = 6,        /* relocatable seg - 4k page aligned*/
+#endif
    /* this currently not supported by the linker. */
-    ALIGN_UNABS         = 5,        /* unnamed absolute segment         */
+    //ALIGN_UNABS         = 5,        /* unnamed absolute segment         */
 };
 
 /*

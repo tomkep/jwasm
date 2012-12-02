@@ -222,9 +222,14 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
             /* if label has a different segment and jump/call is near or short,
              report an error */
             //if ( ModuleInfo.flatgrp_idx != 0 )
-            if ( ModuleInfo.flat_grp )
-                ;
-            else if ( symseg != NULL && CurrSeg != NULL ) {
+            /* v2.09: make sure there's no near jmp/call between 32- and 64-bit */
+            //if ( ModuleInfo.flat_grp )
+            if ( ModuleInfo.flat_grp
+#if AMD64_SUPPORT
+                && ( symseg == NULL || symseg->e.seginfo->Ofssize == ModuleInfo.Ofssize )
+#endif
+               ) {
+            } else if ( symseg != NULL && CurrSeg != NULL ) {
                 /* if the segments belong to the same group, it's ok */
                 if ( symseg->e.seginfo->group != NULL &&
                     symseg->e.seginfo->group == CurrSeg->e.seginfo->group )
@@ -402,8 +407,10 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
     }
     /* forward ref, or external symbol */
     if( CodeInfo->mem_type == MT_EMPTY && mem_type != MT_EMPTY && opndx->instr != T_SHORT ) {
-        if ( mem_type == MT_PROC )
-            mem_type = ( ( SIZE_CODEPTR & ( 1 << ModuleInfo.model ) ) ? MT_FAR : MT_NEAR );
+        /* MT_PROC is most likely obsolete ( used by TYPEDEF only ) */
+        /* v2.09: removed */
+        //if ( mem_type == MT_PROC )
+        //    mem_type = ( ( SIZE_CODEPTR & ( 1 << ModuleInfo.model ) ) ? MT_FAR : MT_NEAR );
         switch( mem_type ) {
         case MT_FAR:
             if( IS_JMPCALL( CodeInfo->token ) ) {

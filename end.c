@@ -24,6 +24,12 @@
 #include "omf.h"
 
 #include "myassert.h"
+#if DLLIMPORT
+#include "mangle.h"
+#endif
+#if PE_SUPPORT
+#include "bin.h"
+#endif
 
 /* prototypes */
 extern ret_code      process_address( struct code_info *, unsigned, struct expr * );
@@ -229,9 +235,22 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
     /* close open segments */
     SegmentModuleExit();
 
+#if PE_SUPPORT
+    if ( ModuleInfo.sub_format == SFORMAT_PE ) {
+        pe_create_MZ_header();
+        //pe_create_PE_header();
+        pe_emit_export_data();
+        if ( ModuleInfo.g.DllQueue )
+            pe_emit_import_data();
+        pe_create_section_table();
+    }
+#endif
+
     ModuleInfo.EndDirFound = TRUE;
-    CodeInfo.token = T_NULL;
-    CodeInfo.pinstr = &InstrTable[IndexFromToken( T_NULL )];
+    //CodeInfo.token = T_NULL; /* v2.09: T_NULL has no entry in optable_idx[] */
+    //CodeInfo.pinstr = &InstrTable[IndexFromToken( T_NULL )];
+    CodeInfo.token = T_NOP;
+    CodeInfo.pinstr = &InstrTable[IndexFromToken( T_NOP )];
     CodeInfo.opnd[0].InsFixup = NULL;
     CodeInfo.flags = 0;
     CodeInfo.mem_type = MT_EMPTY;
@@ -251,6 +270,7 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
             if ( fix == NULL || sym == NULL ) {
                 DebugMsg(("EndDirective: start address invalid, fix=%p, sym=%p\n", fix, sym ));
             } else if ( sym->state == SYM_INTERNAL || sym->state == SYM_EXTERNAL ) {
+                /* MT_PROC is most likely obsolete, used by TYPEDEF only */
                 if ( opndx.mem_type == MT_NEAR || opndx.mem_type == MT_FAR || opndx.mem_type == MT_PROC )
                     error = FALSE;
                 else {
@@ -269,7 +289,10 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
     }
 
     if ( Options.output_format == OFORMAT_OMF ) {
-        ModuleInfo.start_fixup = CodeInfo.opnd[0].InsFixup;
+#if FASTMEM==0
+        LclFree( ModuleInfo.g.start_fixup );
+#endif
+        ModuleInfo.g.start_fixup = CodeInfo.opnd[0].InsFixup;
         ModuleInfo.start_displ = opndx.value;
     } else {
         /* Masm silently ignores start for -coff if an offset was given */

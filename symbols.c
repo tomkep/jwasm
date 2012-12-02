@@ -73,10 +73,13 @@
 
 #define DUMPSYMBOLS 0 /* for debug version only*/
 
-extern struct asym LineCur;   /* @Line symbol       */
-extern struct asym symPC;     /* the '$' symbol     */
 extern struct asym *FileCur;  /* @FileCur symbol    */
-extern struct asym *symCurSeg;/* the @CurSeg symbol */
+extern struct asym *LineCur;  /* @Line symbol       */
+extern struct asym *symCurSeg;/* @CurSeg symbol     */
+
+extern void   UpdateLineNumber( struct asym *, void * );
+extern void   UpdateWordSize( struct asym *, void * );
+extern void   UpdateCurPC( struct asym *sym, void *p );
 
 static struct asym   *gsym_table[ GHASH_TABLE_SIZE ];
 static struct asym   *lsym_table[ LHASH_TABLE_SIZE ];
@@ -98,6 +101,8 @@ static const char szDateFmt[] = "%x"; /* locale's date */
 static const char szTimeFmt[] = "%X"; /* locale's time */
 #endif
 
+static struct asym  *symPC = NULL;
+
 struct tmitem {
     const char *name;
     char *value;
@@ -114,7 +119,25 @@ static const struct tmitem tmtab[] = {
     {"@Time",     szTime, NULL },
     {"@FileName", ModuleInfo.name, NULL },
     {"@FileCur",  NULL, &FileCur },
-    {"@CurSeg",   NULL, &symCurSeg }
+    /* v2.09: @CurSeg value is never set if no segment is ever opened.
+     * this may have caused an access error if a listing was written.
+     */
+    {"@CurSeg",   "", &symCurSeg }
+};
+
+struct eqitem {
+    const char *name;
+    uint_32 value;
+    internal_func sfunc_ptr;
+    struct asym **store;
+};
+
+/* table of predefined numeric equates */
+static const struct eqitem eqtab[] = {
+    { "__JWASM__", _JWASM_VERSION_INT_, NULL, NULL },
+    { "$",         0,                   UpdateCurPC, &symPC },
+    { "@Line",     0,                   UpdateLineNumber, &LineCur },
+    { "@WordSize", 0,                   UpdateWordSize, NULL }, /* must be last (see SymInit()) */
 };
 
 static unsigned int hashpjw( const char *s )
@@ -339,24 +362,24 @@ static void FreeASym( struct asym *sym )
 /**************************************/
 {
     //DebugMsg(("FreeASym: delete %s, state=%X\n", sym->name, sym->state));
-#if FASTPASS==0
+#if FASTPASS==0 /* v2.09: why is this FASTPASS and not FASTMEM? */
     struct fixup     *curr;
     struct fixup     *next;
 
-    if ( Parse_Pass == PASS_1 )
-        for( curr = sym->fixup ; curr; ) {
+    if ( Parse_Pass == PASS_1 ) /* why pass one only? */
+        for( curr = sym->bp_fixup ; curr; ) {
             next = curr->nextbp;
             LclFree( curr );
             curr = next;
         }
 #endif
 #if FASTMEM==0
-    if ( *sym->name ) LclFree( sym->name );
+    if ( sym->name_size ) LclFree( sym->name );
 #endif
     LclFree( sym );
 }
 
-/* free type-specific info of a symbol */
+/* free state-specific info of a symbol */
 
 static void free_ext( struct asym *sym )
 /**************************************/
@@ -381,16 +404,9 @@ static void free_ext( struct asym *sym )
         }
 #endif
         break;
-    case SYM_STACK:
-#ifdef DEBUG_OUT /* to be removed, this can't happen anymore. */
-        if ( sym->mem_type == MT_TYPE && *sym->type->name == NULLC ) {
-            DebugMsg(( "free_ext: stack var with private type: %s\n", sym->name ));
-            /* symbol has a "private" type */
-            SymFree( sym->type );
-        }
-#endif
-        break;
     case SYM_SEG:
+        if ( ((struct dsym *)sym)->e.seginfo->internal )
+            LclFree( ((struct dsym *)sym)->e.seginfo->CodeBuffer );
         LclFree( ((struct dsym *)sym)->e.seginfo );
         break;
     case SYM_GRP:
@@ -407,6 +423,15 @@ static void free_ext( struct asym *sym )
         if ( sym->predefined == FALSE )
             LclFree( sym->string_ptr );
         break;
+#ifdef DEBUG_OUT 
+    case SYM_STACK: /* to be removed, this can't happen anymore. */
+        if ( sym->mem_type == MT_TYPE && *sym->type->name == NULLC ) {
+            DebugMsg(( "free_ext: case SYM_STACK, sym=%s with private type\n", sym->name ));
+            /* symbol has a "private" type */
+            SymFree( sym->type );
+        }
+        break;
+#endif
     }
 }
 
@@ -420,7 +445,8 @@ void SymFree( struct asym *sym )
     free_ext( sym );
 #if FASTMEM==0
     /* there are some items which are located in static memory! */
-    if ( sym->staticmem == FALSE )
+    /* v2.09: obsolete */
+    //if ( sym->isstatic == FALSE )
 #endif
         FreeASym( sym );
     return;
@@ -439,7 +465,7 @@ struct asym *SymAddLocal( struct asym *sym, const char *name )
         return( NULL );
     }
 #if FASTMEM==0
-    if ( sym->name ) LclFree( sym->name );
+    if ( sym->name_size ) LclFree( sym->name );
 #endif
     sym->name_size = strlen( name );
     sym->name = LclAlloc( sym->name_size + 1 );
@@ -449,6 +475,7 @@ struct asym *SymAddLocal( struct asym *sym, const char *name )
     return( sym );
 }
 
+#if 1
 /* add a symbol to the global symbol table */
 
 struct asym *SymAddGlobal( struct asym *sym )
@@ -463,6 +490,7 @@ struct asym *SymAddGlobal( struct asym *sym )
     SymCount++;
     return( sym );
 }
+#endif
 
 struct asym *SymCreate( const char *name )
 /****************************************/
@@ -508,6 +536,8 @@ void SymMakeAllSymbolsPublic( void )
                 //sym->mem_type != MT_ABS &&  /* no EQU or '=' constants */
                 sym->isequate == FALSE &&     /* no EQU or '=' constants */
                 sym->predefined == FALSE && /* no predefined symbols ($) */
+                sym->included == FALSE && /* v2.09: symbol already added to public queue? */
+                //sym->scoped == FALSE && /* v2.09: no procs that are marked as "private" */
                 sym->public == FALSE ) {
                 sym->public = TRUE;
                 AddPublicData( sym );
@@ -578,43 +608,24 @@ void SymInit( void )
             *tmtab[i].store = sym;
     }
 
-    /* add __JWASM__ numeric equate */
-    sym = SymCreate( "__JWASM__" );
-    sym->state = SYM_INTERNAL;
-    /* v2.07: MT_ABS is obsolete */
-    //sym->mem_type = MT_ABS;
-    sym->isdefined = TRUE;
-    sym->predefined = TRUE;
-    sym->offset = _JWASM_VERSION_INT_;
-
-    /* add @Line numeric equate */
-    LineCur.sfunc_ptr = &UpdateLineNumber;
-    /* v2.07: MT_ABS is obsolete */
-    //LineCur.mem_type = MT_ABS;
-    LineCur.mem_type = MT_EMPTY;
-    LineCur.state = SYM_INTERNAL;
-    LineCur.isdefined = TRUE;
-    LineCur.predefined = TRUE;
-#if FASTMEM==0
-    LineCur.staticmem = TRUE;
-#endif
-    LineCur.variable = TRUE; /* ??? */
-    LineCur.name_size = 5; /* sizeof("@Line") */
-    SymAddGlobal( &LineCur );
-
-    /* add @WordSize numeric equate */
-    /* v2.07: MT_ABS is obsolete */
-    //WordSize.mem_type = MT_ABS;
-    WordSize.mem_type = MT_EMPTY;
-    WordSize.state = SYM_INTERNAL;
-    WordSize.isdefined = TRUE;
-    WordSize.predefined = TRUE;
-#if FASTMEM==0
-    WordSize.staticmem = TRUE;
-#endif
-    WordSize.variable = TRUE; /* ??? */
-    WordSize.name_size = 9; /* sizeof( "@WordSize" ) */
-    SymAddGlobal( &WordSize );
+    for( i = 0; i < sizeof(eqtab) / sizeof(eqtab[0]); i++ ) {
+        sym = SymCreate( eqtab[i].name );
+        sym->state = SYM_INTERNAL;
+        /* v2.07: MT_ABS is obsolete */
+        //sym->mem_type = MT_ABS;
+        sym->isdefined = TRUE;
+        sym->predefined = TRUE;
+        sym->offset = eqtab[i].value;
+        sym->sfunc_ptr = eqtab[i].sfunc_ptr;
+        //sym->variable = TRUE; /* if fixup must be created */
+        if ( eqtab[i].store )
+            *eqtab[i].store = sym;
+    }
+    sym->list   = FALSE; /* @WordSize should not be listed */
+    /* $ is an address (usually). Also, don't add it to the list */
+    symPC->variable = TRUE;
+    symPC->list     = FALSE;
+    LineCur->list   = FALSE;
 
     DebugMsg(("SymInit() exit\n"));
     return;
@@ -746,11 +757,11 @@ static void DumpSymbol( struct asym *sym )
     case SYM_STACK: /* should never be found in global table */
         type = "STACK VAR";
         break;
-    case SYM_STRUCT_FIELD: /* should never be found in global table */
+    case SYM_STRUCT_FIELD: /* record bitfields are in global namespace! */
         type = "STRUCT FIELD";
         break;
     case SYM_TYPE:
-        switch ( dir->e.structinfo->typekind ) {
+        switch ( sym->typekind ) {
         case TYPE_UNION:   type = "UNION";     break;
         case TYPE_TYPEDEF: type = "TYPEDEF";   break;
         case TYPE_RECORD:  type = "RECORD";    break;

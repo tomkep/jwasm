@@ -9,6 +9,7 @@
 * functions:
 * - CatStrDir    handle CATSTR   directive ( also TEXTEQU )
 * - SetTextMacro handle EQU      directive if expression is text
+* - AddPredefinedText() for texts defined by .MODEL
 * - SubStrDir    handle SUBSTR   directive
 * - SizeStrDir   handle SIZESTR  directive
 * - InStrDir     handle INSTR    directive
@@ -185,6 +186,7 @@ struct asym *SetTextMacro( struct asm_tok tokenarray[], struct asym *sym, const 
 /*************************************************************************************************************/
 {
     int count;
+    //char *p;
 
 #ifdef DEBUG_OUT
     equcnt++;
@@ -220,11 +222,17 @@ struct asym *SetTextMacro( struct asm_tok tokenarray[], struct asym *sym, const 
     sym->state = SYM_TMACRO;
     sym->isdefined = TRUE;
 
-    if ( tokenarray[2].token == T_STRING && tokenarray[2].string_delim == '<' && tokenarray[3].token == T_FINAL ) {
+    if ( tokenarray[2].token == T_STRING && tokenarray[2].string_delim == '<' ) {
+
+        /* the simplest case: value is a literal. define a text macro! */
+        /* just ONE literal is allowed */
+        if ( tokenarray[3].token != T_FINAL ) {
+            EmitErr( SYNTAX_ERROR_EX, tokenarray[3].tokpos );
+            return( NULL );
+        }
         value = tokenarray[2].string_ptr;
         count = tokenarray[2].stringlen;
     } else {
-        char *p = StringBufferEnd;
         /*
          the original source is used, since the tokenizer has
          deleted some information. it's important to double '!' found inside
@@ -233,11 +241,11 @@ struct asym *SetTextMacro( struct asm_tok tokenarray[], struct asym *sym, const 
         //while ( isspace( *value ) ) value++; /* probably obsolete */
         count = strlen( value );
         /* skip trailing spaces */
-        if ( count ) {
-            for ( ; count; count-- )
-                if ( isspace( *( value + count - 1 ) ) == FALSE )
-                    break;
-        }
+        for ( ; count; count-- )
+            if ( isspace( *( value + count - 1 ) ) == FALSE )
+                break;
+#if 0
+        p = StringBufferEnd;
         for ( ; count; count-- ) {
             if ( *value == '!' || *value == '<' || *value == '>' )
                 *p++ = '!';
@@ -246,6 +254,7 @@ struct asym *SetTextMacro( struct asm_tok tokenarray[], struct asym *sym, const 
         *p = NULLC;
         value = StringBufferEnd;
         count = p - StringBufferEnd;
+#endif
     }
 #if FASTMEM==0
     if ( sym->string_ptr )
@@ -258,7 +267,8 @@ struct asym *SetTextMacro( struct asm_tok tokenarray[], struct asym *sym, const 
         sym->total_size = count + 1;
     }
 #endif
-    memcpy( sym->string_ptr, value, count + 1 );
+    memcpy( sym->string_ptr, value, count );
+    *(sym->string_ptr + count) = NULLC;
 
     DebugMsg1(( "SetTextMacro(%s): value is >%s<, exit\n", sym->name, sym->string_ptr ));
     return( sym );
@@ -266,6 +276,10 @@ struct asym *SetTextMacro( struct asm_tok tokenarray[], struct asym *sym, const 
 
 /* create a (predefined) text macro.
  * used to create @code, @data, ...
+ * there are 2 more locations where predefined text macros may be defined:
+ * - assemble.c, add_cmdline_tmacros()
+ * - symbols.c, SymInit()
+ * this should be changed eventually.
  */
 struct asym *AddPredefinedText( const char *name, const char *value )
 /*******************************************************************/
@@ -295,7 +309,7 @@ ret_code SubStrDir( int i, struct asm_tok tokenarray[] )
     struct asym         *sym;
     char                *name;
     char                *p;
-    char                *newvalue;
+    //char                *newvalue;
     int                 pos;
     int                 size;
     int                 cnt;
@@ -333,6 +347,8 @@ ret_code SubStrDir( int i, struct asm_tok tokenarray[] )
         return( ERROR );
     }
     p = tokenarray[i].string_ptr;
+    cnt = tokenarray[i].stringlen;
+
     i++;
     DebugMsg1(("SubStrDir(%s): src=>%s<\n", name, p));
 
@@ -396,30 +412,41 @@ ret_code SubStrDir( int i, struct asm_tok tokenarray[] )
         size = -1;
         chksize = FALSE;
     }
-
+#if 0
     cnt = pos;
     /* position p to start of substring */
     for ( pos--; pos > 0 && *p ; pos--, p++ )
         if ( *p == '!' && *(p+1) != NULLC )
             p++;
-
     if ( *p == NULLC ) {
-        EmitErr( INDEX_PAST_END_OF_STRING, cnt );
+        EmitErr( INDEX_VALUE_PAST_END_OF_STRING, cnt );
         return( ERROR );
     }
-
     if ( *p == '!' && *(p+1) != NULLC )
         p++;
-
     for ( newvalue = p, cnt = size; *p && cnt; cnt--, p++ )
         if ( *p == '!' && *(p+1) != NULLC )
             p++;
-
     /* v2.04: check added */
     if ( chksize && cnt ) {
         EmitError( COUNT_VALUE_TOO_LARGE );
         return( ERROR );
     }
+    size = p - newvalue;
+    p = newvalue;
+#else
+    if ( pos > cnt ) {
+        EmitErr( INDEX_VALUE_PAST_END_OF_STRING, pos );
+        return( ERROR );
+    }
+    if ( chksize && (pos+size-1) > cnt )  {
+        EmitError( COUNT_VALUE_TOO_LARGE );
+        return( ERROR );
+    }
+    p += pos - 1;
+    if ( size == -1 )
+        size = cnt - pos + 1;
+#endif
 
     sym = SymSearch( name );
 
@@ -445,9 +472,6 @@ ret_code SubStrDir( int i, struct asm_tok tokenarray[] )
 
     sym->state = SYM_TMACRO;
     sym->isdefined = TRUE;
-
-    size = p - newvalue;
-    p = newvalue;
 
 #if FASTMEM==0
     if ( sym->string_ptr )
@@ -503,7 +527,8 @@ ret_code SizeStrDir( int i, struct asm_tok tokenarray[] )
         return( ERROR );
     }
 
-    sizestr = GetLiteralValue( StringBufferEnd, tokenarray[2].string_ptr );
+    //sizestr = GetLiteralValue( StringBufferEnd, tokenarray[2].string_ptr );
+    sizestr = tokenarray[2].stringlen;
 
     if ( sym = CreateVariable( tokenarray[0].string_ptr, sizestr ) ) {
         DebugMsg1(("SizeStrDir(%s) exit, value=%u\n", tokenarray[0].string_ptr, sizestr));
@@ -583,12 +608,14 @@ ret_code InStrDir( int i, struct asm_tok tokenarray[] )
      * the possible '!' operators inside the strings is optional and
      * must be ignored.
      */
-    src = StringBufferEnd;
-    sizestr = GetLiteralValue( src, tokenarray[i].string_ptr );
+    //src = StringBufferEnd;
+    //sizestr = GetLiteralValue( src, tokenarray[i].string_ptr );
+    src = tokenarray[i].string_ptr;
+    sizestr = tokenarray[i].stringlen;
     DebugMsg1(("InStrDir: first string >%s< \n", src ));
 
     if ( start > sizestr ) {
-        EmitErr( INDEX_PAST_END_OF_STRING, start );
+        EmitErr( INDEX_VALUE_PAST_END_OF_STRING, start );
         return( ERROR );
     }
     p = src + start - 1;
@@ -604,8 +631,10 @@ ret_code InStrDir( int i, struct asm_tok tokenarray[] )
         TextItemError( &tokenarray[i] );
         return( ERROR );
     }
-    q = GetAlignedPointer( src, sizestr );
-    j = GetLiteralValue( q, tokenarray[i].string_ptr );
+    //q = GetAlignedPointer( src, sizestr );
+    //j = GetLiteralValue( q, tokenarray[i].string_ptr );
+    q = tokenarray[i].string_ptr;
+    j = tokenarray[i].stringlen;
     DebugMsg1(("InStrDir: second string >%s< \n", q ));
     i++;
     if ( tokenarray[i].token != T_FINAL ) {
@@ -651,7 +680,10 @@ static ret_code CatStrFunc( struct macro_instance *mi, char *buffer, struct asm_
     return( NOT_ERROR );
 }
 
-/* convert string to a number */
+/* convert string to a number.
+ * used by @SubStr() for arguments 2 and 3 (start and size),
+ * and by @InStr() for argument 1 ( start )
+ */
 
 static ret_code GetNumber( char *string, int *pi, struct asm_tok tokenarray[] )
 /*****************************************************************************/
@@ -662,7 +694,7 @@ static ret_code GetNumber( char *string, int *pi, struct asm_tok tokenarray[] )
 
     last = Tokenize( string, Token_Count+1, tokenarray, TOK_RESCAN );
     i = Token_Count+1;
-    if( EvalOperand( &i, tokenarray, last, &opndx, 0 ) == ERROR ) {
+    if( EvalOperand( &i, tokenarray, last, &opndx, EXPF_NOLCREATE ) == ERROR ) {
         return( ERROR );
     }
     if( opndx.kind != EXPR_CONST || opndx.quoted_string != NULL || tokenarray[i].token != T_FINAL ) {
@@ -695,12 +727,16 @@ static ret_code InStrFunc( struct macro_instance *mi, char *buffer, struct asm_t
     if ( mi->parm_array[0] ) {
         if ( GetNumber( mi->parm_array[0], &pos, tokenarray ) == ERROR )
             return( ERROR );
-        if ( pos == 0 )
+        if ( pos == 0 ) {
+            /* adjust index 0. Masm also accepts 0 (and any negative index),
+             * but the result will always be 0 then */
+            DebugMsg(( "@InStr(): index value is 0, changed to 1\n" ));
             pos++;
+        }
     }
 
     if ( pos > strlen( mi->parm_array[1] ) ) {
-        EmitErr( INDEX_PAST_END_OF_STRING, pos );
+        EmitErr( INDEX_VALUE_PAST_END_OF_STRING, pos );
         return( ERROR );
     }
     /* v2.08: if() added, empty searchstr is to return 0 */
@@ -712,7 +748,7 @@ static ret_code InStrFunc( struct macro_instance *mi, char *buffer, struct asm_t
         }
     }
 
-    DebugMsg1(( "@InStrFunc()=>%s<\n", buffer ));
+    DebugMsg1(( "@InStr()=>%s<\n", buffer ));
 
     return( NOT_ERROR );
 }
@@ -750,36 +786,49 @@ static ret_code SubStrFunc( struct macro_instance *mi, char *buffer, struct asm_
     if ( GetNumber( mi->parm_array[1], &pos, tokenarray ) == ERROR )
         return( ERROR );
 
-    if (pos <= 0)
+    if ( pos <= 0 ) {
+        /* Masm doesn't check if index is < 0;
+         * might cause an "internal assembler error".
+         * v2.09: negative index no longer silently changed to 1.
+         */
+        if ( pos ) {
+            EmitErr( INDEX_VALUE_PAST_END_OF_STRING, pos );
+            return( ERROR );
+        }
+        DebugMsg(( "@SubStr(): index value 0 changed to 1\n", pos ));
         pos = 1;
+    }
 
     size = strlen( src );
     if ( pos > size ) {
-        EmitErr( INDEX_PAST_END_OF_STRING, pos );
+        EmitErr( INDEX_VALUE_PAST_END_OF_STRING, pos );
         return( ERROR );
     }
 
+    size = size - pos + 1;
+
     if ( mi->parm_array[2] ) {
-        if ( GetNumber( mi->parm_array[2], &size, tokenarray ) == ERROR )
+        int sizereq;
+        if ( GetNumber( mi->parm_array[2], &sizereq, tokenarray ) == ERROR )
             return( ERROR );
-        if ( size < 0 ) {
+        if ( sizereq < 0 ) {
             EmitError( COUNT_MUST_BE_POSITIVE_OR_ZERO );
             return( ERROR );
         }
-    } else {
-        size = size - pos + 1;
+        if ( sizereq > size ) {
+            EmitError( COUNT_VALUE_TOO_LARGE );
+            return( ERROR );
+        }
+        size = sizereq;
     }
-
-    for( src = src+pos-1 ; size && *src ; size-- )
+#if 1
+    memcpy( buffer, src + pos - 1, size );
+    *(buffer+size) = NULLC;
+#else
+    for( src += pos - 1; size; size-- )
         *buffer++ = *src++;
-
     *buffer = NULLC;
-
-    if ( size ) {
-        EmitError( COUNT_VALUE_TOO_LARGE );
-        return( ERROR );
-    }
-
+#endif
     return( NOT_ERROR );
 }
 

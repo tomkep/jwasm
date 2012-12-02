@@ -20,7 +20,7 @@
 #include "memalloc.h"
 #include "parser.h"
 #include "equate.h"
-#include "labels.h"
+#include "label.h"
 #include "input.h"
 #include "expreval.h"
 #include "types.h"
@@ -403,8 +403,9 @@ static ret_code GetSimpleExpression( struct hll_item *hll, int *i, struct asm_to
         if ( hll->condlines )
             return( NOT_ERROR );
 
+        DebugMsg(( "GetSimpleExpression: empty expression AND empty condlines\n" ));
         EmitError( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE );
-        return( NOT_ERROR );
+        return( ERROR ); /* v2.09: changed from NOT_ERROR to ERROR */
     }
 
     if ( ( opndx->kind != EXPR_CONST ) && ( opndx->kind != EXPR_ADDR ) && ( opndx->kind != EXPR_REG ) )
@@ -522,7 +523,15 @@ static ret_code GetSimpleExpression( struct hll_item *hll, int *i, struct asm_to
     return( NOT_ERROR );
 }
 
-static void InvertJmp( char *p )
+/* invert a Jcc:
+ * - Jx  -> JNx (x = e|z|c|s|p|o )
+ * - JNx -> Jx  (x = e|z|c|s|p|o )
+ * - Ja  -> Jbe, Jae -> Jb
+ * - Jb  -> Jae, Jbe -> Ja
+ * - Jg  -> Jle, Jge -> Jl
+ * - Jl  -> Jge, Jle -> Jg
+ */
+static void InvertJcc( char *p )
 /******************************/
 {
     if ( *p == 'e' || *p == 'z' || *p == 'c' || *p == 's' || *p == 'p' || *p == 'o' ) {
@@ -606,7 +615,7 @@ static ret_code GetAndExpression( struct hll_item *hll, int *i, struct asm_tok t
             /* todo: please describe what's done here and why! */
             if ( hllop->lastjmp ) {
                 char *p = hllop->lastjmp;
-                InvertJmp( p+1 );         /* step 1 */
+                InvertJcc( p+1 );         /* step 1 */
                 if ( truelabel == 0 )     /* step 2 */
                     truelabel = GetHllLabel();
                 DebugMsg1(("%u GetAndExpression: jmp inverted >%s<\n", evallvl, hllop->lastjmp ));
@@ -675,7 +684,7 @@ static ret_code GetExpression( struct hll_item *hll, int *i, struct asm_tok toke
         //if (*lastjmp && ( hll->cmd != HLL_BREAK ) && ( hll->cmd != HLL_WHILE ) ) {
         if ( hllop->lastjmp && is_true == FALSE ) {
             char *p = hllop->lastjmp;
-            InvertJmp(p+1);        /* step 1 */
+            InvertJcc(p+1);        /* step 1 */
             p += 4;                /* skip jcc */
             if ( truelabel == 0 )  /* step 2 */
                 truelabel = GetHllLabel();
@@ -789,6 +798,7 @@ static ret_code EvaluateHllExpression( struct hll_item *hll, int *i, struct asm_
         WriteExprSrc( hll, buffer );
     }
     if ( hll->condlines != NULL && *hll->condlines == EOLCHAR ) {
+        DebugMsg(( "EvaluateHllExpression: EOL at pos 0 in condlines\n" ));
         EmitError( SYNTAX_ERROR_IN_CONTROL_FLOW_DIRECTIVE );
         return( ERROR );
     }
@@ -835,9 +845,15 @@ static ret_code CheckCXZLines( struct hll_item *hll )
 {
     int lines = 0;
     int i;
+    int addchars;
+    char *px;
     bool NL = TRUE;
     char *p = hll->condlines;
 
+    DebugMsg1(("CheckCXZLines enter, p=>%s<\n", p ));
+    /* syntax ".untilcxz 1" has a problem: there's no "jmp" generated at all.
+     * if this syntax is to be supported, activate the #if below.
+     */
     for (; *p; p++ ) {
         if ( *p == EOLCHAR ) {
             NL = TRUE;
@@ -846,26 +862,31 @@ static ret_code CheckCXZLines( struct hll_item *hll )
             NL = FALSE;
             if ( *p == 'j' ) {
                 p++;
-                /* v2.06: rewritten. case ".untilcxz 1" still has problems */
+                /* v2.06: rewritten */
                 if ( *p == 'm' && lines == 0 ) {
-                    p--;
-                    i = strlen( p );
-                    while ( i ) {
-                        *(p+2+i) = *(p+i);
-                        i--;
-                    }
-                    memcpy( p,"loope",5 );
+                    addchars = 2; /* make room for 2 chars, to replace "jmp" by "loope" */
+                    px = "loope";
                 } else if ( lines == 1 && ( *p == 'z' || (*p == 'n' && *(p+1) == 'z') ) ) {
-                    p--;
-                    i = strlen( p );
-                    while ( i ) {
-                        *(p+3+i) = *(p+i);
-                        i--;
-                    }
-                    memcpy( p,"loop",4 );
+                    addchars = 3; /* make room for 3 chars, to replace "jz"/"jnz" by "loopz"/"loopnz" */
+                    px = "loop";
                 } else
-                    return( ERROR );
+                    return( ERROR ); /* anything else is "too complex" */
+            //replace_instr:
+                for ( p--, i = strlen( p ); i >= 0; i-- ) {
+                    *(p+addchars+i) = *(p+i);
+                }
+                memcpy( p, px, strlen( px ) );
             }
+#if 0 /* handle ".untilcxz 1" like masm does */
+            else if ( *p == ' ' && *(p+1) == EOLCHAR && lines == 0 ) {
+                p++;
+                GetLabelStr( hll->labels[LSTART], p );
+                strcat( p, EOLSTR );
+                addchars = 5;
+                px = "loope";
+                goto replace_instr;
+            }
+#endif
         }
     }
     if ( lines > 2 )
@@ -933,7 +954,8 @@ ret_code HllStartDir( int i, struct asm_tok tokenarray[] )
      * LSTART:
      *   ...
      * LTEST: (jumped to by .continue)
-     *   test end condition, cond jump to LSTART label
+     *   a) test end condition, cond jump to LSTART label
+     *   b) unconditional jump to LSTART label
      * LEXIT: (jumped to by .break)
      */
     NewLineQueue();
@@ -1269,7 +1291,7 @@ void HllCheckOpen( void )
         //EmitErr( BLOCK_NESTING_ERROR, ".if-.repeat-.while" );
         EmitErr( UNMATCHED_BLOCK_NESTING, ".if-.repeat-.while" );
     }
-    DebugMsg1(("HllCheckOpen: allocated items:%u, reused items:%u, cond-blocks/bytes:%u/%u\n", cntAlloc, cntReused, cntCond, cntCondBytes ));
+    DebugMsg(("HllCheckOpen: allocated items:%u, reused items:%u, cond-blocks/bytes:%u/%u\n", cntAlloc, cntReused, cntCond, cntCondBytes ));
 }
 
 /* HllInit() is called for each pass */

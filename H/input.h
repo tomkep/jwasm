@@ -60,9 +60,8 @@ struct input_status {
 #endif
 };
 
-extern void     UpdateLineNumber( struct asym * );
 extern uint_32  GetLineNumber( void );
-#define LineNumber GetLineNumber()
+//#define LineNumber GetLineNumber()
 
 extern void     NewLineQueue( void );
 extern void     DeleteLineQueue( void );
@@ -93,6 +92,6 @@ extern bool     is_linequeue_populated( void );
 extern void     SkipCurrentQueue( struct asm_tok * );
 extern ret_code WriteCodeLabel( char *, struct asm_tok[] );
 
-#define GetAlignedPointer( x, size ) ( x + ( ( size + 1 + 3 ) & ~3 ) )
+#define GetAlignedPointer( x, size ) ( x + ( ( size + 1 + sizeof(void *) - 1 ) & ~( sizeof(void *) - 1 ) ) )
 
 #endif

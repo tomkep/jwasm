@@ -90,7 +90,7 @@ static void output_opc( struct code_info *CodeInfo )
      * Output debug info - line numbers
      */
     if( Options.line_numbers )
-        AddLinnumDataRef( LineNumber );
+        AddLinnumDataRef( GetLineNumber() );
 
     /* if it's a FPU instr, reset opsiz */
     //if( ins->cpu & P_FPU_MASK ) {

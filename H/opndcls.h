@@ -4,7 +4,7 @@
  * third operand is extended or a 4th operand ( for AVX ) is added.
  */
 OpCls( NONE,     NONE,       NONE  )
-OpCls( AX,       NONE,       NONE  )
+OpCls( AX,       NONE,       NONE  ) /* FSTSW */
 OpCls( I,        NONE,       NONE  )
 OpCls( I16,      NONE,       NONE  )
 OpCls( I32,      NONE,       NONE  )
@@ -115,6 +115,19 @@ OpCls( RGT16,    RSPEC,      NONE  )
 OpCls( RGT16,    XMM,        NONE  )
 OpCls( RGT16,    XMM_M32,    NONE  )
 OpCls( RGT16,    XMM_M64,    NONE  )
+#if VMXSUPP
+OpCls( R32,      R32_M32,    NONE  )
+OpCls( R32_M32,  R32,        NONE  )
+OpCls( RGT16,    M128,       NONE  )
+#if AMD64_SUPPORT
+OpCls( R64,      R64_M64,    NONE  )
+OpCls( R64_M64,  R64,        NONE  )
+#endif
+#endif
+#if SVMSUPP
+OpCls( A,        NONE,       NONE  )  /* VMRUN rAX */
+OpCls( A,        R32,        NONE  )  /* INVLPGA rAX, ECX */
+#endif
 OpCls( RGT8,     A,          NONE  )
 OpCls( RGT8,     I,          NONE  )
 OpCls( RGT8,     I8,         NONE  )

@@ -5,41 +5,24 @@
 	.model flat
 
 UINT typedef DWORD
+PUINT typedef ptr DWORD
+PVOID typedef ptr
 
 	.code
 
-	if (type(dword ptr [edx])) eq DWORD
-		db 1
-	endif
-	if (type(dword ptr [edx])) eq REAL4
-		db 0
-	endif
-	if (type(byte ptr [edx]))  eq BYTE
-		db 2
-	endif
-	if (type(byte ptr [edx]))  eq SBYTE
-		db 0
-	endif
-	if (type(sword ptr [edx])) eq SWORD
-		db 3
-	endif
-	if (type(sword ptr [edx])) eq WORD
-		db 0
-	endif
-	if (type(real4 ptr [edx])) ne REAL8
-		db 4
-	endif
-	if (type(qword ptr [edx])) ne qword
-		db 0
-	endif
-	if (type(UINT ptr [edx]))  eq UINT
-		db 5
-	endif
-	if (type(DWORD ptr [edx])) eq UINT   ;this is TRUE!
-		db 6
-	endif
-	if (type(SDWORD ptr [edx])) eq UINT
-		db 0
-	endif
+	db (type(dword ptr [edx])) eq DWORD
+	db (type(dword ptr [edx])) eq REAL4
+	db (type(byte ptr [edx]))  eq BYTE
+	db (type(byte ptr [edx]))  eq SBYTE
+	db (type(sword ptr [edx])) eq SWORD
+	db (type(sword ptr [edx])) eq WORD
+	db (type(real4 ptr [edx])) ne REAL8
+	db (type(qword ptr [edx])) ne qword
+	db (type(UINT ptr [edx]))  eq UINT
+	db (type(DWORD ptr [edx])) eq UINT	;exp: TRUE
+	db (type(SDWORD ptr [edx])) eq UINT
+	db (type(PUINT ptr [edx])) eq PUINT
+	db (type(PVOID ptr [edx])) eq PVOID
+	db (type(PVOID ptr [edx])) eq PUINT	;exp: FALSE
 
 	end

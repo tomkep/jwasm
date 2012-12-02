@@ -27,7 +27,7 @@
 "-FPi87\0"          "80x87 instructions (default)\0"
 "-fpc\0"            "Disallow floating-point instructions (.NO87)\0"
 "-fp<n>\0"          "Set FPU, <n> is: 0=8087 (default), 2=80287, 3=80387\0"
-"-G<c|d|z>\0"       "Use Pascal, C or Stdcall calling convention\0"
+"-G<c|d|r|z>\0"     "Use Pascal, C, Fastcall or Stdcall calling convention\0"
 "-I<directory>\0"   "Add directory to list of include directories\0"
 "-m<t|s|c|m|l|h|f>\0" "Set memory model:\0"
 "\0"                "(Tiny, Small, Compact, Medium, Large, Huge, Flat)\0"
@@ -82,36 +82,35 @@
 "-bin\0"            "plain binary file\0"
 #endif
 #if COFF_SUPPORT
-"-coff\0"           "32-bit COFF format object file\0"
+"-coff\0"           "32-bit COFF object file\0"
 #endif
 #if COFF_SUPPORT && DJGPP_SUPPORT
 "-djgpp\0"          "Djgpp's variant of 32-bit COFF object file\0"
 #endif
 #if ELF_SUPPORT
-"-elf\0"            "32-bit ELF format object file\0"
+"-elf\0"            "32-bit ELF object file\0"
 #if AMD64_SUPPORT
-"-elf64\0"          "64-bit ELF format object file\0"
+"-elf64\0"          "64-bit ELF object file\0"
 #endif
 #endif
 #if BIN_SUPPORT && MZ_SUPPORT
 "-mz\0"             "DOS MZ binary file\0"
 #endif
-"-omf\0"            "OMF format object file (default)\0"
+"-omf\0"            "OMF object file (default)\0"
 #if PE_SUPPORT
-"-pe32\0"           "PE32 binary file\0"
-#if AMD64_SUPPORT
-"-pe64\0"           "PE64 binary file\0"
-#endif
+"-pe\0"             "Win32/Win64 PE binary file\0"
 #endif
 #if AMD64_SUPPORT
-"-win64\0"          "64-bit COFF format object file\0"
+"-win64\0"          "64-bit COFF object file\0"
 #endif
 #ifdef DEBUG_OUT
 "Debug options:\0\0"
 "-d6\0"             "Display debug trace on stdout\0"
-"-d7\0"             "Do full second pass\0"
-"-d8\0"             "Disable backpatching\0"
+#if FASTPASS
+"-d7\0"             "Do full subsequent passes (disables \"fastpass\")\0"
 "-ls\0"             "Display preprocessed line storage on stdout\0"
+#endif
+"-d8\0"             "Disable backpatching\0"
 "-pm=<n>\0"         "Stop assembly after <n> passes\0"
 "-sp\0"             "Skip preprocessor step\0"
 #endif

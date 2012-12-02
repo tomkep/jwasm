@@ -40,8 +40,9 @@
 #include "input.h"
 #include "tokenize.h"
 #include "types.h"
-#include "labels.h"
+#include "label.h"
 #include "data.h"
+#include "myassert.h"
 
 #define ALIAS_IN_EXPR 1 /* allow alias names in expression */
 
@@ -79,12 +80,14 @@ enum process_flag {
     PROC_OPERAND  /* stop if an operator with lower precedence is found */
 };
 
+/* code label type values - returned by SIZE and TYPE operators */
 enum labelsize {
     LS_SHORT  = 0xFF01, /* it's documented, but can a label be "short"? */
-    LS_NEAR16 = 0xFF02,
-    LS_NEAR32 = 0xFF04,
+    //LS_NEAR16 = 0xFF02, /* v2.09: the near values are calculated */
+    //LS_NEAR32 = 0xFF04,
+    //LS_NEAR64 = 0xFF08,
     LS_FAR16  = 0xFF05,
-    LS_FAR32  = 0xFF06
+    LS_FAR32  = 0xFF06,
 };
 
 static ret_code evaluate( struct expr *, int *, struct asm_tok[], int, enum process_flag );
@@ -269,7 +272,7 @@ static bool is_unary_op( enum tok_type tt )
 #define is_unary_op( tt ) ( tt == T_OP_BRACKET || tt == T_OP_SQ_BRACKET || tt ==  '+' || tt == '-' || tt == T_UNARY_OPERATOR )
 #endif
 
-/* get value for types
+/* get value for simple types
  * NEAR, FAR and PROC are handled slightly differently:
  * the HIBYTE is set to 0xFF, and PROC depends on the memory model
  */
@@ -278,19 +281,11 @@ static unsigned int GetTypeSize( enum memtype mem_type, int Ofssize )
 {
     if ( (mem_type & MT_SPECIAL) == 0 )
         return( ( mem_type & MT_SIZE_MASK ) + 1 );
+    if ( Ofssize == USE_EMPTY )
+        Ofssize = ModuleInfo.Ofssize;
     switch ( mem_type ) {
-    case MT_NEAR:
-        switch ( Ofssize ) {
-        case USE16: return( 2 );
-        case USE32: return( 4 );
-        }
-        return (0xFF00 | ( 2 << ModuleInfo.Ofssize ) ) ;
-    case MT_FAR:
-        switch ( Ofssize ) {
-        case USE16:  return( 4 );
-        case USE32:  return( 6 );
-        }
-        return (0xFF00 | ( ( 2 << ModuleInfo.Ofssize ) + 2 ) );
+    case MT_NEAR: return ( 0xFF00 | ( 2 << Ofssize ) ) ;
+    case MT_FAR:  return ( ( Ofssize == USE16 ) ? LS_FAR16 : 0xFF00 | ( ( 2 << Ofssize ) + 2 ) );
     }
     /* shouldn't happen */
     return( 0 );
@@ -316,10 +311,10 @@ static uint_32 GetRecordMask( struct dsym *record )
     uint_32 mask = 0;
 #endif
     int i;
-    struct field_item *fl;
+    struct sfield *fl;
 
     for ( fl = record->e.structinfo->head; fl; fl = fl->next ) {
-        struct asym *sym = fl->sym;
+        struct asym *sym = &fl->sym;
         for ( i = sym->offset ;i < sym->offset + sym->total_size; i++ )
             mask |= 1 << i;
     }
@@ -343,7 +338,7 @@ void myatoi128( const char *src, uint_64 dst[], int base, int size )
 
     dst[0] = 0;
     dst[1] = 0;
-    while( src < end ) {
+    do {
         val = ( *src <= '9' ? *src - '0' : ( *src | 0x20 ) - 'a' + 10 );
         px = (uint_16 *)dst;
         for ( len = ( 2 * sizeof( uint_64 ) ) >> 1; len; len-- ) {
@@ -351,8 +346,9 @@ void myatoi128( const char *src, uint_64 dst[], int base, int size )
             *(px++) = val;
             val >>= 16;
         };
+        //myassert( val == 0 ); /* if number doesn't fit in 128 bits */
         src++;
-    }
+    } while( src < end );
     return;
 }
 
@@ -516,11 +512,19 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                      * that's something like "<item>.<type>.<member>"
                      */
                     if ( sym->state == SYM_TYPE ) {
-                        /* superfluous type spec? */
-                        /* v2.7: "if" added.
+                        /*
+                         * v2.07: "if" added.
                          * Masm accepts a different type spec if the "assumed"
-                         * type is undefined */
-                        if ( sym == opnd->type || opnd->type->isdefined == FALSE )
+                         * type is undefined
+                         * v2.09: the change in v2.07 is a regression. if it's a type,
+                         * then "usually" assume a type coercion and "switch" to the
+                         * new type - but not for register assume. This isn't fixed
+                         * yet, because there's no way to find out if a register assume
+                         * did set field 'type'.
+                         * v2.09: oldstructs condition added, see regression test dotop4.asm.
+                         */
+                        //if ( sym == opnd->type || opnd->type->isdefined == FALSE )
+                        if ( sym == opnd->type || opnd->type->isdefined == FALSE || ModuleInfo.oldstructs )
                             ; //opnd->sym = sym;
                         else
                             sym = NULL;
@@ -645,45 +649,38 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                   tokenarray[i].string_ptr, sym->state, sym->type, sym->offset, sym->mem_type, sym->total_size, sym->isdefined ));
         switch ( sym->state ) {
         case SYM_TYPE: /* STRUCT, UNION, RECORD, TYPEDEF */
-            if ( ((struct dsym *)sym)->e.structinfo->isOpen == FALSE ) {
-                opnd->kind = EXPR_CONST;
-                //opnd->mem_type = MT_ABS;
-                opnd->mem_type = sym->mem_type;
-                opnd->is_type = TRUE;
-                DebugMsg1(("get_operand(%s): symbol.kind=%u (STRUCT/UNION/TYPEDEF/RECORD)\n", sym->name, sym->typekind ));
-
-                /* v2.08: if() removed. This was an old hack. */
-                //if ( tokenarray[i-1].token != T_DOT && tokenarray[i+1].token != T_DOT )
-                /* v2.06: the default value for RECORD types is the mask value */
-                if ( sym->typekind == TYPE_RECORD ) {
-#if AMD64_SUPPORT
-                    opnd->llvalue = GetRecordMask( (struct dsym *)sym );
-#else
-                    opnd->value = GetRecordMask( (struct dsym *)sym );
-#endif
-                } else
-                    opnd->value = sym->total_size;
-
-            } else {
+            /* v2.09: no structinfo data for typedefs */
+            if ( sym->typekind != TYPE_TYPEDEF && ((struct dsym *)sym)->e.structinfo->isOpen ) {
                 DebugMsg1(("get_operand(%s): struct/union definition isn't closed!\n", sym->name ));
-                /* a valid constant should be returned if
-                 1. the struct is open      AND
-                 2. it's not an EQU operand
-                 the number isn't used then (except if it's the first DUP operand)
-                 */
-                if ( error_msg == FALSE )
-                    opnd->kind = EXPR_UNDEF;
-                else {
-                    opnd->kind = EXPR_CONST;
-                    /* v2.07: MT_ABS is obsolete */
-                    //opnd->mem_type = MT_ABS;
-                    opnd->value = -1;
-                    opnd->is_type = TRUE;
-                }
+                opnd->kind = EXPR_UNDEF;
+                break;
             }
-            /* skip "alias" types. Obsolete? */
+            /* skip "alias" types */
             for ( ; sym->type; sym = sym->type );
+            opnd->kind = EXPR_CONST;
+            opnd->mem_type = sym->mem_type;
+            opnd->is_type = TRUE;
             opnd->type = sym;
+            DebugMsg1(("get_operand(%s): symbol.kind=%u (STRUCT/UNION/TYPEDEF/RECORD)\n", sym->name, sym->typekind ));
+
+            /* v2.08: if() removed. This was an old hack. */
+            //if ( tokenarray[i-1].token != T_DOT && tokenarray[i+1].token != T_DOT )
+            /* v2.06: the default value for RECORD types is the mask value */
+            if ( sym->typekind == TYPE_RECORD ) {
+#if AMD64_SUPPORT
+                opnd->llvalue = GetRecordMask( (struct dsym *)sym );
+#else
+                opnd->value = GetRecordMask( (struct dsym *)sym );
+#endif
+            } else if ( ( sym->mem_type & MT_SPECIAL_MASK ) == MT_ADDRESS ) { /* v2.09: added */
+                if ( sym->mem_type == MT_PROC ) {
+                    opnd->value = sym->total_size;
+                    opnd->Ofssize = sym->Ofssize;
+                } else
+                    opnd->value = GetTypeSize( sym->mem_type, sym->Ofssize );
+            } else
+                opnd->value = sym->total_size;
+
             break;
         case SYM_STRUCT_FIELD:
             DebugMsg1(("get_operand(%s): structure field, ofs=%Xh\n", sym->name, sym->offset ));
@@ -696,23 +693,18 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
             for ( ; sym->type; sym = sym->type );
             opnd->mem_type = sym->mem_type;
             /*
-             * check if the member field has arbitrary type.
+             * check if the member field is a type (struct or union).
              * If yes, set the <type> member!
-             * It's probably better to handle this case in PrepareOp()
-             * or in dot_op().
+             * this cannot be done in PrepareOp()
              */
-            if ( sym->state == SYM_TYPE && sym->typekind != TYPE_TYPEDEF ) {
-                opnd->type = sym;
-            } else {
-                opnd->type = NULL; /* added v1.96 */
-            }
+            opnd->type = ( sym->state == SYM_TYPE && sym->typekind != TYPE_TYPEDEF ) ? sym : NULL;
             DebugMsg1(("get_operand: mem_type=%Xh type=%s\n", opnd->mem_type, opnd->type ? opnd->type->name : "NULL" ));
             break;
         default: /* SYM_INTERNAL, SYM_EXTERNAL, SYM_SEG, SYM_GRP, SYM_STACK */
             opnd->kind = EXPR_ADDR;
             /* call internal function (@Line, ... ) */
             if ( sym->predefined && sym->sfunc_ptr )
-                sym->sfunc_ptr( sym );
+                sym->sfunc_ptr( sym, NULL );
             //if( opnd->sym->mem_type == MT_ABS ) {
             if( sym->state == SYM_INTERNAL && sym->segment == NULL ) {
                 opnd->kind = EXPR_CONST;
@@ -730,6 +722,7 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                 opnd->sym = sym;
             } else {
                 opnd->label_tok = &tokenarray[i];
+
                 /* a variable with arbitrary type? */
                 /* v2.05: added check for MT_EMPTY */
                 //if( opnd->sym->type ) { 
@@ -749,6 +742,11 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                     opnd->indirect = TRUE;
                 }
                 opnd->sym = sym;
+                /* v2.09: added (also see change in PrepareOp() )
+                 * and see case SYM_STRUCT_FIELD.
+                 */
+                for ( ; sym->type; sym = sym->type );
+                opnd->type = ( sym->state == SYM_TYPE && sym->typekind != TYPE_TYPEDEF ) ? sym : NULL;
             }
             break;
         }
@@ -767,7 +765,9 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
     case T_RES_ID:
         DebugMsg1(("get_operand: T_RES_ID, >%s<, value=%X\n", tokenarray[i].string_ptr, tokenarray[i].tokval));
         if ( tokenarray[i].tokval == T_FLAT ) {
-            if ( error_msg ) { /* don't define FLAT group in EQU expression! */
+            /* v2.09: query NOLCREATE flag */
+            //if ( error_msg ) { /* don't define FLAT group in EQU expression! */
+            if ( ( eflags & EXPF_NOLCREATE ) == 0 ) {
                 /* v2.08 cpu check added */
                 if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
                     EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
@@ -817,8 +817,8 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
         return( ERROR );
     }
     (*idx)++;
-    DebugMsg1(("get_operand exit, ok, value=%" I64X_SPEC " hvalue=%" I64X_SPEC " mem_type=%Xh abs=%u string=%s type=>%s<\n",
-              opnd->llvalue, opnd->hlvalue, opnd->mem_type, opnd->abs, opnd->quoted_string ? opnd->quoted_string->string_ptr : "NULL", opnd->type ? opnd->type->name : "NULL" ));
+    DebugMsg1(("get_operand exit, ok, kind=%u value=%" I64X_SPEC " hvalue=%" I64X_SPEC " mem_type=%Xh abs=%u string=%s type=>%s<\n",
+              opnd->kind, opnd->llvalue, opnd->hlvalue, opnd->mem_type, opnd->abs, opnd->quoted_string ? opnd->quoted_string->string_ptr : "NULL", opnd->type ? opnd->type->name : "NULL" ));
     return( NOT_ERROR );
 }
 
@@ -883,13 +883,15 @@ static ret_code index_connect( struct expr *opnd1, const struct expr *opnd2 )
 }
 
 /* convert an address operand to a const operand if possible.
- * called for '*', '/', '+', '-' operators.
+ * called for '*', '/', '+', '-' and binary (EQ,NE, ... SHL, SHR, ... OR,AND,XOR) operators.
+ * the main purpose is: if a forward reference is included,
+ * assume it is referencing a constant, not a label.
  */
 
 static void MakeConst( struct expr *opnd )
 /****************************************/
 {
-    if( opnd->kind != EXPR_ADDR )
+    if( ( opnd->kind != EXPR_ADDR ) || opnd->indirect ) /* v2.09: check for indirect added */
         return;
 
     if( opnd->sym ) {
@@ -913,22 +915,26 @@ static void MakeConst( struct expr *opnd )
     opnd->label_tok = NULL;
     if( opnd->mbr != NULL ) {
         if( opnd->mbr->state == SYM_STRUCT_FIELD ) {
+#if 0 /* v2.09: mbr can only be SYM_STRUCT_FIELD or SYM_UNDEFINED (if nullmbr) */
         } else if( opnd->mbr->state == SYM_TYPE ) {
             opnd->value += opnd->mbr->total_size;
             opnd->mbr = NULL;
+#endif
         } else {
             return;
         }
     }
+#if 0 /* v2.09: obsolete */
     if( opnd->base_reg != NULL )
         return;
     if( opnd->idx_reg  != NULL )
         return;
+#endif
     if( opnd->override != NULL )
         return;
     opnd->instr = EMPTY;
     opnd->kind = EXPR_CONST;
-    opnd->indirect = FALSE;
+    //opnd->indirect = FALSE; /* not needed */
     opnd->explicit = FALSE;
     opnd->mem_type = MT_EMPTY;
 }
@@ -1024,8 +1030,8 @@ static void invalid_operand( char *oprtr, char *operand )
 }
 
 /* operators
- * LENGTH:    number of items of first initializer
- * SIZE:      size in bytes of first initializer
+ * LENGTH:    number of items of first initializer's first dimension
+ * SIZE:      size in bytes of first initializer's first dimension
  * LENGTHOF:  number of elements in an array
  * SIZEOF:    size in bytes of item (array/struct)
  *
@@ -1052,7 +1058,7 @@ static ret_code sizlen_op( int oper, struct expr *opnd1, struct expr *opnd2, str
                  sym->state == SYM_INTERNAL) &&
                  //sym->mem_type != MT_ABS &&
                  sym->mem_type != MT_EMPTY &&
-                 sym->mem_type != MT_PROC &&
+                 //sym->mem_type != MT_PROC && /* MT_PROC probably obsolete */
                  sym->mem_type != MT_FAR &&
                  sym->mem_type != MT_NEAR )
             ;
@@ -1069,32 +1075,22 @@ static ret_code sizlen_op( int oper, struct expr *opnd1, struct expr *opnd2, str
 
     switch( oper ) {
     case T_LENGTH:
-#if 1
         /* data items and struct fields have a "first" count.
-         * OTOH, procedure locals have none, although they may be arrays.
+         * for procedure locals (+arguments) and code labels, always 1 is returned.
          */
-        opnd1->value = ( sym->state != SYM_STACK && sym->isarray ) ? sym->first_length : 1;
-#else
-        if( opnd2->kind == EXPR_CONST ) {
-            opnd1->value = opnd2->mbr->first_length ? opnd2->mbr->first_length : 1;
-            /* v2.05: first_length no longer set for SYM_STACK */
-            //} else if ( sym->state == SYM_EXTERNAL || ( sym->state == SYM_INTERNAL && sym->isproc ) ) {
-        } else if ( sym->state == SYM_EXTERNAL || sym->state == SYM_STACK || ( sym->state == SYM_INTERNAL && sym->isproc ) ) {
-            opnd1->value = 1;
-        } else if( sym->mem_type == MT_EMPTY ) {
-            opnd1->value = 0;
-        } else {
-            opnd1->value = sym->first_length ? sym->first_length : 1;
-        }
-#endif
+        /* v2.09: first_length is valid if isdata is set */
+        //opnd1->value = ( sym->state != SYM_STACK && sym->isarray ) ? sym->first_length : 1;
+        opnd1->value = sym->isdata ? sym->first_length : 1;
         break;
     case T_LENGTHOF:
         /* LENGTHOF needs either a data label or a structure field */
         /* a TYPE (structure, typedef) is invalid */
         if( opnd2->kind == EXPR_CONST ) {
             opnd1->value = opnd2->mbr->total_length;
+#if 0 /* v2.09: unnecessary */
         } else if( sym->state == SYM_UNDEFINED && Parse_Pass == PASS_1 ) {
             opnd1->value = sym->total_length;
+#endif
         } else if ( sym->state == SYM_EXTERNAL && sym->iscomm == FALSE ) {
             /* for externals other than COMM, total_length field is used otherwise */
             opnd1->value = 1;
@@ -1103,20 +1099,25 @@ static ret_code sizlen_op( int oper, struct expr *opnd1, struct expr *opnd2, str
         }
         break;
     case T_SIZE:
-        /* if it is a TYPE, first_size isn't set. then use
-         * total_size.
-         * v2.04: first_size is no longer set for SYM_STACK.
-         */
+        /* v2.04: first_size is no longer set for SYM_STACK. */
         if( sym == NULL ) {
-            opnd1->value = opnd2->value;
+            /* v2.09: check memtype */
+            if ( ( opnd2->mem_type & MT_SPECIAL_MASK ) == MT_ADDRESS )
+                opnd1->value = 0xFF00 | opnd2->value;
+            else
+                opnd1->value = opnd2->value;
         } else if ( sym->isdata ) {
             opnd1->value = sym->first_size;
+#if 0 /* v2.09: can't happen, since for a type, sym is NULL */
         } else if( sym->state == SYM_TYPE ) {
             opnd1->value = sym->total_size;
+#endif
         } else if( sym->state == SYM_STACK ) {
             opnd1->value = GetSizeValue( sym );
         } else if( sym->mem_type == MT_NEAR ) {
-            opnd1->value = GetSymOfssize( sym ) ? LS_NEAR32 : LS_NEAR16;
+            /* v2.09: also handle 64-bit */
+            //opnd1->value = GetSymOfssize( sym ) ? LS_NEAR32 : LS_NEAR16;
+            opnd1->value = 0xFF00 | ( 2 << GetSymOfssize( sym ) );
         } else if( sym->mem_type == MT_FAR ) {
             opnd1->value = GetSymOfssize( sym ) ? LS_FAR32 : LS_FAR16;
         } else {
@@ -1133,7 +1134,7 @@ static ret_code sizlen_op( int oper, struct expr *opnd1, struct expr *opnd2, str
         else
             DebugMsg1(("sizlen_op(sizeof): symbol NULL, opnd2.value=%u\n", opnd2->value ));
 #endif
-        /* if sym = NULL then operand is a type constant */
+        /* if sym is NULL, then operand is a type constant */
         if ( sym == NULL ) {
             /* v2.06: default value of RECORD types is the mask! */
             if ( opnd2->is_type && opnd2->type && opnd2->type->typekind == TYPE_RECORD )
@@ -1143,8 +1144,8 @@ static ret_code sizlen_op( int oper, struct expr *opnd1, struct expr *opnd2, str
 #if 1 /* v2.05: don't use total_size for externals anymore! */
         } else if ( sym->state == SYM_EXTERNAL && sym->iscomm == FALSE ) {
             opnd1->value = GetSizeValue( sym );
-            if ( sym->iscomm == TRUE )
-                opnd1->value *= sym->total_length;
+            //if ( sym->iscomm == TRUE )
+            //    opnd1->value *= sym->total_length;
 #endif
         } else
             opnd1->value = sym->total_size;
@@ -1214,6 +1215,7 @@ static ret_code type_op( int oper, struct expr *opnd1, struct expr *opnd2, struc
              */
             if ( opnd2->mem_type == MT_PROC )
                 opnd1->type = opnd2->type;
+
         } else if ( opnd2->kind == EXPR_REG && opnd2->indirect == FALSE ) {
             opnd1->value = SizeFromRegister( opnd2->base_reg->tokval );
 #if 1 /* v2.03: added */
@@ -1231,6 +1233,7 @@ static ret_code type_op( int oper, struct expr *opnd1, struct expr *opnd2, struc
             opnd1->value = SizeFromMemtype( opnd2->mem_type, ModuleInfo.Ofssize, opnd2->type );
             opnd1->is_type = TRUE; /* v2.04: added */
             opnd1->mem_type = opnd2->mem_type; /* v2.04: added */
+            opnd1->type = opnd2->type; /* v2.09: added */
         } else /* it is a number or EXPR_REG + indirect */
             opnd1->value = 0;
 #if 0
@@ -1241,11 +1244,10 @@ static ret_code type_op( int oper, struct expr *opnd1, struct expr *opnd2, struc
         //} else if( sym->mem_type == MT_TYPE ) { /* v2.04: check for explicit */
     } else if( sym->mem_type == MT_TYPE && opnd2->explicit == FALSE ) {
         opnd1->value = sym->type->total_size;
-#if 1 /* v2.03: added */
-        opnd1->is_type = TRUE;
-        if ( opnd1->mem_type == MT_EMPTY )
-            opnd1->mem_type = opnd2->mem_type;
-#endif
+        opnd1->is_type = TRUE; /* v2.03: added */
+        //if ( opnd1->mem_type == MT_EMPTY ) /* v2.09 */
+        opnd1->mem_type = sym->type->mem_type; /* v2.09 */
+        opnd1->type = sym->type; /* v2.09 */
     } else {
 #if 1 /* v2.03: added */
         opnd1->is_type = TRUE;
@@ -1255,11 +1257,13 @@ static ret_code type_op( int oper, struct expr *opnd1, struct expr *opnd2, struc
         /* v2.05: stack vars pointer types? */
         if ( sym->mem_type == MT_PTR )
             opnd1->value = SizeFromMemtype( sym->isfar ? MT_FAR : MT_NEAR, sym->Ofssize, NULL );
-        else if( sym->mem_type == MT_NEAR )
-            opnd1->value = GetSymOfssize( sym ) ? LS_NEAR32 : LS_NEAR16;
-        else if( sym->mem_type == MT_FAR )
+        else if( sym->mem_type == MT_NEAR ) {
+            /* v2.09: also handle 64-bit */
+            //opnd1->value = GetSymOfssize( sym ) ? LS_NEAR32 : LS_NEAR16;
+            opnd1->value = 0xFF00 | ( 2 << GetSymOfssize( sym ) );
+        } else if( sym->mem_type == MT_FAR ) {
             opnd1->value = GetSymOfssize( sym ) ? LS_FAR32 : LS_FAR16;
-        else
+        } else
             opnd1->value = SizeFromMemtype( opnd2->mem_type, GetSymOfssize( sym ), sym->type );
     }
     DebugMsg1(("type_op: result value=%u type=%s\n", opnd1->value, opnd1->type ? opnd1->type->name : "NULL" ));
@@ -1353,7 +1357,7 @@ static ret_code opattr_op( int oper, struct expr *opnd1, struct expr *opnd2, str
         opnd1->value |= OPATTR_REGISTER;
 
     //if ( opnd2->kind != EXPR_UNDEF && ( opnd2->sym == 0 || opnd2->sym->isdefined == TRUE ) )
-    if ( opnd2->kind != EXPR_UNDEF && opnd2->kind != EXPR_FLOAT && ( opnd2->sym == 0 || opnd2->sym->isdefined == TRUE ) )
+    if ( opnd2->kind != EXPR_UNDEF && opnd2->kind != EXPR_FLOAT && ( opnd2->sym == NULL || opnd2->sym->isdefined == TRUE ) )
         opnd1->value |= OPATTR_DEFINED; 
 
     if ( opnd2->sym && opnd2->sym->state == SYM_STACK ||
@@ -1381,8 +1385,7 @@ static ret_code short_op( int oper, struct expr *opnd1, struct expr *opnd2, stru
     if ( opnd2->kind != EXPR_ADDR ||
         ( opnd2->mem_type != MT_EMPTY &&
          opnd2->mem_type != MT_NEAR &&
-         opnd2->mem_type != MT_FAR &&
-         opnd2->mem_type != MT_PROC ) ) {
+         opnd2->mem_type != MT_FAR ) ) {
         CEmitError( EXPRESSION_MUST_BE_A_CODE_ADDRESS );
         return( ERROR );
     }
@@ -1593,10 +1596,19 @@ static ret_code this_op( int oper, struct expr *opnd1, struct expr *opnd2, struc
         thissym->isdefined = TRUE;
     }
 
+    DebugMsg1(("this_op: memtype=%Xh type=%s\n", opnd2->mem_type, opnd2->type ? opnd2->type->name : "NULL" ));
     opnd1->kind = EXPR_ADDR;
-    thissym->mem_type = opnd2->mem_type;
-    if ( opnd2->sym && opnd2->sym->mem_type == MT_TYPE )
-        thissym->type = opnd2->sym->type;
+
+    /* v2.09: a label is not a valid argument */
+    //if ( opnd2->sym && opnd2->sym->mem_type == MT_TYPE )
+    //    thissym->type = opnd2->sym->type;
+    /* v2.09: set structured type */
+    thissym->type = opnd2->type;
+    if ( opnd2->type ) {
+        thissym->mem_type = MT_TYPE;
+    } else
+        thissym->mem_type = opnd2->mem_type;
+
     opnd1->sym  = thissym;
     SetSymSegOfs( thissym );
     opnd1->mem_type = thissym->mem_type;
@@ -1644,9 +1656,9 @@ static ret_code wimask_op( int oper, struct expr *opnd1, struct expr *opnd2, str
     } else {
         if ( opnd2->is_type ) { /* get width of the RECORD? */
             struct dsym *dir = (struct dsym *)sym;
-            struct field_item *fl;
+            struct sfield *fl;
             for ( fl = dir->e.structinfo->head; fl; fl = fl->next )
-                opnd1->value += fl->sym->total_size;
+                opnd1->value += fl->sym.total_size;
         } else
             opnd1->value = sym->total_size;
     }
@@ -1791,7 +1803,7 @@ static ret_code minus_op( struct expr *opnd1, struct expr *opnd2 )
      *                                    order )
      */
 
-    DebugMsg1(("minus_op: types tok1=%u, tok2=%u\n", opnd1->type, opnd2->type ));
+    DebugMsg1(("minus_op: kind tok1=%u, tok2=%u\n", opnd1->kind, opnd2->kind ));
 
     if( check_direct_reg( opnd1, opnd2 ) == ERROR ) {
         DebugMsg(("minus_op: error direct register\n"));
@@ -1827,7 +1839,8 @@ static ret_code minus_op( struct expr *opnd1, struct expr *opnd2 )
         DebugMsg1(("minus_op: ADDR-ADDR\n" ));
         fix_struct_value( opnd1 );
         fix_struct_value( opnd2 );
-        if( opnd2->base_reg != NULL || opnd2->idx_reg != NULL ) {
+        //if( opnd2->base_reg != NULL || opnd2->idx_reg != NULL ) { /* v2.09: just check 'indirect' */
+        if( opnd2->indirect ) {
             CEmitError( INVALID_USE_OF_REGISTER );
             DebugMsg(("minus_op error 2\n"));
             return( ERROR );
@@ -1847,28 +1860,11 @@ static ret_code minus_op( struct expr *opnd1, struct expr *opnd2 )
             }
             /* handle first operand */
             sym = opnd1->sym;
-#if 0 /* v2.05: can't happen */
-            //if( Parse_Pass > PASS_1 && sym->defined == FALSE ) {
-            if( Parse_Pass > PASS_1 && sym->state == SYM_UNDEFINED ) {
-                if( error_msg )
-                    EmitErr( LABEL_NOT_DEFINED, sym->name );
-                DebugMsg(("minus_op error 4\n"));
-                return( ERROR );
-            }
-#endif
             opnd1->value += sym->offset;
 
             /* handle second operand */
             sym = opnd2->sym;
             if( Parse_Pass > PASS_1 ) {
-#if 0 /* v2.05: can't happen */
-                if( sym->state == SYM_UNDEFINED ) {
-                    if( error_msg )
-                        EmitErr( LABEL_NOT_DEFINED, sym->name );
-                    DebugMsg(("minus_op error 5\n"));
-                    return( ERROR );
-                }
-#endif
                 /* if symbol is external, error - unless it's the same symbol */
                 if ( ( sym->state == SYM_EXTERNAL ||
                      opnd1->sym->state == SYM_EXTERNAL) &&
@@ -1885,32 +1881,40 @@ static ret_code minus_op( struct expr *opnd1, struct expr *opnd2 )
                     return( ERROR );
                 }
             }
+
+            /* the type changes from address to constant.
+             * but only if both labels are defined and no indirect addressing.
+             */
+            opnd1->kind = EXPR_CONST;
+
             /* v2.05: if at least one label is undefined, assume result=1 */
             if ( opnd1->sym->state == SYM_UNDEFINED ||
-                opnd2->sym->state == SYM_UNDEFINED )
+                opnd2->sym->state == SYM_UNDEFINED ) {
                 opnd1->value = 1;
-            else {
+                /* 2.09: make sure an undefined label is returned */
+                if ( opnd1->sym->state != SYM_UNDEFINED ) {
+                    opnd1->sym = opnd2->sym;
+                    opnd1->label_tok = opnd2->label_tok;
+                }
+                opnd1->kind = EXPR_ADDR;
+            } else {
                 /* v2.06c: do 64-bit arithmetic (more rigid test in data.c) */
                 //opnd1->value -= sym->offset;
                 //opnd1->value -= opnd2->value;
                 opnd1->value64 -= sym->offset;
                 opnd1->value64 -= opnd2->value64;
+                opnd1->label_tok = NULL;
+                opnd1->sym = NULL;
             }
-            opnd1->label_tok = NULL;
-            opnd1->sym = NULL;
-            if( opnd1->base_reg == NULL && opnd1->idx_reg == NULL ) {
-
+            //if( opnd1->base_reg == NULL && opnd1->idx_reg == NULL ) { /* v2.09: just check 'indirect' */
+            if( opnd1->indirect == FALSE ) {
                 if( opnd1->instr == T_OFFSET && opnd2->instr == T_OFFSET )
                     opnd1->instr = EMPTY;
-
-                opnd1->kind = EXPR_CONST;
-                /* the type changes from address to constant.
-                 */
-                opnd1->indirect = FALSE;
+                //opnd1->indirect = FALSE; /* v2.09: not needed */
             } else {
                 DebugMsg1(("minus_op, exit, ADDR, base=%X, idx=%X\n", opnd1->base_reg, opnd1->idx_reg ));
                 opnd1->kind = EXPR_ADDR;
-                opnd1->indirect |= opnd2->indirect;
+                //opnd1->indirect |= opnd2->indirect;  /* v2.09: op1->indirect is always 1, op2->indirect is always 0 */
             }
             opnd1->explicit = FALSE;
             opnd1->mem_type = MT_EMPTY;
@@ -1924,7 +1928,7 @@ static ret_code minus_op( struct expr *opnd1, struct expr *opnd2 )
         opnd1->kind = EXPR_ADDR;
 
     } else {
-        DebugMsg(("minus_op, exit, error: types tok1=%u, tok2=%u\n", opnd1->type, opnd2->type ));
+        DebugMsg(("minus_op, exit, error: kinds tok1=%u, tok2=%u\n", opnd1->kind, opnd2->kind ));
         return( ConstError( opnd1, opnd2 ) );
     }
     return( NOT_ERROR );
@@ -2659,10 +2663,12 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
                 /* for segment registers, both size 2 and 4 is ok.*/
                 if ( GetValueSp( temp ) & OP_SR ) {
                     if ( opnd1->value != 2 && opnd1->value != 4 ) {
+                        DebugMsg(("calculate(PTR), error 2: opnd1->value=%u\n", opnd1->value ));
                         CEmitError( INVALID_USE_OF_REGISTER );
                         return( ERROR );
                     }
                 } else if ( opnd1->value != SizeFromRegister( temp ) ) {
+                    DebugMsg(("calculate(PTR), error 3: %u != %u\n", opnd1->value, SizeFromRegister( temp ) ));
                     CEmitError( INVALID_USE_OF_REGISTER );
                     return( ERROR );
                 }
@@ -2723,25 +2729,35 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
             return( ConstError( opnd1, opnd2 ) );
         }
 
-        DebugMsg1(("calculate(%s): values=%I64u/%I64u types=%u/%u memtypes=%X/%X\n", oper->string_ptr,
+        DebugMsg1(("calculate(%s): values=%I64u/%I64u is_type=%u/%u memtypes=%X/%X\n", oper->string_ptr,
                    opnd1->value64, opnd2->value64, opnd1->is_type, opnd2->is_type, opnd1->mem_type, opnd2->mem_type  ));
         switch( oper->tokval ) {
         case T_EQ:
 #if 1 /* v2.03: added */
-            /* if both operands are types, do a more strict comparison! */
+            /* if both operands are types, compare mem_type and type! */
             if ( opnd1->is_type && opnd2->is_type ) {
-                opnd1->value64 = ( ((opnd1->value64 == opnd2->value64) &&
-                ( opnd1->mem_type == opnd2->mem_type )) ? -1:0 );
+                /* v2.09: include type member in comparison, but ignore typedef types */
+                if ( opnd1->type && opnd1->type->typekind == TYPE_TYPEDEF && opnd1->type->is_ptr == 0 )
+                    opnd1->type = NULL;
+                if ( opnd2->type && opnd2->type->typekind == TYPE_TYPEDEF && opnd2->type->is_ptr == 0 )
+                    opnd2->type = NULL;
+                opnd1->value64 = ( ( opnd1->mem_type == opnd2->mem_type &&
+                                    opnd1->type == opnd2->type ) ? -1:0 );
             } else
 #endif
             opnd1->value64 = ( opnd1->value64 == opnd2->value64 ? -1:0 );
             break;
         case T_NE:
 #if 1 /* v2.03: added */
-            /* if both operands are types, do a more strict comparison! */
+            /* if both operands are types, compare mem_type and type! */
             if ( opnd1->is_type && opnd2->is_type ) {
-                opnd1->value64 = ( ((opnd1->value64 != opnd2->value64) ||
-                ( opnd1->mem_type != opnd2->mem_type )) ? -1:0 );
+                /* v2.09: include type member in comparison, but ignore typedef types */
+                if ( opnd1->type && opnd1->type->typekind == TYPE_TYPEDEF && opnd1->type->is_ptr == 0  )
+                    opnd1->type = NULL;
+                if ( opnd2->type && opnd2->type->typekind == TYPE_TYPEDEF && opnd2->type->is_ptr == 0  )
+                    opnd2->type = NULL;
+                opnd1->value64 = ( ( opnd1->mem_type != opnd2->mem_type ||
+                opnd1->type != opnd2->type ) ? -1:0 );
             } else
 #endif
             opnd1->value64 = ( opnd1->value64 != opnd2->value64 ? -1:0 );
@@ -2983,20 +2999,23 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
 
 #ifdef DEBUG_OUT
     if ( opnd1->hlvalue ) {
-        DebugMsg1(("calculate(%s) exit, ok, value=0x%" I64X_SPEC "_%016" I64X_SPEC " memtype=0x%X indirect=%u type=>%s<\n",
+        DebugMsg1(("calculate(%s) exit, ok kind=%u value=0x%" I64X_SPEC "_%016" I64X_SPEC " memtype=0x%X indirect=%u type=>%s<\n",
                    oper->string_ptr,
+                   opnd1->kind,
                    opnd1->hlvalue, opnd1->llvalue,
                    opnd1->mem_type,
                    opnd1->indirect, opnd1->type ? opnd1->type->name : "NULL" ));
     } else if ( opnd1->hvalue ) {
-        DebugMsg1(("calculate(%s) exit, ok, value=%" I64d_SPEC"(0x%" I64X_SPEC") memtype=0x%X indirect=%u type=>%s<\n",
+        DebugMsg1(("calculate(%s) exit, ok kind=%u value=%" I64d_SPEC"(0x%" I64X_SPEC") memtype=0x%X indirect=%u type=>%s<\n",
                    oper->string_ptr,
+                   opnd1->kind,
                    opnd1->llvalue, opnd1->llvalue,
                    opnd1->mem_type,
                    opnd1->indirect, opnd1->type ? opnd1->type->name : "NULL" ));
     } else {
-        DebugMsg1(("calculate(%s) exit, ok, value=%d(0x%X) memtype=0x%X ind=%u exp=%u type=%s mbr=%s\n",
+        DebugMsg1(("calculate(%s) exit, ok kind=%u value=%d(0x%X) memtype=0x%X ind=%u exp=%u type=%s mbr=%s\n",
                    oper->string_ptr,
+                   opnd1->kind,
                    opnd1->value, opnd1->value,
                    opnd1->mem_type,
                    opnd1->indirect, opnd1->explicit,
@@ -3020,11 +3039,16 @@ static void PrepareOp( struct expr *opnd, const struct expr *old, const struct a
         if ( old->type ) {
             DebugMsg1(("PrepareOp: implicit type: %s\n", old->type->name));
             opnd->type = old->type;
+#if 0
+        /* v2.09 (type field is now set in get_operand();
+         * it's problematic to use old->sym here, because this field
+         * is not necessarily set by the operand just before the dot.
+         */
         //} else if ( old->sym && old->sym->mem_type == MT_TYPE ) {
         } else if ( old->sym && old->sym->mem_type == MT_TYPE && old->instr == EMPTY ) {
             DebugMsg1(("PrepareOp: label %s, implicit type: %s\n", old->sym->name, old->sym->type->name));
             for ( opnd->type = old->sym->type; opnd->type->type; opnd->type = opnd->type->type );
-
+#endif
         /* v2.07: changed */
         //} else if ( !ModuleInfo.oldstructs ) {
         /* v2.08: reverted, replaced by changes in dot_op() and get_operand(), case T_STYPE */

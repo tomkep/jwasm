@@ -16,7 +16,7 @@ name = jwasm
 # PODIR  - root directory for compiler, linker, include and lib files
 
 !ifndef PODIR
-PODIR  = \PellesC
+PODIR  = d:\PellesC
 !endif
 
 !ifdef AMD64
@@ -54,7 +54,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/types.obj    $(OUTD)/fpfixup.obj  $(OUTD)/invoke.obj  \
            $(OUTD)/equate.obj   $(OUTD)/mangle.obj   $(OUTD)/loop.obj    \
            $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   \
-           $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/labels.obj  \
+           $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/label.obj   \
            $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    \
            $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   \
            $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
@@ -80,15 +80,15 @@ all: $(OUTD) $(OUTD)\$(name).exe $(DOSTARG)
 $(OUTD):
 	@mkdir $(OUTD)
 
-$(OUTD)\$(name).exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
+$(OUTD)\$(name).exe : $(OUTD)\main.obj $(OUTD)\$(name).lib
 !ifdef AMD64
-	$(LINK) $(lflagsw) $(OUTD)/main.obj $(OUTD)/$(name).lib /LIBPATH:$(PODIR)\Lib /LIBPATH:$(PODIR)\Lib\Win64 /OUT:$@
+	$(LINK) $(lflagsw) $(OUTD)\main.obj $(OUTD)\$(name).lib /LIBPATH:$(PODIR)\Lib /LIBPATH:$(PODIR)\Lib\Win64 /OUT:$@
 !else
-	$(LINK) $(lflagsw) $(OUTD)/main.obj $(OUTD)/$(name).lib /LIBPATH:$(PODIR)\Lib /LIBPATH:$(PODIR)\Lib\Win /OUT:$@
+	$(LINK) $(lflagsw) $(OUTD)\main.obj $(OUTD)\$(name).lib /LIBPATH:$(PODIR)\Lib /LIBPATH:$(PODIR)\Lib\Win /OUT:$@
 !endif
 
-$(OUTD)\$(name)d.exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
-	@$(LINK) $(lflagsd) $(HXDIR)\Lib\initw32.obj $(OUTD)/main.obj $(OUTD)/$(name).lib /LIBPATH:$(PODIR)\Lib crt.lib /OUT:$@
+$(OUTD)\$(name)d.exe : $(OUTD)\main.obj $(OUTD)\$(name).lib
+	@$(LINK) $(lflagsd) $(HXDIR)\Lib\initw32.obj $(OUTD)\main.obj $(OUTD)\$(name).lib /LIBPATH:$(PODIR)\Lib crt.lib /OUT:$@
 	@$(HXDIR)\bin\patchpe $*.exe
 
 $(OUTD)\$(name).lib : $(proj_obj)

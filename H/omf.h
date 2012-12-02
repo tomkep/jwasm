@@ -10,13 +10,13 @@
 #define MAX_PUB_LENGTH          1024 /* OMF: max length of pubdef record */
 #define MAX_EXT_LENGTH          1020 /* OMF: max length ( in chars ) of extdef */
 
-void      omf_init( struct module_info *, FILE * );
+void      omf_init( struct module_info * );
 void      omf_fini( void );
 ret_code  omf_write_public( bool );
 void      omf_write_alias( void );
 ret_code  omf_write_autodep( void );
 void      omf_write_header( void );
-ret_code  omf_write_comdef( void );
+//ret_code  omf_write_comdef( void );
 void      omf_write_extdef( void );
 void      omf_write_lnames( void );
 void      omf_write_seg( bool );

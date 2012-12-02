@@ -1,6 +1,61 @@
 
    Changelog
 
+   12/02/2012, v2.09:
+
+   Bugfixes:
+   -  setting the value of an assembly-time variable to an alias didn't
+      reset bits 32-63 of the value (see regression test equate23.asm).
+   -  an undefined symbol in the argument of an assembly-time variable 
+      wasn't always flagged as error.
+   -  the difference of two labels was assumed to be a constant, even if one
+      or both labels weren't defined (yet). This caused problems if the result
+      was used in a preprocessor expression or as argument for an 
+      assembly-time variable (see regression test equate22.aso).
+   -  multiple consecutive expansion operators (%) in a macro argument were
+      rejected.
+   -  comparing two types for (in)equality didn't work in all cases.
+   -  MZ format: values changed by OPTION MZ affected further modules
+      assembled with -mz.
+   -  regression in v2.08(a): equates with a string value may have been stored
+      as text macro, althouth the string value fits in 32-bit.
+   -  Win64: the type of expression <struct>.<member> wasn't ignored if such
+      an expression was used as an argument for INVOKE.
+   -  regression in v2.7-2.08a: a type behind a dot was rejected in some cases
+      if it didn't match the current type; it must be handled like a type
+      coercion.
+   -  a struct member with a TYPEDEF type did accept a literal as initializer
+      without complains. An error occured only if the struct was instanced.
+      Now a warning is displayed at the struct declaration.
+   -  THIS operator didn't handle structured types correctly.
+   -  SIZE and LENGTH operator returned wrong values if the first expression
+      contained DUP with an argument of more than 1 item.
+   -  -Zd, -Zi option, COFF format: duplicate entries for static procs may
+      have occured in symbol table.
+   -  regression in v2.07-2.08a: an explicit type didn't override the assumed
+      type if OPTION OLDSTRUCTS was set (regression test dotop4.asm).
+   -  OMF format: both communal variables and externals with alternate names 
+      in a module made the assembler create an invalid object module.
+   -  "ifdef FLAT" was always true.
+   -  current prolog and epilog settings weren't reset for each pass.
+      Actually, this was only a problem if FASTPASS wasn't active ( JWASMR ).
+   -  COFF: .file entry in symbol table was name & extension only.
+   -  64-bit: for non-FRAME procs, OPTION WIN32:2 (introduced in v2.08) didn't
+      work if there were register contents to be saved via the USES phrase.
+   -  64-bit, OPTION WIN64:1: just fix arguments were stored in shadow space,
+      no "VARARG" arguments.
+
+   Other changes:
+   -  JWASMR.EXE: now compiled without support for SSSE3.
+   -  new output format PE and cmdline option -pe added.
+   -  samples Win32_8, Win32_8m, Win64_8, Win64_9a and Win64_9d added.
+   -  tool res2inc added.
+   -  option -Gr ( fastcall calling convention ) added.
+   -  struct initialization does no longer generate code.
+   -  Msvc64.mak added.
+   -  support for Intel VMX extensions added.
+   -  support for AMD SVM (AMD-V) implemented, inactive.
+
    09/07/2012, v2.08a:
 
    -  result of a macro function was expanded further even if the final result

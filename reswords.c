@@ -142,7 +142,7 @@ const struct instr_item InstrTable[] = {
     { opcls, byte1_info, prefix, 1, rm_info, op_dir, 0, cpu, opcode, rm_byte },
 #include "instruct.h"
 #include "instr64.h"
-ins (NULL,0,0,OpCls(NONE,NONE,NONE),0,0,0,0,0,0,0) /* T_NULL entry. Must be last! */
+ins (NULL,0,0,OpCls(NONE,NONE,NONE),0,0,0,0,0,0,0) /* last (dummy) entry */
 #undef insm
 #undef insn
 #undef insx
@@ -153,6 +153,7 @@ ins (NULL,0,0,OpCls(NONE,NONE,NONE),0,0,0,0,0,0,0) /* T_NULL entry. Must be last
 /* create SpecialTable. */
 
 const struct special_item SpecialTable[] = {
+    { 0, 0, 0, 0, 0 }, /* dummy entry for T_NULL */
 #define res(tok, string, len, type, value, bytval, flags, cpu, sflags ) \
     { value, sflags, cpu, bytval, type },
 #include "special.h"
@@ -223,7 +224,8 @@ short optable_idx[] = {
     //T_NULL_I /* v2.06: also not needed */
 };
 
-/* table of instruction operand classes */
+/* table of instruction operand classes
+ */
 const struct opnd_class opnd_clstab[] = {
 #define OpCls( op1, op2, op3 ) { { OP_ ## op1, OP_ ## op2 }, OP3_ ## op3 },
 #include "opndcls.h"
@@ -266,6 +268,7 @@ static const char resw_strings[] = {
  * this table's entries will be used to create the instruction hash table.
  */
 struct ReservedWord ResWordTable[] = {
+    { 0, 0, 0, NULL }, /* dummy entry for T_NULL */
 #define res(tok, string, len, type, value, bytval, flags, cpu, sflags) \
     { 0, len, RWF_SPECIAL | flags, NULL },
 #include "special.h"
@@ -292,7 +295,6 @@ struct ReservedWord ResWordTable[] = {
 #include "instravx.h"
 #undef avxins
 #endif
-    { 0, 0, 0, NULL } /* dummy entry for T_NULL */
 };
 
 #if AVXSUPP
@@ -379,6 +381,10 @@ static const struct replace_ins patchtabr[] = {
     { T_SLDT - SPECIAL_LAST, T_SLDT_I, T_SLDT_I64 },
     { T_SMSW - SPECIAL_LAST, T_SMSW_I, T_SMSW_I64 },
     { T_STR  - SPECIAL_LAST, T_STR_I,  T_STR_I64  },
+#endif
+#if VMXSUPP /* v2.09: added */
+    { T_VMREAD  - SPECIAL_LAST, T_VMREAD_I,   T_VMREAD_I64  },
+    { T_VMWRITE - SPECIAL_LAST, T_VMWRITE_I,  T_VMWRITE_I64 },
 #endif
 };
 
@@ -553,7 +559,7 @@ void Set64Bit( bool newmode )
     int i;
 
     if ( newmode != b64bit ) {
-        DebugMsg(("Set64Bit(%u): mode is to change\n", newmode ));
+        DebugMsg1(("Set64Bit(%u): mode is to change\n", newmode ));
         if ( newmode != FALSE ) {
             optable_idx[ T_INC - SPECIAL_LAST ]++;   /* skip the one-byte register INC */
             optable_idx[ T_DEC - SPECIAL_LAST ]++;   /* skip the one-byte register DEC */
@@ -676,7 +682,8 @@ void ResWordsInit( void )
         ResWordTable[T_VPEXTRQ].flags |= RWF_X64;
         ResWordTable[T_VPINSRQ].flags |= RWF_X64;
 #endif
-        for( i = 0; i < T_NULL; i++ ) {
+        /* v2.09: start with index = 1, since index 0 is now T_NULL */
+        for( i = 1; i < sizeof( ResWordTable ) / sizeof( ResWordTable[0] ); i++ ) {
             ResWordTable[i].name = p;
             p += ResWordTable[i].len;
 #if AMD64_SUPPORT /* don't add the words specific to x64 */
@@ -701,7 +708,7 @@ void ResWordsInit( void )
     DebugMsg(("SpecialTable\n"));
     DebugMsg(("keyword             value   sflags  cpu val8 type\n"));
     DebugMsg(("-------------------------------------------------\n"));
-    for ( i = 0; i < sizeof( SpecialTable ) / sizeof( SpecialTable[0] ); i++ ) {
+    for ( i = 1; i < sizeof( SpecialTable ) / sizeof( SpecialTable[0] ); i++ ) {
         DebugMsg(("%-16s %8X %8X %4X %4X  %2X\n", GetResWName( i, NULL ),
                   SpecialTable[i].value, SpecialTable[i].sflags,
                   SpecialTable[i].cpu, SpecialTable[i].bytval,
@@ -712,7 +719,7 @@ void ResWordsInit( void )
     DebugMsg(("\nInstructionTable\n"));
     DebugMsg(("keyword          cls cpu opc rmb b1 rmi pfx fst\n"));
     DebugMsg(("-------------------------------------------------------\n"));
-    for ( i = INS_FIRST_1 + 1; i < T_NULL; i++ ) {
+    for ( i = INS_FIRST_1 + 1; i < sizeof( ResWordTable ) / sizeof( ResWordTable[0]; i++ ) {
         const struct instr_item *ins = &InstrTable[IndexFromToken( i )];
         DebugMsg(("%-16s %02X %4X  %02X  %02X %2u %X   %X   %u\n", GetResWName( i, NULL ),
                   ins->opclsidx,

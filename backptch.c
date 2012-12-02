@@ -254,8 +254,8 @@ ret_code BackPatch( struct asym *sym )
     struct fixup     *next;
 
     DebugMsg(("BackPatch(%s) enter, seg.ofs=%s.%X\n", sym->name, sym->segment ? sym->segment->name : "NULL (!?)", sym->offset ));
-    fixup = sym->fixup;
-    sym->fixup = NULL;
+    fixup = sym->bp_fixup;
+    sym->bp_fixup = NULL;
     for( ; fixup != NULL; fixup = next ) {
         next = fixup->nextbp;
         if( DoPatch( sym, fixup ) == ERROR ) {

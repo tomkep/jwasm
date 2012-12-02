@@ -48,6 +48,7 @@
 #define _MAX_DIR FILENAME_MAX
 #define _MAX_DRIVE 4
 #pragma warn(disable:2030) /* disable '=' used in a conditional expression */
+#pragma warn(disable:2229) /* disable 'local x is potentially used without ... */
 #pragma warn(disable:2231) /* disable enum value x not handled in switch statement */
 #elif defined(__BORLANDC__) || defined(__OCC__)
 #define _stricmp  stricmp
@@ -74,16 +75,28 @@
 #endif
 #define MAX_STRUCT_NESTING      32 /* limit for "anonymous structs" only */
 
-#define MAX_LNAME              255 /* OMF lnames */
+#define MAX_LNAME              255 /* OMF lnames - length must fit in 1 byte */
 #define LNAME_NULL             0   /* OMF first entry in lnames array */
 
 /* output format switches */
+#ifndef BIN_SUPPORT
 #define BIN_SUPPORT  1 /* support BIN output format              */
-#define MZ_SUPPORT   1 /* support DOS MZ output format           */
+#endif
+#if BIN_SUPPORT
+#ifndef MZ_SUPPORT
+#define MZ_SUPPORT   1 /* support DOS MZ binary format           */
+#endif
+#ifndef PE_SUPPORT
+#define PE_SUPPORT   1 /* support PE32 + PE64 binary format      */
+#endif
+#else
+#define MZ_SUPPORT 0 /* both MZ and PE need BIN==1 */
+#define PE_SUPPORT 0
+#endif
+
 #ifndef COFF_SUPPORT
 #define COFF_SUPPORT 1 /* support COFF output format             */
 #endif
-#define PE_SUPPORT   0 /* support PE32 + PE64 binary format      */
 #ifndef DJGPP_SUPPORT
 #define DJGPP_SUPPORT 0 /* support for Djgpp COFF variant        */
 #endif
@@ -94,9 +107,17 @@
 /* instruction set switches */
 #define K3DSUPP      1 /* support K3D instruction set            */
 #define SSE3SUPP     1 /* support SSE3 instruction set           */
-#define SSSE3SUPP    1 /* support SSSE3 instruction set          */
 #ifndef AMD64_SUPPORT
 #define AMD64_SUPPORT 1 /* 1=support 64bit */
+#endif
+#ifndef VMXSUPP
+#define VMXSUPP      1 /* support VMX extensions                 */
+#endif
+#ifndef SVMSUPP
+#define SVMSUPP      0 /* support SVM (=AMD-V) extensions        */
+#endif
+#ifndef SSSE3SUPP
+#define SSSE3SUPP    1 /* support SSSE3 instruction set          */
 #endif
 #ifndef SSE4SUPP
 #define SSE4SUPP     1 /* support SSE4 instruction set           */
@@ -154,8 +175,8 @@
 
 /* JWasm version info */
 #define _BETA_
-#define _JWASM_VERSION_ "2.08" _BETA_
-#define _JWASM_VERSION_INT_ 208
+#define _JWASM_VERSION_ "2.09" _BETA_
+#define _JWASM_VERSION_INT_ 209
 
 #define NULLC  '\0'
 //#define NULLS  ""
@@ -219,38 +240,34 @@ enum file_extensions {
 
 /* output formats. Order must match formatoptions[] in assemble.c */
 enum oformat {
-    OFORMAT_BIN, /* this is also for MZ formats */
+#if BIN_SUPPORT
+    OFORMAT_BIN, /* used by -bin, -mz and -pe */
+#endif
     OFORMAT_OMF,
 #if COFF_SUPPORT
-    OFORMAT_COFF, /* this is also for PE formats */
+    OFORMAT_COFF,/* used by -coff, -djgpp and -win64 */
 #endif
 #if ELF_SUPPORT
-    OFORMAT_ELF,
+    OFORMAT_ELF, /* used by -elf and elf64 */
 #endif
 };
 
-enum hformat {
-    HFORMAT_NONE,
+enum sformat {
+    SFORMAT_NONE,
 #if MZ_SUPPORT
-    HFORMAT_MZ,    /* MZ binary */
+    SFORMAT_MZ,    /* MZ binary */
+#endif
+#if PE_SUPPORT
+    SFORMAT_PE,    /* PE (32- or 64-bit) binary */
 #endif
 #if COFF_SUPPORT
- #if AMD64_SUPPORT
-    HFORMAT_WIN64, /* PE32+, COFF for 64bit */
- #endif
  #if DJGPP_SUPPORT
-    HFORMAT_DJGPP, /* Djgpp variant of COFF */
- #endif
- #if PE_SUPPORT
-    HFORMAT_PE32,  /* PE32 binary, not supported yet */
-  #if AMD64_SUPPORT
-    HFORMAT_PE64,  /* PE64 binary, not supported yet */
-  #endif
+    SFORMAT_DJGPP, /* Djgpp variant of COFF */
  #endif
 #endif
-#if ELF_SUPPORT
+#if COFF_SUPPORT || ELF_SUPPORT
  #if AMD64_SUPPORT
-    HFORMAT_ELF64, /* ELF for 64bit  */
+    SFORMAT_64BIT, /* 64bit COFF or ELF */
  #endif
 #endif
 };
@@ -491,7 +508,7 @@ enum opt_queues {
 };
 
 enum prologue_epilogue_mode {
-    PEM_DEFAULT,
+    PEM_DEFAULT, /* must be value 0 */
     PEM_MACRO,
     PEM_NONE
 };
@@ -543,9 +560,11 @@ struct global_options {
     bool        warning_error;           /* -WX option */
 #ifdef DEBUG_OUT
     bool        debug;                   /* -d6 option */
-    bool        nofastpass;              /* -d7 option */
     bool        nobackpatch;             /* -d8 option */
+#if FASTPASS
+    bool        nofastpass;              /* -d7 option */
     bool        print_linestore;         /* -ls option */
+#endif
     uint_16     max_passes;              /* -pm option */
     bool        skip_preprocessor;       /* -sp option */
 #endif
@@ -581,7 +600,7 @@ struct global_options {
     bool        safeseh;                 /* -safeseh option */
     uint_8      ignore_include;          /* -X option */
     enum oformat output_format;          /* -bin, -omf, -coff, -elf options */
-    enum hformat header_format;          /* -mz, -pe options */
+    enum sformat sub_format;             /* -mz, -pe, -win64, -elf64 options */
     uint_8      fieldalign;              /* -Zp option  */
     enum lang_type langtype;             /* -Gc|d|z option */
     enum model_type model;               /* -mt|s|m|c|l|h|f option */
@@ -592,6 +611,24 @@ struct global_options {
     enum naming_types naming_convention; /* OW naming peculiarities */
 #endif
 };
+
+#if MZ_SUPPORT
+/* if the structure changes, option.c, SetMZ() might need adjustment! */
+struct MZDATA {
+    uint_16 ofs_fixups; /* offset start fixups */
+    uint_16 alignment; /* header alignment: 16,32,64,128,256,512 */
+    uint_16 heapmin;
+    uint_16 heapmax;
+};
+#endif
+
+#if DLLIMPORT
+struct dll_desc {
+    struct dll_desc *next;
+    int cnt;
+    char name[1];
+};
+#endif
 
 /* Information about the module */
 
@@ -613,7 +650,7 @@ struct module_vars {
     //struct symbol_queue AltQueue;        /* weak externals */
     struct qdesc        AltQueue;        /* weak externals */
 #if DLLIMPORT
-    struct qdesc        DllQueue;        /* dlls of OPTION DLLIMPORT */
+    struct dll_desc     *DllQueue;       /* dlls of OPTION DLLIMPORT */
 #endif
     FILE                *curr_file[NUM_FILE_TYPES];  /* ASM, ERR, OBJ and LST */
     char                *curr_fname[NUM_FILE_TYPES];
@@ -622,6 +659,7 @@ struct module_vars {
     char                *IncludePath;
     struct input_queue  *line_queue;     /* line queue */
     struct file_list    *file_stack;     /* source item (file/macro) stack */
+    struct fixup        *start_fixup;    /* OMF only */
 };
 
 struct format_options;
@@ -631,7 +669,7 @@ struct module_info {
     char                *proc_prologue;  /* prologue macro if PEM_MACRO */
     char                *proc_epilogue;  /* epilogue macro if PEM_MACRO */
 #if DLLIMPORT
-    char                *CurrDll;        /* OPTION DLLIMPORT dll */
+    struct dll_desc     *CurrDll;        /* OPTION DLLIMPORT dll */
 #endif
     const struct format_options *fmtopt; /* v2.07: added */
     unsigned            anonymous_label; /* "anonymous label" counter */
@@ -640,7 +678,7 @@ struct module_info {
     enum model_type     model;           /* memory model */
     enum lang_type      langtype;        /* language */
     enum os_type        ostype;          /* operating system */
-    enum hformat        header_format;   /* header format */
+    enum sformat        sub_format;      /* sub-output format */
     enum fastcall_type  fctype;          /* fastcall type */
     enum seg_order      segorder;        /* .alpha, .seq, .dosseg */
     enum offset_type    offsettype;      /* OFFSET:GROUP|FLAT|SEGMENT */
@@ -649,13 +687,13 @@ struct module_info {
     unsigned char       radix;           /* current .RADIX setting */
     unsigned char       fieldalign;      /* -Zp, OPTION:FIELDALIGN setting */
     unsigned char       line_flags;      /* current line has been printed */
-    unsigned char       StructInit;      /* for initialization of struct data items */
 #if PROCALIGN
     unsigned char       procalign;       /* current OPTION:PROCALIGN setting */
 #endif
     enum listmacro      list_macro;      /* current .LISTMACRO setting */
-    unsigned char       Ofssize;         /* current offset size (16,32,64) */
+    unsigned char       Ofssize;         /* current offset size (USE16,USE32,USE64) */
     unsigned char       defOfssize;      /* default segment offset size (16,32 [,64]-bit) */
+    unsigned char       wordsize;        /* current word size (2,4,8) */
     unsigned            case_sensitive:1;     /* option casemap */
     unsigned            convert_uppercase:1;  /* option casemap */
     unsigned            procs_private:1; /* option proc:private */
@@ -673,27 +711,43 @@ struct module_info {
     unsigned            list_generated_code:1; /* .listall, -Sa, -Sg */
     unsigned            StartupDirectiveFound:1;
     unsigned            EndDirFound:1;
-    unsigned            frame_auto:1;
+#if AMD64_SUPPORT
+    unsigned            frame_auto:1;    /* win64 only */
+#endif
     unsigned            NoSignExtend:1;  /* option nosignextend */
-
-    //unsigned            flatgrp_idx;     /* index of FLAT group */
+#if ELF_SUPPORT || AMD64_SUPPORT || MZ_SUPPORT
     union {
-        uint_8          osabi;            /* for ELF */
-        uint_8          win64_flags;      /* for WIN64 */
+#if ELF_SUPPORT || AMD64_SUPPORT
+        struct {
+#if ELF_SUPPORT
+        uint_8          elf_osabi;       /* for ELF   */
+#endif
+#if AMD64_SUPPORT
+        uint_8          win64_flags;     /* for WIN64 + PE(32+) */
+#endif
+        };
+#endif
+#if MZ_SUPPORT
+        struct MZDATA   mz_data;         /* for MZ    */
+#endif
     };
+#endif
     unsigned char       simseg_init;     /* simplified segm dir flags */
+    unsigned char       simseg_defd;     /* v2.09: flag if seg was defined before simseg dir */
     unsigned char       PhaseError;      /* phase error flag */
     unsigned char       CommentDataInCode;/* OMF: emit coment records about data in code segs */
-    unsigned char       prologuemode;
-    unsigned char       epiloguemode;
-    unsigned char       invoke_exprparm; /* forward refs for INVOKE params? */
-    uint                srcfile;         /* is a file stack index */
+    unsigned char       prologuemode;    /* current PEM_ enum value for OPTION PROLOGUE */
+    unsigned char       epiloguemode;    /* current PEM_ enum value for OPTION EPILOGUE */
+    unsigned char       invoke_exprparm; /* flag: forward refs for INVOKE params ok? */
+    uint                srcfile;         /* current file - is a file stack index */
     struct dsym         *currseg;        /* currently active segment */
     struct dsym         *flat_grp;       /* magic FLAT group */
     struct asym         *start_label;    /* start label */
-    struct fixup        *start_fixup;    /* OMF only */
     uint_32             start_displ;     /* OMF only, displ for start label */
     uint_8              *pCodeBuff;
+#if PE_SUPPORT || DLLIMPORT
+    char                *imp_prefix;
+#endif
     /* input members */
     char                *currsource;     /* current source line */
     char                *CurrComment;    /* current comment */
@@ -708,9 +762,8 @@ struct module_info {
 #define StringBufferEnd ModuleInfo.stringbufferend
 #define CurrFile        ModuleInfo.g.curr_file
 #define CurrFName       ModuleInfo.g.curr_fname
-#define FNamesTab       ModuleInfo.g.FNames
 #define CurrSeg         ModuleInfo.currseg
-
+#define CurrWordSize    ModuleInfo.wordsize
 
 struct format_options {
     void (*init)( struct module_info * );
@@ -723,16 +776,6 @@ struct fname_list {
     char    *fullname;
     time_t  mtime;
 };
-
-#if MZ_SUPPORT
-/* if the structure changes, option.c, SetMZ() might need adjustment! */
-struct MZDATA {
-    uint_16 ofs_fixups; /* offset start fixups */
-    uint_16 alignment; /* header alignment: 16,32,64,128,256,512 */
-    uint_16 heapmin;
-    uint_16 heapmax;
-};
-#endif
 
 /* global variables */
 

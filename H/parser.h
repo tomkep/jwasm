@@ -37,6 +37,7 @@
 
 /* define tokens for SpecialTable (registers, operators, ... ) */
 enum special_token {
+    T_NULL,
 #define  res(token, string, len, type, value, bytval, flags, cpu, sflags) T_ ## token ,
 #include "special.h"
 #undef res
@@ -66,7 +67,6 @@ enum instr_token {
 #include "instravx.h"
 #undef avxins
 #endif
-    T_NULL
 };
 
 /*---------------------------------------------------------------------------*/
@@ -91,7 +91,7 @@ enum queue_type {
 extern struct symbol_queue SymTables[];
 
 /*
- values for <rm_info>
+ values for <rm_info> (3 bits)
  000            -> has rm_byte with w-, d- and/or s-bit in opcode
  001( no_RM   ) -> no rm_byte
  010( no_WDS  ) -> has rm_byte, but w-bit, d-bit, s-bit of opcode are absent
@@ -103,9 +103,9 @@ enum rm_info {
     R_in_OP = 0x3,
 };
 
-/* values for <allowed_prefix> */
+/* values for <allowed_prefix> (3 bits) */
 enum allowed_prefix {
-    AP_NO_PREFIX= 0x00,
+    // AP_NO_PREFIX= 0x00, /* value 0 means "normal" */
     AP_LOCK     = 0x01,
     AP_REP      = 0x02,
     AP_REPxx    = 0x03,
@@ -141,7 +141,10 @@ enum rex_bits {
 };
 #endif
 
-/* v2.06: data removed from struct instr_item */
+/* operand classes. this table is defined in reswords.c.
+ * index into this array is member opclsidx in instr_item.
+ * v2.06: data removed from struct instr_item.
+ */
 struct opnd_class {
     enum operand_type opnd_type[2];  /* operands 1 + 2 */
     unsigned char opnd_type_3rd;     /* operand 3 */
@@ -163,7 +166,7 @@ struct instr_item {
         first           : 1,    /* 1=opcode's first entry */
         rm_info         : 3,    /* info on r/m byte */
         opnd_dir        : 1;    /* operand direction */
-    unsigned char reserved;
+    unsigned char reserved;     /* not used yet */
 #ifdef __WATCOMC__
     enum cpu_info   cpu;        /* CPU type */
 #else
@@ -287,8 +290,8 @@ struct code_info {
 #define IS_OPER_32( s )   ( s->Ofssize ? ( s->prefix.opsiz == FALSE ) : ( s->prefix.opsiz == TRUE ))
 
 /* globals */
-extern struct asym           WordSize;
-#define CurrWordSize WordSize.value
+//extern struct asym           WordSize;
+//#define CurrWordSize WordSize.value
 extern const struct instr_item   InstrTable[];   /* instruction table */
 extern const struct special_item SpecialTable[]; /* rest of res words */
 extern short                     optable_idx[];  /* helper, access thru IndexFromToken() only */

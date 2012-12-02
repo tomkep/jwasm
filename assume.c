@@ -36,7 +36,7 @@
 #include "segment.h"
 #include "assume.h"
 #include "types.h"
-#include "labels.h"
+#include "label.h"
 #include "input.h"
 #include "expreval.h"
 #include "fastpass.h"
@@ -180,7 +180,7 @@ void ModelAssumeInit( void )
     switch( ModuleInfo.model ) {
     case MODEL_FLAT:
 #if AMD64_SUPPORT
-        if ( ModuleInfo.header_format == HFORMAT_WIN64 )
+        if ( ModuleInfo.fctype == FCT_WIN64 )
             pGSassume = szNothing;
 #endif
         AddLineQueueX( "%r %r:%r,%r:%r,%r:%r,%r:%r,%r:%s,%r:%s",
@@ -378,7 +378,7 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
                     /* ensure that directive is rerun in pass 2
                      * so an error msg can be emitted.
                      */
-                    FStoreLine(0);
+                    FStoreLine( 0 );
                     info->symbol = opnd.sym;
                 } else if ( ( opnd.sym->state == SYM_SEG || opnd.sym->state == SYM_GRP ) && opnd.instr == EMPTY ) {
                     info->symbol = opnd.sym;

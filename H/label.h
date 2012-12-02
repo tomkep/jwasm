@@ -28,12 +28,12 @@
 *
 ****************************************************************************/
 
-#ifndef _LABELS_H_
-#define _LABELS_H_
+#ifndef _LABEL_H_
+#define _LABEL_H_
 
 struct qualified_type;
 
-extern void         LabelsInit( void );
+extern void         LabelInit( void );
 extern char         *GetAnonymousLabel( char *, int );
 extern struct asym  *CreateLabel( const char *, enum memtype, struct qualified_type *, bool );
 

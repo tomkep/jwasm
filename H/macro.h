@@ -33,6 +33,14 @@
 
 #define PLACEHOLDER_CHAR '\n' /* "escape" char for macro placeholders */
 
+enum macro_flags {
+#if MACROLABEL
+    MF_LABEL  = 0x01,   /* a label exists at pos 0 */
+#endif
+    MF_NOSAVE = 0x02,   /* no need to save/restore input status */
+    MF_IGNARGS = 0x04   /* ignore additional arguments (for FOR directive) */
+};
+
 /* functions in expans.c */
 
 extern int      GetLiteralValue( char *, const char * );
@@ -40,6 +48,7 @@ extern int      RunMacro( struct dsym *, int, struct asm_tok[], char *, int, boo
 extern ret_code ExpandText( char *, struct asm_tok[], unsigned int );
 extern int      ExpandLineItems( char *, int, struct asm_tok[], int, int );
 extern ret_code ExpandLine( char *, struct asm_tok[] );
+extern void     ExpandLiterals( int i, struct asm_tok[] );
 
 /* functions in macro.c */
 
@@ -56,6 +65,7 @@ extern void     MacroFini( void );
 
 extern struct asym *SetTextMacro( struct asm_tok[], struct asym *, const char *, const char * ); /* EQU for texts */
 extern struct asym *AddPredefinedText( const char *, const char * );
+extern void        TextItemError( struct asm_tok * );
 
 extern void     StringInit( void );
 #ifdef DEBUG_OUT

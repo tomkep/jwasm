@@ -21,7 +21,7 @@ extern struct asym *CreateTypeSymbol( struct asym *, const char *, bool );
 extern struct asym *SearchNameInStruct( const struct asym *, const char *, uint_32 *, int level );
 //extern ret_code    EndstructDirective( int );
 extern ret_code    GetQualifiedType( int *, struct asm_tok[], struct qualified_type * );
-extern struct asym *AddFieldToStruct( int, struct asm_tok[], const char *, enum memtype, struct dsym *, uint_32 );
+extern struct asym *CreateStructField( int, struct asm_tok[], const char *, enum memtype, struct asym *, uint_32 );
 extern void        UpdateStructSize( struct asym * );
 extern ret_code    SetStructCurrentOffset( int_32 );
 extern ret_code    AlignInStruct( int );

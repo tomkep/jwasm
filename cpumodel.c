@@ -23,8 +23,12 @@
 #include "listing.h"
 #include "proc.h"
 #include "macro.h"
+#include "fixup.h"
 
 #include "myassert.h"
+#if PE_SUPPORT
+#include "bin.h"
+#endif
 
 #define DOT_XMMARG 0 /* 1=optional argument for .XMM directive */
 
@@ -63,6 +67,15 @@ static struct asym *sym_DataSize  ; /* numeric. requires model */
 static struct asym *sym_Model     ; /* numeric. requires model */
 struct asym *sym_Interface ; /* numeric. requires model */
 struct asym *sym_Cpu       ; /* numeric. This is ALWAYS set */
+
+#if AMD64_SUPPORT
+#if COFF_SUPPORT
+const struct format_options coff64_fmtopt = { NULL, COFF64_DISALLOWED, "PE32+" };
+#endif
+#if ELF_SUPPORT
+const struct format_options elf64_fmtopt  = { NULL, ELF64_DISALLOWED,  "ELF64" };
+#endif
+#endif
 
 /* find token in a string table */
 
@@ -127,6 +140,18 @@ static void SetModel( void )
         ModuleInfo.offsettype = OT_FLAT;
 #if AMD64_SUPPORT
         SetDefaultOfssize( ((ModuleInfo.curr_cpu & P_CPU_MASK) >= P_64 ) ? USE64 : USE32 );
+        /* v2.03: if cpu is x64 and language is fastcall,
+         * set fastcall type to win64.
+         * This is rather hackish, but currently there's no other possibility
+         * to enable the win64 ABI from the source.
+         */
+        if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_64 )
+            if ( ModuleInfo.langtype == LANG_FASTCALL ) {
+                if ( Options.output_format != OFORMAT_ELF ) {
+                    DebugMsg(("SetModel: FASTCALL type set to WIN64\n"));
+                    ModuleInfo.fctype = FCT_WIN64;
+                }
+            }
 #else
         SetDefaultOfssize( USE32 );
 #endif
@@ -191,17 +216,12 @@ static void SetModel( void )
 
 #if AMD64_SUPPORT
     if ( ModuleInfo.defOfssize == USE64 && ModuleInfo.fctype == FCT_WIN64 ) {
-        ReservedStack.mem_type = MT_EMPTY;
-        ReservedStack.state = SYM_INTERNAL;
-        ReservedStack.isdefined = TRUE;
-        ReservedStack.predefined = TRUE;
-#if FASTMEM==0
-        ReservedStack.staticmem = TRUE;
-#endif
-        ReservedStack.variable = TRUE;
-        ReservedStack.name_size = 14; /* sizeof( "@ReservedStack" ) */
-        SymAddGlobal( &ReservedStack );
+        sym_ReservedStack = AddPredefinedConstant( "@ReservedStack", 0 );
     }
+#endif
+#if PE_SUPPORT
+    if ( ModuleInfo.sub_format == SFORMAT_PE )
+        pe_create_PE_header();
 #endif
 }
 
@@ -252,10 +272,10 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
     index = FindToken( tokenarray[i].string_ptr, ModelToken, sizeof( ModelToken )/sizeof( ModelToken[0] ) );
     if( index >= 0 ) {
         if( ModuleInfo.model != MODEL_NONE ) {
+            //if ( Parse_Pass == PASS_1 ) /* not needed, this code runs in pass one only */
             EmitWarn( 2, MODEL_DECLARED_ALREADY );
-            return( NOT_ERROR );
         }
-        model = index + 1;
+        model = index + 1; /* model is one-base ( 0 is MODEL_NONE ) */
         i++;
     } else {
         EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
@@ -307,27 +327,19 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
             EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
             return( ERROR );
         }
+#if AMD64_SUPPORT
+        if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_64 ) /* cpu 64-bit? */
+            switch ( Options.output_format ) {
+            case OFORMAT_COFF: ModuleInfo.fmtopt = &coff64_fmtopt; break;
+            case OFORMAT_ELF:  ModuleInfo.fmtopt = &elf64_fmtopt;  break;
+            };
+#endif
         DefineFlatGroup();
     }
 
     ModuleInfo.model = model;
-    if ( init & INIT_LANG ) {
+    if ( init & INIT_LANG )
         ModuleInfo.langtype = language;
-#if AMD64_SUPPORT
-        /* v2.03: set header and fastcall type to win64 if x64 is active.
-         * This is rather hackish, but currently there's no other possibility
-         * to enable the win64 ABI from the source.
-         */
-        if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) == P_64 )
-            if ( language == LANG_FASTCALL &&
-                model == MODEL_FLAT &&
-                Options.output_format != OFORMAT_ELF ) {
-                DebugMsg(("ModelDirective: FASTCALL type set to WIN64\n"));
-                ModuleInfo.header_format = HFORMAT_WIN64;
-                ModuleInfo.fctype = FCT_WIN64;
-            }
-#endif
-    }
     if ( init & INIT_STACK )
         ModuleInfo.distance = distance;
     if ( init & INIT_OS )

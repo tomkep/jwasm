@@ -34,7 +34,7 @@
 
 extern struct dsym     *CurrProc;      /* current procedure */
 #if AMD64_SUPPORT
-extern struct asym     ReservedStack;  /* max stack space required by INVOKE */
+extern struct asym     *sym_ReservedStack;  /* max stack space required by INVOKE */
 #endif
 
 /*---------------------------------------------------------------------------*/
@@ -42,8 +42,8 @@ extern struct asym     ReservedStack;  /* max stack space required by INVOKE */
 //extern void             pushitem( void *, void * );
 //extern void             *popitem( void * );
 
-extern ret_code         ExamineProc( int, struct asm_tok[], struct dsym *, bool );  /* common for PROC/PROTO */
-extern struct asym      *CreateProc( struct asym *, const char *, unsigned char );
+extern ret_code         ParseProc( int, struct asm_tok[], struct dsym *, bool, enum lang_type );
+extern struct asym      *CreateProc( struct asym *, const char *, enum sym_state );
 extern void             DeleteProc( struct dsym * );
 
 extern ret_code         CopyPrototype( struct dsym *, struct dsym * );

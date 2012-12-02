@@ -274,6 +274,8 @@ static ret_code get_string( struct asm_tok *buf, struct line_status *p )
                 tsrc = src;
                 tcount = count;
                 while (*src != delim && *src != NULLC && count < MAX_STRING_LEN-1 ) {
+                    if ( symbol_o == '<' && *src == '!' && *(src+1) != NULLC )
+                        src++;
                     *dst++ = *src++;
                     count++;
                 }
@@ -290,12 +292,14 @@ static ret_code get_string( struct asm_tok *buf, struct line_status *p )
 #endif
             } else if( c == '!' && symbol_o == '<' && *(src+1) ) {
                 /* handle literal-character operator '!'.
-                 it makes the next char to enter the literal uninterpreted.
+                 * it makes the next char to enter the literal uninterpreted.
                  */
-                *dst++ = c; src++;
-                count++;
-                if ( count == MAX_STRING_LEN )
-                    break;
+                /* v2.09: don't store the '!' */
+                //*dst++ = c; src++;
+                //count++;
+                //if ( count == MAX_STRING_LEN )
+                //    break;
+                src++;
                 *dst++ = *src++;
                 count++;
             } else if( c == '\\' &&  ConcatLine( src, count, dst, p ) != EMPTY ) {
@@ -347,7 +351,8 @@ static ret_code get_string( struct asm_tok *buf, struct line_status *p )
         for( ; count < MAX_STRING_LEN &&
             /* v2.08: stop also at < and % */
             //*src != NULLC && !isspace( *src ) && *src != ',' && *src != ';' && *src != ')'; ) {
-            *src && !isspace( *src ) && *src != ',' && *src != ')' && *src != '<' && *src != '%'; ) {
+            //*src && !isspace( *src ) && *src != ',' && *src != ')' && *src != '<' && *src != '%'; ) {
+            *src && !isspace( *src ) && *src != ',' && *src != ')' && *src != '%'; ) {
             if ( p->flags == TOK_DEFAULT ) { /* fixme: '\' in <>-literals are handled ALWAYS */
                 if ( *src == '\\' ) {
                     if ( ConcatLine( src, count, dst, p ) != EMPTY ) {

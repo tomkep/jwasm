@@ -57,7 +57,7 @@ proj_obj = $(OUTD)\main.o     $(OUTD)\assemble.o $(OUTD)\assume.o  \
            $(OUTD)\types.o    $(OUTD)\fpfixup.o  $(OUTD)\invoke.o  \
            $(OUTD)\equate.o   $(OUTD)\mangle.o   $(OUTD)\loop.o    \
            $(OUTD)\parser.o   $(OUTD)\tokenize.o $(OUTD)\input.o   \
-           $(OUTD)\expans.o   $(OUTD)\symbols.o  $(OUTD)\labels.o  \
+           $(OUTD)\expans.o   $(OUTD)\symbols.o  $(OUTD)\label.o   \
            $(OUTD)\fixup.o    $(OUTD)\codegen.o  $(OUTD)\data.o    \
            $(OUTD)\reswords.o $(OUTD)\branch.o   $(OUTD)\queue.o   \
            $(OUTD)\hll.o      $(OUTD)\proc.o     $(OUTD)\option.o  \

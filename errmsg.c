@@ -77,7 +77,7 @@ void DoDebugMsg1( const char *format, ... )
 
     if( ModuleInfo.cref == FALSE ) return;
 
-    printf( "%lu%s. ", LineNumber, GetTopLine( buffer ) );
+    printf( "%lu%s. ", GetLineNumber(), GetTopLine( buffer ) );
 
     va_start( args, format );
     vprintf( format, args );

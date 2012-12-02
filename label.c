@@ -35,11 +35,11 @@
 #include "proc.h"
 #include "assume.h"
 #include "types.h"
-#include "labels.h"
+#include "label.h"
 #include "listing.h"
 
-void LabelsInit( void )
-/*********************/
+void LabelInit( void )
+/********************/
 {
     ModuleInfo.anonymous_label = 0;
 }
@@ -89,8 +89,9 @@ struct asym *CreateLabel( const char *name, enum memtype mem_type, struct qualif
     }
 
     sym = SymLookupLabel( name, bLocal );
-    if( sym == NULL )
+    if( sym == NULL ) /* may happen if name is invalid or too long */
         return( NULL );
+
     if( Parse_Pass == PASS_1 ) {
         if( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) {
             /* don't accept EXTERNDEF for a local label! */
@@ -114,6 +115,9 @@ struct asym *CreateLabel( const char *name, enum memtype mem_type, struct qualif
         } else {
             /* v2.04: emit a more distinctive error msg */
             if ( sym->state == SYM_INTERNAL && sym->mem_type == mem_type )
+                /* fixme: if label has exactly the same value ( segment+offset ),
+                 * it's ok.
+                 */
                 EmitErr( SYMBOL_ALREADY_DEFINED, name );
             else
                 EmitErr( SYMBOL_REDEFINITION, name );
@@ -130,8 +134,9 @@ struct asym *CreateLabel( const char *name, enum memtype mem_type, struct qualif
 
         /* v2.05: added to accept type prototypes */
         if ( mem_type == MT_PROC ) {
+            DebugMsg1(("CreateLabel(%s): memtype MT_PROC detected, sym.isproc=%u\n", sym->name, sym->isproc ));
             if ( sym->isproc == FALSE ) {
-                CreateProc( sym, NULL, TRUE );
+                CreateProc( sym, NULL, SYM_INTERNAL );
                 CopyPrototype( (struct dsym *)sym, (struct dsym *)ti->symtype );
             }
             mem_type = ti->symtype->mem_type;
@@ -227,8 +232,9 @@ ret_code LabelDirective( int i, struct asm_tok tokenarray[] )
     /* v2.08: if label has a true memory type, set total_size and total_length */
     if ( sym = CreateLabel( tokenarray[0].string_ptr, ti.mem_type, &ti, FALSE ) ) {
         DebugMsg1(("LabelDirective(%s): label created, memtype=%Xh size=%u\n", sym->name, sym->mem_type, ti.size ));
-        /* sym->isdata must be 0, else the label directive was generated within data_item()
+        /* sym->isdata must be 0, else the LABEL directive was generated within data_item()
          * and fields total_size & total_length must not be modified then!
+         * v2.09: data_item() no longer creates LABEL directives.
          */
         if ( sym->isdata == FALSE && ( sym->mem_type & MT_SPECIAL_MASK ) != MT_ADDRESS ) {
             sym->total_size = ti.size;

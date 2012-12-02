@@ -56,6 +56,7 @@ endif
 
 ;--- with macro procedures, nothing is swallowed
 ;--- (but still not quite compatible!)
+;--- v2.09: the last three cases should work now.
 
 	M1
 	M1 1,2,3

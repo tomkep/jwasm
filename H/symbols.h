@@ -36,8 +36,7 @@
 
 /*
  * SYM_LIB  - library paths are no longer added to the symbol table
- * SYM_LNAME has been removed.
- * It was used for the null-entry in the LNAME table only
+ * SYM_LNAME has been removed. It was used for the null-entry in the LNAME table only
  * v2.01: SYM_PROC has been removed.
  * v2.01: SYM_LIB has been removed.
  */
@@ -47,8 +46,8 @@ enum sym_state {
     SYM_EXTERNAL,       /*  2 external       */
     SYM_SEG,            /*  3 segment        */
     SYM_GRP,            /*  4 group          */
-    SYM_STACK,          /*  5 stack variable */
-    SYM_STRUCT_FIELD,   /*  6 struct member  */
+    SYM_STACK,          /*  5 stack variable - in local symbol tables only */
+    SYM_STRUCT_FIELD,   /*  6 struct member - not in symbol table - except record fields */
     SYM_TYPE,           /*  7 structure, union, typedef, record */
     SYM_ALIAS,          /*  8 alias name     */
     SYM_MACRO,          /*  9 macro          */
@@ -80,7 +79,7 @@ enum memtype {
 #if AVXSUPP
     MT_YMMWORD = 32 - 1,
 #endif
-    MT_PROC  = 0x80,
+    MT_PROC  = 0x80,   /* symbol is a TYPEDEF PROTO, state=SYM_TYPE, typekind=TYPE_TYPEDEF, prototype is stored in target_type */
     MT_NEAR  = 0x81,
     MT_FAR   = 0x82,
     MT_EMPTY = 0xC0,
@@ -106,7 +105,7 @@ enum memtype {
 struct macro_instance;
 
 typedef ret_code (* macro_func)( struct macro_instance *, char *, struct asm_tok * );
-typedef void (* internal_func)( struct asym * );
+typedef void (* internal_func)( struct asym *, void * );
 
 struct debug_info {
     uint_32 start_line;  /* procs's start line */
@@ -137,29 +136,33 @@ struct asym {
     enum memtype    mem_type;
     unsigned char   used:1,       /* symbol has been referenced */
                     isdefined:1,  /* symbol is "defined" in this pass */
-                    scoped:1,     /* symbol is local label or LOCAL */
+                    scoped:1,     /* symbol is local label or SYM_STACK */
                     /* v2.07: removed */
                     //isglobal:1,   /* symbol has been added to the globals queue */
-                    iat_used:1,   /* v2.07: IAT entry of symbol used */
+#if DLLIMPORT
+                    iat_used:1,   /* v2.07: IAT entry of symbol used (SYM_EXTERNAL + isproc==1 only) */
+#endif
                     isequate:1,   /* symbol has been defined with EQU */
                     predefined:1, /* symbol is predefined */
                     variable:1,   /* symbol is variable ('=' directive) */
                     public:1;     /* symbol has been added to the publics queue */
     unsigned char   list:1,       /* symbol is to be listed */
                     isarray:1,    /* symbol is an array (total_length is valid) */
-                    included:1,   /* COFF: static symbol added to public queue. ELF:symbol added to symbol table */
-                    saved:1,      /* assembly time variables only: symbol has been saved ("fast pass") */
+                    isdata:1,     /* field first_size is valid */
                     isproc:1,     /* symbol is PROC or PROTO */
-#if FASTMEM==0
-                    staticmem:1,  /* symbol stored in static memory */
+#if FASTPASS
+                    issaved:1,    /* assembly time variables only: symbol has been saved */
 #endif
+//#if FASTMEM==0 /* v2.09: obsolete */
+//                    isstatic:1,   /* symbol stored in static memory */
+//#endif
 #ifdef DEBUG_OUT
                     forward:1,    /* symbol was forward referenced */
 #endif
-                    isdata:1;     /* field first_size is valid */
+                    included:1;   /* COFF: static symbol added to public queue. ELF:symbol added to symbol table (SYM_INTERNAL) */
     union {
-        /* for SYM_INTERNAL (memtype != NEAR|FAR), SYM_STRUCT_FIELD */
-        uint_32         first_size;   /* size of 1st initializer in bytes */
+        /* for SYM_INTERNAL (data labels, memtype != NEAR|FAR), SYM_STRUCT_FIELD */
+        uint_32         first_size;   /* size of 1st initializer's dimension in bytes */
         /* for SYM_INTERNAL (memtype == NEAR|FAR),
          * SYM_GRP (Ofssize),
          * SYM_EXTERNAL (Ofssize, comm, weak, isfar, is_ptr, ptr_memtype),
@@ -190,9 +193,8 @@ struct asym {
         };
     };
     union {
-        /* first_length is used for data items only
-         * for SYM_INTERNAL ("data labels" only), SYM_STRUCT_FIELD */
-        uint_32         first_length; /* size of 1st initializer--elts. dup'd */
+        /* for SYM_INTERNAL (data labels only), SYM_STRUCT_FIELD */
+        uint_32         first_length; /* size of 1st initializer's dimension in item units */
         /* SYM_TYPE (TYPEKIND_STRUCT or TYPEKIND_UNION) */
         uint_32         max_mbr_size; /* max size members */
         /* SYM_STACK, SYM_TYPE (TYPEKIND_TYPEDEF), SYM_EXTERNAL, SYM_INTERNAL (code labels) */
@@ -208,7 +210,7 @@ struct asym {
         /* for SYM_INTERNAL, isequate=1 (numeric equates) */
         int_32          value3264;    /* high bits for equates */
 #if DLLIMPORT
-        const char     *dllname;      /* SYM_EXTERNAL (isproc=1) */
+        struct dll_desc *dll;         /* SYM_EXTERNAL (isproc=1) */
 #endif
     };
     union {
@@ -235,11 +237,24 @@ struct asym {
     uint_16         name_size;
 #endif
     enum lang_type  langtype;
-    struct asym     *type;        /* set if memtype is MT_TYPE */
+#ifdef DEBUG_OUT
     union {
-        struct fixup *fixup;      /* SYM_INTERNAL, SYM_UNDEFINED, SYM_EXTERNAL? only */
+        struct asym *type;        /* set if memtype is MT_TYPE */
+        struct dsym *ttype;       /* for easier debugging */
+    };
+#else
+    struct asym     *type;        /* set if memtype is MT_TYPE */
+#endif
+    union {
+        /* SYM_INTERNAL, SYM_UNDEFINED, SYM_EXTERNAL: backpatching fixup */
+        struct fixup *bp_fixup;
         /* for SYM_EXTERNAL */
-        uint         ext_idx;     /* (external definition) index */
+        uint         ext_idx;     /* table index ( for coff and elf ) */
+        struct {
+            /* omf indices are 16-bit only! */
+            uint_16  ext_idx1;    /* omf: (external definition) index */
+            uint_16  ext_idx2;    /* omf: (external definition) index for weak external */
+        };
     };
 };
 
@@ -248,9 +263,6 @@ struct asym {
 /* procedure and symbolic integer constants.                                 */
 /*---------------------------------------------------------------------------*/
 
-typedef int     direct_idx;     /* directive index, such as segment index, */
-                                /* group index or lname index, etc.        */
-
 struct seg_item {
     struct seg_item     *next;
     struct dsym         *seg;
@@ -258,9 +270,9 @@ struct seg_item {
 
 struct grp_info {
     struct seg_item     *seglist;       /* list of segments in the group */
-    direct_idx          grp_idx;        /* its group index (OMF) */
-    direct_idx          lname_idx;      /* LNAME index (OMF only) */
-    uint                numseg;         /* number of segments in the group */
+    int                 grp_idx;        /* its group index (OMF) */
+    int                 lname_idx;      /* LNAME index (OMF only) */
+    uint                numseg;         /* OMF: number of segments in the group */
 };
 
 enum seg_type {
@@ -270,7 +282,13 @@ enum seg_type {
     SEGTYPE_BSS,
     SEGTYPE_STACK,
     SEGTYPE_ABS,
-    SEGTYPE_ERROR
+#if PE_SUPPORT
+    SEGTYPE_HDR,   /* only used in bin.c for better sorting */
+    SEGTYPE_CDATA, /* only used in bin.c for better sorting */
+    SEGTYPE_RELOC, /* only used in bin.c for better sorting */
+    SEGTYPE_RSRC,  /* only used in bin.c for better sorting */
+    SEGTYPE_ERROR, /* must be last - an "impossible" segment type */
+#endif
 };
 
 struct seg_info {
@@ -298,8 +316,8 @@ struct seg_info {
     uint_32             num_relocs;     /* used by COFF/ELF */
     short               seg_idx;        /* segment # */
     enum seg_type       segtype;        /* segment's type (code, data, ...) */
-    direct_idx          lname_idx;      /* segment's name LNAME index (OMF only) */
-    direct_idx          class_name_idx; /* segment's class LNAME index */
+    int                 lname_idx;      /* segment's name LNAME index (OMF only) */
+    struct asym         *clsym;         /* segment's class name (stored in an asym item) */
     union {
         uint_16         abs_frame;      /* ABS seg, frame number (OMF,BIN) */
 #if COMDATSUPP
@@ -311,12 +329,14 @@ struct seg_info {
         char            *aliasname;     /* ALIAS name (COFF/ELF only) */
     };
     unsigned char       Ofssize;        /* segment's offset size */
-    unsigned char       characteristics;/* used by COFF/ELF */
+    unsigned char       characteristics;/* used by COFF/ELF/PE */
+
     unsigned char       alignment:4;    /* is value 2^x */
     unsigned char       readonly:1;     /* if segment is readonly */
     unsigned char       info:1;         /* if segment is info only (COFF/ELF) */
     unsigned char       force32:1;      /* force 32bit segdef (OMF only) */
     unsigned char       data_in_code:1; /* data items in code segm (OMF only) */
+    unsigned char       internal:1;     /* internal segment with private buffer */
     unsigned char       written:1;      /* code/data just written */
     unsigned char       combine:3;
 #if COMDATSUPP
@@ -338,7 +358,7 @@ struct proc_info {
     char                *prologuearg;   /* PROC: prologuearg attribute */
 #if AMD64_SUPPORT
     struct asym         *exc_handler;   /* PROC: exc handler set by FRAME */
-    int                 ReservedStack;  /* win64: additional reserved stack */
+    int                 ReservedStack;  /* PROC: win64: additional reserved stack */
 #endif
     uint_32             list_pos;       /* PROC: prologue list pos */
     union {
@@ -347,7 +367,7 @@ struct proc_info {
             unsigned char  is_vararg:1; /* if last param is VARARG */
             unsigned char  pe_type:1;   /* epilog code, 1=use LEAVE */
             unsigned char  export:1;    /* EXPORT attribute set */
-            unsigned char  init:1;      /* has ExamineProc() been called? */
+            unsigned char  init_done:1; /* has ParseProc() been called? */
             unsigned char  forceframe:1;/* FORCEFRAME prologuearg? */
             unsigned char  loadds:1;    /* LOADDS prologuearg? */
             unsigned char  stackparam:1;/* for FASTCALL: 1=a stack param exists */
@@ -390,13 +410,13 @@ struct macro_info {
     uint                srcfile;    /* sourcefile index */
 };
 
-/* STRUCT field item */
+/* STRUCT field */
 
-struct field_item {
-    struct field_item   *next;      /* next field in STRUCT,UNION,RECORD */
-    char                *initializer; /* not used by record fields */
-    char                *value;
-    struct asym         *sym;
+struct sfield {
+    struct asym         sym;        /* field symbol ( state=SYM_STRUCT_FIELD ) */
+    struct sfield       *next;      /* next field in STRUCT,UNION,RECORD */
+    //char                *init_dir; /* v2.09: removed ; previously: not used by record fields */
+    char                ivalue[1];  /* v2.09: type changed from char * to char[] */
 };
 
 enum type_kind {
@@ -408,8 +428,8 @@ enum type_kind {
 };
 
 struct struct_info {
-    struct field_item   *head; /* start of struct's field list */
-    struct field_item   *tail; /* used during parsing of struct only */
+    struct sfield       *head; /* STRUCT/UNION/RECORD: start of field list */
+    struct sfield       *tail; /* STRUCT/UNION/RECORD: current/next field */
     /* v2.08: typekind moved to struct asym */
     //#ifdef __WATCOMC__
     //    enum type_kind      typekind;
@@ -420,7 +440,7 @@ struct struct_info {
     union {
         uint_8          flags;
         struct {
-            unsigned char   isInline:1;  /* STRUCT/UNION: inline */
+            unsigned char   isInline:1;  /* STRUCT/UNION: inline (unused) */
             unsigned char   isOpen:1;    /* STRUCT/UNION: set until the matching ENDS is found */
             unsigned char   OrgInside:1; /* STRUCT: struct contains an ORG */
         };
@@ -428,7 +448,7 @@ struct struct_info {
 };
 
 /* dsym originally was a "directive_node"
- * However, currently all symbols are allocated as a dsym
+ * However, currently all symbols except SYM_STRUCT_FIELDs are allocated as a dsym.
  * the additional 3 fields are used differently depending on symbol's type.
  */
 
@@ -438,7 +458,7 @@ struct dsym {
         struct seg_info     *seginfo;   /* SYM_SEG (segments) */
         struct grp_info     *grpinfo;   /* SYM_GRP (groups) */
         struct proc_info    *procinfo;  /* SYM_INTERNAL|SYM_EXTERNAL (procs, isproc=1) */
-        struct struct_info  *structinfo;/* SYM_TYPE (structs, unions, typedefs, records) */
+        struct struct_info  *structinfo;/* SYM_TYPE (structs, unions, records [, typedefs]) */
         struct macro_info   *macroinfo; /* SYM_MACRO (macros) */
         /* SYM_STACK, SYM_INTERNAL (code labels, isproc=0)
          * used to save the local hash table (contains PROC locals: params,
@@ -446,8 +466,12 @@ struct dsym {
          */
         struct dsym *nextll;
     } e;
-    /* for SYM_UNDEFINED, SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_ALIAS:
-     * linked list of this type of symbol.
+    /* next item in linked lists of certain symbol types.
+     * - SYM_UNDEFINED -> TAB_UNDEF
+     * - SYM_EXTERNAL  -> TAB_EXT
+     * - SYM_SEG       -> TAB_SEG
+     * - SYM_GRP       -> TAB_GRP
+     * - SYM_ALIAS:    -> TAB_ALIAS
      * for SYM_INTERNAL:
      * linked list of labels for current segment (used for BackPatch)
      */
@@ -460,7 +484,7 @@ struct dsym {
          * pass one.
          */
         struct dsym *prev;
-        /* used by PROC for linked list */
+        /* used by PROC symbols (SYM_INTERNAL) for linked list, TAB_PROC */
         struct dsym *nextproc;
         /* used by PROC locals (SYM_STACK) for linked list */
         struct dsym *nextlocal;

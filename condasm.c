@@ -209,28 +209,11 @@ static bool check_blank( const char *string )
 static bool check_dif( const char *string1, const char *string2, bool sensitive )
 /*******************************************************************************/
 {
-#if 1
-    /* v2.02: transform to the "visible" format first.
-     * that's because the '!' character is often optional
-     * and must be ignored then.
-     */
-    char s1[MAX_LINE_LEN];
-    char s2[MAX_LINE_LEN];
-
-    GetLiteralValue( s1, string1 );
-    GetLiteralValue( s2, string2 );
-    if( sensitive ) {
-        return( strcmp( s1, s2 ) != 0 );
-    } else {
-        return( _stricmp( s1, s2 ) != 0 );
-    }
-#else
     if( sensitive ) {
         return( strcmp( string1, string2 ) != 0 );
     } else {
         return( _stricmp( string1, string2 ) != 0 );
     }
-#endif
 }
 
 ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
@@ -394,6 +377,10 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
                 NextIfState = ( check_defd( tokenarray[i].string_ptr )  ? BLOCK_ACTIVE : BLOCK_INACTIVE );
             }
             i++;
+        } else if ( tokenarray[i].token == T_RES_ID && tokenarray[i].tokval == T_FLAT ) {
+            /* v2.09: special treatment of FLAT added */
+            NextIfState = (( ModuleInfo.flat_grp && ModuleInfo.flat_grp->sym.isdefined ) ? BLOCK_ACTIVE : BLOCK_INACTIVE );
+            i++;
         } else if ( Options.strict_masm_compat == FALSE && (
                     tokenarray[i].token == T_RES_ID ||
                     tokenarray[i].token == T_STYPE ||
@@ -430,16 +417,21 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
     return( NOT_ERROR );
 }
 
-static char * GetErrText( struct asm_tok *text, char *buffer )
+static char * GetErrText( int i, struct asm_tok tokenarray[] )
 /************************************************************/
 {
-    *buffer = NULLC;
-    if ( text ) {
-        *(buffer+0) = ':';
-        *(buffer+1) = ' ';
-        GetLiteralValue( buffer+2, text->string_ptr );
+    *StringBufferEnd = NULLC;
+    if ( i ) {
+        if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
+            TextItemError( &tokenarray[i] );
+        } else {
+            *(StringBufferEnd+0) = ':';
+            *(StringBufferEnd+1) = ' ';
+            //GetLiteralValue( buffer+2, text->string_ptr );
+            strcpy( StringBufferEnd+2, tokenarray[i].string_ptr );
+        }
     }
-    return( buffer );
+    return( StringBufferEnd );
 
 }
 
@@ -461,8 +453,9 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
     const char *string1;
     const char *string2;
     int errmsg = EMPTY;
-    int errtxt = 0;
-    char tmpbuffer[MAX_LINE_LEN];
+    int erridx = 0;
+    struct asym *sym;
+    int idloc;
 
     direct = tokenarray[i].tokval;
 
@@ -476,17 +469,15 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
             return( ERROR );
         if ( opndx.kind == EXPR_CONST )
             ;
-        else if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE )
-            opndx.value += opndx.sym->offset;
+        else if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE && opndx.sym && opndx.sym->state == SYM_UNDEFINED )
+            ;//opndx.value += opndx.sym->offset;
         else {
             EmitError( CONSTANT_EXPECTED );
             return( ERROR );
         }
         if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
             i++;
-            if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
-                errtxt = i++;
-            }
+            erridx = i++;
         }
         if ( Parse_Pass == PASS_1 )
             break;
@@ -497,96 +488,85 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
         }
 
         if ( errmsg != EMPTY )
-            EmitErr( errmsg, opndx.value, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
+            EmitErr( errmsg, opndx.value, GetErrText( erridx, tokenarray ) );
         break;
     case CC_SYMARG: /* .ERR[N]DEF */
-        /* these directives are defined with flag DF_NOEXPAND,
-         * so there's no preprocessor expansion!
-         */
-        if ( tokenarray[i].token == T_ID ) {
-            struct asym * sym;
-            int idloc = i;
-            do {
-                i++;
-            } while ( tokenarray[i].token == T_DOT || tokenarray[i].token == T_ID );
-            if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
-                /* v2.05: added */
-                /* v2.08: obsolete, the expansion occurs in the preprocessor.
-                 * See ExpandLine() in expans.c
-                 */
-                //ExpandLineItems( tokenarray[i].tokpos, i, tokenarray, TRUE, FALSE );
-                i++;
-                /* Masm seems to accept anything as text */
-                if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
-                    errtxt = i++;
-                }
-            }
-
-            //if ( tokenarray[i].token != T_FINAL )
-            //    break;
-
-            /* should run on pass 2 only! */
-            if ( Parse_Pass == PASS_1 )
-                break;
-
-            /* don't use check_defd()! */
-            /* v2.07: check for structured variables */
-            if ( Options.strict_masm_compat == FALSE &&
-                tokenarray[idloc+1].token == T_DOT &&
-                ( sym = SymSearch( tokenarray[idloc].string_ptr ) ) &&
-                ( ( sym->state == SYM_TYPE ) || sym->type ) ) {
-                uint_32 value;
-                int j = idloc;
-                int size;
-                value = 0;
-                do {
-                    j += 2;
-                    /* if it's a structured variable, use its type! */
-                    if ( sym->state != SYM_TYPE )
-                        sym = sym->type;
-                    sym = SearchNameInStruct( sym, tokenarray[j].string_ptr, &value, 0 );
-                } while ( sym && tokenarray[j+1].token == T_DOT );
-                if ( tokenarray[j].token == T_ID )
-                    j++;
-                else if ( tokenarray[j].token != T_FINAL && tokenarray[j].token != T_COMMA ) {
-                    EmitErr( SYNTAX_ERROR_EX, tokenarray[j].string_ptr );
-                    return( ERROR );
-                }
-                size = tokenarray[j].tokpos - tokenarray[idloc].tokpos;
-                memcpy( tmpbuffer, tokenarray[idloc].tokpos, size );
-                tmpbuffer[size] = NULLC;
-            } else {
-                sym = SymSearch( tokenarray[idloc].string_ptr );
-                strcpy( tmpbuffer, tokenarray[idloc].string_ptr );
-            }
-            if ( sym && sym->state == SYM_UNDEFINED )
-                sym = NULL;
-
-            /* Masm "usually" ignores the optional errtxt! */
-            if( direct == T_DOT_ERRDEF && sym != NULL )
-                EmitErr( FORCED_DEF, tmpbuffer );
-            else if( direct == T_DOT_ERRNDEF && sym == NULL )
-                EmitErr( FORCED_NOT_DEF, tmpbuffer );
-        } else {
+        /* there's a special handling of these directives in ExpandLine()! */
+        if ( tokenarray[i].token != T_ID ) {
             EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
             return( ERROR );
         }
+        idloc = i;
+        /* skip the next param */
+        do {
+            i++;
+        } while ( tokenarray[i].token == T_DOT || tokenarray[i].token == T_ID );
+        if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
+            /* v2.05: added */
+            /* v2.08: obsolete, the expansion occurs in the preprocessor.
+             * See ExpandLine() in expans.c
+             */
+            //ExpandLineItems( tokenarray[i].tokpos, i, tokenarray, TRUE, FALSE );
+            i++;
+            erridx = i++;  /* Masm seems to accept anything as text */
+        }
+
+        //if ( tokenarray[i].token != T_FINAL )
+        //    break;
+
+        /* should run on pass 2 only! */
+        if ( Parse_Pass == PASS_1 )
+            break;
+
+        /* don't use check_defd()! */
+        /* v2.07: check for structured variables */
+        if ( Options.strict_masm_compat == FALSE &&
+            tokenarray[idloc+1].token == T_DOT &&
+            ( sym = SymSearch( tokenarray[idloc].string_ptr ) ) &&
+            ( ( sym->state == SYM_TYPE ) || sym->type ) ) {
+            uint_32 value;
+            int j = idloc;
+            int size;
+            value = 0;
+            do {
+                j += 2;
+                /* if it's a structured variable, use its type! */
+                if ( sym->state != SYM_TYPE )
+                    sym = sym->type;
+                sym = SearchNameInStruct( sym, tokenarray[j].string_ptr, &value, 0 );
+            } while ( sym && tokenarray[j+1].token == T_DOT );
+            if ( tokenarray[j].token == T_ID )
+                j++;
+            else if ( tokenarray[j].token != T_FINAL && tokenarray[j].token != T_COMMA ) {
+                EmitErr( SYNTAX_ERROR_EX, tokenarray[j].string_ptr );
+                return( ERROR );
+            }
+            size = tokenarray[j].tokpos - tokenarray[idloc].tokpos;
+            memcpy( StringBufferEnd, tokenarray[idloc].tokpos, size );
+            *(StringBufferEnd+size) = NULLC;
+        } else {
+            sym = SymSearch( tokenarray[idloc].string_ptr );
+            strcpy( StringBufferEnd, tokenarray[idloc].string_ptr );
+        }
+        if ( sym && sym->state == SYM_UNDEFINED )
+            sym = NULL;
+
+        /* Masm "usually" ignores the optional errtxt! */
+        if( direct == T_DOT_ERRDEF && sym != NULL )
+            EmitErr( FORCED_DEF, StringBufferEnd );
+        else if( direct == T_DOT_ERRNDEF && sym == NULL )
+            EmitErr( FORCED_NOT_DEF, StringBufferEnd );
         break;
     case CC_BLKARG: /* .ERR[N]B */
         string1 = tokenarray[i].string_ptr;
         if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
-            if ( tokenarray[i].token == T_ID && SymSearch( string1 ) == NULL )
-                EmitErr( SYMBOL_NOT_DEFINED, string1 );
-            else
-                EmitError( TEXT_ITEM_REQUIRED );
+            TextItemError( &tokenarray[i] );
             return( ERROR );
         }
         i++;
         if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
             i++;
-            if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
-                errtxt = i++;
-            }
+            erridx = i++;
         }
         if ( Parse_Pass == PASS_1 )
             break;
@@ -595,15 +575,12 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
         else if ( direct == T_DOT_ERRNB && !check_blank( string1 ) )
             errmsg = FORCED_NOT_BLANK;
         if ( errmsg != EMPTY )
-            EmitErr( errmsg, string1, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
+            EmitErr( errmsg, string1, GetErrText( erridx, tokenarray ) );
         break;
     case CC_LITARG: /* .ERRDIF[I], .ERRIDN[I] */
         string1 = tokenarray[i].string_ptr;
         if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
-            if ( tokenarray[i].token == T_ID && SymSearch( string1 ) == NULL )
-                EmitErr( SYMBOL_NOT_DEFINED, string1 );
-            else
-                EmitError( TEXT_ITEM_REQUIRED );
+            TextItemError( &tokenarray[i] );
             return( ERROR );
         }
         i++;
@@ -614,18 +591,13 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
         i++;
         string2 = tokenarray[i].string_ptr;
         if ( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
-            if ( tokenarray[i].token == T_ID && SymSearch( string2 ) == NULL )
-                EmitErr( SYMBOL_NOT_DEFINED, string2 );
-            else
-                EmitError( TEXT_ITEM_REQUIRED );
+            TextItemError( &tokenarray[i] );
             return( ERROR );
         }
         i++;
         if ( tokenarray[i].token == T_COMMA && tokenarray[i+1].token != T_FINAL ) {
             i++;
-            if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
-                errtxt = i++;
-            }
+            erridx = i++;
         }
         if ( Parse_Pass == PASS_1 )
             break;
@@ -648,7 +620,7 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
                 errmsg = FORCED_IDN;
         }
         if ( errmsg != EMPTY )
-            EmitErr( errmsg, string1, string2, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
+            EmitErr( errmsg, string1, string2, GetErrText( erridx, tokenarray ) );
         break;
     case CC_PASS2: /* .ERR2 */
         if ( ModuleInfo.setif2 == FALSE ) {
@@ -657,16 +629,16 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
         }
     case CC_PASS1: /* .ERR1 */
     default: /* .ERR */
-        if ( tokenarray[i].token == T_STRING && tokenarray[i].string_delim == '<' ) {
-            errtxt = i++;
+        if ( tokenarray[i].token != T_FINAL ) {
+            erridx = i++;
         }
         if ( Parse_Pass == PASS_1 )
             break;
-        EmitErr( FORCED_ERR, GetErrText( errtxt ? &tokenarray[errtxt] : NULL, tmpbuffer ) );
+        EmitErr( FORCED_ERR, GetErrText( erridx, tokenarray ) );
         break;
     }
     if ( tokenarray[i].token != T_FINAL ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
     return( NOT_ERROR );

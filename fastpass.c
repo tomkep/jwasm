@@ -79,7 +79,7 @@ void StoreLine( char *srcline, uint_32 list_pos, int flags )
     j = ( ( ( flags & 1 ) && ModuleInfo.CurrComment ) ? strlen( ModuleInfo.CurrComment ) : 0 );
     LineStoreCurr = LclAlloc( i + j + sizeof( struct line_item ) );
     LineStoreCurr->next = NULL;
-    LineStoreCurr->lineno = LineNumber;
+    LineStoreCurr->lineno = GetLineNumber();
     if ( MacroLevel ) {
         LineStoreCurr->srcfile = 0xfff;
     } else {
@@ -134,7 +134,7 @@ void SaveVariableState( struct asym *sym )
     struct equ_item *p;
 
     DebugMsg1(( "SaveVariableState(%s)=%d\n", sym->name, sym->value ));
-    sym->saved = TRUE; /* don't try to save this symbol (anymore) */
+    sym->issaved = TRUE; /* don't try to save this symbol (anymore) */
     p = LclAlloc( sizeof( struct equ_item ) );
     p->next = NULL;
     p->sym = sym;
@@ -181,7 +181,7 @@ struct line_item *RestoreState( void )
         struct line_item *endl = LclAlloc( sizeof( struct line_item ) + 3 );
         endl->next = NULL;
         endl->srcfile = 0;
-        endl->lineno = LineNumber;
+        endl->lineno = GetLineNumber();
         endl->list_pos = 0;
         strcpy( endl->line, "END");
         LineStoreHead = endl;
@@ -190,6 +190,23 @@ struct line_item *RestoreState( void )
 #endif
     return( LineStoreHead );
 }
+
+#if FASTMEM==0
+/* this is debugging code only. Usually FASTPASS and FASTMEM
+ * are both either TRUE or FALSE.
+ * It's active if both DEBUG and TRMEM is set in Makefile.
+ */
+void FreeLineStore( void )
+/************************/
+{
+    struct line_item *next;
+    for ( LineStoreCurr = LineStoreHead; LineStoreCurr; ) {
+        next = LineStoreCurr->next;
+        LclFree( LineStoreCurr );
+        LineStoreCurr = next;
+    }
+}
+#endif
 
 void FastpassInit( void )
 /***********************/

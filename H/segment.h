@@ -50,7 +50,7 @@ extern ret_code         SetOfssize( void );
 extern void             DefineFlatGroup( void );
 extern ret_code         SegmentModuleExit( void );
 extern void             DeleteGroup( struct dsym * );
-extern char             *GetLname( direct_idx );
+//extern char             *GetLname( int );
 extern void             FreeLnameQueue( void );
 
 /* simplified segment functions */

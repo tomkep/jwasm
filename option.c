@@ -18,9 +18,6 @@
 
 /* prototypes */
 extern struct asym          *sym_Interface;
-#if MZ_SUPPORT
-extern struct MZDATA mzdata;
-#endif
 
 #ifdef __I86__
 #define OPTQUAL __near
@@ -484,7 +481,7 @@ OPTFUNC( SetFieldAlign )
     uint temp, temp2;
     struct expr opndx;
 
-    if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
+    if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOLCREATE ) == ERROR )
         return( ERROR );
     if ( opndx.kind != EXPR_CONST ) {
         EmitError( CONSTANT_EXPECTED );
@@ -496,7 +493,7 @@ OPTFUNC( SetFieldAlign )
     }
     for( temp = 1, temp2 = 0; temp < opndx.uvalue ; temp <<= 1, temp2++ );
     if( temp != opndx.uvalue ) {
-        EmitError( POWER_OF_2 );
+        EmitErr( POWER_OF_2, opndx.value );
         return( ERROR );
     }
     ModuleInfo.fieldalign = temp2;
@@ -515,7 +512,7 @@ OPTFUNC( SetProcAlign )
     int temp, temp2;
     struct expr opndx;
 
-    if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
+    if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOLCREATE ) == ERROR )
         return( ERROR );
     if ( opndx.kind != EXPR_CONST ) {
         EmitError( CONSTANT_EXPECTED );
@@ -526,7 +523,7 @@ OPTFUNC( SetProcAlign )
     }
     for( temp = 1, temp2 = 0; temp < opndx.value ; temp <<= 1, temp2++ );
     if( temp != opndx.value ) {
-        EmitError( POWER_OF_2 );
+        EmitErr( POWER_OF_2, opndx.value );
         return( ERROR );
     }
     ModuleInfo.procalign = temp2;
@@ -544,7 +541,7 @@ OPTFUNC( SetMZ )
     uint_16 *parms;
     struct expr opndx;
 
-    for ( j = 0, parms = (uint_16 *)&mzdata ; j < 4; j++ ) {
+    for ( j = 0, parms = (uint_16 *)&ModuleInfo.mz_data ; j < 4; j++ ) {
         int k;
         for ( k = i; tokenarray[k].token != T_FINAL; k++ )
             if ( tokenarray[k].token == T_COMMA ||
@@ -559,7 +556,8 @@ OPTFUNC( SetMZ )
                 EmitConstError( &opndx );
                 return( ERROR );
             }
-            *(parms + j) = opndx.value;
+            if ( ModuleInfo.sub_format == SFORMAT_MZ )
+                *(parms + j) = opndx.value;
         } else {
             EmitError( CONSTANT_EXPECTED );
             return( ERROR );
@@ -571,17 +569,19 @@ OPTFUNC( SetMZ )
             j++;
         }
     }
-    /* ensure validity of the params */
-    if ( mzdata.ofs_fixups < 0x1E )
-        mzdata.ofs_fixups = 0x1E;
 
-    for( j = 16; j < mzdata.alignment; j <<= 1 );
-    if( j != mzdata.alignment )
-        EmitError( INVALID_HEADER_ALIGNMENT );
+    /* ensure data integrity of the params */
+    if ( ModuleInfo.sub_format == SFORMAT_MZ ) {
+        if ( ModuleInfo.mz_data.ofs_fixups < 0x1E )
+            ModuleInfo.mz_data.ofs_fixups = 0x1E;
 
-    if ( mzdata.heapmax < mzdata.heapmin )
-        mzdata.heapmax = mzdata.heapmin;
+        for( j = 16; j < ModuleInfo.mz_data.alignment; j <<= 1 );
+        if( j != ModuleInfo.mz_data.alignment )
+            EmitError( INVALID_HEADER_ALIGNMENT );
 
+        if ( ModuleInfo.mz_data.heapmax < ModuleInfo.mz_data.heapmin )
+            ModuleInfo.mz_data.heapmax = ModuleInfo.mz_data.heapmin;
+    }
     *pi = i;
     return( NOT_ERROR );
 }
@@ -623,7 +623,7 @@ OPTFUNC( SetElf )
             return( ERROR );
         }
         if ( Options.output_format == OFORMAT_ELF )
-            ModuleInfo.osabi = opndx.value;
+            ModuleInfo.elf_osabi = opndx.value;
     } else {
         EmitError( CONSTANT_EXPECTED );
         return( ERROR );
@@ -691,7 +691,8 @@ OPTFUNC( SetWin64 )
     struct expr opndx;
 
     /* if -win64 isn't set, skip the option */
-    if ( ModuleInfo.header_format != HFORMAT_WIN64 ) {
+    /* v2.09: skip option if Ofssize != USE64 */
+    if ( ModuleInfo.defOfssize != USE64 ) {
         SkipOption( pi, tokenarray );
         return( NOT_ERROR);
     }
@@ -715,23 +716,32 @@ OPTFUNC( SetWin64 )
 
 #if DLLIMPORT
 
-static char *IncludeDll( const char *name )
-/*****************************************/
+static struct dll_desc *IncludeDll( const char *name )
+/****************************************************/
 {
-    struct qnode *q;
-    char *node;
+    struct dll_desc **q;
+    struct dll_desc *node;
 
     /* allow a zero-sized name! */
     if ( *name == NULLC )
-        return( "" );
+        return( NULL );
 
-    for ( q = ModuleInfo.g.DllQueue.head; q ; q = q->next ) {
-        if ( _stricmp( q->elmt, name ) == 0 )
-            return( (char *)q->elmt );
+    for ( q = &ModuleInfo.g.DllQueue; *q ; q = &(*q)->next ) {
+        if ( _stricmp( (*q)->name, name ) == 0 )
+            return( *q );
     }
-    node = LclAlloc( strlen( name ) + 1 );
-    strcpy( node, name );
-    QAddItem( &ModuleInfo.g.DllQueue, node );
+    node = LclAlloc( sizeof( struct dll_desc ) + strlen( name ) );
+    node->next = NULL;
+    node->cnt = 0;
+    strcpy( node->name, name );
+    *q = node;
+
+#if AMD64_SUPPORT
+    ModuleInfo.imp_prefix = ( ( ModuleInfo.defOfssize == USE64 ) ? "__imp_" : "_imp_" );
+#else
+    ModuleInfo.imp_prefix = "_imp_";
+#endif
+
     return( node );
 }
 

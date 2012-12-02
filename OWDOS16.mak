@@ -49,7 +49,7 @@ LOPTD = debug dwarf op symfile
 
 lflagsd = $(LOPTD) sys dos op map=$^*, stack=0x8400
 
-CC=$(WATCOM)\binnt\wcc -q -0 -w3 -zc -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -DAMD64_SUPPORT=0 -DSSE4SUPP=0 -DOWFC_SUPPORT=0 -DDLLIMPORT=0 -DAVXSUPP=0 -zt=12000
+CC=$(WATCOM)\binnt\wcc -q -0 -w3 -zc -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -DAMD64_SUPPORT=0 -DSSSE3SUPP=0 -DSSE4SUPP=0 -DOWFC_SUPPORT=0 -DDLLIMPORT=0 -DAVXSUPP=0 -DPE_SUPPORT=0 -DVMXSUPP=0 -DSVMSUPP=0 -zt=12000
 
 .c{$(OUTD)}.obj:
 	@$(CC) $<
@@ -60,7 +60,7 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/input.obj   &
            $(OUTD)/expans.obj   $(OUTD)/expreval.obj $(OUTD)/symbols.obj &
            $(OUTD)/codegen.obj  $(OUTD)/equate.obj   &
            $(OUTD)/directiv.obj $(OUTD)/assume.obj   $(OUTD)/posndir.obj &
-           $(OUTD)/types.obj    $(OUTD)/invoke.obj   $(OUTD)/labels.obj  &
+           $(OUTD)/types.obj    $(OUTD)/invoke.obj   $(OUTD)/label.obj   &
            $(OUTD)/errmsg.obj   $(OUTD)/macro.obj    $(OUTD)/string.obj  &
            $(OUTD)/mangle.obj   $(OUTD)/loop.obj     $(OUTD)/backptch.obj&
            $(OUTD)/fpfixup.obj  $(OUTD)/fixup.obj    $(OUTD)/data.obj    &
@@ -71,10 +71,8 @@ proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/input.obj   &
            $(OUTD)/listing.obj  $(OUTD)/safeseh.obj &
            $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
            $(OUTD)/msgtext.obj  $(OUTD)/linnum.obj   &
-!if $(DEBUG)
 !if $(TRMEM)
            $(OUTD)/trmem.obj    &
-!endif
 !endif
            $(OUTD)/tbyte.obj    $(OUTD)/cpumodel.obj&
            $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      

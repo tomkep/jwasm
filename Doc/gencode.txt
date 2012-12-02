@@ -13,7 +13,9 @@
   - .STARTUP and .EXIT directives
   - simplified segment directives (.CODE, .DATA, .CONST, ...)
   - default PROC prologue and epilogue (when a RET/IRET is detected)
-  - STRUCT data initialization (slightly peculiar)
   - ENDP ( in Win64, if procedure has FRAME attribute )
-  - END ( if a segment opened by simplified segment directives is still open )
+  - END 
+    + if a segment opened by simplified segment directives is still open
+    + PE format: generates import/export data, MZ header
+  - [removed since v2.09: STRUCT data initialization (was slightly peculiar)]
 
