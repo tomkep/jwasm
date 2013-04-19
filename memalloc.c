@@ -154,11 +154,11 @@ uint_32 mymmap_size = 0;   /* size in bytes */
 struct linked_list {
     void *next;
 };
-static uint_8 *pBase; /* start list of 512 kB blocks */
-static uint_8 *pCurr; /* points into current block */
-static int currfree;  /* free memory left in current block */
+static uint_8 *pBase; /* start list of 512 kB blocks; to be moved to ModuleInfo.g */
+static uint_8 *pCurr; /* points into current block; to be moved to ModuleInfo.g */
+static int currfree;  /* free memory left in current block; to be moved to ModuleInfo.g */
 #ifdef DEBUG_OUT
-static int blocks;    /* number of blocks allocated so far */
+static int blocks;    /* number of blocks allocated so far; to be moved to ModuleInfo.g */
 #endif
 #endif
 
@@ -342,6 +342,9 @@ void *MemAlloc( size_t size )
     if( ptr == NULL ) {
         Fatal( OUT_OF_MEMORY );
     }
+#if 0
+    memset( ptr, 0xff, size );
+#endif
     return( ptr );
 }
 

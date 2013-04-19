@@ -115,6 +115,23 @@ void fill_placeholders( char *dst, const char *src, uint argc, uint localstart, 
     return;
 }
 
+/* Read the current (macro) queue until it's done. */
+
+void SkipCurrentQueue( struct asm_tok tokenarray[] )
+/**************************************************/
+{
+    char buffer[MAX_LINE_LEN];
+
+    /* The queue isn't just thrown away, because any
+     * coditional assembly directives found in the source
+     * must be executed.
+     */
+    while ( GetTextLine( buffer ) ) {
+        Tokenize( buffer, 0, tokenarray, TOK_DEFAULT );
+    }
+
+}
+
 static char * replace_parm( const char *line, char *start, int len, struct mname_list *mnames )
 /*********************************************************************************************/
 {
@@ -158,12 +175,14 @@ static char * replace_parm( const char *line, char *start, int len, struct mname
             if ( start >= rest ) {
                 char *end = rest + strlen(rest);
                 char *dst = end + 1;
-                while (end >= rest )
+                while ( end >= rest )
                     *dst-- = *end--;
                 *start = count;
             } else {
                 *start++ = count;
-                strcpy( start, rest );
+                /* v2.10: strcpy should not be used if strings overlap */
+                //strcpy( start, rest );
+                memmove( start, rest, strlen( rest) + 1 );
             }
             return( start ); /* word has been replaced */
         }

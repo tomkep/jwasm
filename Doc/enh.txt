@@ -27,11 +27,7 @@
      mov eax, MASK S1.bit0
      or v1.bit0 ???
 
-  4. native support for PE binaries
-
-     The best approach would be if simple PE binaries can be created with
-     the BIN format, with additional help of some macros. The main problem
-     are fixups, there's no way to access the fixup list from the source.
+  4. [ done, was: native support for PE binaries ]
 
   5. ASSUME extension
 

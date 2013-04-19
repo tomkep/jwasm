@@ -55,7 +55,7 @@ extra_c_flags = -O2 -Ox -GS- -DNDEBUG
 #extra_c_flags = -Ox -DNDEBUG
 !endif
 
-c_flags =-D__NT__ $(extra_c_flags) $(c_flags64)
+c_flags =-D__NT__ $(extra_c_flags)
 
 # if MSVC++ 2005 EE is used:
 # 1. define __STDC_WANT_SECURE_LIB__=0 to avoid "deprecated" warnings

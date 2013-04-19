@@ -89,7 +89,7 @@ static const char usage[] = {
 const char szCVCompiler[] = { "Microsoft (R) Macro Assembler Version 6.15.8803" };
 //const char szCVCompiler[] = { "Microsoft (R) Macro Assembler Version 8.00.50727" };
 #else
-const char szCVCompiler[] = { "JWasm v" _JWASM_VERSION_ };
+const char szCVCompiler[] = { "JWasm v" _JWASM_VERSION_STR_ };
 #endif
 
 void MsgInit( void )

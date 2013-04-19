@@ -83,11 +83,13 @@ uint_16                 Frame_Datum;    /* curr fixup frame value */
 struct asym             *SegOverride;
 static enum assume_segreg  LastRegOverride;/* needed for CMPS */
 
+#if 0 /* v2.10: moved to expreval.c */
 static const uint_16 tbaseptr[] = { T_BP, T_EBP
 #if AMD64_SUPPORT
 , T_RBP
 #endif
 };
+#endif
 
 struct symbol_queue SymTables[TAB_LAST];/* tables of definitions */
 
@@ -96,7 +98,7 @@ void sym_add_table( struct symbol_queue *queue, struct dsym *item )
 {
 #ifdef DEBUG_OUT
     if ( queue == &SymTables[TAB_UNDEF] )
-        item->sym.forward = TRUE;
+        item->sym.fwdref = TRUE;
 #endif
     /* put the new entry into the queue for its type of symbol */
     if( queue->head == NULL ) {
@@ -471,10 +473,11 @@ static void seg_override( struct code_info *CodeInfo, int seg_reg, const struct 
     }
 
     switch( seg_reg ) {
-    case T_SS: /* doesn't happen */
+    //case T_SS: /* doesn't happen */
     case T_BP:
     case T_EBP:
     case T_ESP:
+        /* todo: check why cases T_RBP/T_RSP aren't needed! */
         default_seg = ASSUME_SS;
         break;
     default:
@@ -784,6 +787,16 @@ ret_code segm_override( const struct expr *opndx, struct code_info *CodeInfo )
     return( NOT_ERROR );
 }
 
+void EmitConstError( const struct expr *opnd )
+/********************************************/
+{
+    if ( opnd->hlvalue != 0 )
+        EmitErr( CONSTANT_VALUE_TOO_LARGE_EX, opnd->hlvalue, opnd->value64 );
+    else
+        EmitErr( CONSTANT_VALUE_TOO_LARGE, opnd->value64 );
+    return;
+}
+
 /* get an immediate operand without a fixup.
  * output:
  * - ERROR: error
@@ -800,7 +813,7 @@ static ret_code idata_nofixup( struct code_info *CodeInfo, unsigned CurrOpnd, co
     int_32      value;
     int         size;
 
-    DebugMsg1(("idata_nofixup(kind=%u mem_type=%Xh value=%" I64X_SPEC ") enter\n", opndx->kind, opndx->mem_type, opndx->value64));
+    DebugMsg1(("idata_nofixup( CurrOpnd=%u ) enter [opnd kind=%u mem_type=%Xh value=%" I64X_SPEC "]\n", CurrOpnd, opndx->kind, opndx->mem_type, opndx->value64));
 
     /* jmp/call/jxx/loop/jcxz/jecxz? */
     if( IS_ANY_BRANCH( CodeInfo->token ) ) { 
@@ -939,7 +952,7 @@ static ret_code idata_fixup( struct code_info *CodeInfo, unsigned CurrOpnd, stru
     int                 size;
     uint_8              Ofssize; /* 1=32bit, 0=16bit offset for fixup */
 
-    DebugMsg1(("idata_fixup(opndx.type/mem_type=%u/%Xh) enter [CodeInfo.mem_type=%Xh]\n", opndx->type, opndx->mem_type, CodeInfo->mem_type));
+    DebugMsg1(("idata_fixup( CurrOpnd=%u ) enter [opndx.kind=%u mem_type=%Xh, CodeInfo.mem_type=%Xh]\n", CurrOpnd, opndx->kind, opndx->mem_type, CodeInfo->mem_type));
 
     /* jmp/call/jcc/loopcc/jxcxz? */
     if( IS_ANY_BRANCH( CodeInfo->token ) ) {
@@ -953,19 +966,11 @@ static ret_code idata_fixup( struct code_info *CodeInfo, unsigned CurrOpnd, stru
         || ( opndx->sym->state == SYM_GRP )
         || ( opndx->instr == T_SEG ) ) {
         Ofssize = USE16;
-    } else if( opndx->abs ) {  /* an (external) absolute symbol? */
+    } else if( opndx->is_abs ) {  /* an (external) absolute symbol? */
         Ofssize = USE16;
     } else {
         Ofssize = GetSymOfssize( opndx->sym );
     }
-
-    /* v2.04: looks like nonsense. */
-    //if( opndx->instr != EMPTY ) {
-    //    if( ( opndx->base_reg != NULL ) || ( opndx->idx_reg != NULL ) ) {
-    //        EmitError( INVALID_MEMORY_POINTER );
-    //        return( ERROR );
-    //    }
-    //}
 
     if( opndx->instr == T_SHORT ) {
         /* short works for branch instructions only */
@@ -973,8 +978,18 @@ static ret_code idata_fixup( struct code_info *CodeInfo, unsigned CurrOpnd, stru
         return( ERROR );
     }
 
+    /* the code below should be rewritten.
+     * - an address operator ( OFFSET, LROFFSET, IMAGEREL, SECTIONREL,
+     *   LOW, HIGH, LOWWORD, HIGHWORD, LOW32, HIGH32, SEG ) should not
+     *   force a magnitude, but may set a minimal magnitude - and the
+     *   fixup type, of course.
+     * - check if Codeinfo->mem_type really has to be set here!
+     */
+
     /* v2.06: added */
-    if ( opndx->explicit ) {
+    /* v2.10: modified */
+    //if ( opndx->explicit ) {
+    if ( opndx->explicit && !opndx->is_abs ) {
         CodeInfo->const_size_fixed = TRUE;
         if ( CodeInfo->mem_type == MT_EMPTY )
             CodeInfo->mem_type = opndx->mem_type;
@@ -1009,12 +1024,12 @@ static ret_code idata_fixup( struct code_info *CodeInfo, unsigned CurrOpnd, stru
         switch ( size ) {
         case 1:
             /* v2.05: if () added */
-            if ( opndx->abs || opndx->instr == T_LOW || opndx->instr == T_HIGH )
+            if ( opndx->is_abs || opndx->instr == T_LOW || opndx->instr == T_HIGH )
                 CodeInfo->mem_type = MT_BYTE;
             break;
         case 2:
             /* v2.05: if () added */
-            if ( opndx->abs ||
+            if ( opndx->is_abs ||
                 CodeInfo->Ofssize == USE16 ||
                 opndx->instr == T_LOWWORD ||
                 opndx->instr == T_HIGHWORD )
@@ -1030,24 +1045,27 @@ static ret_code idata_fixup( struct code_info *CodeInfo, unsigned CurrOpnd, stru
              */
             //case 8: CodeInfo->mem_type = MT_QWORD;break;
             /* v2.05a: added */
-            if ( Ofssize == USE64 &&
-                CodeInfo->token == T_MOV &&
-                ( CodeInfo->opnd[OPND1].type & OP_R64 ) )
-                CodeInfo->mem_type = MT_QWORD;
+            if ( Ofssize == USE64 ) {
+                if ( CodeInfo->token == T_MOV &&
+                    ( CodeInfo->opnd[OPND1].type & OP_R64 ) )
+                    CodeInfo->mem_type = MT_QWORD;
+                else if ( opndx->instr == T_LOW32 || opndx->instr == T_HIGH32 )
+                    /* v2.10:added; LOW32/HIGH32 in expreval.c won't set mem_type anymore. */
+                    CodeInfo->mem_type = MT_DWORD;
+            }
             break;
 #endif
         }
     }
     if ( CodeInfo->mem_type == MT_EMPTY ) {
-        if( opndx->abs ) {
+        if( opndx->is_abs ) {
             //if( opndx->mem_type != MT_EMPTY && opndx->mem_type != MT_ABS ) {
             if( opndx->mem_type != MT_EMPTY ) {
                 CodeInfo->mem_type = opndx->mem_type;
+            } else if ( CodeInfo->token == T_PUSHW ) { /* v2.10: special handling PUSHW */
+                CodeInfo->mem_type = MT_WORD;
             } else {
-                if( IS_OPER_32( CodeInfo ) )
-                    CodeInfo->mem_type = MT_DWORD;
-                else
-                    CodeInfo->mem_type = MT_WORD;
+                CodeInfo->mem_type = ( IS_OPER_32( CodeInfo ) ? MT_DWORD : MT_WORD );
             }
         } else {
             switch ( CodeInfo->token ) {
@@ -1065,16 +1083,15 @@ static ret_code idata_fixup( struct code_info *CodeInfo, unsigned CurrOpnd, stru
                     case T_HIGH:
                         opndx->mem_type = MT_BYTE;
                         break;
+                    case T_LOW32: /* v2.10: added - low32_op() doesn't set mem_type anymore. */
 #if IMAGERELSUPP
                     case T_IMAGEREL:
 #endif
 #if SECTIONRELSUPP
                     case T_SECTIONREL:
 #endif
-#if IMAGERELSUPP || SECTIONRELSUPP
                         opndx->mem_type = MT_DWORD;
                         break;
-#endif
                     };
                 }
                 /* default: push offset only */
@@ -1110,7 +1127,10 @@ static ret_code idata_fixup( struct code_info *CodeInfo, unsigned CurrOpnd, stru
     }
     size = SizeFromMemtype( CodeInfo->mem_type, Ofssize, NULL );
     switch( size ) {
-    case 1:  CodeInfo->opnd[CurrOpnd].type = OP_I8;  SET_OPSIZ_NO( CodeInfo );  break;
+    case 1:
+        CodeInfo->opnd[CurrOpnd].type = OP_I8;
+        SET_OPSIZ_NO( CodeInfo ); /* v2.10: reset opsize is not really a good idea - might have been set by previous operand */
+        break;
     case 2:  CodeInfo->opnd[CurrOpnd].type = OP_I16; SET_OPSIZ_16( CodeInfo );  break;
     case 4:  CodeInfo->opnd[CurrOpnd].type = OP_I32; SET_OPSIZ_32( CodeInfo );  break;
 #if AMD64_SUPPORT
@@ -1168,14 +1188,16 @@ static ret_code idata_fixup( struct code_info *CodeInfo, unsigned CurrOpnd, stru
 #if AMD64_SUPPORT
         /* v2.06: changed */
         //if ( Ofssize == USE64 && CodeInfo->mem_type == MT_QWORD )
-        if ( CodeInfo->opnd[CurrOpnd].type == OP_I64 )
+        /* v2.10: changed */
+        //if ( CodeInfo->opnd[CurrOpnd].type == OP_I64 )
+        if ( CodeInfo->opnd[CurrOpnd].type == OP_I64 && ( opndx->instr == EMPTY || opndx->instr == T_OFFSET ) )
             fixup_type = FIX_OFF64;
         else
 #endif
             /* v2.04: changed, no longer depends on OfsSize */
             /* v2.05a: changed, so size==8 won't get a FIX_OFF16 type */
             //if ( size == 4 )
-            if ( size >= 4 ) {
+            if ( size >= 4 && opndx->instr != T_LOWWORD ) {
                 /* v2.06: added branch for PTR16 fixup.
                  * it's only done if type coercion is FAR (Masm-compat)
                  */
@@ -1245,6 +1267,14 @@ static void SetPtrMemtype( struct code_info *CodeInfo, struct expr *opndx )
 
     if ( opndx->mbr )  /* the mbr field has higher priority */
         sym = opndx->mbr;
+
+    /* v2.10: the "explicit" condition is now handled FIRST */
+#if 1 /* v2.0: handle PF16 ptr [ebx], which didn't work in v1.96 */
+    if ( opndx->explicit && opndx->type ) {
+        size = opndx->type->total_size;
+        CodeInfo->isfar = opndx->type->isfar;
+    } else
+#endif
     if ( sym ) {
         if ( sym->type ) {
             size = sym->type->total_size;
@@ -1264,11 +1294,6 @@ static void SetPtrMemtype( struct code_info *CodeInfo, struct expr *opndx )
             else
                 size = sym->total_size;
         }
-#if 1 /* v2.0: handle PF16 ptr [ebx], which didn't work in v1.96 */
-    } else if ( opndx->explicit && opndx->type ) {
-        size = opndx->type->total_size;
-        CodeInfo->isfar = opndx->type->isfar;
-#endif
     } else {
         if ( SIZE_DATAPTR & ( 1 << ModuleInfo.model ) ) {
             DebugMsg1(("SetPtrMemtype: model with FAR data pointers\n" ));
@@ -1578,6 +1603,7 @@ static ret_code memory_operand( struct code_info *CodeInfo, unsigned CurrOpnd, s
 
     /* use base + index from here - don't use opndx-> base_reg/idx_reg! */
 
+#if 0 /* v2.10: moved to expreval.c */
     if ( sym && sym->state == SYM_STACK ) {
         if( base != EMPTY ) {
             if( index != EMPTY ) {
@@ -1590,6 +1616,7 @@ static ret_code memory_operand( struct code_info *CodeInfo, unsigned CurrOpnd, s
         }
         base = tbaseptr[CodeInfo->Ofssize];
     }
+#endif
 
     /* check for base registers */
 
@@ -1624,29 +1651,35 @@ static ret_code memory_operand( struct code_info *CodeInfo, unsigned CurrOpnd, s
         } else {
             CodeInfo->prefix.adrsiz = TRUE;
         }
+
+        /* v2.10: register swapping has been moved to expreval.c, index_connect().
+         * what has remained here is the check if R/ESP is used as index reg.
+         */
         if ( GetRegNo( index ) == 4 ) { /* [E|R]SP? */
-            int tmp = index;
+            DebugMsg(( "memory_operand: error, base regno=%u, index regno=%u, opnd.scale=%u\n", GetRegNo( base ), GetRegNo( index ), opndx->scale ));
+            //int tmp = index;
             if( opndx->scale ) { /* no scale must be set */
                 EmitErr( CANNOT_BE_USED_AS_INDEX_REGISTER, GetResWName( index, NULL ) );
-                return( ERROR );
-            }
-            if ( GetRegNo( base ) == 4 ) {
+                //return( ERROR );
+            } else {
+            //if ( GetRegNo( base ) == 4 ) {
                 EmitErr( MULTIPLE_BASE_REGISTERS_NOT_ALLOWED );
-                return( ERROR );
+                //return( ERROR );
             }
+            return( ERROR );
+            /* swap base and index */
+            //index = base;
+            //base = tmp;
+#if 0
+        } else if ( Options.masm_compat_gencode && opndx->scale == 0 && GetRegNo( base ) != 4 ) {
+            /* v2.08: Masm 6+ swaps base and index, even if -Zm is set (Masm 5.1 does NOT swap) */
+            int tmp = index;
             /* swap base and index */
             index = base;
             base = tmp;
-        } else
-#if 1
-            if ( Options.masm_compat_gencode && opndx->scale == 0 && GetRegNo( base ) != 4 ) {
-                /* v2.08: Masm 6+ swaps base and index, even if -Zm is set (Masm 5.1 does NOT swap) */
-                int tmp = index;
-                /* swap base and index */
-                index = base;
-                base = tmp;
-            }
 #endif
+        }
+
         /* 32/64 bit indirect addressing? */
         if( ( CodeInfo->Ofssize == USE16 && CodeInfo->prefix.adrsiz == 1 ) ||
 #if AMD64_SUPPORT
@@ -1681,7 +1714,7 @@ static ret_code memory_operand( struct code_info *CodeInfo, unsigned CurrOpnd, s
 
     if( with_fixup ) {
 
-        if( opndx->abs ) {
+        if( opndx->is_abs ) {
             Ofssize = IS_ADDR32( CodeInfo );
         } else if ( sym ) {
             Ofssize = GetSymOfssize( sym );
@@ -1738,6 +1771,13 @@ static ret_code memory_operand( struct code_info *CodeInfo, unsigned CurrOpnd, s
             }
         }
 
+#if IMAGERELSUPP || SECTIONRELSUPP /* v2.10: added; IMAGEREL/SECTIONREL for indirect memory operands */
+        if ( fixup_type == FIX_OFF32 )
+            if ( opndx->instr == T_IMAGEREL )
+                fixup_type = FIX_OFF32_IMGREL;
+            else if ( opndx->instr == T_SECTIONREL )
+                fixup_type = FIX_OFF32_SECREL;
+#endif
         /* no fixups are needed for memory operands of string instructions and XLAT/XLATB.
          * However, CMPSD and MOVSD are also SSE2 opcodes, so the fixups must be generated
          * anyways.
@@ -1866,6 +1906,9 @@ ret_code process_address( struct code_info *CodeInfo, unsigned CurrOpnd, struct 
                     p++;
                 } while ( p->first == FALSE );
             }
+            /* v2.10: if current operand is the third argument, always assume an immediate */
+            if ( CurrOpnd == OPND3 )
+                return( idata_fixup( CodeInfo, CurrOpnd, opndx ) );
         }
         /* v2.0: fixups should be generated for undefined operands
          * to allow backpatching!
@@ -1887,7 +1930,7 @@ ret_code process_address( struct code_info *CodeInfo, unsigned CurrOpnd, struct 
         mem_type = opndx->mem_type;
 
         /* symbol external, but absolute? */
-        if( opndx->abs ) {
+        if( opndx->is_abs ) {
             return( idata_fixup( CodeInfo, CurrOpnd, opndx ) );
         }
 
@@ -2226,6 +2269,9 @@ static void HandleStringInstructions( struct code_info *CodeInfo, const struct e
 #if AMD64_SUPPORT
     case T_LODSQ:
 #endif
+        /* v2.10: remove unnecessary DS prefix ( Masm-compatible ) */
+        if ( CodeInfo->prefix.RegOverride == ASSUME_DS )
+            CodeInfo->prefix.RegOverride = EMPTY;
         break;
     default: /*INS[B|W|D], SCAS[B|W|D|Q], STOS[B|W|D|Q] */
         /* INSx, SCASx and STOSx don't allow any segment prefix != ES
@@ -2842,6 +2888,8 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
              * be used for this handling, LOF_STORED in line_flags.
              * It's only a problem if a '@@:' is the first line
              * in the code section.
+             * v2.10: is no longer an issue because the label counter has
+             * been moved to module_vars (see global.h).
              */
             FStoreLine(0);
             if ( CurrFile[LST] ) {
@@ -2941,7 +2989,7 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
             //if ( ModuleInfo.list && (( line_flags & LOF_LISTED ) == 0 ) && Parse_Pass == PASS_1 )
 #if FASTPASS
             /* v2.08: UseSavedState == FALSE added */
-            if ( ModuleInfo.list && ( Parse_Pass == PASS_1 || GeneratedCode || UseSavedState == FALSE ) )
+            if ( ModuleInfo.list && ( Parse_Pass == PASS_1 || ModuleInfo.GeneratedCode || UseSavedState == FALSE ) )
 #else
             if ( ModuleInfo.list )
 #endif
@@ -3036,12 +3084,7 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
             if ( in_epilogue == FALSE && ModuleInfo.epiloguemode != PEM_NONE ) {
                 in_epilogue = TRUE;
                 /* v2.07: special handling for RET/IRET */
-#if FASTPASS
-                if ( ModuleInfo.CurrComment && ModuleInfo.list_generated_code ) {
-                    FStoreLine(1);
-                } else
-                    FStoreLine(0);
-#endif
+                FStoreLine( ( ModuleInfo.CurrComment && ModuleInfo.list_generated_code ) ? 1 : 0 );
                 temp = RetInstr( i, tokenarray, Token_Count );
                 in_epilogue = FALSE;
                 return( temp );

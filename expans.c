@@ -586,6 +586,8 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
     //if ( mi.currline || addprefix ) {
     if ( mi.startline ) {
         struct input_status oldstat;
+        int oldifnesting;
+        int cntgoto;
 
         DebugMsg1(("RunMacro(%s): enter assembly loop, macro level=%u\n", macro->sym.name, MacroLevel+1 ));
         /* v2.04: this listing is too excessive */
@@ -601,8 +603,10 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
          * move the macro instance onto the file stack!
          * Also reset the current linenumber!
          */
-        PushMacro( &macro->sym, &mi, 0 );
+        PushMacro( &macro->sym, &mi );
         MacroLevel++;
+        oldifnesting = GetIfNestLevel(); /* v2.10 */
+        cntgoto = 0; /* v2.10 */
         /* Run the assembler until we hit EXITM or ENDM.
          * Also handle GOTO and macro label lines!
          */
@@ -658,6 +662,16 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
                         }
                     }
                     DebugMsg1(("RunMacro(%s): EXITM, result=>%s<\n", macro->sym.name, out ? out : "NULL" ));
+
+                    /* v2.10: if a goto had occured, rescan the full macro to ensure that
+                     * the "if"-nesting level is ok.
+                     */
+                    if ( cntgoto ) {
+                        mi.currline = NULL;
+                        SetMacroLineNumber( 0 );
+                        SetIfNestLevel( oldifnesting );
+                    }
+
                     SkipCurrentQueue( tokenarray );
                     *is_exitm = TRUE;
                     break;
@@ -695,21 +709,19 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
                             /* v2.05: display error msg BEFORE SkipCurrentQueue()! */
                             DebugMsg1(("RunMacro(%s): GOTO, label >%s< not found!\n", macro->sym.name, tokenarray[1].string_ptr ));
                             EmitErr( MACRO_LABEL_NOT_DEFINED, tokenarray[1].string_ptr );
+                        } else {
+                            DebugMsg1(("RunMacro(%s): GOTO, found label >%s<\n", macro->sym.name, ptr));
+                            /* v2.10: rewritten, "if"-nesting-level handling added */
+                            mi.currline = lnode;
+                            SetMacroLineNumber( i );
+                            SetIfNestLevel( oldifnesting );
+                            cntgoto++;
+                            continue;
                         }
                     } else {
-                        lnode = NULL;
                         EmitErr( SYNTAX_ERROR_EX, tokenarray->tokpos );
                     }
                     SkipCurrentQueue( tokenarray );
-                    /* v2.05: MacroLevel isn't touched anymore inside the loop */
-                    //MacroLevel--;
-                    if ( lnode ) {
-                        DebugMsg1(("RunMacro(%s): GOTO, found label >%s<\n", macro->sym.name, ptr));
-                        //NewLineQueue();
-                        mi.currline = lnode;
-                        PushMacro( &macro->sym, &mi, i );
-                        continue;
-                    }
                     break;
                 }
             }
@@ -1454,6 +1466,17 @@ ret_code ExpandLine( char *string, struct asm_tok tokenarray[] )
                 Token_Count = Tokenize( string, 0, tokenarray, TOK_DEFAULT );
                 continue;
             }
+#if 1 /* v2.10. see regression test equate27.asm */
+            if ( count == 1 && tokenarray[0].token == T_ID && tokenarray[1].token == T_ID ) {
+                rc = ExpandToken( string, &count, tokenarray, 2, FALSE, FALSE );
+                if( rc == ERROR || rc == EMPTY )
+                    return( rc );
+                if ( rc == STRING_EXPANDED ) {
+                    Token_Count = Tokenize( string, 0, tokenarray, TOK_DEFAULT );
+                    continue;
+                }
+            }
+#endif
         }
         /* scan the line from left to right for (text) macros.
          * it's currently not quite correct. a macro proc should only
@@ -1482,7 +1505,7 @@ ret_code ExpandLine( char *string, struct asm_tok tokenarray[] )
             Token_Count = Tokenize( string, 0, tokenarray, TOK_RESCAN );
         } else
             break;
-    }
+    } /* end for() */
     if ( lvl == MAX_TEXTMACRO_NESTING ) {
         EmitError( MACRO_NESTING_LEVEL_TOO_DEEP );
         return( ERROR );

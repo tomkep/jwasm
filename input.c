@@ -49,7 +49,6 @@
 
 extern struct ReservedWord  ResWordTable[];
 extern ret_code (* const directive[])( int, struct asm_tok[] );
-extern char inside_comment;
 
 #define REMOVECOMENT 0 /* 1=remove comments from source       */
 #define DETECTCTRLZ 1
@@ -96,15 +95,16 @@ struct input_queue {
     struct line_list    *tail;
 };
 
-enum file_list_type {
+enum file_item_type {
     FLT_FILE  = 0,
     FLT_MACRO = 2,
     FLT_LQ    = 3,
 };
 
-struct file_list {
-    struct file_list    *next;
-    uint_8              type;       /* item type ( see enum file_list_type ) */
+/* item on file stack ( contains currently open input files ) */
+struct file_item {
+    struct file_item    *next;
+    uint_8              type;       /* item type ( see enum file_item_type ) */
     uint_16             srcfile;    /* index of file in ModuleInfo.g.FNames */
     union {
         void            *content;   /* generic */
@@ -117,11 +117,11 @@ struct file_list {
 };
 
 /* NOTE: the line queue is a simple list of lines.
- if it must be nested, it is converted to a file_list item
+ if it must be nested, it is converted to a file_item item
  and pushed onto the file stack.
  */
 //static struct input_queue *line_queue;  /* line queue */
-//static struct file_list *file_stack;    /* source item (file/macro) stack */
+//static struct file_item *file_stack;    /* source item (file/macro) stack */
 #define line_queue  ModuleInfo.g.line_queue
 #define file_stack  ModuleInfo.g.file_stack
 
@@ -148,6 +148,10 @@ long cnttok1;
  * the buffer must be a multiple of MAX_LINE_LEN
  */
 static char *srclinebuffer;
+
+/* string buffer - token strings and other stuff are stored here.
+ * must be a multiple of MAX_LINE_LEN since it is used for string expansion.
+ */
 char *token_stringbuf;  /* start token string buffer */
 
 /* fixme: add '|| defined(__CYGWIN__)' ? */
@@ -209,27 +213,33 @@ static time_t GetFileTimeStamp( const char *filename )
 /* check if a file is in the array of known files.
  * if no, store the file at the array's end.
  * returns array index.
+ * used for the main source and all INCLUDEd files.
  * the array is stored in the standard C heap!
  * the filenames are stored in the "local" heap.
  */
 static uint AddFile( char const *fname )
 /**************************************/
 {
-    struct fname_list *newfn;
+    struct fname_item *newfn;
     uint    index;
     char    name[_MAX_FNAME];
     char    ext[_MAX_EXT];
 
     DebugMsg1(("AddFile(%s) enter\n", fname ));
     for( index = 0; index < ModuleInfo.g.cnt_fnames; index++ ) {
-        if( filecmp( fname, ModuleInfo.g.FNames[index].fullname ) == 0 )
+        if( filecmp( fname, ModuleInfo.g.FNames[index].fullname ) == 0 ) {
+#ifdef DEBUG_OUT
+            if ( Parse_Pass == PASS_1 )
+                ModuleInfo.g.FNames[index].included++;
+#endif
             return( index );
+        }
     }
 
     if ( ( index % 64 ) == 0 ) {
-        newfn = (struct fname_list *)MemAlloc( ( index + 64) * sizeof( struct fname_list ) );
+        newfn = (struct fname_item *)MemAlloc( ( index + 64) * sizeof( struct fname_item ) );
         if ( ModuleInfo.g.FNames ) {
-            memcpy( newfn, ModuleInfo.g.FNames, index * sizeof( struct fname_list ) );
+            memcpy( newfn, ModuleInfo.g.FNames, index * sizeof( struct fname_item ) );
             MemFree( ModuleInfo.g.FNames );
         }
         ModuleInfo.g.FNames = newfn;
@@ -257,11 +267,14 @@ static uint AddFile( char const *fname )
     strcat( newfn->name, ext );
     newfn->fullname = (char *)LclAlloc( strlen( fname ) + 1 );
     strcpy( newfn->fullname, fname );
+#ifdef DEBUG_OUT
+    newfn->included = 1;
+#endif
 #endif
     return( index );
 }
 
-const struct fname_list *GetFName( uint index )
+const struct fname_item *GetFName( uint index )
 /*********************************************/
 {
     return( ModuleInfo.g.FNames+index );
@@ -309,7 +322,7 @@ static void FreeLineQueue( struct input_queue *queue )
 void ClearFileStack( void )
 /*************************/
 {
-    struct file_list   *nextfile;
+    struct file_item   *nextfile;
 
     DeleteLineQueue();
 
@@ -331,7 +344,7 @@ void ClearFileStack( void )
 void UpdateLineNumber( struct asym *sym, void *p )
 /************************************************/
 {
-    struct file_list *fl;
+    struct file_item *fl;
     for ( fl = file_stack; fl ; fl = fl->next )
         if ( fl->type == FLT_FILE ) {
             sym->value = fl->line_num;
@@ -429,12 +442,12 @@ void AddFileSeq( uint file )
  * type: FLT_FILE, FLT_MACRO or FLT_LQ.
  * macro = macro symbol or NULL.
  */
-static struct file_list *PushLineSource( char type, void *pv )
+static struct file_item *PushLineSource( char type, void *pv )
 /************************************************************/
 {
-    struct file_list   *fl;
+    struct file_item   *fl;
 
-    fl = SrcAlloc( sizeof( struct file_list ) );
+    fl = SrcAlloc( sizeof( struct file_item ) );
     fl->next = file_stack;
     fl->type = type;
     fl->content = pv;
@@ -455,7 +468,7 @@ void NewLineQueue( void )
 {
     DebugMsg1(( "NewLineQueue() enter [line_queue=%X, old queue_level=%u]\n", line_queue, queue_level ));
     if ( line_queue ) {
-        struct file_list *fl;
+        struct file_item *fl;
         fl = PushLineSource( FLT_LQ, line_queue );
         fl->srcfile = get_curr_srcfile();
         line_queue = NULL;
@@ -584,15 +597,22 @@ void AddLineQueueX( const char *fmt, ... )
  * in case of errors. Param <line> is != 0 when GOTO
  * is handled.
  */
-void PushMacro( struct asym *macro, struct macro_instance *mi, unsigned line )
-/****************************************************************************/
+void PushMacro( struct asym *macro, struct macro_instance *mi )
+/*************************************************************/
 {
-    struct file_list *fl;
+    struct file_item *fl;
 
     DebugMsg1(( "PushMacro(%s), queue level=%u\n", macro->name, queue_level++ ));
     fl = PushLineSource( FLT_MACRO, mi );
     fl->macro = macro;
-    fl->line_num = line;
+    //fl->line_num = line;
+    return;
+}
+
+void SetMacroLineNumber( unsigned line )
+/**************************************/
+{
+    file_stack->line_num = line;
     return;
 }
 
@@ -600,7 +620,7 @@ void PushMacro( struct asym *macro, struct macro_instance *mi, unsigned line )
 bool MacroInUse( struct dsym *macro )
 /***********************************/
 {
-    struct file_list *fl;
+    struct file_item *fl;
 
     for ( fl = file_stack; fl ; fl = fl->next )
         if ( fl->type == FLT_MACRO && fl->macro == &macro->sym )
@@ -614,7 +634,7 @@ uint get_curr_srcfile( void )
 /***************************/
 {
 #if 1
-    struct file_list *fl;
+    struct file_item *fl;
     for ( fl = file_stack; fl ; fl = fl->next )
         if ( fl->type == FLT_FILE )
             return( fl->srcfile );
@@ -640,7 +660,7 @@ void set_curr_srcfile( uint file, uint_32 line_num )
 int GetCurrSrcPos( char *buffer )
 /*******************************/
 {
-    struct file_list *fl;
+    struct file_item *fl;
     uint_32 line;
 
     for( fl = file_stack; fl && fl->type != FLT_FILE; fl = fl->next );
@@ -662,7 +682,7 @@ int GetCurrSrcPos( char *buffer )
 void print_source_nesting_structure( void )
 /*****************************************/
 {
-    struct file_list       *fl;
+    struct file_item       *fl;
     unsigned        tab = 1;
 
     /* in main source file? */
@@ -759,7 +779,7 @@ ret_code InputQueueFile( const char *path, FILE * *pfile )
 /********************************************************/
 {
     FILE        *file = NULL;
-    struct file_list   *fl;
+    struct file_item   *fl;
     char        fullpath[ _MAX_PATH ];
     char        buffer[ _MAX_PATH ];
     char        drive[_MAX_DRIVE];
@@ -783,6 +803,9 @@ ret_code InputQueueFile( const char *path, FILE * *pfile )
                 _splitpath( GetFName( fl->srcfile )->fullname, drive2, dir2, NULL, NULL );
                 DebugMsg1(("InputQueueFile(): curr src=%s, split into drive=%s, dir=%s\n", GetFName( fl->srcfile)->fullname, drive2, dir2 ));
                 if ( dir2[0] == '\\' || dir2[0] == '/' ) {
+                    if ( dir[0] ) {/* v2.10: if there's a directory part, add it to the directory part of the current file */
+                        strcat( dir2, dir );
+                    }
                     _makepath( fullpath, drive2, dir2, fname, ext );
                     file = fopen( fullpath, "rb" );
                     DebugMsg1(("InputQueueFile(): makepath()=%s, file=%X\n", fullpath, file ));
@@ -826,7 +849,7 @@ char *GetTextLine( char *buffer )
 /*******************************/
 {
     struct line_list   *inputline;
-    struct file_list   *fl;
+    struct file_item   *fl;
 
     *buffer = NULLC;
 
@@ -870,7 +893,10 @@ char *GetTextLine( char *buffer )
 #endif
                 return( buffer );
             }
-            /* EOF of main module reached? */
+#ifdef DEBUG_OUT
+            ModuleInfo.g.FNames[fl->srcfile].lines = fl->line_num;
+#endif
+            /* EOF of main module reached? ( will only happen if no END directive is found ) */
             if ( fl->next == NULL )
                 break;
 
@@ -972,7 +998,7 @@ void AddStringToIncludePath( const char *string )
 static void GetFileCur( struct asym *sym )
 /****************************************/
 {
-    struct file_list *fl;
+    struct file_item *fl;
 
     for( fl = file_stack; fl && fl->type != FLT_FILE; fl = fl->next );
     sym->string_ptr = GetFName( fl->srcfile )->name;
@@ -995,7 +1021,7 @@ static void GetFileCur( struct asym *sym )
 void InputInit( void )
 /********************/
 {
-    struct file_list   *fl;
+    struct file_item   *fl;
     char        path[_MAX_PATH];
     char        drive[_MAX_DRIVE];
     char        dir[_MAX_DIR];
@@ -1051,7 +1077,7 @@ void InputPassInit( void )
 {
     line_queue = NULL;
     file_stack->line_num = 0;
-    inside_comment = NULLC;
+    //inside_comment = NULLC;
     CurrSource = srclinebuffer;
     *CurrSource = NULLC;
     StringBufferEnd = token_stringbuf;
@@ -1068,7 +1094,16 @@ void InputFini( void )
 {
 #ifdef DEBUG_OUT
     int   i;
-    for( i = 0; i < ModuleInfo.g.cnt_fnames; i++) {
+
+    /* for the main source file, lines usually isn't filled yet */
+    ModuleInfo.g.FNames[ModuleInfo.srcfile].lines = file_stack->line_num;
+    for( i = 0; i < ModuleInfo.g.cnt_fnames; i++ ) {
+        if ( Options.log_all_files ) {
+            if ( ModuleInfo.g.FNames[i].included > 1 )
+                printf("%2u: %5u *%2u %s\n", i+1, ModuleInfo.g.FNames[i].lines, ModuleInfo.g.FNames[i].included, ModuleInfo.g.FNames[i].fullname );
+            else
+                printf("%2u: %5u     %s\n", i+1, ModuleInfo.g.FNames[i].lines, ModuleInfo.g.FNames[i].fullname );
+        }
         DebugMsg(( "InputFini: idx=%u name=%s full=%s\n", i, ModuleInfo.g.FNames[i].name, ModuleInfo.g.FNames[i].fullname ));
     }
 #endif
@@ -1170,6 +1205,72 @@ void PopInputStatus( struct input_status *newstat )
     return;
 }
 
+/*
+ * RunLineQueue() is called whenever generated code is to be assembled.
+ * It saves current input status, then processes current line queue and
+ * finally restores the input status.
+ */
+
+void RunLineQueue( void )
+/***********************/
+{
+    struct input_status oldstat;
+    struct asm_tok *tokenarray;
+
+    DebugMsg1(( "RunLineQueue() enter\n" ));
+    /* v2.03: ensure the current source buffer is still aligned */
+    tokenarray = PushInputStatus( &oldstat );
+    ModuleInfo.GeneratedCode++;
+    while ( ( Token_Count = GetPreprocessedLine( CurrSource, tokenarray ) ) >= 0 ) {
+        if ( Token_Count )
+            ParseLine( tokenarray );
+    }
+#ifdef DEBUG_OUT
+    if ( ModuleInfo.EndDirFound == TRUE ) {
+        DebugMsg(("!!!!! Error: End directive found in generated-code parser loop!\n"));
+    }
+    lq_line = 0;
+#endif
+    ModuleInfo.GeneratedCode--;
+    PopInputStatus( &oldstat );
+
+    DebugMsg1(( "RunLineQueue() exit\n" ));
+    return;
+}
+
+#if 0 /* v2.09: obsolete, struct initialization does no longer generate code */
+
+/* this is called by InitStructuredVar(), which is a special case */
+
+void RunLineQueueEx( void )
+/*************************/
+{
+    struct input_status oldstat;
+    struct asm_tok *tokenarray;
+
+    DebugMsg1(( "RunLineQueueEx() enter\n" ));
+    tokenarray = PushInputStatus( &oldstat );
+    while ( ( Token_Count = GetPreprocessedLine( CurrSource, tokenarray ) ) >= 0 ) {
+        if ( Token_Count ) {
+            ParseLine( tokenarray );
+            /* handle special case 'structure initialization' */
+            if ( Options.preprocessor_stdout == TRUE )
+                WritePreprocessedLine( CurrSource );
+        }
+    }
+#ifdef DEBUG_OUT
+    if ( ModuleInfo.EndDirFound == TRUE ) {
+        DebugMsg(("!!!!! Error: End directive found in generated-code parser loop!\n"));
+    }
+    lq_line = 0;
+#endif
+    PopInputStatus( &oldstat );
+
+    DebugMsg1(( "RunLineQueueEx() exit\n" ));
+    return;
+}
+#endif
+
 /* INCLUDE directive.
  * If a full path is specified, the directory where the included file
  * is located becomes the "source" directory, that is, it is searched
@@ -1215,24 +1316,6 @@ ret_code IncludeDirective( int i, struct asm_tok tokenarray[] )
         InputQueueFile( name, NULL );
     }
     return( NOT_ERROR );
-}
-
-/* Read the current queue until it's done.
- */
-
-void SkipCurrentQueue( struct asm_tok tokenarray[] )
-/**************************************************/
-{
-    char buffer[MAX_LINE_LEN];
-
-    /* The queue isn't just thrown away, because any
-     * coditional assembly directives found in the source
-     * must be executed.
-     */
-    while ( GetTextLine( buffer ) ) {
-        Tokenize( buffer, 0, tokenarray, TOK_DEFAULT );
-    }
-
 }
 
 /* preprocessor directive or macro procedure is preceded

@@ -140,18 +140,20 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
 
     /* v2.05: just 1 operand possible */
     if ( CurrOpnd != OPND1 ) {
-        EmitError( SYNTAX_ERROR );
+        //EmitError( SYNTAX_ERROR ); /* v2.10: error msg changed */
+        EmitError( INVALID_INSTRUCTION_OPERANDS );
         return( ERROR );
     }
     if ( opndx->explicit )
         CodeInfo->mem_type = opndx->mem_type;
     /*
-     * Masm checks overrides for branch instructions with immediate operand.
-     * No segment prefix byte is emitted.
+     * Masm checks overrides for branch instructions with immediate operand!
+     * Of course, no segment prefix byte is emitted - would be pretty useless.
+     * It might cause the call/jmp to become FAR, though.
      */
     if ( opndx->override != NULL ) {
         segm_override( opndx, NULL );
-        DebugMsg(("process_branch(%" FX32 "): segment override %s\n", GetCurrOffset(), SegOverride->name ));
+        DebugMsg(("process_branch(%" FX32 "): segment override %s\n", GetCurrOffset(), SegOverride ? SegOverride->name : "NULL" ));
         if ( SegOverride && opndx->sym && opndx->sym->segment ) {
             if ( SegOverride != opndx->sym->segment &&  SegOverride != ((struct dsym *)opndx->sym->segment)->e.seginfo->group ) {
                 EmitErr( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS, opndx->sym ? opndx->sym->name : "" );

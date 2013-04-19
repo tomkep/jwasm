@@ -38,16 +38,30 @@
 #include "label.h"
 #include "listing.h"
 
+/* LABELARRAY: syntax extension to LABEL directive:
+ *  <label> LABEL <qualified type>[: index]
+ */
+
+#ifdef __I86__
+#define LABELARRAY 0  /* not for jwasmr.exe */
+#else
+#define LABELARRAY 1
+#endif
+
+#if LABELARRAY
+#include "expreval.h"
+#endif
+
 void LabelInit( void )
 /********************/
 {
-    ModuleInfo.anonymous_label = 0;
+    ModuleInfo.g.anonymous_label = 0;
 }
 
 char *GetAnonymousLabel( char *buffer, int value )
 /************************************************/
 {
-    sprintf( buffer, "L&_%04u", ModuleInfo.anonymous_label + value );
+    sprintf( buffer, "L&_%04u", ModuleInfo.g.anonymous_label + value );
     return( buffer );
 }
 
@@ -84,7 +98,7 @@ struct asym *CreateLabel( const char *name, enum memtype mem_type, struct qualif
 
     //if( strcmp( name, "@@" ) == 0 ) {
     if( name[0] == '@' && name[1] == '@' && name[2] == NULLC ) {
-        sprintf( buffer, "L&_%04u", ++ModuleInfo.anonymous_label );
+        sprintf( buffer, "L&_%04u", ++ModuleInfo.g.anonymous_label );
         name = buffer;
     }
 
@@ -125,8 +139,8 @@ struct asym *CreateLabel( const char *name, enum memtype mem_type, struct qualif
         }
         /* add the label to the linked list attached to curr segment */
         /* this allows to reduce the number of passes (see fixup.c) */
-        ((struct dsym *)sym)->next = (struct dsym *)CurrSeg->e.seginfo->labels;
-        CurrSeg->e.seginfo->labels = sym;
+        ((struct dsym *)sym)->next = (struct dsym *)CurrSeg->e.seginfo->label_list;
+        CurrSeg->e.seginfo->label_list = sym;
 
         /* a possible language type set by EXTERNDEF must be kept! */
         if ( sym->langtype == LANG_NONE )
@@ -192,6 +206,9 @@ ret_code LabelDirective( int i, struct asm_tok tokenarray[] )
 {
     struct qualified_type ti;
     struct asym *sym;
+#if LABELARRAY
+    uint_32 length;
+#endif
 
     if( i != 1 ) {  /* LABEL must be preceded by an ID */
         EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
@@ -210,36 +227,66 @@ ret_code LabelDirective( int i, struct asm_tok tokenarray[] )
     if ( GetQualifiedType( &i, tokenarray, &ti ) == ERROR )
         return( ERROR );
 
-    DebugMsg1(("LabelDirective(%s): memtype=%Xh, far=%u, ptr=%u, type=%s)\n",
-               tokenarray[0].string_ptr, ti.mem_type, ti.is_far, ti.is_ptr, ti.symtype ? ti.symtype->name : "NULL" ));
+    DebugMsg1(("LabelDirective(%s): memtype=%Xh, far=%u, ptr=%u, ofssize=%u, type=%s)\n",
+               tokenarray[0].string_ptr, ti.mem_type, ti.is_far, ti.is_ptr, ti.Ofssize, ti.symtype ? ti.symtype->name : "NULL" ));
+
+#if LABELARRAY
+    length = -1;
+#endif
+    /* v2.10: first if()-block is to handle all address types ( MT_NEAR, MT_FAR and MT_PROC ) */
+    //if ( ti.mem_type == MT_NEAR || ti.mem_type == MT_FAR ) {
+    if ( ( ti.mem_type & MT_SPECIAL_MASK) == MT_ADDRESS ) {
+        /* dont allow near16/far16/near32/far32 if size won't match */
+        if ( ti.Ofssize != USE_EMPTY && ModuleInfo.Ofssize != ti.Ofssize ) {
+            EmitError( OFFSET_SIZE_MISMATCH );
+            return( ERROR );
+        }
+    }
+#if LABELARRAY
+    else if ( tokenarray[i].token == T_COLON && tokenarray[i+1].token != T_FINAL && Options.strict_masm_compat == FALSE ) {
+        struct expr opnd;
+        i++;
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opnd, 0 ) == ERROR )
+            return( ERROR );
+        if ( opnd.kind != EXPR_CONST ) {
+            if ( opnd.sym && opnd.sym->state == SYM_UNDEFINED )
+                opnd.value = 1;
+            else {
+                EmitError( CONSTANT_EXPECTED );
+                return( ERROR );
+            }
+        }
+        length = opnd.value;
+    }
+#endif
 
     if ( tokenarray[i].token != T_FINAL ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
-    }
-
-    /* dont allow near16/far16/near32/far32 if size won't match */
-    if ( ( ti.mem_type == MT_NEAR || ti.mem_type == MT_FAR ) &&
-        ti.Ofssize != USE_EMPTY &&
-        ModuleInfo.Ofssize != ti.Ofssize ) {
-        EmitError( OFFSET_SIZE_MISMATCH );
+        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ); /* v2.10: display tokpos */
         return( ERROR );
     }
 
     if ( ModuleInfo.list )
         LstWrite( LSTTYPE_LABEL, 0, NULL );
 
-    /* v2.08: if label has a true memory type, set total_size and total_length */
+    /* v2.08: if label is a DATA label, set total_size and total_length */
     if ( sym = CreateLabel( tokenarray[0].string_ptr, ti.mem_type, &ti, FALSE ) ) {
         DebugMsg1(("LabelDirective(%s): label created, memtype=%Xh size=%u\n", sym->name, sym->mem_type, ti.size ));
         /* sym->isdata must be 0, else the LABEL directive was generated within data_item()
          * and fields total_size & total_length must not be modified then!
          * v2.09: data_item() no longer creates LABEL directives.
          */
-        if ( sym->isdata == FALSE && ( sym->mem_type & MT_SPECIAL_MASK ) != MT_ADDRESS ) {
-            sym->total_size = ti.size;
-            sym->total_length = 1;
-        }
+        if ( sym->isdata == FALSE && ( sym->mem_type & MT_SPECIAL_MASK ) != MT_ADDRESS )
+#if LABELARRAY
+            if ( length != -1 ) {
+                sym->total_size = ti.size * length;
+                sym->total_length = length;
+                sym->isarray = TRUE;
+            } else
+#endif
+            {
+                sym->total_size = ti.size;
+                sym->total_length = 1;
+            }
         return( NOT_ERROR );
     }
     return( ERROR );

@@ -10,6 +10,9 @@ call :coffdbg
 rem ifdef calls jwasmr ( won't run in 64-bit Windows )
 call :ifdef
 call :pe
+call :zne
+call :zg
+call :bin
 exit
 
 :cmpbin
@@ -42,11 +45,16 @@ if errorlevel 1 goto end
 goto end
 
 :coff
-rem weak externals
+rem weak externals [ extern sym (altname) ...]
 jwasm -q -coff EXTERN4.ASC
 if errorlevel 1 goto end
 ..\tools\link /nologo /subsystem:console EXTERN4.OBJ
 ..\tools\jfc -pe EXTERN4.EXE EXTERN4.EXP
+
+rem weak externals [ ALIAS <> = <> ]
+jwasm -q -coff EXTERN11.ASC
+if errorlevel 1 goto end
+..\tools\jfc -co EXTERN11.OBJ EXTERN11.EXP
 
 rem ALIAS segment attribute
 jwasm -q -coff SEGALIAS.ASC
@@ -88,6 +96,30 @@ rem unsupported directives in COFF
 jwasm -q -coff -eq UNSUPP1.ASC
 ..\tools\jfc UNSUPP1.ERR UNSUPP1.EXP
 
+jwasm -q -coff DATA10.ASC
+if errorlevel 1 goto end
+..\tools\jfc -co DATA10.OBJ DATA10.EXP
+
+jwasm -q -coff COFFOP.ASC
+if errorlevel 1 goto end
+..\tools\jfc -co COFFOP.OBJ COFFOP.EXP
+
+rem invalid operands for COFF operators
+jwasm -q -coff -eq COFFOP2.ASC
+..\tools\jfc COFFOP2.ERR COFFOP2.EXP
+
+rem invalid segment attribute (ALIAS) changes
+jwasm -q -coff -eq ALIAS2.ASC
+..\tools\jfc ALIAS2.ERR ALIAS2.EXP
+
+rem COMDAT errors
+jwasm -q -coff -eq COMDAT1.ASC
+..\tools\jfc COMDAT1.ERR COMDAT1.EXP
+
+rem COMDAT object module
+jwasm -q -coff COMDAT2.ASC
+..\tools\jfc -co COMDAT2.OBJ COMDAT2.EXP
+
 goto end
 
 :coffdbg
@@ -105,6 +137,24 @@ goto end
 :pe
 jwasm -q -pe PE1.ASC
 ..\tools\jfc -pe PE1.EXE PE1.EXP
+goto end
+
+:zne
+jwasm -q -eq -Zne OVERRID3.ASC
+..\tools\jfc OVERRID3.ERR OVERRID3.EXP
+goto end
+
+:zg
+jwasm -q -Zg -bin LOCAL3.ASC
+..\tools\jfc LOCAL3.BIN LOCAL3.EXP
+
+jwasm -q -Zg -bin INVOKE21.ASC
+..\tools\jfc INVOKE21.BIN INVOKE21.EXP
+goto end
+
+:bin
+jwasm -q -eq -bin STARTUP4.ASC
+..\tools\jfc STARTUP4.ERR STARTUP4.EXP
 goto end
 
 :end

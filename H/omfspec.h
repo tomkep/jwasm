@@ -86,6 +86,7 @@ enum {
 
 /*
  *  INTEL Segment Combination Attributes - C field
+ *  JWasm uses COMB_INVALID, COMB_ADDOFF, COMB_STACK & COMB_COMMON
  */
 
 enum {
@@ -208,14 +209,17 @@ enum cmd_omf {
     CMD_COMDEF          = 0xb0,     /* communal definition              */
     CMD_BAKPAT          = 0xb2,     /* backpatch record (for Quick C)   */
     CMD_BAKP32          = 0xb3,
+
+    /* the following types are used to make local names known to the linker */
     CMD_LEXTDEF         = 0xb4,     /* local import names record        */
     CMD_STATIC_EXTDEF   = 0xb4,
-    CMD_LEXTDEF32       = 0xb5,     /* 32-bit local import names record */
+    CMD_LEXTDEF32       = 0xb5,     /* local 32-bit import names record */
     CMD_STATIC_EXTD32   = 0xb5,
     CMD_LPUBDEF         = 0xb6,     /* local public names def record    */
     CMD_LPUBDEF32       = 0xb7,
     CMD_LCOMDEF         = 0xb8,     /* local communal names def record  */
     CMD_STATIC_COMDEF   = 0xb8,
+
     CMD_CEXTDF          = 0xbc,     /* external reference to a COMDAT   */
     CMD_COMDAT          = 0xc2,     /* initialized communal data record */
     CMD_COMD32          = 0xc3,     /* 32-bit version                   */
@@ -267,10 +271,16 @@ enum {
     CMT_TNL = 0x40,   /* no list bit */
 };
 /*
- * Comment classes
- * JWasm uses: CMT_DOSSEG, CMT_DEFAULT_LIBRARY, CMT_DLL_ENTRY,
- *             CMT_MS_END_PASS_1, CMT_DEPENDENCY, CMT_LINKER_DIRECTIVE
- *             CMT_DISASM_DIRECTIVE, CMT_MS_OMF, CMT_WKEXT.
+ * Comment classes. JWasm uses:
+ * - CMT_DOSSEG           : dosseg directive
+ * - CMT_DEFAULT_LIBRARY  : includelib directive
+ * - CMT_DLL_ENTRY        : PROC's EXPORT attribute
+ * - CMT_MS_END_PASS_1    : end of pass one
+ * - CMT_DEPENDENCY       : include directive, Borland specific
+ * - CMT_LINKER_DIRECTIVE : wlink specials
+ * - CMT_DISASM_DIRECTIVE : wdis special
+ * - CMT_MS_OMF           : codeview debug info version
+ * - CMT_WKEXT            : extern directive with altname
  */
 enum {
     CMT_LANGUAGE_TRANS  = 0x00, /* Language translator comment          */
@@ -386,13 +396,18 @@ enum {
     COMDEF_LEAF_4       = 0x88  /* 4 byte size field                    */
 };
 
+/* COMDAT (initialized communal data);
+ * record type 0xC2/0xC3;
+ * MS extension introduced for MSC 7.
+ */
 enum {
 /*
- *  COMDAT flags
+ *  COMDAT flags 
  */
     COMDAT_CONTINUE     = 0x01, /* continuation of previous COMDAT */
     COMDAT_ITERATED     = 0x02, /* LIDATA form of COMDAT */
     COMDAT_LOCAL        = 0x04, /* COMDAT is local to this module */
+    COMDAT_DATAINCODE   = 0x08, /* data in code segment */
 /*
  *  COMDAT allocation type
  */

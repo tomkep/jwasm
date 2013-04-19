@@ -353,7 +353,7 @@ ret_code SubStrDir( int i, struct asm_tok tokenarray[] )
     DebugMsg1(("SubStrDir(%s): src=>%s<\n", name, p));
 
     if ( tokenarray[i].token != T_COMMA ) {
-        EmitError( EXPECTING_COMMA );
+        EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
         return( ERROR );
     }
     i++;
@@ -381,7 +381,7 @@ ret_code SubStrDir( int i, struct asm_tok tokenarray[] )
     }
     if ( tokenarray[i].token != T_FINAL ) {
         if ( tokenarray[i].token != T_COMMA ) {
-            EmitError( EXPECTING_COMMA );
+            EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
             return( ERROR );
         }
         i++;
@@ -593,7 +593,7 @@ ret_code InStrDir( int i, struct asm_tok tokenarray[] )
             EmitWarn( 3, POSITIVE_VALUE_EXPECTED );
         }
         if ( tokenarray[i].token != T_COMMA ) {
-            EmitError( EXPECTING_COMMA );
+            EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
             return( ERROR );
         }
         i++; /* skip comma */
@@ -622,7 +622,7 @@ ret_code InStrDir( int i, struct asm_tok tokenarray[] )
 
     i++;
     if ( tokenarray[i].token != T_COMMA ) {
-        EmitError( EXPECTING_COMMA );
+        EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
         return( ERROR );
     }
     i++;

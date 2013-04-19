@@ -10,7 +10,7 @@
 /* Characteristics flags */
 #define IMAGE_FILE_RELOCS_STRIPPED           0x0001  // no relocations
 #define IMAGE_FILE_EXECUTABLE_IMAGE          0x0002  // is executable
-#define IMAGE_FILE_LINE_NUMS_STRIPPED        0x0004  // no line nunber info
+#define IMAGE_FILE_LINE_NUMS_STRIPPED        0x0004  // no line number info
 #define IMAGE_FILE_LOCAL_SYMS_STRIPPED       0x0008  // no local symbols
 #define IMAGE_FILE_LARGE_ADDRESS_AWARE       0x0020  // App can handle >2gb addresses
 #define IMAGE_FILE_32BIT_MACHINE             0x0100  // 32 bit word machine.

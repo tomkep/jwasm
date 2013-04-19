@@ -317,6 +317,8 @@ ret_code AliasDirective( int i, struct asm_tok tokenarray[] )
 
         sym->state = SYM_ALIAS;
         sym->substitute = sym2;
+        /* v2.10: copy language type of alias */
+        sym->langtype = sym2->langtype;
         sym_add_table( &SymTables[TAB_ALIAS], (struct dsym *)sym ); /* add ALIAS */
         return( NOT_ERROR );
     }

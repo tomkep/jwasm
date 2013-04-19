@@ -51,4 +51,6 @@ extern ret_code         RetInstr( int, struct asm_tok[], int );   /* handle RET/
 extern void             write_prologue( struct asm_tok[] );
 extern void             ProcInit( void );
 
+extern void             ProcCheckOpen( void );
+
 #endif

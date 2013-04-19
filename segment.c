@@ -133,11 +133,13 @@ void UpdateCurPC( struct asym *sym, void *p )
         sym->mem_type = MT_EMPTY;
         sym->segment = NULL; /* v2.07: needed again */
         sym->offset = CurrStruct->sym.offset + (CurrStruct->next ? CurrStruct->next->sym.offset : 0);
-    } else {
+    } else if ( CurrSeg ) { /* v2.10: check for CurrSeg != NULL */
         sym->mem_type = MT_NEAR;
         sym->segment = (struct asym *)CurrSeg;
         sym->offset = GetCurrOffset();
-    }
+    } else
+        EmitErr( MUST_BE_IN_SEGMENT_BLOCK ); /* v2.10: added */
+
     DebugMsg1(("UpdateCurPC: curr value=%" FX32 "h\n", sym->offset ));
 }
 
@@ -217,18 +219,18 @@ static void UpdateCurrSegVars( void )
     info = &(SegAssumeTable[ ASSUME_CS ]);
     if( CurrSeg == NULL ) {
         info->symbol = NULL;
-        info->flat = FALSE;
+        info->is_flat = FALSE;
         info->error = TRUE;
         symCurSeg->string_ptr = "";
         //symPC.segment = NULL; /* v2.05: removed */
     } else {
-        info->flat = FALSE;
+        info->is_flat = FALSE;
         info->error = FALSE;
         /* fixme: OPTION OFFSET:SEGMENT? */
         if( CurrSeg->e.seginfo->group != NULL ) {
             info->symbol = CurrSeg->e.seginfo->group;
             if ( info->symbol == &ModuleInfo.flat_grp->sym )
-                info->flat = TRUE;
+                info->is_flat = TRUE;
         } else {
             info->symbol = &CurrSeg->sym;
         }
@@ -642,9 +644,10 @@ void SetSymSegOfs( struct asym *sym )
     sym->offset = GetCurrOffset();
 }
 
+/* get segment type from alignment, combine type or class name */
 
-static enum seg_type TypeFromClassName( const struct dsym *seg, const char *name )
-/********************************************************************************/
+enum seg_type TypeFromClassName( const struct dsym *seg, const struct asym *clname )
+/**********************************************************************************/
 {
     int     slen;
     char    uname[MAX_ID_LEN+1];
@@ -656,14 +659,14 @@ static enum seg_type TypeFromClassName( const struct dsym *seg, const char *name
     if ( seg->e.seginfo->combine == COMB_STACK )
         return( SEGTYPE_STACK );
 
-    if( name == NULL )
+    if( clname == NULL )
         return( SEGTYPE_UNDEF );
 
-    if( _stricmp( name, GetCodeClass() ) == 0 )
+    if( _stricmp( clname->name, GetCodeClass() ) == 0 )
         return( SEGTYPE_CODE );
 
-    slen = strlen( name );
-    strcpy( uname, name );
+    slen = clname->name_size;
+    memcpy( uname, clname->name, clname->name_size + 1 );
     _strupr( uname );
     switch( slen ) {
     default:
@@ -756,7 +759,9 @@ static struct asym *FindClass( const char *name, int len )
     return( NULL );
 }
 
-/* add a class name to the lname queue */
+/* add a class name to the lname queue
+ * if it doesn't exist yet.
+ */
 
 static struct asym *CreateClassLname( const char *name )
 /******************************************************/
@@ -921,7 +926,7 @@ static void UnlinkSeg( struct dsym *dir )
 ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
 /*******************************************************/
 {
-    char                is_old;
+    char                is_old = FALSE;
     char                *token;
     int                 typeidx;
     const struct typeinfo *type;          /* type of option */
@@ -961,7 +966,6 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         sym->list = TRUE; /* always list segments */
         dir = (struct dsym *)sym;
         dir->e.seginfo->seg_idx = ++ModuleInfo.g.num_segs;
-        is_old = FALSE;
 #if 0 //COFF_SUPPORT || ELF_SUPPORT /* v2.09: removed, since not Masm-compatible */
         if ( Options.output_format == OFORMAT_COFF
 #if ELF_SUPPORT
@@ -992,7 +996,6 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         dir = (struct dsym *)sym;
         if( dir->e.seginfo->lname_idx == 0 ) {
             /* segment was forward referenced (in a GROUP directive), but not really set up */
-            is_old = FALSE;
             /* the segment list is to be sorted.
              * So unlink the segment and add it at the end.
              */
@@ -1158,7 +1161,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
                 if ( opndx.value == 5 ) {
                     struct asym *sym2;
                     if ( tokenarray[i].token != T_COMMA ) {
-                        EmitError( EXPECTING_COMMA );
+                        EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
                         i = Token_Count; /* stop further parsing of this line */
                         break;
                     }
@@ -1206,7 +1209,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
             } else
                 dir->e.seginfo->Ofssize = type->value;
             break;
-#if COFF_SUPPORT || ELF_SUPPORT
+#if COFF_SUPPORT || ELF_SUPPORT || PE_SUPPORT
         case INIT_CHAR_INFO:
             dir->e.seginfo->info = TRUE; /* fixme: check that this flag isn't changed */
             break;
@@ -1214,7 +1217,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
             DebugMsg1(("SegmentDir(%s): characteristics found\n", name ));
             /* characteristics are restricted to COFF/ELF/BIN-PE */
             if ( Options.output_format == OFORMAT_OMF
-#if BIN_SUPPORT
+#if PE_SUPPORT
                 || ( Options.output_format == OFORMAT_BIN && ModuleInfo.sub_format != SFORMAT_PE )
 #endif
                ) {
@@ -1223,7 +1226,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
                 newcharacteristics |= type->value;
             break;
         case INIT_ALIAS:
-            DebugMsg1(("SegmentDir(%s): ALIAS found\n", name ));
+            DebugMsg1(("SegmentDir(%s): ALIAS found, curr value=%s\n", name, dir->e.seginfo->aliasname ? dir->e.seginfo->aliasname : "NULL" ));
             /* alias() is restricted to COFF/ELF/BIN-PE */
             if ( Options.output_format == OFORMAT_OMF
                 || ( Options.output_format == OFORMAT_BIN && ModuleInfo.sub_format != SFORMAT_PE )
@@ -1251,14 +1254,26 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
                 EmitErr( EXPECTED, ")" );
                 break;
             }
-            dir->e.seginfo->aliasname = LclAlloc( tokenarray[temp].stringlen );
-            memcpy( dir->e.seginfo->aliasname, tokenarray[temp].string_ptr+1, tokenarray[temp].stringlen );
-            *(dir->e.seginfo->aliasname+tokenarray[temp].stringlen) = NULLC;
+            /* v2.10: if segment already exists, check that old and new aliasname are equal */
+            if ( is_old ) {
+                if ( dir->e.seginfo->aliasname == NULL ||
+                    ( tokenarray[temp].stringlen != strlen( dir->e.seginfo->aliasname ) ) ||
+                    memcmp( dir->e.seginfo->aliasname, tokenarray[temp].string_ptr + 1, tokenarray[temp].stringlen ) ) {
+                    EmitErr( SEGDEF_CHANGED, dir->sym.name, MsgGetEx( TXT_ALIASNAME ) );
+                    break;
+                }
+            } else {
+                /* v2.10: " + 1" was missing in next line */
+                dir->e.seginfo->aliasname = LclAlloc( tokenarray[temp].stringlen + 1 );
+                memcpy( dir->e.seginfo->aliasname, tokenarray[temp].string_ptr+1, tokenarray[temp].stringlen );
+                *(dir->e.seginfo->aliasname+tokenarray[temp].stringlen) = NULLC;
+            }
+            DebugMsg1(("SegmentDir(%s): ALIAS argument=>%s<\n", name, dir->e.seginfo->aliasname ));
             break;
 #endif
 #ifdef DEBUG_OUT
         default: /* shouldn't happen */
-            myassert( 0 );
+            /**/myassert( 0 );
             break;
 #endif
         }
@@ -1269,7 +1284,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         enum seg_type res;
 
         //token = GetLname( dir->e.seginfo->class_name_idx );
-        res = TypeFromClassName( dir, dir->e.seginfo->clsym ? dir->e.seginfo->clsym->name : NULL );
+        res = TypeFromClassName( dir, dir->e.seginfo->clsym );
         if( res != SEGTYPE_UNDEF ) {
             dir->e.seginfo->segtype = res;
         }

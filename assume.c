@@ -43,22 +43,27 @@
 #include "tokenize.h"
 #include "listing.h"
 
-/* prototypes */
-
-/* table SegAssume is for the segment registers: */
-
-struct assume_info SegAssumeTable[NUM_SEGREGS];
-
-/* table StdAssume is for the standard registers:
- * (E)AX=0, (E)CX=1, (E)DX=2, (E)BX=3
- * (E)SP=4, (E)BP=5, (E)SI=6, (E)DI=7
- */
 #if AMD64_SUPPORT
 #define NUM_STDREGS 16
 #else
 #define NUM_STDREGS 8
 #endif
 
+/* prototypes */
+
+/* todo: move static variables to ModuleInfo */
+
+/* table SegAssume is for the segment registers;
+ * for order see enum assume_segreg.
+ */
+struct assume_info SegAssumeTable[NUM_SEGREGS];
+
+/* table StdAssume is for the standard registers;
+ * order does match regno in special.h:
+ * (R|E)AX=0, (R|E)CX=1, (R|E)DX=2, (R|E)BX=3
+ * (R|E)SP=4, (R|E)BP=5, (R|E)SI=6, (R|E)DI=7
+ * R8 .. R15.
+ */
 struct assume_info StdAssumeTable[NUM_STDREGS];
 
 static struct asym *stdsym[NUM_STDREGS];
@@ -96,13 +101,15 @@ void GetSegAssumeTable( void *savedstate )
  * register assumes need more work to save/restore the
  * current status, because they have their own
  * type symbols, which may be reused.
+ * this functions is also called by context.c, ContextDirective()!
  */
 
 void SetStdAssumeTable( void *savedstate, struct stdassume_typeinfo *ti )
 /***********************************************************************/
 {
     int i;
-    DebugMsg(("SetStdAssumeTable\n" ));
+
+    DebugMsg(("SetStdAssumeTable enter\n" ));
     memcpy( &StdAssumeTable, savedstate, sizeof(StdAssumeTable) );
     for ( i = 0; i < NUM_STDREGS; i++, ti++ ) {
         if ( StdAssumeTable[i].symbol ) {
@@ -141,24 +148,53 @@ void AssumeSaveState( void )
 }
 #endif
 
-void AssumeInit( void )
-/*********************/
+void AssumeInit( int pass ) /* pass may be -1 here! */
+/*************************/
 {
     int reg;
 
     for( reg = 0; reg < NUM_SEGREGS; reg++ ) {
         SegAssumeTable[reg].symbol = NULL;
         SegAssumeTable[reg].error = FALSE;
-        SegAssumeTable[reg].flat = FALSE;
+        SegAssumeTable[reg].is_flat = FALSE;
     }
-    for( reg = 0; reg < NUM_STDREGS; reg++ ) {
-        StdAssumeTable[reg].symbol = NULL;
-        StdAssumeTable[reg].error = 0;
-        stdsym[reg] = NULL;
+
+    /* the GPR assumes are handled somewhat special by masm.
+     * they aren't reset for each pass - instead they keep their value.
+     */
+
+    if ( pass <= PASS_1 ) { /* v2.10: just reset assumes in pass one */
+
+        for( reg = 0; reg < NUM_STDREGS; reg++ ) {
+            StdAssumeTable[reg].symbol = NULL;
+            StdAssumeTable[reg].error = 0;
+        }
+        if ( pass == PASS_1 )
+            memset( &stdsym, 0, sizeof( stdsym ) );
     }
 #if FASTPASS
-    if ( Parse_Pass != PASS_1 ) {
+    if ( pass > PASS_1 && UseSavedState ) {
         SetSegAssumeTable( &saved_SegAssumeTable );
+#if 0
+        /* v2.10: this is a weird Masm feature:
+         * if a GPR is assumed to be a pointer to a struct,
+         * it isn't reset when a new pass starts.
+         * see assume11.asm and assume12.asm
+         */
+        if ( pass == PASS_2 ) {
+            struct assume_info *psaved = &saved_StdAssumeTable;
+            struct stdassume_typeinfo *ptype = &saved_StdTypeInfo;
+            for ( reg = 0; reg < NUM_STDREGS; reg++, psaved++, ptype++ )
+                if ( psaved->symbol == NULL && StdAssumeTable[reg].symbol && StdAssumeTable[reg].symbol->target_type ) {
+                    psaved->symbol = StdAssumeTable[reg].symbol;
+                    ptype->type        = psaved->symbol->type;
+                    ptype->target_type = psaved->symbol->target_type;
+                    ptype->mem_type    = psaved->symbol->mem_type;
+                    ptype->ptr_memtype = psaved->symbol->ptr_memtype;
+                    ptype->is_ptr      = psaved->symbol->is_ptr;
+                }
+        }
+#endif
         SetStdAssumeTable( &saved_StdAssumeTable, saved_StdTypeInfo );
     }
 #endif
@@ -263,7 +299,7 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
 
         if( ( tokenarray[i].token == T_ID )
             && (0 == _stricmp( tokenarray[i].string_ptr, szNothing )) ) {
-            AssumeInit();
+            AssumeInit( -1 );
             i++;
             break;
         }
@@ -310,7 +346,7 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
 
         if( 0 == _stricmp( tokenarray[i].string_ptr, szError )) {
             if ( segtable ) {
-                info->flat = FALSE;
+                info->is_flat = FALSE;
                 info->error = TRUE;
             } else
                 info->error |= (( reg >= T_AH && reg <= T_BH ) ? RH_ERROR : ( flags & OP_R ));
@@ -318,7 +354,7 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
             i++;
         } else if( 0 == _stricmp( tokenarray[i].string_ptr, szNothing )) {
             if ( segtable ) {
-                info->flat = FALSE;
+                info->is_flat = FALSE;
                 info->error = FALSE;
             } else
                 info->error &= ~(( reg >= T_AH && reg <= T_BH ) ? RH_ERROR : ( flags & OP_R ));
@@ -388,12 +424,12 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
                     EmitError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
                     return( ERROR );
                 }
-                info->flat = ( info->symbol == &ModuleInfo.flat_grp->sym );
+                info->is_flat = ( info->symbol == &ModuleInfo.flat_grp->sym );
                 break;
             case EXPR_REG:
                 if ( GetValueSp( opnd.base_reg->tokval ) & OP_SR ) {
                     info->symbol = SegAssumeTable[ GetRegNo( opnd.base_reg->tokval ) ].symbol;
-                    info->flat = SegAssumeTable[ GetRegNo( opnd.base_reg->tokval ) ].flat;
+                    info->is_flat = SegAssumeTable[ GetRegNo( opnd.base_reg->tokval ) ].is_flat;
                     break;
                 }
             default:
@@ -441,7 +477,7 @@ enum assume_segreg search_assume( const struct asym *sym,
         if( SegAssumeTable[def].symbol == sym )
             return( def );
         if( search_grps && grp ) {
-            if( SegAssumeTable[def].flat && grp == &ModuleInfo.flat_grp->sym )
+            if( SegAssumeTable[def].is_flat && grp == &ModuleInfo.flat_grp->sym )
                 return( def );
             if( SegAssumeTable[def].symbol == grp )
                 return( def );
@@ -459,7 +495,7 @@ enum assume_segreg search_assume( const struct asym *sym,
     /* now check the groups */
     if( search_grps && grp )
         for( def = 0; def < NUM_SEGREGS; def++ ) {
-            if( SegAssumeTable[searchtab[def]].flat && grp == &ModuleInfo.flat_grp->sym )
+            if( SegAssumeTable[searchtab[def]].is_flat && grp == &ModuleInfo.flat_grp->sym )
                 return( searchtab[def] );
             if( SegAssumeTable[searchtab[def]].symbol == grp ) {
                 return( searchtab[def] );
@@ -478,7 +514,7 @@ enum assume_segreg search_assume( const struct asym *sym,
 struct asym *GetOverrideAssume( enum assume_segreg override )
 /***********************************************************/
 {
-    if( SegAssumeTable[override].flat ) {
+    if( SegAssumeTable[override].is_flat ) {
         return( (struct asym *)ModuleInfo.flat_grp );
     }
     return( SegAssumeTable[override].symbol);
@@ -486,23 +522,34 @@ struct asym *GetOverrideAssume( enum assume_segreg override )
 }
 
 /*
+ * GetAssume():
+ * called by check_assume() in parser.c
  * in:
- * override: SegOverride
- * sym: symbol in current memory operand
- * def: default segment assume value
+ * - override: SegOverride
+ * - sym: symbol in current memory operand
+ * - def: default segment assume value
+ * to be fixed: check if symbols with state==SYM_STACK are handled correctly.
  */
 
 enum assume_segreg GetAssume( const struct asym *override, const struct asym *sym, enum assume_segreg def, struct asym * *passume )
-/*********************************************************************************************************************/
+/*********************************************************************************************************************************/
 {
     enum assume_segreg  reg;
 
-    if( ( def != ASSUME_NOTHING ) && SegAssumeTable[def].flat ) {
+    if( ( def != ASSUME_NOTHING ) && SegAssumeTable[def].is_flat ) {
         *passume = (struct asym *)ModuleInfo.flat_grp;
         return( def );
     }
     if( override != NULL ) {
         reg = search_assume( override, def, FALSE );
+#if 1 /* v2.10: added */
+    } else if ( sym->state == SYM_STACK ) {
+        /* stack symbols don't have a segment part.
+         * In case [R|E]BP is used as base, it doesn't matter.
+         * However, if option -Zg is set, this isn't true.
+         */
+        reg = ASSUME_SS;
+#endif
     } else {
         reg = search_assume( sym->segment, def, TRUE );
     }

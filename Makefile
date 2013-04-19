@@ -60,7 +60,7 @@ LINK = $(WATCOM)\binnt\wlink.exe
 #########
 extra_c_flags =
 !if $(DEBUG)
-extra_c_flags += -od -d2 -w3 -DDEBUG_OUT
+extra_c_flags += -od -d2 -w3 -hc -DDEBUG_OUT
 !else
 #extra_c_flags += -obmilrt -s -DNDEBUG
 extra_c_flags += -oxa -s -DNDEBUG
@@ -77,7 +77,7 @@ extra_c_flags += -DDJGPP_SUPPORT=1
 !if $(DEBUG)
 # for OW v1.8, the debug version needs user32.lib to resolve CharUpperA()
 # without it, WD(W) will crash immediately.
-LOPTD = debug dwarf op symfile lib user32.lib
+LOPTD = debug c op cvp, symfile lib user32.lib
 !else
 LOPTD = 
 !endif

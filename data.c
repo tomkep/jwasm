@@ -184,8 +184,9 @@ static ret_code InitializeArray( const struct sfield *f, int *pi, struct asm_tok
  * symtype:  type of data item
  * embedded: is != NULL if proc is called recursively
 
- * currently this proc emits ASM lines with simple types
+ * up to v2.08, this proc did emit ASM lines with simple types
  * to actually "fill" the structure.
+ * since v2.09, it calls data_item() directly.
 
  * Since this function may be reentered, it's necessary to save/restore
  * global variable Token_Count.
@@ -209,15 +210,10 @@ static ret_code InitStructuredVar( int index, struct asm_tok tokenarray[], const
     struct expr     opndx;
     //char            line[MAX_LINE_LEN];
 
-#ifdef DEBUG_OUT
-#if 0 // FASTPASS
-    if ( Parse_Pass > PASS_1 && UseSavedState ) {
-        DebugMsg(("InitStructuredVar(%s): unexpectedly called in pass %u!!!!!\n", symtype->sym.name, Parse_Pass+1 ));
-    }
-#endif
-    DebugMsg1(("InitStructuredVar(%s) enter, total=%" FU32 "/%" FU32 ", init=>%s<, embedded=%s, alignm=%u\n",
-              symtype->sym.name, symtype->sym.total_size, symtype->sym.total_length, tokenarray[index].string_ptr, embedded ? embedded->name : "NULL", symtype->e.structinfo->alignment ));
-#endif
+    DebugMsg1(("InitStructuredVar(%s) enter, total_size=%" FU32 ", init=>%s<, embedded=%s, alignm=%u\n",
+              symtype->sym.name, symtype->sym.total_size, tokenarray[index].string_ptr, embedded ? embedded->name : "NULL", symtype->e.structinfo->alignment ));
+
+    /**/myassert( symtype->sym.state == SYM_TYPE && symtype->sym.typekind != TYPE_TYPEDEF );
 
     if ( tokenarray[index].token == T_STRING ) {
         /* v2.08: no special handling of {}-literals anymore */
@@ -343,7 +339,9 @@ static ret_code InitStructuredVar( int index, struct asm_tok tokenarray[], const
                 if ( c ) {
                     EmitErr( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM, tokenarray[j].tokpos );
                 } else
-                    data_item( &j, tokenarray, NULL, no_of_bytes, f->sym.type, 1, FALSE, f->sym.mem_type & MT_FLOAT, FALSE, i );
+                    if ( ERROR == data_item( &j, tokenarray, NULL, no_of_bytes, f->sym.type, 1, FALSE, f->sym.mem_type & MT_FLOAT, FALSE, i ) ) {
+                        EmitErr( INVALID_DATA_INITIALIZER, f->sym.name );
+                    }
             }
         }
         /* Add padding bytes if necessary (never inside RECORDS!).
@@ -567,7 +565,7 @@ static ret_code data_item( int *start_pos, struct asm_tok tokenarray[], struct a
     struct fixup        *fixup;
     struct expr         opndx;
 
-    DebugMsg1(("data_item( idx=%u [%s], label=%s, no_of_bytes=%" FU32 ", type=%s, dup=%" FX32 "h, struct=%u, is_float=%u ) enter\n",
+    DebugMsg1(("data_item( idx=%u [%s], label=%s, no_of_bytes=%" FU32 ", type=%s, dup=%" FX32 "h, inside_struct=%u, is_float=%u ) enter\n",
                *start_pos, tokenarray[*start_pos].tokpos, sym ? sym->name : "NULL",
                no_of_bytes, type_sym ? type_sym->name : "NULL",
                dup, inside_struct, is_float ));
@@ -586,7 +584,10 @@ next_item:
 
             /* it's either a real data item - then inside_struct is FALSE -
              * or a structure FIELD of arbitrary type.
+             *
+             * v2.10: regression in v2.09: alias types weren't skipped for InitStructuredVar()
              */
+            while ( type_sym->type ) type_sym = type_sym->type;
             if( inside_struct == FALSE ) {
                 if ( InitStructuredVar( i, tokenarray, (struct dsym *)type_sym, NULL ) == ERROR )
                     return( ERROR );
@@ -597,9 +598,10 @@ next_item:
                  * fixme: the best solution is to always set type_sym to NULL if
                  * the type is a TYPEDEF. if the item is a struct member, then
                  * sym is ALWAYS != NULL and the symbol's type can be gained from there.
+                 * v2.10: aliases are now already skipped here ( see above ).
                  */
-                while ( type_sym->type ) /* skip alias types */
-                    type_sym = type_sym->type;
+                //while ( type_sym->type ) /* skip alias types */
+                //    type_sym = type_sym->type;
                 if( type_sym->typekind == TYPE_TYPEDEF && Parse_Pass == PASS_1 )
                     EmitWarn( 2, UNEXPECTED_LITERAL_FOUND_IN_EXPRESSION, tokenarray[i].tokpos );
             }
@@ -608,12 +610,16 @@ next_item:
                 update_sizes( sym, no_of_bytes );
             i++;
             goto item_done;
-#if 0 /* just let EvalOperand() emit 'Unexpected literal...' error */
+#if 0 /* v2.08: just let EvalOperand() emit 'Unexpected literal...' error */
         } else {
-            DebugMsg(("data_item: invalid initializer for structure >%s<\n", tokenarray[i].tokpos ));
-            //EmitError( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM );
-            EmitErr( INVALID_DATA_INITIALIZER );
-            return( ERROR );
+            DebugMsg(("data_item: invalid string initializer >%s<\n", tokenarray[i].tokpos ));
+            /* Masm accepts invalid initializer strings if they are actually never used
+             * for initialization.
+             */
+            if( inside_struct && Parse_Pass == PASS_1 ) {
+                EmitWarn( 2, UNEXPECTED_LITERAL_FOUND_IN_EXPRESSION, tokenarray[i].tokpos );
+                tokenarray[i].token = T_QUESTION_MARK;
+            }
 #endif
         }
     }
@@ -692,10 +698,17 @@ next_item:
     /* a STRUCT/UNION/RECORD data item needs a literal as initializer */
     /* v2.06: changed */
     //if( type_sym != NULL && inside_struct == FALSE ) {
-    if( type_sym != NULL && type_sym->typekind != TYPE_TYPEDEF ) {
-        DebugMsg1(("data_item: error, type=%s needs literal, >%s<\n", type_sym->name, tokenarray[i].tokpos ));
-        EmitErr( STRUCTURE_IMPROPERLY_INITIALIZED, type_sym->name );
-        return( ERROR );
+    //if( type_sym != NULL && type_sym->typekind != TYPE_TYPEDEF ) {
+    if( type_sym ) {
+        /* v2.10: use a temp symbol, so the original type name can be displayed in the error msg. */
+        const struct asym *tmp = type_sym;
+        /* v2.10: check if target type is a struct/union/record; if yes, it's an error. */
+        while ( tmp->type ) tmp = tmp->type;
+        if ( tmp->typekind != TYPE_TYPEDEF ) {
+            DebugMsg1(("data_item: error, type=%s needs literal, >%s<\n", type_sym->name, tokenarray[i].tokpos ));
+            EmitErr( STRUCTURE_IMPROPERLY_INITIALIZED, type_sym->name );
+            return( ERROR );
+        }
     }
 
     /* handle '?' */
@@ -864,7 +877,7 @@ next_item:
     case EXPR_ADDR:
         /* since a fixup will be created, 8 bytes is max */
         if ( no_of_bytes > sizeof(uint_64) ) {
-            EmitError( INVALID_DATA_INITIALIZER );
+            EmitErr( INVALID_DATA_INITIALIZER, sym ? sym->name : "" );
             break;
         }
         /* indirect addressing (incl. stack variables) is invalid */
@@ -913,13 +926,15 @@ next_item:
         case T_OFFSET:
             switch ( no_of_bytes ) {
             case 1:
-                DebugMsg(("data_item.ADDR: error, a offset wont fit in a BYTE\n" ));
                 /* forward reference? */
-                if ( Parse_Pass == PASS_1 && opndx.sym && opndx.sym->state == SYM_UNDEFINED )
-                    ;
-                else
+                if ( Parse_Pass == PASS_1 && opndx.sym && opndx.sym->state == SYM_UNDEFINED ) {
+                    DebugMsg(("data_item.ADDR: forward reference + OFFSET operator + DB -> may become error in Pass 2\n" ));
+                    fixup_type = FIX_VOID; /* v2.10: was regression in v2.09 */
+                } else {
+                    DebugMsg(("data_item.ADDR: error, an offset wont fit in a BYTE\n" ));
                     EmitError( OFFSET_MAGNITUDE_TOO_LARGE );
-                fixup_type = FIX_OFF8;
+                    fixup_type = FIX_OFF8;
+                }
                 break;
             case 2:
                 fixup_type = FIX_OFF16;
@@ -996,7 +1011,7 @@ next_item:
                     ;
                 else {
                     /* v2.08: accept 1-byte absolute externals */
-                    if ( opndx.sym && opndx.sym->state == SYM_EXTERNAL && opndx.abs == TRUE ) {
+                    if ( opndx.sym && opndx.sym->state == SYM_EXTERNAL && opndx.is_abs == TRUE ) {
                     } else {
                         DebugMsg(("data_item.ADDR: error, no of bytes=%u\n", no_of_bytes ));
                         EmitError( MAGNITUDE_TOO_LARGE_FOR_SPECIFIED_SIZE );
@@ -1024,7 +1039,7 @@ next_item:
                         DebugMsg(("data_item.ADDR: error, memtype %X wont fit in a WORD\n", opndx.mem_type));
                         EmitErr( INITIALIZER_MAGNITUDE_TOO_LARGE, opndx.sym ? opndx.sym->name : "" );
                     };
-                } else if ( opndx.sym && opndx.sym->state == SYM_EXTERNAL && opndx.abs == TRUE ) {
+                } else if ( opndx.sym && opndx.sym->state == SYM_EXTERNAL && opndx.is_abs == TRUE ) {
                     /* v2.07a: accept ABSolute externals (regression in v2.07) */
                 } else if ( opndx.sym &&
                            opndx.sym->state != SYM_UNDEFINED &&
@@ -1385,14 +1400,14 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
                     goto label_defined; /* don't relink the label */
 
                 } else {
-                    DebugMsg(("data_dir: errror, symbol redefinition\n"));
+                    DebugMsg(("data_dir(%s): error, symbol redefinition, state=%X\n", sym->name, sym->state ));
                     EmitErr( SYMBOL_REDEFINITION, sym->name );
                     return( ERROR );
                 }
                 /* add the label to the linked list attached to curr segment */
                 /* this allows to reduce the number of passes (see Fixup.c) */
-                ((struct dsym *)sym)->next = (struct dsym *)CurrSeg->e.seginfo->labels;
-                CurrSeg->e.seginfo->labels = sym;
+                ((struct dsym *)sym)->next = (struct dsym *)CurrSeg->e.seginfo->label_list;
+                CurrSeg->e.seginfo->label_list = sym;
 
             } else {
                 old_offset = sym->offset;

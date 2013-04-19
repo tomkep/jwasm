@@ -24,7 +24,7 @@ void      omf_write_grp( void );
 void      omf_write_export( void );
 void      omf_write_lib( void );
 void      omf_write_dosseg( void );
-void      omf_end_of_pass1( void );
+void      omf_end_of_pass1( struct fixup * );
 void      omf_set_filepos( void );
 void      omf_write_ledata( struct dsym * );
 void      omf_write_linnum( void );

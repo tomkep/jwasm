@@ -9,6 +9,7 @@
 *
 ****************************************************************************/
 
+#include <stddef.h>
 #include <ctype.h>
 
 #include "globals.h"
@@ -31,6 +32,16 @@
 #include "segment.h"
 #include "equate.h"
 #include "expreval.h"
+
+#define RAWSIZE_ROUND 1 /* SectionHeader.SizeOfRawData is multiple FileAlign. Required by MS COFF spec */
+#define IMGSIZE_ROUND 1 /* OptionalHeader.SizeOfImage is multiple ObjectAlign. Required by MS COFF spec */
+
+#define IMPDIRSUF  "2"  /* import directory segment suffix */
+#define IMPNDIRSUF "3"  /* import data null directory entry segment suffix */
+#define IMPILTSUF  "4"  /* ILT segment suffix */
+#define IMPIATSUF  "5"  /* IAT segment suffix */
+#define IMPSTRSUF  "6"  /* import strings segment suffix */
+
 #endif
 
 /* pespec.h contains MZ header declaration */
@@ -71,6 +82,9 @@ struct calc_param {
         uint_64 imagebase64;  /* -pe: image base */
 #endif
     };
+#if RAWSIZE_ROUND
+    uint_32 rawpagesize;
+#endif
 #endif
 };
 
@@ -103,9 +117,10 @@ enum pe_flags_values {
 static const char *hdrname = ".hdr$";
 static const char *hdrattr = "read public 'HDR'";
 static const char *edataname = ".edata";
-static const char *edataattr = "FLAT read public 'DATA'";
+static const char *edataattr = "FLAT read public alias('.rdata') 'DATA'";
 static const char *idataname = ".idata$";
-static const char *idataattr = "FLAT read public 'DATA'";
+//static const char *idataattr = "FLAT read public 'DATA'";
+static const char *idataattr = "FLAT read public alias('.rdata') 'DATA'";
 
 static const char *mzcode[] = {
     "db 'M','Z'",        /* e_magic */
@@ -133,7 +148,7 @@ static const struct IMAGE_PE_HEADER32 pe32def = {
     { IMAGE_NT_OPTIONAL_HDR32_MAGIC,
     5,1,0,0,0,0,0,0, /* linkervers maj/min, sizeof code/init/uninit, entrypoint, base code/data */
     0x400000,
-    0x1000, 0x200,
+    0x1000, 0x200, /* SectionAlignment, FileAlignment */
     4,0,0,0,4,0, /* OSversion maj/min, Imagevers maj/min, Subsystemvers maj/min */
     0,0,0,0, /* Win32vers, sizeofimage, sizeofheaders, checksum */
     IMAGE_SUBSYSTEM_WINDOWS_CUI,0,
@@ -151,7 +166,7 @@ static const struct IMAGE_PE_HEADER64 pe64def = {
     { IMAGE_NT_OPTIONAL_HDR64_MAGIC,
     5,1,0,0,0,0,0, /* linkervers maj/min, sizeof code/init/uninit, entrypoint, base code */
     0x400000,
-    0x1000, 0x200,
+    0x1000, 0x200, /* SectionAlignment, FileAlignment */
     4,0,0,0,4,0,
     0,0,0,0,
     IMAGE_SUBSYSTEM_WINDOWS_CUI,0,
@@ -443,7 +458,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             /* assembly time variable (also $ symbol) in reloc? */
             /* v2.07: moved inside if-block, using new local var "offset" */
             if ( fixup->sym->variable ) {
-                seg = (struct dsym *)fixup->segment;
+                seg = (struct dsym *)fixup->segment_var;
                 offset = 0;
                 DebugMsg(("DoFixup(%s, %04" FX32 ", %s): variable, fixup->segment=%Xh fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
                           curr->sym.name, fixup->location, fixup->sym->name, seg, fixup->offset, fixup->sym->offset ));
@@ -514,7 +529,9 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             }
 
         } else {
-            seg = (struct dsym *)fixup->segment;
+            /* v2.10: member segment_var is for assembly-time variables only */
+            //seg = (struct dsym *)fixup->segment_var;
+            seg = NULL;
             DebugMsg(("DoFixup(%s, %04" FX32 ", %s): target segment=0, fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
                       curr->sym.name, fixup->location, fixup->sym ? fixup->sym->name : "", fixup->offset ? offset : 0 ));
             value = 0;
@@ -614,6 +631,15 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             }
 #endif
         case FIX_PTR16:
+#if 1
+            /* v2.10: absolute segments are ok */
+            if ( seg && seg->e.seginfo->segtype == SEGTYPE_ABS ) {
+                *codeptr.dw = value & 0xffff;
+                codeptr.dw++;
+                *codeptr.dw = seg->e.seginfo->abs_frame;
+                break;
+            }
+#endif
 #if MZ_SUPPORT
             if ( ModuleInfo.sub_format == SFORMAT_MZ ) {
                 DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_PTR16, seg->start=%Xh\n", curr->sym.name, fixup->location, seg->e.seginfo->start_offset ));
@@ -633,6 +659,15 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             }
 #endif
         case FIX_PTR32:
+#if 1
+            /* v2.10: absolute segments are ok */
+            if ( seg && seg->e.seginfo->segtype == SEGTYPE_ABS ) {
+                *codeptr.dd = value;
+                codeptr.dd++;
+                *codeptr.dw = seg->e.seginfo->abs_frame;
+                break;
+            }
+#endif
 #if MZ_SUPPORT
             if ( ModuleInfo.sub_format == SFORMAT_MZ ) {
                 DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_PTR32\n", curr->sym.name, fixup->location ));
@@ -746,6 +781,11 @@ void pe_create_PE_header( void )
         pehdr->e.seginfo->segtype = SEGTYPE_HDR;
         pehdr->e.seginfo->CodeBuffer = LclAlloc( size );
         memcpy( pehdr->e.seginfo->CodeBuffer, p, size );
+#ifdef __UNIX__
+        time((long *)(pehdr->e.seginfo->CodeBuffer+offsetof( struct IMAGE_PE_HEADER32, FileHeader.TimeDateStamp )));
+#else
+        time((time_t *)(pehdr->e.seginfo->CodeBuffer+offsetof( struct IMAGE_PE_HEADER32, FileHeader.TimeDateStamp )));
+#endif
         sym = CreateVariable( "@pe_file_flags", ((struct IMAGE_PE_HEADER32 *)p)->FileHeader.Characteristics );
         if ( sym ) {
             DebugMsg(("pe_create_PE_header: CreateVariable(@pe_file_flags)=%X [value=%X]\n", sym, sym ? sym->value : 0 ));
@@ -820,7 +860,7 @@ void pe_create_section_table( void )
             DebugMsg(("pe_create_section_table: items in object table: %u\n", objs ));
             objtab->sym.max_offset = sizeof(struct IMAGE_SECTION_HEADER) * objs;
             /* alloc space for 1 more section (.reloc) */
-            objtab->e.seginfo->CodeBuffer = LclAlloc( objtab->sym.max_offset );
+            objtab->e.seginfo->CodeBuffer = LclAlloc( objtab->sym.max_offset + sizeof(struct IMAGE_SECTION_HEADER) );
         }
     }
 }
@@ -841,13 +881,28 @@ void pe_create_section_table( void )
  };
 */
 
+struct expitem {
+    char *name;
+    uint idx;
+};
+
+static int compare_exp( const void *p1, const void *p2 )
+/*******************************************************/
+{
+    return( strcmp( ((struct expitem *)p1)->name, ((struct expitem *)p2)->name ) );
+}
+
 void pe_emit_export_data( void )
 /******************************/
 {
     struct dsym *curr;
+    int_32 timedate;
     int cnt;
     int i;
     char *name;
+    char *fname;
+    struct expitem *pitems;
+    struct expitem *pexp;
 
     DebugMsg(("pe_emit_export_data enter\n" ));
     for( curr = SymTables[TAB_PROC].head, cnt = 0; curr; curr = curr->nextproc ) {
@@ -859,24 +914,55 @@ void pe_emit_export_data( void )
         AddLineQueueX( "%r DOTNAME", T_OPTION );
         /* create .edata segment */
         AddLineQueueX( "%s %r %r %s", edataname, T_SEGMENT, T_DWORD, edataattr );
-        /* create export directory */
-        AddLineQueueX( "DD 0, 0, 0, %r @%s_name, %u, %u, %u, %r @%s_func, %r @%s_names, %r @%s_nameord",
-                      T_IMAGEREL, name, 1, cnt, cnt, T_IMAGEREL, name, T_IMAGEREL, name, T_IMAGEREL, name );
+#ifdef __UNIX__
+        time( &timedate );
+#else
+        time( (time_t *)&timedate );
+#endif
+        /* create export directory: Characteristics, Timedate, MajMin, Name, Base, ... */
+        AddLineQueueX( "DD 0, 0%xh, 0, %r @%s_name, %u, %u, %u, %r @%s_func, %r @%s_names, %r @%s_nameord",
+                      timedate, T_IMAGEREL, name, 1, cnt, cnt, T_IMAGEREL, name, T_IMAGEREL, name, T_IMAGEREL, name );
+
+        /* the name pointer table must be in ascending order!
+         * so we have to fill an array of exports and sort it.
+         */
+        pitems = (struct expitem *)myalloca( cnt * sizeof( struct expitem ) );
+        for( curr = SymTables[TAB_PROC].head, pexp = pitems, i = 0; curr; curr = curr->nextproc ) {
+            if( curr->e.procinfo->export ) {
+                pexp->name = curr->sym.name;
+                pexp->idx  = i++;
+                pexp++;
+            }
+        }
+        qsort( pitems, cnt, sizeof( struct expitem ), compare_exp );
+
+        /* emit export address table.
+         * would be possible to just use the array of sorted names,
+         * but we want to emit the EAT being sorted by address.
+         */
         AddLineQueueX( "@%s_func %r DWORD", name, T_LABEL );
         for( curr = SymTables[TAB_PROC].head; curr; curr = curr->nextproc ) {
             if( curr->e.procinfo->export )
                 AddLineQueueX( "DD %r %s", T_IMAGEREL, curr->sym.name );
         }
+
+        /* emit the name pointer table */
         AddLineQueueX( "@%s_names %r DWORD", name, T_LABEL );
-        for( curr = SymTables[TAB_PROC].head; curr; curr = curr->nextproc ) {
-            if( curr->e.procinfo->export )
-                AddLineQueueX( "DD %r @%s", T_IMAGEREL, curr->sym.name );
-        }
+        for ( i = 0; i < cnt; i++ )
+            AddLineQueueX( "DD %r @%s", T_IMAGEREL, (pitems+i)->name );
+
+        /* ordinal table. each ordinal is an index into the export address table */
         AddLineQueueX( "@%s_nameord %r WORD", name, T_LABEL );
         for( i = 0; i < cnt; i++ ) {
-            AddLineQueueX( "DW %u", i );
+            AddLineQueueX( "DW %u", (pitems+i)->idx );
         }
-        AddLineQueueX( "@%s_name DB '%s',0", name, name );
+        /* v2.10: name+ext of dll */
+        //AddLineQueueX( "@%s_name DB '%s',0", name, name );
+        for ( fname = CurrFName[OBJ] + strlen( CurrFName[OBJ] ); fname > CurrFName[OBJ]; fname-- )
+            if ( *fname == '/' || *fname == '\\' || *fname == ':' )
+                break;
+        AddLineQueueX( "@%s_name DB '%s',0", name, fname );
+
         for( curr = SymTables[TAB_PROC].head; curr; curr = curr->nextproc ) {
             if( curr->e.procinfo->export ) {
                 Mangle( &curr->sym, StringBufferEnd );
@@ -888,6 +974,15 @@ void pe_emit_export_data( void )
         RunLineQueue();
     }
 }
+
+/* write import data.
+ * convention:
+ * .idata$2: import directory
+ * .idata$3: final import directory NULL entry
+ * .idata$4: ILT entry
+ * .idata$5: IAT entry
+ * .idata$6: strings
+ */
 
 void pe_emit_import_data( void )
 /******************************/
@@ -918,12 +1013,12 @@ void pe_emit_import_data( void )
                 *pdot = '_';
 
             /* import directory entry */
-            AddLineQueueX( "%s2 %r %r %s", idataname, T_SEGMENT, T_DWORD, idataattr );
+            AddLineQueueX( "%s" IMPDIRSUF " %r %r %s", idataname, T_SEGMENT, T_DWORD, idataattr );
             AddLineQueueX( "DD %r @%s_ilt, 0, 0, %r @%s_name, %r @%s_iat", T_IMAGEREL, p->name, T_IMAGEREL, p->name, T_IMAGEREL, p->name );
-            AddLineQueueX( "%s2 %r", idataname, T_ENDS );
+            AddLineQueueX( "%s" IMPDIRSUF " %r", idataname, T_ENDS );
 
             /* emit ILT */
-            AddLineQueueX( "%s4 %r %s %s", idataname, T_SEGMENT, align, idataattr );
+            AddLineQueueX( "%s" IMPILTSUF " %r %s %s", idataname, T_SEGMENT, align, idataattr );
             AddLineQueueX( "@%s_ilt label %r", p->name, ptrtype );
             for ( curr = SymTables[TAB_EXT].head; curr != NULL ; curr = curr->next ) {
                 if ( curr->sym.iat_used && curr->sym.dll == p ) {
@@ -932,24 +1027,24 @@ void pe_emit_import_data( void )
             }
             /* ILT termination entry */
             AddLineQueueX( "@LPPROC 0" );
-            AddLineQueueX( "%s4 %r", idataname, T_ENDS );
+            AddLineQueueX( "%s" IMPILTSUF " %r", idataname, T_ENDS );
 
             /* emit IAT */
-            AddLineQueueX( "%s5 %r %s %s", idataname, T_SEGMENT, align, idataattr );
+            AddLineQueueX( "%s" IMPIATSUF " %r %s %s", idataname, T_SEGMENT, align, idataattr );
             AddLineQueueX( "@%s_iat label %r", p->name, ptrtype );
 
             for ( curr = SymTables[TAB_EXT].head; curr != NULL ; curr = curr->next ) {
                 if ( curr->sym.iat_used && curr->sym.dll == p ) {
                     Mangle( &curr->sym, StringBufferEnd );
-                    AddLineQueueX( "%s%s @LPPROC %r @%s_name", ModuleInfo.imp_prefix, StringBufferEnd, T_IMAGEREL, curr->sym.name );
+                    AddLineQueueX( "%s%s @LPPROC %r @%s_name", ModuleInfo.g.imp_prefix, StringBufferEnd, T_IMAGEREL, curr->sym.name );
                 }
             }
             /* IAT termination entry */
             AddLineQueueX( "@LPPROC 0" );
-            AddLineQueueX( "%s5 %r", idataname, T_ENDS );
+            AddLineQueueX( "%s" IMPIATSUF " %r", idataname, T_ENDS );
 
             /* emit name table */
-            AddLineQueueX( "%s6 %r %r %s", idataname, T_SEGMENT, T_WORD, idataattr );
+            AddLineQueueX( "%s" IMPSTRSUF " %r %r %s", idataname, T_SEGMENT, T_WORD, idataattr );
             for ( curr = SymTables[TAB_EXT].head; curr != NULL ; curr = curr->next ) {
                 if ( curr->sym.iat_used && curr->sym.dll == p ) {
                     AddLineQueueX( "@%s_name dw 0", curr->sym.name );
@@ -966,15 +1061,15 @@ void pe_emit_import_data( void )
                 AddLineQueueX( "@%s_name db '%s',0", p->name, p->name );
 
             AddLineQueue( "even" );
-            AddLineQueueX( "%s6 %r", idataname, T_ENDS );
+            AddLineQueueX( "%s" IMPSTRSUF " %r", idataname, T_ENDS );
 
         }
     }
     if ( is_linequeue_populated() ) {
         /* import directory NULL entry */
-        AddLineQueueX( "%s3 %r %r %s", idataname, T_SEGMENT, T_DWORD, idataattr );
+        AddLineQueueX( "%s" IMPNDIRSUF " %r %r %s", idataname, T_SEGMENT, T_DWORD, idataattr );
         AddLineQueueX( "DD 0, 0, 0, 0, 0" );
-        AddLineQueueX( "%s3 %r", idataname, T_ENDS );
+        AddLineQueueX( "%s" IMPNDIRSUF " %r", idataname, T_ENDS );
         RunLineQueue();
     }
 }
@@ -1118,9 +1213,6 @@ static void pe_set_base_relocs( struct dsym *reloc )
 #define GHF( x ) ph32->x
 #endif
 
-/* use coff routine to translate section names ( to be improved ) */
-extern char *CoffConvertSectionName( struct asym *sym );
-
 /*
  * set values in PE header
  * including data directories:
@@ -1158,7 +1250,8 @@ static void pe_set_values( struct calc_param *cp )
     struct IMAGE_FILE_HEADER *fh;
     struct IMAGE_SECTION_HEADER *section;
     struct IMAGE_DATA_DIRECTORY *datadir;
-    char *name;
+    char *secname;
+    char buffer[MAX_ID_LEN+1];
 
     mzhdr  = ( struct dsym *)SymSearch( ".hdr$1" );
     pehdr  = ( struct dsym *)SymSearch( ".hdr$2" );
@@ -1241,6 +1334,10 @@ static void pe_set_values( struct calc_param *cp )
     fh = &((struct IMAGE_PE_HEADER32 *)pehdr->e.seginfo->CodeBuffer)->FileHeader;
     fh->NumberOfSections = objtab->sym.max_offset / sizeof( struct IMAGE_SECTION_HEADER );
 
+#if RAWSIZE_ROUND
+    cp->rawpagesize = ( ModuleInfo.defOfssize == USE64 ? ph64->OptionalHeader.FileAlignment : ph32->OptionalHeader.FileAlignment );
+#endif
+
     /* fill object table values */
     section = (struct IMAGE_SECTION_HEADER *)objtab->e.seginfo->CodeBuffer;
     for( curr = SymTables[TAB_SEG].head, i = -1; curr; curr = curr->next ) {
@@ -1250,8 +1347,8 @@ static void pe_set_values( struct calc_param *cp )
             continue;
         if ( curr->e.seginfo->lname_idx != i ) {
             i = curr->e.seginfo->lname_idx;
-            name = CoffConvertSectionName( &curr->sym );
-            strncpy( section->Name, name, sizeof ( section->Name ) );
+            secname = ( curr->e.seginfo->aliasname ? curr->e.seginfo->aliasname : ConvertSectionName( &curr->sym, NULL, buffer ) );
+            strncpy( section->Name, secname, sizeof ( section->Name ) );
             if ( curr->e.seginfo->segtype != SEGTYPE_BSS )
                 section->PointerToRawData = curr->e.seginfo->fileoffset;
             section->VirtualAddress = curr->e.seginfo->start_offset;
@@ -1260,22 +1357,37 @@ static void pe_set_values( struct calc_param *cp )
                 sizehdr = curr->e.seginfo->fileoffset;
         }
         section->Characteristics |= pe_get_characteristics( curr );
-        if ( curr->e.seginfo->segtype != SEGTYPE_BSS )
+        if ( curr->e.seginfo->segtype != SEGTYPE_BSS ) {
             section->SizeOfRawData += curr->sym.max_offset;
-        section->Misc.VirtualSize += curr->sym.max_offset;
+        }
+
+        /* v2.10: this calculation is not correct */
+        //section->Misc.VirtualSize += curr->sym.max_offset;
+        section->Misc.VirtualSize = curr->sym.max_offset + ( curr->e.seginfo->start_offset - section->VirtualAddress );
+
         if ( curr->next == NULL || curr->next->e.seginfo->lname_idx != i ) {
-            if ( codebase == 0 && ( section->Characteristics & IMAGE_SCN_MEM_EXECUTE ) ) {
-                codebase = section->VirtualAddress;
-                codesize = section->Misc.VirtualSize;
+#if RAWSIZE_ROUND /* AntiVir TR/Crypt.XPACK Gen */
+            section->SizeOfRawData += cp->rawpagesize - 1;
+            section->SizeOfRawData &= ~(cp->rawpagesize - 1);
+#endif
+            if ( section->Characteristics & IMAGE_SCN_MEM_EXECUTE ) {
+                if ( codebase == 0 )
+                    codebase = section->VirtualAddress;
+                codesize += section->SizeOfRawData;
             }
-            if ( database == 0 && ( section->Characteristics & IMAGE_SCN_CNT_INITIALIZED_DATA ) ) {
-                database = section->VirtualAddress;
-                datasize = section->Misc.VirtualSize;
+            if ( section->Characteristics & IMAGE_SCN_CNT_INITIALIZED_DATA ) {
+                if ( database == 0 )
+                    database = section->VirtualAddress;
+                datasize += section->SizeOfRawData;
             }
         }
-        if ( curr->next && curr->next->e.seginfo->lname_idx != i )
+        if ( curr->next && curr->next->e.seginfo->lname_idx != i ) {
+            DebugMsg(("pe_set_values: object %.8s, VA=%" FX32 " size=%" FX32 " phys ofs/size=%" FX32 "h/%" FX32 "h\n",
+                  section->Name, section->VirtualAddress, section->Misc.VirtualSize, section->PointerToRawData, section->SizeOfRawData ));
             section++;
+        }
     }
+
 
     if ( ModuleInfo.start_label ) {
 #if AMD64_SUPPORT
@@ -1291,12 +1403,20 @@ static void pe_set_values( struct calc_param *cp )
 
 #if AMD64_SUPPORT
     if ( ModuleInfo.defOfssize == USE64 ) {
+#if IMGSIZE_ROUND
+        /* round up the SizeOfImage field to page boundary */
+        sizeimg = ( sizeimg + ph64->OptionalHeader.SectionAlignment - 1 ) & ~(ph64->OptionalHeader.SectionAlignment - 1);
+#endif
         ph64->OptionalHeader.SizeOfCode = codesize;
         ph64->OptionalHeader.BaseOfCode = codebase;
         ph64->OptionalHeader.SizeOfImage = sizeimg;
         ph64->OptionalHeader.SizeOfHeaders = sizehdr;
         datadir = &ph64->OptionalHeader.DataDirectory[0];
     } else {
+#endif
+#if IMGSIZE_ROUND
+        /* round up the SizeOfImage field to page boundary */
+        sizeimg = ( sizeimg + ph32->OptionalHeader.SectionAlignment - 1 ) & ~(ph32->OptionalHeader.SectionAlignment - 1);
 #endif
         ph32->OptionalHeader.SizeOfCode = codesize;
         ph32->OptionalHeader.SizeOfInitializedData = datasize;
@@ -1310,23 +1430,23 @@ static void pe_set_values( struct calc_param *cp )
 #endif
 
     /* set export directory data dir value */
-    if ( curr = (struct dsym *)SymSearch(".edata") ) {
+    if ( curr = (struct dsym *)SymSearch( edataname ) ) {
         datadir[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress = curr->e.seginfo->start_offset;
         datadir[IMAGE_DIRECTORY_ENTRY_EXPORT].Size = curr->sym.max_offset;
     }
 
-    /* set import directory data dir value */
-    if ( curr = (struct dsym *)SymSearch(".idata$2") ) {
-        struct dsym *idata6;
-        struct dsym *idata5;
+    /* set import directory and IAT data dir value */
+    if ( curr = (struct dsym *)SymSearch( ".idata$" IMPDIRSUF ) ) {
+        struct dsym *idata_null;
+        struct dsym *idata_iat;
         uint_32 size;
-        idata5 = (struct dsym *)SymSearch(".idata$5");
-        idata6 = (struct dsym *)SymSearch(".idata$6");
-        size = idata6->e.seginfo->start_offset + idata6->sym.max_offset - curr->e.seginfo->start_offset;
+        idata_null = (struct dsym *)SymSearch( ".idata$" IMPNDIRSUF ); /* final NULL import directory entry */
+        idata_iat = (struct dsym *)SymSearch( ".idata$" IMPIATSUF ); /* IAT entries */
+        size = idata_null->e.seginfo->start_offset + idata_null->sym.max_offset - curr->e.seginfo->start_offset;
         datadir[IMAGE_DIRECTORY_ENTRY_IMPORT].VirtualAddress = curr->e.seginfo->start_offset;
         datadir[IMAGE_DIRECTORY_ENTRY_IMPORT].Size = size;
-        datadir[IMAGE_DIRECTORY_ENTRY_IAT].VirtualAddress = idata5->e.seginfo->start_offset;
-        datadir[IMAGE_DIRECTORY_ENTRY_IAT].Size = idata5->sym.max_offset;
+        datadir[IMAGE_DIRECTORY_ENTRY_IAT].VirtualAddress = idata_iat->e.seginfo->start_offset;
+        datadir[IMAGE_DIRECTORY_ENTRY_IAT].Size = idata_iat->sym.max_offset;
     }
 
     /* set resource directory data dir value */
@@ -1341,6 +1461,9 @@ static void pe_set_values( struct calc_param *cp )
         datadir[IMAGE_DIRECTORY_ENTRY_BASERELOC].Size = curr->sym.max_offset;
     }
 
+    /* fixme: TLS entry is not written because there exists a segment .tls, but
+     * because a _tls_used symbol is found ( type: IMAGE_THREAD_DIRECTORY )
+     */
     if ( curr = (struct dsym *)SymSearch(".tls") ) {
         datadir[IMAGE_DIRECTORY_ENTRY_TLS].VirtualAddress = curr->e.seginfo->start_offset;
         datadir[IMAGE_DIRECTORY_ENTRY_TLS].Size = curr->sym.max_offset;
@@ -1348,7 +1471,7 @@ static void pe_set_values( struct calc_param *cp )
 
 #if AMD64_SUPPORT
     if ( ModuleInfo.defOfssize == USE64 ) {
-        if ( curr = (struct dsym *)SymSearch(".pdata") ) {
+        if ( curr = (struct dsym *)SymSearch( ".pdata" ) ) {
             datadir[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress = curr->e.seginfo->start_offset;
             datadir[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size = curr->sym.max_offset;
         }
@@ -1376,12 +1499,12 @@ ret_code bin_write_data( struct module_info *modinfo )
     //const enum seg_type *segtype;
     int i;
     int first;
+    uint_32 sizeheap;
 #if MZ_SUPPORT
     struct IMAGE_DOS_HEADER *pMZ;
     uint_16 reloccnt;
     uint_32 sizemem;
     struct dsym *stack = NULL;
-    uint_32 sizeheap;
     uint_8  *hdrbuf;
 #endif
     struct calc_param cp = { TRUE, 0 };
@@ -1640,6 +1763,18 @@ ret_code bin_write_data( struct module_info *modinfo )
 #endif
         first = FALSE;
     }
+#if PE_SUPPORT && RAWSIZE_ROUND
+    if ( modinfo->sub_format == SFORMAT_PE ) {
+        size = ftell( CurrFile[OBJ] );
+        if ( size & ( cp.rawpagesize - 1 ) ) {
+            char *tmp;
+            size = cp.rawpagesize - ( size & ( cp.rawpagesize - 1 ) );
+            tmp = myalloca( size );
+            memset( tmp, 0, size );
+            fwrite( tmp, 1, size, CurrFile[OBJ] );
+        }
+    }
+#endif
 #if SECTORMAP
     LstPrintf( szSep );
     LstNL();

@@ -32,15 +32,15 @@
 
 #define LABELSGLOBAL 0 /* make the generated labels global */
 
+/* v2.10: static variables moved to ModuleInfo */
+#define HllStack ModuleInfo.g.HllStack
+#define HllFree  ModuleInfo.g.HllFree
+
 #if LABELSGLOBAL
 #define LABELQUAL "::"
 #else
 #define LABELQUAL ":"
 #endif
-
-#define LSTART 0      /* loop start label         */
-#define LTEST  1      /* continue, test for exit  */
-#define LEXIT  2      /* loop exit label          */
 
 #ifdef DEBUG_OUT
 #define EOLCHAR '^'  /* this allows better displays */
@@ -50,6 +50,7 @@
 #define EOLSTR  "\n"
 #endif
 
+/* values for struct hll_item.cmd */
 enum hll_cmd {
     HLL_IF,
     HLL_WHILE,
@@ -57,6 +58,14 @@ enum hll_cmd {
     HLL_BREAK  /* .IF behind .BREAK or .CONTINUE */
 };
 
+/* index values for struct hll_item.labels[] */
+enum hll_label_index {
+    LSTART,     /* loop start label         */
+    LTEST,      /* continue, test for exit  */
+    LEXIT,      /* loop exit label          */
+};
+
+/* values for struct hll_item.flags */
 enum hll_flags {
     HLLF_ELSEOCCURED = 0x01,
 };
@@ -65,7 +74,7 @@ enum hll_flags {
 /* item for .IF, .WHILE, .REPEAT, ... */
 struct hll_item {
     struct hll_item     *next;
-    uint_32             labels[3];
+    uint_32             labels[3];      /* labels for LSTART, LTEST, LEXIT */
     char                *condlines;     /* for .WHILE: lines to add after test */
 #ifdef __WATCOMC__
     enum hll_cmd        cmd;            /* start cmd (IF, WHILE, REPEAT) */
@@ -113,9 +122,6 @@ static const char flaginstr[] = {
 /* in Masm, there's a nesting level limit of 20. In JWasm, there's
  * currently no limit.
  */
-static struct hll_item     *HllStack; /* for .WHILE, .IF, .REPEAT */
-/* v2.06: <struct hll>-items made reuseable */
-static struct hll_item     *HllFree; /* stack of free <struct hll>-items */
 
 #ifdef DEBUG_OUT
 static int cntAlloc = 0;
@@ -136,7 +142,7 @@ static uint_32 GetHllLabel( void )
  * which Tokenize() usually is to remove.
  * There has been a hack implemented in Tokenize() so that it won't touch the
  * '<' if .IF, .ELSEIF, .WHILE, .UNTIL, .UNTILCXZ or .BREAK/.CONTINUE has been
- * detected
+ * detected.
  */
 static enum c_bop GetCOp( struct asm_tok *item )
 /**********************************************/
@@ -408,8 +414,11 @@ static ret_code GetSimpleExpression( struct hll_item *hll, int *i, struct asm_to
         return( ERROR ); /* v2.09: changed from NOT_ERROR to ERROR */
     }
 
-    if ( ( opndx->kind != EXPR_CONST ) && ( opndx->kind != EXPR_ADDR ) && ( opndx->kind != EXPR_REG ) )
+    /* EXPR_EMPTY is already handled, EXPR_FLOAT is not accepted */
+    if ( ( opndx->kind != EXPR_CONST ) && ( opndx->kind != EXPR_ADDR ) && ( opndx->kind != EXPR_REG ) ) {
+        EmitError( REAL_OR_BCD_NUMBER_NOT_ALLOWED ); /* v2.10: added */
         return( ERROR );
+    }
 
     op2_pos = *i;
 
@@ -1299,10 +1308,10 @@ void HllCheckOpen( void )
 void HllInit( int pass )
 /**********************/
 {
-    if ( pass == PASS_1 )
-        HllFree = NULL;
+    //if ( pass == PASS_1 )
+    //    HllFree = NULL;
 
-    HllStack = NULL; /* empty stack of open hll directives */
+    //HllStack = NULL; /* empty stack of open hll directives */
     ModuleInfo.hll_label = 0; /* init hll label counter */
 #ifdef DEBUG_OUT
     evallvl = 0;

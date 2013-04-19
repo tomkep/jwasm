@@ -38,14 +38,18 @@ inc_dirs = -IH -I"$(PODIR)\include"
 LINK = $(PODIR)\Bin\polink.exe
 LIB = $(PODIR)\Bin\polib.exe
 
-c_flags =-D__NT__ -Ze $(extra_c_flags)
+# options: 
+#  -Ze  enable MS extensions
+#  -J   default type of char is unsigned
+#  -std:C99  use C99, not C11
+c_flags =-D__NT__ -Ze -J -std:C99 $(extra_c_flags)
 
 lflagsw = $(LOPTD) /SUBSYSTEM:CONSOLE /map:$*.map
 
 CC=$(PODIR)\bin\pocc.exe $(inc_dirs) $(c_flags)
 
 .c{$(OUTD)}.obj:
-	@$(CC) -J -Fo$*.obj $<
+	@$(CC) -Fo$*.obj $<
 
 proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \

@@ -93,7 +93,7 @@ ret_code LoopDirective( int i, struct asm_tok tokenarray[] )
 
         if( directive == T_FORC || directive == T_IRPC ) {
             if( tokenarray[i].token != T_COMMA ) {
-                EmitError( EXPECTING_COMMA );
+                EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
                 return( ERROR );
             }
             i++;
@@ -134,7 +134,7 @@ ret_code LoopDirective( int i, struct asm_tok tokenarray[] )
             while ( tokenarray[i].token != T_FINAL && tokenarray[i].token != T_COMMA )
                 i++;
             if( tokenarray[i].token != T_COMMA ) {
-                EmitError( EXPECTING_COMMA );
+                EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
                 return( ERROR );
             }
             i++;
@@ -208,7 +208,11 @@ ret_code LoopDirective( int i, struct asm_tok tokenarray[] )
     case T_REPT:
         /* negative repeat counts are accepted and are treated like 0 */
         for ( ; macro->sym.value < opnd.value; macro->sym.value++ ) {
-            RunMacro( macro, Token_Count, tokenarray, NULL, MF_NOSAVE, &is_exitm );
+            /* v2.10: Token_Count becomes volatile if MF_NOSAVE is set */
+            tokenarray[0].token = T_FINAL;
+            Token_Count = 0;
+            //RunMacro( macro, Token_Count, tokenarray, NULL, MF_NOSAVE, &is_exitm );
+            RunMacro( macro, 0, tokenarray, NULL, MF_NOSAVE, &is_exitm );
             if ( is_exitm )
                 break;
             DebugMsg1(("LoopDirective REPT: iteration=%" FU32 "\n", ++count ));

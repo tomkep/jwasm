@@ -49,8 +49,8 @@
 #else
 #define SkipFixup()
 #endif
-static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
-/**************************************************************/
+static void DoPatch( struct asym *sym, struct fixup *fixup )
+/**********************************************************/
 {
     long                disp;
     long                max_disp;
@@ -82,7 +82,7 @@ static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
                   fixup->def_seg ? fixup->def_seg->sym.name : "NULL",
                   seg ? seg->sym.name : "NULL" ));
         SkipFixup();
-        return( NOT_ERROR );
+        return;
     }
 
     if( Parse_Pass == PASS_1 ) {
@@ -95,7 +95,7 @@ static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
             /* todo: insert LABELOPT block here */
             OutputByte( 0 ); /* it's pass one, nothing is written */
             FreeFixup( fixup );
-            return( NOT_ERROR );
+            return;
         //} else if( sym->mem_type == MT_NEAR ) {
         } else {
             /* forward reference, only at first pass */
@@ -104,7 +104,7 @@ static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
             case FIX_RELOFF16:
                 FreeFixup( fixup );
                 DebugMsg(("DoPatch: FIX_RELOFF32/FIX_RELOFF16, return\n"));
-                return( NOT_ERROR );
+                return;
             case FIX_OFF8:  /* push <forward reference> */
                 if ( fixup->option == OPTJ_PUSH ) {
                     size = 1;    /* size increases from 2 to 3/5 */
@@ -141,13 +141,10 @@ static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
                 switch( fixup->option ) {
                 case OPTJ_EXPLICIT:
 #if 0 /* don't display the error at the destination line! */
-                    sym->fixup = NULL;
                     DebugMsg(("DoPatch: jump out of range, disp=%d\n", disp ));
                     EmitErr( JUMP_OUT_OF_RANGE, disp - max_disp );
-                    return( ERROR );
-#else
-                    return( NOT_ERROR ); /* nothing to do */
 #endif
+                    return;
                 case OPTJ_EXTEND: /* Jxx for 8086 */
                     size++;       /* will be 3/5 finally */
                     /* fall through */
@@ -167,7 +164,7 @@ static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
                         for ( fixup2 = seg->e.seginfo->FixupListHead; fixup2; fixup2 = fixup2->nextrlc ) {
                             if ( fixup2->orgoccured ) {
                                 DebugMsg(("DoPatch: ORG/ALIGN detected, optimization canceled\n" ));
-                                return( NOT_ERROR );
+                                return;
                             }
                             /* do this check after the check for ORG! */
                             if ( fixup2->location <= fixup->location )
@@ -179,7 +176,7 @@ static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
                      * ( PROCs are NOT contained in this list because they
                      * use the <next>-field of dsym already!)
                      */
-                    for ( sym2 = seg->e.seginfo->labels; sym2; sym2 = (struct asym *)((struct dsym *)sym2)->next ) {
+                    for ( sym2 = seg->e.seginfo->label_list; sym2; sym2 = (struct asym *)((struct dsym *)sym2)->next ) {
                         //if ( sym2 == sym )
                         //    continue;
                         /* v2.0: location is at least 1 byte too low, so
@@ -235,7 +232,7 @@ static ret_code DoPatch( struct asym *sym, struct fixup *fixup )
         SkipFixup();
         break;
     }
-    return( NOT_ERROR );
+    return;
 }
 
 ret_code BackPatch( struct asym *sym )
@@ -253,16 +250,20 @@ ret_code BackPatch( struct asym *sym )
     struct fixup     *fixup;
     struct fixup     *next;
 
-    DebugMsg(("BackPatch(%s) enter, seg.ofs=%s.%X\n", sym->name, sym->segment ? sym->segment->name : "NULL (!?)", sym->offset ));
-    fixup = sym->bp_fixup;
-    sym->bp_fixup = NULL;
-    for( ; fixup != NULL; fixup = next ) {
+#ifdef DEBUG_OUT
+    uint_32 oldofs = sym->offset;
+#endif
+    DebugMsg1(("BackPatch(%s): location=%s:%X, bp_fixup=%X\n", sym->name, sym->segment ? sym->segment->name : "!NULL!", sym->offset, sym->bp_fixup ));
+
+    for( fixup = sym->bp_fixup; fixup; fixup = next ) {
         next = fixup->nextbp;
-        if( DoPatch( sym, fixup ) == ERROR ) {
-            return( ERROR );
-        }
+        DoPatch( sym, fixup );
     }
-    DebugMsg(("BackPatch(%s) exit, ofs=%X\n", sym->name, sym->offset ));
+    sym->bp_fixup = NULL;
+#ifdef DEBUG_OUT
+    if ( oldofs != sym->offset )
+        DebugMsg1(("BackPatch(%s) exit, new ofs=%X\n", sym->name, sym->offset ));
+#endif
     return( NOT_ERROR );
 }
 

@@ -63,7 +63,7 @@ static char *Check4Mangler( int *i, struct asm_tok tokenarray[] )
         mangle_type = tokenarray[*i].string_ptr;
         (*i)++;
         if( tokenarray[*i].token != T_COMMA ) {
-            EmitWarn( 2, EXPECTING_COMMA );
+            EmitWarn( 2, EXPECTING_COMMA, tokenarray[*i].tokpos );
         } else {
             (*i)++;
         }
@@ -363,7 +363,7 @@ ret_code ExterndefDirective( int i, struct asm_tok tokenarray[] )
                 if ( (i + 1) < Token_Count )
                     i++;
             } else {
-                EmitError( EXPECTING_COMMA );
+                EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
                 return( ERROR );
             }
 
@@ -706,6 +706,7 @@ static struct asym *MakeComm( char *name, struct asym *sym, int size, int count,
 /* define "communal" items
  * syntax:
  * COMM [langtype] [NEAR|FAR] label:type[:count] [, ... ]
+ * the size & count values must NOT be forward references!
  */
 
 ret_code CommDirective( int i, struct asm_tok tokenarray[] )
@@ -770,7 +771,9 @@ ret_code CommDirective( int i, struct asm_tok tokenarray[] )
         for ( tmp = i; tmp < Token_Count;tmp++ )
             if ( tokenarray[tmp].token == T_COLON )
                 break;
-        if ( EvalOperand( &i, tokenarray, tmp, &opndx, 0 ) == ERROR )
+        /* v2.10: expression evaluator isn't to accept forward references */
+        //if ( EvalOperand( &i, tokenarray, tmp, &opndx, 0 ) == ERROR )
+        if ( EvalOperand( &i, tokenarray, tmp, &opndx, EXPF_NOLCREATE ) == ERROR )
             return( ERROR );
         /* v2.03: a string constant is accepted by Masm */
         //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
@@ -788,7 +791,9 @@ ret_code CommDirective( int i, struct asm_tok tokenarray[] )
         if( tokenarray[i].token == T_COLON ) {
             i++;
             /* get optional count argument */
-            if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
+            /* v2.10: expression evaluator isn't to accept forward references */
+            //if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
+            if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOLCREATE ) == ERROR )
                 return( ERROR );
             /* v2.03: a string constant is acceptable! */
             //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
@@ -822,7 +827,7 @@ ret_code CommDirective( int i, struct asm_tok tokenarray[] )
         SetMangler( sym, langtype, mangle_type );
 
         if ( tokenarray[i].token != T_FINAL && tokenarray[i].token != T_COMMA ) {
-            EmitError( EXPECTING_COMMA );
+            EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
             return( ERROR );
         }
     }

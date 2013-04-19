@@ -230,7 +230,9 @@ res(HIGH32,     high32,      6,  RWT_UNARY_OP, AT_CONST | AT_FLOAT, 6,  0,   P_8
 #endif
 res(HIGHWORD,   highword,    8,  RWT_UNARY_OP, AT_CONST,   6,  0,   P_86,  UOT_HIGHWORD  )
 #if IMAGERELSUPP
-res(IMAGEREL,   imagerel,    8,  RWT_UNARY_OP, AT_TLN,     5,  0,   P_86,  UOT_IMAGEREL  )
+/* v2.10: changed AT_TLN to AT_LABEL */
+//res(IMAGEREL,   imagerel,    8,  RWT_UNARY_OP, AT_TLN,     5,  0,   P_86,  UOT_IMAGEREL  )
+res(IMAGEREL,   imagerel,    8,  RWT_UNARY_OP, AT_LABEL,   5,  0,   P_86,  UOT_IMAGEREL  )
 #endif
 res(LENGTH,     length,      6,  RWT_UNARY_OP, AT_LF,      3,  0,   P_86,  UOT_LENGTH    )
 res(LENGTHOF,   lengthof,    8,  RWT_UNARY_OP, AT_LF,      3,  0,   P_86,  UOT_LENGTHOF  )

@@ -454,12 +454,15 @@ void SymFree( struct asym *sym )
 
 /* add a symbol to local table and set the symbol's name.
  * the previous name was "", the symbol wasn't in a symbol table.
- * this function is called for PROC parameters.
+ * this function is called for PROC parameters ( see proc.c ).
  */
 struct asym *SymAddLocal( struct asym *sym, const char *name )
 /************************************************************/
 {
-    if( SymFind( name ) ) {
+    struct asym *sym2;
+    /* v2.10: ignore symbols with state SYM_UNDEFINED! */
+    //if( SymFind( name ) ) {
+    if( ( sym2 = SymFind( name ) ) && sym2->state != SYM_UNDEFINED ) {
         /* shouldn't happen */
         EmitErr( SYMBOL_ALREADY_DEFINED, name );
         return( NULL );
@@ -510,11 +513,16 @@ struct asym *SymCreate( const char *name )
 
 struct asym *SymLCreate( const char *name )
 /*****************************************/
-/* Create symbol and insert it into the local symbol table */
+/* Create symbol and insert it into the local symbol table.
+ * This function is called by LocalDir() and ParseParams()
+ * in proc.c ( for LOCAL directive and PROC parameters ).
+ */
 {
     struct asym *sym;
 
-    if( SymFind( name ) ) {
+    /* v2.10: ignore symbols with state SYM_UNDEFINED */
+    //if( SymFind( name ) ) {
+    if( ( sym = SymFind( name ) ) && sym->state != SYM_UNDEFINED ) {
         EmitErr( SYMBOL_ALREADY_DEFINED, name );
         return( NULL );
     }
@@ -538,6 +546,7 @@ void SymMakeAllSymbolsPublic( void )
                 sym->predefined == FALSE && /* no predefined symbols ($) */
                 sym->included == FALSE && /* v2.09: symbol already added to public queue? */
                 //sym->scoped == FALSE && /* v2.09: no procs that are marked as "private" */
+                sym->name[1] != '&' && /* v2.10: no @@ code labels */
                 sym->public == FALSE ) {
                 sym->public = TRUE;
                 AddPublicData( sym );
@@ -691,28 +700,26 @@ void SymGetAll( struct asym **syms )
     return;
 }
 
-/* enum symbols in global hash table */
+/* enum symbols in global hash table.
+ * used for codeview symbolic debug output.
+ */
 
-int SymEnum( struct asym * *psym, int *pi )
-/*****************************************/
+struct asym *SymEnum( struct asym *sym, int *pi )
+/***********************************************/
 {
-    unsigned            i;
-    struct asym         *sym;
-
-    if ( *psym == NULL ) {
-        i = 0;
-        sym = gsym_table[i];
+    if ( sym == NULL ) {
+        *pi = 0;
+        sym = gsym_table[*pi];
     } else {
-        i = *pi;
-        sym = *psym;
         sym = sym->next;
     }
 
-    for( ; sym == NULL && i < GHASH_TABLE_SIZE; i++ )
-        sym = gsym_table[i];
-    *psym = sym;
-    *pi = i;
-    return( sym != NULL );
+    /* v2.10: changed from for() to while() */
+    while( sym == NULL && *pi < GHASH_TABLE_SIZE - 1 )
+        sym = gsym_table[++(*pi)];
+
+    //printf("sym=%X, i=%u\n", sym, *pi );
+    return( sym );
 }
 
 #if defined( DEBUG_OUT )

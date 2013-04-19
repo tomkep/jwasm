@@ -21,6 +21,7 @@
 #include "expreval.h"
 #include "types.h"
 #include "listing.h"
+#include "proc.h"
 #include "omf.h"
 
 #include "myassert.h"
@@ -231,6 +232,8 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
             CurrStruct = CurrStruct->next;
         EmitErr( UNMATCHED_BLOCK_NESTING, CurrStruct->sym.name );
     }
+    /* v2.10: check for open PROCedures */
+    ProcCheckOpen();
 
     /* close open segments */
     SegmentModuleExit();

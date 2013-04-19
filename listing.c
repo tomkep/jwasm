@@ -157,7 +157,7 @@ void LstWrite( enum lsttype type, uint_32 oldofs, void *value )
 
     if ( ModuleInfo.list == FALSE || CurrFile[LST] == NULL || ( ModuleInfo.line_flags & LOF_LISTED ) )
         return;
-    if ( GeneratedCode && ( ModuleInfo.list_generated_code == FALSE ) )
+    if ( ModuleInfo.GeneratedCode && ( ModuleInfo.list_generated_code == FALSE ) )
         return;
     if ( MacroLevel ) {
         switch ( ModuleInfo.list_macro ) {
@@ -171,11 +171,11 @@ void LstWrite( enum lsttype type, uint_32 oldofs, void *value )
 
     ModuleInfo.line_flags |= LOF_LISTED;
 
-    DebugMsg1(("LstWrite: enter, pos=%" FU32 ", GeneratedCode=%u, MacroLevel=%u\n", list_pos, GeneratedCode, MacroLevel ));
+    DebugMsg1(("LstWrite: enter, pos=%" FU32 ", GeneratedCode=%u, MacroLevel=%u\n", list_pos, ModuleInfo.GeneratedCode, MacroLevel ));
     pSrcline = CurrSource;
 #if FASTPASS
     if ( ( Parse_Pass > PASS_1 ) && UseSavedState ) {
-        if ( GeneratedCode == 0 ) {
+        if ( ModuleInfo.GeneratedCode == 0 ) {
             if ( !( ModuleInfo.line_flags & LOF_SKIPPOS ) )
                 list_pos = LineStoreCurr->list_pos;
 #if USELSLINE /* either use CurrSource + CurrComment or LineStoreCurr->line (see assemble.c, OnePass() */
@@ -257,16 +257,23 @@ void LstWrite( enum lsttype type, uint_32 oldofs, void *value )
         *p2 = ' ';
         break;
     case LSTTYPE_EQUATE:
-        ll.buffer[1] = '=';
         if ( sym->state == SYM_INTERNAL ) {
+            /* v2.10: display current offset if equate is an alias for a label in this segment */
+            idx = 1;
+            if ( sym->segment && sym->segment == &CurrSeg->sym ) {
+                sprintf( ll.buffer, "%08" FX32, GetCurrOffset() );
+                idx = 10;
+            }
+            ll.buffer[idx] = '=';
 #if AMD64_SUPPORT
             if ( sym->value3264 != 0 && ( sym->value3264 != -1 || sym->value >= 0 ) )
-                sprintf( &ll.buffer[3], "%-" PREFFMTSTR I64X_SPEC, sym->value, sym->value3264 );
+                sprintf( &ll.buffer[idx+2], "%-" PREFFMTSTR I64X_SPEC, sym->value, sym->value3264 );
             else
 #endif
-                sprintf( &ll.buffer[3], "%-" PREFFMTSTR FX32, sym->value );
+                sprintf( &ll.buffer[idx+2], "%-" PREFFMTSTR FX32, sym->value );
             ll.buffer[28] = ' ';
         } else if ( sym->state == SYM_TMACRO ) {
+            ll.buffer[1] = '=';
             //GetLiteralValue( buffer2, sym->string_ptr );
             //strcpy( buffer2, sym->string_ptr );
             for ( p1 = sym->string_ptr, p2 = &ll.buffer[3], pll = &ll; *p1; ) {
@@ -313,7 +320,7 @@ void LstWrite( enum lsttype type, uint_32 oldofs, void *value )
     if ( Parse_Pass == PASS_1 || UseSavedState == FALSE ) {
 #endif
         idx = sizeof( ll.buffer );
-        if ( GeneratedCode )
+        if ( ModuleInfo.GeneratedCode )
             ll.buffer[28] = '*';
         if ( MacroLevel ) {
             len = sprintf( &ll.buffer[29], "%u", MacroLevel );
@@ -407,7 +414,7 @@ void LstNL( void )
 void LstSetPosition( void )
 /*************************/
 {
-    if( CurrFile[LST] && ( Parse_Pass > PASS_1 ) && UseSavedState && GeneratedCode == 0 ) {
+    if( CurrFile[LST] && ( Parse_Pass > PASS_1 ) && UseSavedState && ModuleInfo.GeneratedCode == 0 ) {
         list_pos = LineStoreCurr->list_pos;
         fseek( CurrFile[LST], list_pos, SEEK_SET );
         ModuleInfo.line_flags |= LOF_SKIPPOS;
@@ -480,6 +487,7 @@ static const char *SimpleTypeString( enum memtype mem_type )
 
 /* called by log_struct and log_typedef
  * that is, the symbol is ensured to be a TYPE!
+ * argument 'buffer' is either NULL or "very" large ( StringBufferEnd ).
  */
 
 static const char *GetMemtypeString( const struct asym *sym, char *buffer )
@@ -508,21 +516,20 @@ static const char *GetMemtypeString( const struct asym *sym, char *buffer )
             else
                 p = sym->Ofssize ? strings[LS_NEAR32] : strings[LS_NEAR16];
 
-        if ( buffer ) {
-            strcat( buffer, p );
-            strcat( buffer, " ");
-            strcat( buffer, strings[LS_PTR] );
-            /* v2.05: added */
-            if ( sym->state == SYM_TYPE ) {
-                struct dsym *dir = (struct dsym *)sym;
-                if ( dir->sym.typekind == TYPE_TYPEDEF ) {
-                    strcat( buffer, " ");
-                    if ( sym->target_type )
-                        strcat( buffer, sym->target_type->name );
-                    else if ( dir->sym.is_ptr == 1 &&
-                             ( dir->sym.ptr_memtype & MT_SPECIAL ) == 0 )
-                        strcat( buffer, SimpleTypeString( dir->sym.ptr_memtype ) );
-                }
+        if ( buffer ) { /* Currently, 'buffer' is only != NULL for typedefs */
+            int i;
+            char *b2 = buffer;
+            /* v2.10: improved pointer TYPEDEF display */
+            for ( i = sym->is_ptr; i; i-- ) {
+                b2 += sprintf( b2, "%s %s ", p, strings[LS_PTR] );
+            }
+            /* v2.05: added. */
+            if ( sym->state == SYM_TYPE && sym->typekind == TYPE_TYPEDEF ) {
+                //strcat( buffer, " ");
+                if ( sym->target_type )
+                    strcpy( b2, sym->target_type->name );
+                else if ( ( sym->ptr_memtype & MT_SPECIAL ) == 0 )
+                    strcpy( b2, SimpleTypeString( sym->ptr_memtype ) );
             }
             return( buffer );
         }
@@ -809,7 +816,7 @@ static void log_proc( const struct asym *sym )
     LstPrintf( "%0*" FX32 " ", Ofssize > USE16 ? 8 : 4, sym->state == SYM_INTERNAL ? sym->total_size : 0 );
 
 #ifdef DEBUG_OUT
-    if ( sym->forward )
+    if ( sym->fwdref )
         LstPrintf( "(F) " );
 #endif
     if( sym->public ) {
@@ -901,7 +908,7 @@ static void log_proc( const struct asym *sym )
                           l2->sym.offset,
                           get_sym_seg_name( &l2->sym ));
 #ifdef DEBUG_OUT
-                if ( l2->sym.forward )
+                if ( l2->sym.fwdref )
                     LstPrintf( " (F)" );
 #endif
                 LstNL();
@@ -958,7 +965,7 @@ static void log_symbol( const struct asym *sym )
             LstPrintf( "%s ", get_sym_seg_name( sym ) );
 
 #ifdef DEBUG_OUT
-        if ( sym->forward )
+        if ( sym->fwdref )
             LstPrintf( "(F) " );
 #endif
         if ( sym->state == SYM_EXTERNAL && sym->iscomm == TRUE )
@@ -1155,7 +1162,7 @@ ret_code ListingDirective( int i, struct asm_tok tokenarray[] )
                         if ( (i + 1) < Token_Count )
                             i++;
                     } else {
-                        EmitError( EXPECTING_COMMA );
+                        EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
                         return( ERROR );
                     }
                 }
@@ -1222,7 +1229,7 @@ ret_code ListMacroDirective( int i, struct asm_tok tokenarray[] )
 void LstOpenFile( void )
 /**********************/
 {
-    const struct fname_list *fn;
+    const struct fname_item *fn;
     char buffer[128];
 
     list_pos = 0;

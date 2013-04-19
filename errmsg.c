@@ -175,8 +175,8 @@ void PrintNote( int msgnum, ... )
     va_end( args2 );
 }
 
-void EmitErr( int msgnum, ... )
-/*****************************/
+int EmitErr( int msgnum, ... )
+/****************************/
 {
     va_list args1, args2;
 
@@ -193,6 +193,7 @@ void EmitErr( int msgnum, ... )
     print_source_nesting_structure();
     if( Options.error_limit != -1  &&  ModuleInfo.g.error_count == Options.error_limit+1 )
         Fatal( TOO_MANY_ERRORS );
+    return( ERROR );
 }
 
 void EmitError( int msgnum )
@@ -250,7 +251,7 @@ void Fatal( unsigned msg, ... )
 
     /* setjmp() has been called in AssembleModule().
      * if a fatal error happens outside of this function, longjmp()
-     * is NOT to be used ( virtually may happen for "out of memory" only)
+     * is NOT to be used ( out of memory condition, @cmd file open error, ... )
      */
     if ( CurrFName[ASM] )
         longjmp( jmpenv, 2 );

@@ -23,5 +23,11 @@
 #define MEM_RELEASE    0x8000
 #define PAGE_READWRITE 0x0004
 
-WINBASEAPI void *WINAPI VirtualAlloc( void *, uint_32, uint_32, uint_32 );
-WINBASEAPI int   WINAPI VirtualFree( void *, uint_32, uint_32 );
+/*
+ * v2.10: second parameter of VirtualAlloc/Free changed to size_t ( from uint_32 ).
+ * The old declaration did work for Win64, due to the AMD64 peculiarity that writing
+ * to the lower 32-bits of a register ( here: EDX/RDX ) clears the upper 32-bits.
+ */
+
+WINBASEAPI void *WINAPI VirtualAlloc( void *, size_t, uint_32, uint_32 );
+WINBASEAPI int   WINAPI VirtualFree( void *, size_t, uint_32 );

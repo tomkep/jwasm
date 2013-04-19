@@ -103,9 +103,10 @@ static struct intseg internal_segs[] = {
 #define SYMTAB_IDX   1
 #define STRTAB_IDX   2
 
+/* struct to help convert section names in COFF, ELF, PE */
 struct conv_section {
     uint_8 len;
-    uint_8 flags;
+    uint_8 flags; /* see below */
     const char *src;
     const char *dst;
 };
@@ -124,11 +125,10 @@ static const struct conv_section cst[] = {
 /* translate section names:
  * see cst[] above for details.
  */
-static char *ElfConvertSectionName( const struct asym *sym )
-/**********************************************************/
+static char *ElfConvertSectionName( const struct asym *sym, char *name )
+/**********************************************************************/
 {
     int i;
-    static char name[MAX_ID_LEN+1];
 
     for ( i = 0; i < sizeof( cst ) / sizeof( cst[0] ); i++ ) {
         if ( memcmp( sym->name, cst[i].src, cst[i].len ) == 0 ) {
@@ -552,7 +552,7 @@ static void set_symtab_values( void *hdr )
                 /* however, if it's an assembly time variable */
                 /* use a raw section reference */
                 if ( fix->sym->variable ) {
-                    fix->sym = fix->segment;
+                    fix->sym = fix->segment_var;
                 } else if ( ( fix->sym->state == SYM_INTERNAL ) &&
                     fix->sym->included == FALSE &&
                     fix->sym->public == FALSE ) {
@@ -664,11 +664,12 @@ static void set_shstrtab_values( void )
     struct dsym *curr;
     char        *p;
     unsigned int size = 1;
+    char buffer[MAX_ID_LEN+1];
 
     /* get program + reloc section sizes */
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         /* v2.07: ALIAS name defined? */
-        p = ( curr->e.seginfo->aliasname ? curr->e.seginfo->aliasname : ElfConvertSectionName( &curr->sym ) );
+        p = ( curr->e.seginfo->aliasname ? curr->e.seginfo->aliasname : ElfConvertSectionName( &curr->sym, buffer ) );
         size += strlen( p ) + 1;
         if ( curr->e.seginfo->FixupListHead )
             size += strlen( p ) +
@@ -693,7 +694,7 @@ static void set_shstrtab_values( void )
 
     /* names of program sections */
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
-        strcpy( p, curr->e.seginfo->aliasname ? curr->e.seginfo->aliasname : ElfConvertSectionName( &curr->sym ) );
+        strcpy( p, curr->e.seginfo->aliasname ? curr->e.seginfo->aliasname : ElfConvertSectionName( &curr->sym, buffer ) );
         p += strlen( p ) + 1;
     }
     /* names of internal sections */
@@ -710,7 +711,7 @@ static void set_shstrtab_values( void )
             strcpy( p, ".rel" );
 #endif
             p += strlen( p );
-            strcpy( p, curr->e.seginfo->aliasname ? curr->e.seginfo->aliasname : ElfConvertSectionName( &curr->sym ) );
+            strcpy( p, curr->e.seginfo->aliasname ? curr->e.seginfo->aliasname : ElfConvertSectionName( &curr->sym, buffer ) );
             p += strlen( p ) + 1;
         }
     }

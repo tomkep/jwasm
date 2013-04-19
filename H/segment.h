@@ -47,6 +47,7 @@ extern void             SegmentFini( void );    /* exit segments */
 extern struct asym      *GetGroup( const struct asym * );
 extern uint_32          GetCurrSegAlign( void );
 extern ret_code         SetOfssize( void );
+extern enum seg_type    TypeFromClassName( const struct dsym *, const struct asym * );
 extern void             DefineFlatGroup( void );
 extern ret_code         SegmentModuleExit( void );
 extern void             DeleteGroup( struct dsym * );

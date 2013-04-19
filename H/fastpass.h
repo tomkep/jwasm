@@ -43,7 +43,7 @@ struct mod_state {
     bool init;           /* is this struct initialized? */
     struct equ_item *EquHead; /* the list of modified assembly time variables */
     struct equ_item *EquTail;
-    struct module_info modinfo;
+    uint_8 modinfo[ sizeof( struct module_info ) - sizeof( struct module_vars ) ];
 };
 
 /* source lines start to be "stored" when one of the following is detected:

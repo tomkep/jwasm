@@ -68,14 +68,8 @@ extern char           *end_stringbuf;
 extern char    *token_stringbuf;  /* start token string buffer */
 extern char    *commentbuffer;
 
-/* string buffer - token strings and other stuff are stored here.
- * must be a multiple of MAX_LINE_LEN since it is used for string expansion.
- */
-
 /* v2.08: moved to struct line_status */
 //static uint_8 g_flags; /* directive flags for current line */
-
-char inside_comment;
 
 #if !defined(__GNUC__) && !defined(__POCC__)
 #define tolower(c) ((c >= 'A' && c <= 'Z') ? c | 0x20 : c )
@@ -915,9 +909,9 @@ static void StartComment( const char *p )
         EmitError( COMMENT_DELIMITER_EXPECTED );
         return;
     }
-    inside_comment = *p++;
-    if( strchr( p, inside_comment ) )
-        inside_comment = NULLC;
+    ModuleInfo.inside_comment = *p++;
+    if( strchr( p, ModuleInfo.inside_comment ) )
+        ModuleInfo.inside_comment = NULLC;
     return;
 }
 
@@ -948,11 +942,11 @@ int Tokenize( char *line, unsigned int start, struct asm_tok tokenarray[], unsig
         /* v2.06: these flags are now initialized on a higher level */
         //ModuleInfo.line_flags = 0;
         p.output = token_stringbuf;
-        if( inside_comment ) {
-            DebugMsg1(("COMMENT active, delim is >%c<, line is >%s<\n", inside_comment, line));
-            if( strchr( line, inside_comment ) != NULL ) {
+        if( ModuleInfo.inside_comment ) {
+            DebugMsg1(("COMMENT active, delim is >%c<, line is >%s<\n", ModuleInfo.inside_comment, line));
+            if( strchr( line, ModuleInfo.inside_comment ) != NULL ) {
                 DebugMsg1(("COMMENT mode exited\n"));
-                inside_comment = NULLC;
+                ModuleInfo.inside_comment = NULLC;
             }
             goto skipline;
         }
@@ -1036,7 +1030,7 @@ int Tokenize( char *line, unsigned int start, struct asm_tok tokenarray[], unsig
                 if ( tokenarray[p.index].token == T_DIRECTIVE &&
                     tokenarray[p.index].bytval == DRT_CONDDIR ) {
                     if ( tokenarray[p.index].tokval == T_COMMENT ) {
-                        DebugMsg1(("tokenize: COMMENT starting, delim is >%c<\n", inside_comment));
+                        DebugMsg1(("tokenize: COMMENT starting, delim is >%c<\n", ModuleInfo.inside_comment));
                         StartComment( p.input );
                         break; /* p.index is 0 or 2 */
                     }

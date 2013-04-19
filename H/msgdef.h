@@ -13,6 +13,7 @@ pick( MSG_BANNER,             "%s, Masm-compatible assembler.\n" "Portions Copyr
 pick( MSG_ERROR_PREFIX,       "Error" )
 pick( MSG_WARNING_PREFIX,     "Warning" )
 pick( MSG_FATAL_PREFIX,       "Fatal error" )
+
 /* segment attribute text constants for error SEGDEF_CHANGED */
 pick( TXT_READONLY,           "readonly" )
 pick( TXT_ALIGNMENT,          "alignment" )
@@ -20,10 +21,10 @@ pick( TXT_COMBINE,            "combine" )
 pick( TXT_SEG_WORD_SIZE,      "segment word size" )
 pick( TXT_CLASS,              "class" )
 pick( TXT_CHARACTERISTICS,    "characteristics" )
+pick( TXT_ALIASNAME,          "alias" ) /* v2.10: added */
 
 /* error/warning message text constants */
 
-pick( msg_unused1,          "" )
 pick( msg_unused2,          "" )
 pick( msg_unused3,          "" )
 pick( msg_unused4,          "" )
@@ -64,7 +65,7 @@ pick( CANNOT_MIX_16_AND_32_BIT_REGISTERS,   "Base and index register differ in s
 #else
 pick( CANNOT_MIX_16_AND_32_BIT_REGISTERS,   "Cannot mix 16 and 32-bit registers" )
 #endif
-pick( EXPECTING_COMMA,                      "Expecting comma" )
+pick( EXPECTING_COMMA,                      "Expecting comma: %s" )
 pick( ORG_NEEDS_A_CONSTANT_OR_LOCAL_OFFSET, "ORG needs a constant or local offset" )
 pick( POP_CS_IS_NOT_ALLOWED,                "POP CS is not allowed" )
 pick( ONLY_MOV_CAN_USE_SPECIAL_REGISTER,    "Only MOV can use special register" )
@@ -89,7 +90,7 @@ pick( OP1_TOO_SMALL,               "Operand 1 too small" )
 pick( LINE_TOO_LONG,               "Line too long" )
 pick( TOO_MANY_TOKENS,             "Too many tokens in a line" )
 pick( MEMBER_NOT_DEFINED,          "Symbol not defined : %s.%s" )
-pick( OPERAND_EXPECTED,            "Operand is expected" )
+pick( EXPRESSION_EXPECTED,         "Expression expected: %s" )
 pick( CONSTANT_EXPECTED,           "Constant expected" )
 pick( CONSTANT_OPERAND_EXPECTED,   "Constant operand is expected" )
 pick( DOT_ELSE_CLAUSE_ALREADY_OCCURED_IN_THIS_DOT_IF_BLOCK, ".ELSE clause already occured in this .IF block" )
@@ -220,7 +221,7 @@ pick( NO_4KPAGE_ALIGNED_SEGMENTS_IN_MS386,"No 4k Page-aligned segments in MS386 
 #else
 pick( msg_filler25,                      "" )
 #endif
-pick( msg_unused12,                      "" )
+pick( LINNUM_INFO_FOR_SEGMENT_WITHOUT_CLASS_CODE, "Line number information for segment without class 'CODE': %s" )
 pick( OPERAND_MUST_BE_RELOCATABLE,       "Operand must be relocatable" )
 pick( CONSTANT_OR_RELOCATABLE_LABEL_EXPECTED, "Constant or relocatable label expected" )
 pick( IF2_NOT_ALLOWED,                   "[ELSE]IF2/.ERR2 not allowed, single-pass assembler" )
@@ -232,7 +233,7 @@ pick( LEADING_UNDERSCORE_REQUIRED_FOR_START_LABEL, "For -coff leading underscore
 #else
 pick( msg_filler2, "" )
 #endif
-pick( INVALID_CMDLINE_VALUE,             "Invalid command-line value, default is used: %s" )
+pick( INVALID_CMDLINE_VALUE,             "Invalid command-line value, default is used: -%s" )
 pick( UNKNOWN_FIXUP_TYPE,                "Unknown fixup type: %u at %s.%lX" )
 pick( UNSUPPORTED_FIXUP_TYPE,            "Unsupported fixup type for %s: %s" )
 pick( INVALID_FIXUP_TYPE,                "Invalid fixup type for %s: %u at location %s.%lX" )
@@ -286,7 +287,7 @@ pick( MISSING_RIGHT_PARENTHESIS_IN_EXPRESSION, "Missing right parenthesis in exp
 pick( INVALID_OPERAND_FOR_OPERATOR,      "Invalid operand for %s: %s" )
 pick( STRUCTURE_IMPROPERLY_INITIALIZED,  "Structure improperly initialized: %s" )
 pick( EXPECTED,                          "Expected: %s" )
-pick( INVALID_DATA_INITIALIZER,          "Invalid data initializer" )
+pick( INVALID_DATA_INITIALIZER,          "Invalid data initializer: %s" )
 pick( EXPECTED_DATA_LABEL,               "Expected data label" )
 pick( EXPRESSION_MUST_BE_A_CODE_ADDRESS, "Expression must be a code address" )
 pick( N_OPTION_NEEDS_A_NAME_PARAMETER,   "-n Option needs a valid name parameter" )

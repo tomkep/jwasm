@@ -59,7 +59,7 @@ enum msgno {
 #endif
 
 extern void EmitError( int msgnum );
-extern void EmitErr( int msgnum, ... );
+extern int  EmitErr( int msgnum, ... );
 extern void EmitWarn( int level, int msgnum, ... );
 extern void PrintNote( int msgnum, ... );
 extern char *ErrnoStr( void );

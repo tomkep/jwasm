@@ -120,7 +120,7 @@ struct fixup {
             int_8           frame_type;     /* frame specifier (SEG=0,GRP=1,,...) */
             uint_16         frame_datum;    /* additional data, usually index */
         };
-        struct asym         *segment;       /* symbol's segment if assembly time var */
+        struct asym         *segment_var;   /* symbol's segment if assembly time var */
     };
     struct dsym             *def_seg;       /* segment the fixup is in */
     struct asym             *sym;

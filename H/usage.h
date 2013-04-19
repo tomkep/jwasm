@@ -2,16 +2,15 @@
 "options:\0"
 #if AMD64_SUPPORT
 "-<0|1|..|10>[p]\0" "Set CPU: 0=8086 (default), 1=80186, 2=80286, 3=80386,\0"
-"\0"                "4=80486, 5=Pentium, 6=PPro, 7=P2, 8=P3, 9=P4, 10=x86-64.\0"
-"\0"                "<p> allows privileged instructions.\0"
+"\0"                "4=80486, 5=Pentium, 6=PPro, 7=P2, 8=P3, 9=P4, 10=x86-64;\0"
+"\0"                "<p> allows privileged instructions\0"
 #else
 "-<0|1|..|6>[p]\0"  "Set CPU: 0=8086 (default), 1=80186, 2=80286, 3=80386,\0"
-"\0"                "4=80486, 5=Pentium, 6=Pentium Pro.\0"
-"\0"                "<p> allows privileged instructions.\0"
+"\0"                "4=80486, 5=Pentium, 6=Pentium Pro;\0"
+"\0"                "<p> allows privileged instructions\0"
 #endif
 "-c\0"              "Assemble without linking (always set)\0"
-"-C<p|u|x>\0"       "Set OPTION CASEMAP: p=NONE, u=ALL,\0"
-"\0"                "x=NOTPUBLIC (default).\0"
+"-C<p|u|x>\0"       "Set OPTION CASEMAP: p=NONE, u=ALL, x=NOTPUBLIC (default)\0"
 "-D<name>[=text]\0" "Define text macro\0"
 "-e<number>\0"      "Set error limit number (default=50)\0"
 "-EP\0"             "Output preprocessed listing to stdout\0"
@@ -32,7 +31,7 @@
 "-m<t|s|c|m|l|h|f>\0" "Set memory model:\0"
 "\0"                "(Tiny, Small, Compact, Medium, Large, Huge, Flat)\0"
 "-nc=<name>\0"       "Set class name of code segment\0"
-"-n<d|m|t>=<name>\0" "Set name of data segment, module or text segment\0"
+"-n<d|m|t>=<name>\0" "Set name of d)ata segment, m)odule or t)ext segment\0"
 #if COCTALS
 "-o\0"              "Allow C form of octal constants\0"
 #endif
@@ -58,12 +57,13 @@
 "\0"                "1=OW register calling convention\0"
 #endif
 "-Zg\0"             "Generated code is to exactly match Masm's one\0"
-"-Zi\0"             "Add symbolic debug info (OMF & COFF only)\0"
+"-Zi[0|1|2|3]\0"    "Add symbolic debug info (OMF & COFF): 0=globals\0"
+"\0"                "1= +locals, 2= +types (default), 3= +constants\0"
 "-zlc\0"            "No OMF records about data in code\0"
 "-zld\0"            "No OMF records about far call optimization\0"
 #if COFF_SUPPORT
-"-zlf\0"            "No COFF .file entry in symbol table\0"
-"-zls\0"            "No COFF auxiliary entries for sections in symbol table\0"
+"-zl<f|p|s>\0"      "Suppress items in COFF symbol table: f=no .file entry,\0"
+"\0"                "p=no static procs, s=no auxiliary entries for sections\0"
 #endif
 "-Zm\0"             "Masm v5.1 compatibility\0"
 "-Zne\0"            "Disable syntax extensions not supported by Masm\0"
@@ -82,7 +82,7 @@
 "-bin\0"            "plain binary file\0"
 #endif
 #if COFF_SUPPORT
-"-coff\0"           "32-bit COFF object file\0"
+"-coff\0"           "COFF object file\0"
 #endif
 #if COFF_SUPPORT && DJGPP_SUPPORT
 "-djgpp\0"          "Djgpp's variant of 32-bit COFF object file\0"
@@ -98,19 +98,22 @@
 #endif
 "-omf\0"            "OMF object file (default)\0"
 #if PE_SUPPORT
-"-pe\0"             "Win32/Win64 PE binary file\0"
+"-pe\0"             "PE binary file, 32/64-bit\0"
 #endif
 #if AMD64_SUPPORT
 "-win64\0"          "64-bit COFF object file\0"
 #endif
 #ifdef DEBUG_OUT
 "Debug options:\0\0"
-"-d6\0"             "Display debug trace on stdout\0"
+"-af\0"             "Display all files used in assembly process on stdout\0"
+"-dt\0"             "Display debug trace on stdout\0"
 #if FASTPASS
-"-d7\0"             "Do full subsequent passes (disables \"fastpass\")\0"
 "-ls\0"             "Display preprocessed line storage on stdout\0"
 #endif
-"-d8\0"             "Disable backpatching\0"
+"-nbp\0"            "Disable backpatching\0"
+#if FASTPASS
+"-nfp\0"            "Do full subsequent passes (disables \"fastpass\")\0"
+#endif
 "-pm=<n>\0"         "Stop assembly after <n> passes\0"
 "-sp\0"             "Skip preprocessor step\0"
 #endif

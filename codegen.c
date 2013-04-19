@@ -809,9 +809,13 @@ static ret_code check_operand_2( struct code_info *CodeInfo, enum operand_type o
                 /* v2.06b: added "undefined" check */
                 if ( CodeInfo->undef_sym == FALSE &&
                     ( CodeInfo->opnd[OPND1].InsFixup == NULL ||
-                    CodeInfo->opnd[OPND1].InsFixup->sym == NULL ||
-                    CodeInfo->opnd[OPND1].InsFixup->sym->state != SYM_UNDEFINED ) )
+                     CodeInfo->opnd[OPND1].InsFixup->sym == NULL ||
+                     CodeInfo->opnd[OPND1].InsFixup->sym->state != SYM_UNDEFINED ) ) {
+                    DebugMsg(("check_operand_2: error: undef_sym=%u Fixup[0]=%X [%s]\n",
+                              CodeInfo->undef_sym, CodeInfo->opnd[OPND1].InsFixup,
+                              CodeInfo->opnd[OPND1].InsFixup ? CodeInfo->opnd[OPND1].InsFixup->sym ? CodeInfo->opnd[OPND1].InsFixup->sym->name : "NULL" : "NULL" ));
                     EmitErr( INSTRUCTION_OPERAND_MUST_HAVE_SIZE );
+                }
         }
 
         output_opc( CodeInfo );

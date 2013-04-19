@@ -85,7 +85,7 @@ enum memtype {
     MT_EMPTY = 0xC0,
     MT_BITS  = 0xC1,   /* record field */
     MT_PTR   = 0xC3,   /* v2.05: changed, old value 0x83 */
-    MT_TYPE  = 0xC4,   /* structured variable */
+    MT_TYPE  = 0xC4,   /* symbol has user-defined type (struct, union, record) */
     MT_SPECIAL = 0x80, /* bit 7 */
     MT_SPECIAL_MASK = 0xC0, /* bit 6+7 */
     MT_ADDRESS = 0x80, /* bit 7=1, bit 6 = 0 */
@@ -156,9 +156,7 @@ struct asym {
 //#if FASTMEM==0 /* v2.09: obsolete */
 //                    isstatic:1,   /* symbol stored in static memory */
 //#endif
-#ifdef DEBUG_OUT
-                    forward:1,    /* symbol was forward referenced */
-#endif
+                    fwdref:1,     /* symbol was forward referenced */
                     included:1;   /* COFF: static symbol added to public queue. ELF:symbol added to symbol table (SYM_INTERNAL) */
     union {
         /* for SYM_INTERNAL (data labels, memtype != NEAR|FAR), SYM_STRUCT_FIELD */
@@ -199,6 +197,8 @@ struct asym {
         uint_32         max_mbr_size; /* max size members */
         /* SYM_STACK, SYM_TYPE (TYPEKIND_TYPEDEF), SYM_EXTERNAL, SYM_INTERNAL (code labels) */
         struct asym     *target_type; /* set if ptr_memtype is MT_TYPE */
+        /* SYM_TMACRO (if it's a register variable for FASTCALL) */
+        uint_16         regist[2];
     };
     union {
         /* for SYM_INTERNAL, SYM_STRUCT_FIELD,
@@ -227,7 +227,7 @@ struct asym {
              * v2.04: moved from first_length, were it didn't work anymore
              * since the addition of field max_mbr_size.
              */
-            uint_16        cv_typeref;
+            uint_16        cvtyperef;
             uint_8         typekind;
         };
     };
@@ -275,21 +275,7 @@ struct grp_info {
     uint                numseg;         /* OMF: number of segments in the group */
 };
 
-enum seg_type {
-    SEGTYPE_UNDEF,
-    SEGTYPE_CODE,
-    SEGTYPE_DATA,
-    SEGTYPE_BSS,
-    SEGTYPE_STACK,
-    SEGTYPE_ABS,
-#if PE_SUPPORT
-    SEGTYPE_HDR,   /* only used in bin.c for better sorting */
-    SEGTYPE_CDATA, /* only used in bin.c for better sorting */
-    SEGTYPE_RELOC, /* only used in bin.c for better sorting */
-    SEGTYPE_RSRC,  /* only used in bin.c for better sorting */
-    SEGTYPE_ERROR, /* must be last - an "impossible" segment type */
-#endif
-};
+typedef uint_8 * (* FlushSegFunc)( struct dsym *, uint_8 *, int );
 
 struct seg_info {
     struct asym         *group;         /* segment's group or NULL */
@@ -305,7 +291,10 @@ struct seg_info {
     uint_8              *CodeBuffer;
 #endif
     uint_32             bytes_written;  /* initialized bytes in segment */
-    struct asym         *labels;        /* linked list of labels in this seg */
+    union {
+        struct asym     *label_list;    /* linked list of labels in this seg */
+        FlushSegFunc    flushfunc;      /* to flush the segment buffer */
+    };
     struct fixup        *FixupListHead; /* fixup queue head */
     struct fixup        *FixupListTail; /* fixup queue tail */
     union {
@@ -330,21 +319,22 @@ struct seg_info {
     };
     unsigned char       Ofssize;        /* segment's offset size */
     unsigned char       characteristics;/* used by COFF/ELF/PE */
+    unsigned char       alignment;      /* is value 2^x */
 
-    unsigned char       alignment:4;    /* is value 2^x */
     unsigned char       readonly:1;     /* if segment is readonly */
     unsigned char       info:1;         /* if segment is info only (COFF/ELF) */
     unsigned char       force32:1;      /* force 32bit segdef (OMF only) */
     unsigned char       data_in_code:1; /* data items in code segm (OMF only) */
     unsigned char       internal:1;     /* internal segment with private buffer */
     unsigned char       written:1;      /* code/data just written */
-    unsigned char       combine:3;
+    unsigned char       linnum_init:1;  /* v2.10: linnum data emitted for segment? */
+    unsigned char       combine:3;      /* combine type, see omfspec.h */
 #if COMDATSUPP
     unsigned char       comdat_selection:3; /* COFF only */
 #endif
 };
 
-#define MAX_SEGALIGNMENT 0x0F
+#define MAX_SEGALIGNMENT 0xFF
 
 /* PROC item */
 
@@ -376,6 +366,7 @@ struct proc_info {
 #endif
         };
     };
+    uint_8              size_prolog;    /* v2.10: prologue size */
 };
 
 /* macro parameter */
@@ -513,7 +504,7 @@ extern  void            SymFini( void );
 extern  void            SymPassInit( int pass );
 extern  void            SymMakeAllSymbolsPublic( void );
 extern  void            SymGetAll( struct asym ** );
-extern  int             SymEnum( struct asym * *, int * );
+extern  struct asym     *SymEnum( struct asym *, int * );
 extern  uint_32         SymGetCount( void );
 
 #ifdef __WATCOMC__

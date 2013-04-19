@@ -541,11 +541,12 @@ static ret_code CheckAnonymousStruct( struct dsym *type )
     return( NOT_ERROR );
 }
 
-/* this function is called in pass 1 only.
+/* CreateStructField() - creates a symbol of state SYM_STRUCT_FIELD.
+ * this function is called in pass 1 only.
  * - loc: initializer index location, -1 means no initializer (is an embedded struct)
  * - name: field name, may be NULL
  * - mem_type: mem_type of item
- * - vartype: arbitrary type of item if memtype is MT_TYPE
+ * - vartype: user-defined type of item if memtype is MT_TYPE
  * - size: size of type - used for alignment only
  */
 struct asym *CreateStructField( int loc, struct asm_tok tokenarray[], const char *name, enum memtype mem_type, struct asym *vartype, uint_32 size )
@@ -1114,6 +1115,8 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
 
 /* RECORD directive
  * syntax: <label> RECORD <bitfield_name>:<size>[,...]
+ * defines a RECORD type (state=SYM_TYPE).
+ * the memtype will be MT_BYTE, MT_WORD, MT_DWORD [, MT_QWORD in 64-bit].
  */
 
 ret_code RecordDirective( int i, struct asm_tok tokenarray[] )

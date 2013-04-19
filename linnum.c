@@ -120,7 +120,7 @@ void AddLinnumDataRef( uint_32 line_num )
 #endif
         return;
     }
-    DebugMsg(("AddLinnumDataRef(#=%u) enter, currofs=%Xh, CurrProc=%s, GeneratedCode=%u\n", line_num, GetCurrOffset(), CurrProc ? CurrProc->sym.name : "NULL", GeneratedCode ));
+    DebugMsg(("AddLinnumDataRef(#=%u) enter, currofs=%Xh, CurrProc=%s, GeneratedCode=%u\n", line_num, GetCurrOffset(), CurrProc ? CurrProc->sym.name : "NULL", ModuleInfo.GeneratedCode ));
     curr = LclAlloc( sizeof( struct line_num_info ) );
     curr->number = line_num;
     if ( line_num == 0 ) { /* happens for COFF only */
@@ -156,6 +156,13 @@ void AddLinnumDataRef( uint_32 line_num )
         curr->srcfile = get_curr_srcfile();
     }
     lastLineNumber = line_num;
+    /* v2.10: warning if line-numbers for segments without class code! */
+    if ( CurrSeg->e.seginfo->linnum_init == FALSE ) {
+        CurrSeg->e.seginfo->linnum_init = TRUE;
+        if ( TypeFromClassName( CurrSeg, CurrSeg->e.seginfo->clsym ) != SEGTYPE_CODE ) {
+            EmitWarn( 2, LINNUM_INFO_FOR_SEGMENT_WITHOUT_CLASS_CODE, CurrSeg->sym.name );
+        }
+    }
     AddLinnumData( curr );
 
     return;

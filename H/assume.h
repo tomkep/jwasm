@@ -44,7 +44,7 @@ struct assume_info {
     struct asym         *symbol;        /* segment, group or type that is to
                                            be associated with the register */
     unsigned char       error;          /* register assumed to ERROR */
-    unsigned char       flat;           /* register assumed to FLAT  */
+    unsigned char       is_flat;        /* register assumed to FLAT  */
 };
 
 /* v2.05: introduced */
@@ -56,13 +56,17 @@ struct stdassume_typeinfo {
     unsigned char       is_ptr;
 };
 
-/* segment assume table is sorted by seg reg number: ES,CS,SS,DS,FS,GS */
+/* segment assume table is sorted by seg reg number: ES,CS,SS,DS,FS,GS.
+ * see enum assume_segreg in globals.h.
+ */
 extern struct assume_info SegAssumeTable[];
+
+/* standard register assume table; contains 8/16 entries for the GPRs */
 extern struct assume_info StdAssumeTable[];
 
 #define NUM_SEGREGS 6
 
-extern void AssumeInit( void );     /* init assume tables */
+extern void AssumeInit( int );     /* init assume tables */
 
 extern enum assume_segreg search_assume( const struct asym *sym, enum assume_segreg def, bool search_grps );
 extern enum assume_segreg GetAssume( const struct asym *, const struct asym *, enum assume_segreg, struct asym * * );

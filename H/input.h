@@ -69,7 +69,8 @@ extern void     AddLineQueue( const char *line );
 extern void     AddLineQueueX( const char *fmt, ... );
 extern ret_code InputQueueFile( const char *path, FILE * *pfile );
 extern char     *GetTextLine( char *buffer );
-extern void     PushMacro( struct asym *, struct macro_instance *, unsigned );
+extern void     PushMacro( struct asym *, struct macro_instance * );
+extern void     SetMacroLineNumber( unsigned );
 #if FASTMEM==0
 extern bool     MacroInUse( struct dsym * );
 #endif
@@ -79,17 +80,18 @@ extern void     InputPassInit( void );
 extern void     InputFini( void );
 extern struct asm_tok *PushInputStatus( struct input_status * );
 extern void     PopInputStatus( struct input_status * );
+extern void     RunLineQueue( void );
+//extern void     RunLineQueueEx( void );
 extern int      GetPreprocessedLine( char *, struct asm_tok[] );
 extern int      GetCurrSrcPos( char * );
 extern void     ClearFileStack( void );
 extern uint     get_curr_srcfile( void );
 extern void     set_curr_srcfile( uint, uint_32 );
-extern const struct fname_list *GetFName( uint );
+extern const struct fname_item *GetFName( uint );
 #ifdef DEBUG_OUT
 extern char     *GetTopLine( char * );
 #endif
 extern bool     is_linequeue_populated( void );
-extern void     SkipCurrentQueue( struct asm_tok * );
 extern ret_code WriteCodeLabel( char *, struct asm_tok[] );
 
 #define GetAlignedPointer( x, size ) ( x + ( ( size + 1 + sizeof(void *) - 1 ) & ~( sizeof(void *) - 1 ) ) )

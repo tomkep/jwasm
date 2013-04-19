@@ -802,7 +802,8 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
             /* for a simple register, get its size */
             if ( opnd.kind == EXPR_REG && opnd.indirect == FALSE ) {
                 asize = SizeFromRegister( opnd.base_reg->tokval );
-            } else if ( opnd.mem_type == MT_EMPTY ) {
+            //} else if ( opnd.mem_type == MT_EMPTY ) { /* v2.10: a TYPE may return mem_type != MT_EMPTY! */
+            } else if ( opnd.kind == EXPR_CONST || opnd.mem_type == MT_EMPTY ) {
                 asize = psize;
                 /* v2.04: added, to catch 0-size params ( STRUCT without members ) */
                 if ( psize == 0 ) {
@@ -967,8 +968,11 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                      */
                     //if ( Options.masm_compat_gencode ) {
                     if ( Options.masm_compat_gencode || psize == 2 ) {
-                        /* v2.05: push a 0 word if argument is VARARG */
-                        if ( curr->sym.is_vararg )
+                        /* v2.05: push a 0 word if argument is VARARG
+                         * v2.10: push a 0 word if psize != 2
+                         */
+                        //if ( curr->sym.is_vararg )
+                        if ( curr->sym.is_vararg || psize != 2 )
                             AddLineQueueX( " pushw 0" );
                         else {
 #if AMD64_SUPPORT
@@ -1417,16 +1421,15 @@ ret_code InvokeDirective( int i, struct asm_tok tokenarray[] )
     p = StringBufferEnd;
     strcpy( p, " call " );
     p += 6;
-#if 0 /* v2.09: uselabel obsolete */
-    if ( uselabel ) {
-        DebugMsg1(("InvokeDir: opnd.label_tok is used: %s\n", opnd.label_tok->string_ptr ));
-        strcpy( p, opnd.label_tok->string_ptr );
-    } else {
-#endif
+    /* v2.09: 'uselabel' obsolete */
+    //if ( uselabel ) {
+    //    DebugMsg1(("InvokeDir: opnd.label_tok is used: %s\n", opnd.label_tok->string_ptr ));
+    //    strcpy( p, opnd.label_tok->string_ptr );
+    //} else {
 #if DLLIMPORT
         if ( sym->state == SYM_EXTERNAL && sym->dll ) {
             char *iatname = p;
-            strcpy( p, ModuleInfo.imp_prefix );
+            strcpy( p, ModuleInfo.g.imp_prefix );
             p += strlen( p );
             p += Mangle( sym, p );
             namepos++;

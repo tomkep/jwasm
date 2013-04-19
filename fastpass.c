@@ -51,7 +51,7 @@ static void SaveState( void )
     modstate.init = TRUE;
     modstate.EquHead = modstate.EquTail = NULL;
 
-    memcpy( &modstate.modinfo, &ModuleInfo, sizeof( struct module_info ) );
+    memcpy( &modstate.modinfo, (uint_8 *)&ModuleInfo + sizeof( struct module_vars ), sizeof( modstate.modinfo ) );
 
     SegmentSaveState();
     AssumeSaveState();
@@ -70,7 +70,7 @@ void StoreLine( char *srcline, uint_32 list_pos, int flags )
     if ( Options.nofastpass )
         return;
 #endif
-    if ( GeneratedCode ) /* don't store generated lines! */
+    if ( ModuleInfo.GeneratedCode ) /* don't store generated lines! */
         return;
     if ( StoreState == FALSE ) /* line store already started? */
         SaveState();
@@ -126,6 +126,10 @@ void SkipSavedState( void )
  source. To be able to restart the assembly process from a certain
  location within the source, it's necessary to save the value of
  assembly time variables.
+ However, to reduce the number of variables that are saved, an
+ assembly-time variable is only saved when
+ - it is changed
+ - it was defined when StoreState() is called
  */
 
 void SaveVariableState( struct asym *sym )
@@ -168,9 +172,11 @@ struct line_item *RestoreState( void )
                 curr->sym->isdefined = curr->isdefined;
             //}
         }
-        /* fields in struct "g" are not to be restored. */
-        memcpy( &modstate.modinfo.g, &ModuleInfo.g, sizeof( ModuleInfo.g ) );
-        memcpy( &ModuleInfo, &modstate.modinfo, sizeof( struct module_info ) );
+        /* fields in module_vars are not to be restored.
+         * v2.10: the module_vars fields are not saved either.
+         */
+        //memcpy( &modstate.modinfo.g, &ModuleInfo.g, sizeof( ModuleInfo.g ) );
+        memcpy( (char *)&ModuleInfo + sizeof( struct module_vars ), &modstate.modinfo, sizeof( modstate.modinfo ) );
         SetOfssize();
         SymSetCmpFunc();
     }

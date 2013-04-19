@@ -198,33 +198,41 @@ static int watc_pcheck( struct dsym *proc, struct dsym *paranode, int *used )
     paranode->sym.state = SYM_TMACRO;
     switch ( size ) {
     case 1:
-        GetResWName( watc_regs8[firstreg], regname );
+        paranode->sym.regist[0] = watc_regs8[firstreg];
         break;
     case 2:
-        GetResWName( watc_regs16[firstreg], regname );
+        paranode->sym.regist[0] = watc_regs16[firstreg];
         break;
     case 4:
         if ( Ofssize ) {
-            GetResWName( watc_regs32[firstreg], regname );
+            paranode->sym.regist[0] = watc_regs32[firstreg];
         } else {
-            sprintf( regname, "%s::%s",
-                    GetResWName( watc_regs16[firstreg+1], regist ),
-                    GetResWName( watc_regs16[firstreg], NULL ) );
+            paranode->sym.regist[0] = watc_regs16[firstreg];
+            paranode->sym.regist[1] = watc_regs16[firstreg+1];
         }
         break;
     case 8:
         if ( Ofssize ) {
-            sprintf( regname, "%s::%s",
-                    GetResWName( watc_regs32[firstreg+1], regist ),
-                    GetResWName( watc_regs32[firstreg], NULL ) );
+            paranode->sym.regist[0] = watc_regs32[firstreg];
+            paranode->sym.regist[1] = watc_regs32[firstreg+1];
         } else {
-            /* the AX:BX:CX:DX sequence is for 16-bit only */
+            /* the AX:BX:CX:DX sequence is for 16-bit only.
+             * fixme: no support for codeview debug info yet;
+             * the S_REGISTER record supports max 2 registers only.
+             */
             for( firstreg = 0, regname[0] = NULLC; firstreg < 4; firstreg++ ) {
                 GetResWName( watc_regs_qw[firstreg], regname + strlen( regname ) );
                 if ( firstreg != 3 )
                     strcat( regname, "::");
             }
         }
+    }
+    if ( paranode->sym.regist[1] ) {
+        sprintf( regname, "%s::%s",
+                GetResWName( paranode->sym.regist[1], regist ),
+                GetResWName( paranode->sym.regist[0], NULL ) );
+    } else if ( paranode->sym.regist[0] ) {
+        GetResWName( paranode->sym.regist[0], regname );
     }
     *used |= newflg;
     paranode->sym.string_ptr = LclAlloc( strlen( regname ) + 1 );
@@ -262,6 +270,8 @@ static int ms32_pcheck( struct dsym *proc, struct dsym *paranode, int *used )
     if ( size > CurrWordSize || *used >= ms32_maxreg[ModuleInfo.Ofssize] )
         return( 0 );
     paranode->sym.state = SYM_TMACRO;
+    /* v2.10: for codeview debug info, store the register index in the symbol */
+    paranode->sym.regist[0] = ModuleInfo.Ofssize ? ms32_regs32[*used] : ms32_regs16[*used];
     GetResWName( ModuleInfo.Ofssize ? ms32_regs32[*used] : ms32_regs16[*used], regname );
     paranode->sym.string_ptr = LclAlloc( strlen( regname ) + 1 );
     strcpy( paranode->sym.string_ptr, regname );
@@ -585,7 +595,7 @@ ret_code LocalDir( int i, struct asm_tok tokenarray[] )
                 if ( (i + 1) < Token_Count )
                     i++;
             } else {
-                EmitError( EXPECTING_COMMA );
+                EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
                 return( ERROR );
             }
 
@@ -876,7 +886,7 @@ static ret_code ParseParams( int i, struct asm_tok tokenarray[], struct dsym *pr
         if ( tokenarray[i].token != T_FINAL ) {
             if( tokenarray[i].token != T_COMMA ) {
                 DebugMsg(("ParseParams: error, cntParam=%u, found %s\n", cntParam, tokenarray[i].tokpos ));
-                EmitError( EXPECTING_COMMA );
+                EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
                 return( ERROR );
             }
             i++;    /* go past comma */
@@ -1448,8 +1458,8 @@ ret_code ProcDir( int i, struct asm_tok tokenarray[] )
         /* v2.04: add the proc to the list of labels attached to curr segment.
          * this allows to reduce the number of passes (see fixup.c)
          */
-        ((struct dsym *)sym)->next = (struct dsym *)CurrSeg->e.seginfo->labels;
-        CurrSeg->e.seginfo->labels = sym;
+        ((struct dsym *)sym)->next = (struct dsym *)CurrSeg->e.seginfo->label_list;
+        CurrSeg->e.seginfo->label_list = sym;
 
     } else {
         /**/myassert( sym != NULL );
@@ -1647,6 +1657,8 @@ static void ProcFini( struct dsym *proc )
     if ( proc->sym.segment == &CurrSeg->sym ) {
         proc->sym.total_size = GetCurrOffset() - proc->sym.offset;
     } else {
+        DebugMsg1(("ProcFini(%s): unmatched block nesting error, proc->seg=%s, CurrSeg=%s\n",
+                   proc->sym.name, proc->sym.segment->name, CurrSeg ? CurrSeg->sym.name : "NULL" ));
         EmitErr( UNMATCHED_BLOCK_NESTING, proc->sym.name );
         proc->sym.total_size = CurrProc->sym.segment->offset - proc->sym.offset;
     }
@@ -1699,13 +1711,14 @@ static void ProcFini( struct dsym *proc )
 ret_code EndpDir( int i, struct asm_tok tokenarray[] )
 /****************************************************/
 {
-    DebugMsg1(("EndpDir(%s) enter, curr ofs=%" FX32 "\n", tokenarray[0].string_ptr, GetCurrOffset() ));
+    DebugMsg1(("EndpDir(%s) enter, curr ofs=% " FX32 ", CurrProc=%s\n", tokenarray[0].string_ptr, GetCurrOffset(), CurrProc ? CurrProc->sym.name : "NULL" ));
     if( i != 1 || tokenarray[2].token != T_FINAL ) {
         EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
         return( ERROR );
     }
+    /* v2.10: "+ 1" added to CurrProc->sym.name_size */
     if( CurrProc &&
-       ( SymCmpFunc(CurrProc->sym.name, tokenarray[0].string_ptr, CurrProc->sym.name_size ) == 0 ) ) {
+       ( SymCmpFunc(CurrProc->sym.name, tokenarray[0].string_ptr, CurrProc->sym.name_size + 1 ) == 0 ) ) {
         ProcFini( CurrProc );
     } else {
         EmitErr( UNMATCHED_BLOCK_NESTING, tokenarray[0].string_ptr );
@@ -1940,6 +1953,7 @@ void ProcCheckOpen( void )
 /************************/
 {
     while( CurrProc != NULL ) {
+        DebugMsg1(("ProcCheckOpen: unmatched block nesting error, CurrProc=%s\n", CurrProc->sym.name ));
         EmitErr( UNMATCHED_BLOCK_NESTING, CurrProc->sym.name );
         ProcFini( CurrProc );
     }
@@ -2340,6 +2354,8 @@ void write_prologue( struct asm_tok tokenarray[] )
         DebugMsg1(("write_prologue(%s): userdefined prologue %s\n", CurrProc->sym.name , ModuleInfo.proc_prologue ));
         write_userdef_prologue( tokenarray );
     }
+    /* v2.10: for debug info, calculate prologue size */
+    CurrProc->e.procinfo->size_prolog = GetCurrOffset() - CurrProc->sym.offset;
     return;
 }
 

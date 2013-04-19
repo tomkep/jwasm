@@ -67,6 +67,7 @@ struct global_options Options = {
     /* quiet            */          FALSE,
     /* line_numbers     */          FALSE,
     /* debug_symbols    */          0,
+    /* debug_ext        */          0, /* v2.10 */
     /* floating_point   */          FPO_NO_EMULATION,
 
     /* error_limit      */          50,
@@ -82,6 +83,7 @@ struct global_options Options = {
 #endif
     /* max_passes       */          0,
     /* skip_preprocessor */         0,
+    /* log_all_files    */          0,
 #endif
     /* names            */          {
         NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -99,8 +101,11 @@ struct global_options Options = {
     /* no_comment_data_in_code_records */   FALSE,
     /* no_opt_farcall        */     FALSE,
     /* no_dependencies       */ //    FALSE,
+#if COFF_SUPPORT
     /* no_file_entry         */     FALSE,
+    /* no_static_procs       */     FALSE,
     /* no_section_aux_entry  */     FALSE,
+#endif
     /* no_cdecl_decoration   */     FALSE,
     /* stdcall_decoration    */     STDCALL_FULL,
     /* no_export_decoration  */     FALSE,
@@ -158,6 +163,7 @@ static const enum cpu_info cpuoption[] = {
 #endif
 };
 
+#if 0 /* v2.10: removed, because factually never called */
 static void StripQuotes( char *fname )
 /************************************/
 {
@@ -183,9 +189,13 @@ static void StripQuotes( char *fname )
 static char *GetAFileName( void )
 /*******************************/
 {
+    DebugMsg(("GetAFileName() enter, OptName=>%s<\n", OptName ));
     StripQuotes( OptName );
     return( OptName );
 }
+#else
+#define GetAFileName() OptName
+#endif
 
 #if BUILD_TARGET
 static void SetTargName( char *name, unsigned len )
@@ -264,6 +274,7 @@ static void get_fname( int type, const char *token )
 /**************************************************/
 /*
  * called by -Fo, -Fw or -Fl (for .OBJ, .ERR or .LST filenames ).
+ * also called by -Fd; in this case type is > NUM_FILE_TYPES!
  */
 {
     char        *pExt;
@@ -282,13 +293,17 @@ static void get_fname( int type, const char *token )
      */
     if( fname[0] == NULLC ) {
         DebugMsg(("get_fname(%u, >%s< ) name is empty or a directory\n", type, token ));
-        if ( DefaultDir[type] )
-            MemFree( DefaultDir[type]);
-        DefaultDir[type] = MemAlloc( strlen( token ) + 1 );
-        strcpy( DefaultDir[type], token );
+        /* v2.10: ensure type is < NUM_FILE_TYPES */
+        if ( type < NUM_FILE_TYPES ) {
+            if ( DefaultDir[type] )
+                MemFree( DefaultDir[type]);
+            DefaultDir[type] = MemAlloc( strlen( token ) + 1 );
+            strcpy( DefaultDir[type], token );
+        }
         return;
     }
-    if ( drive[0] == NULLC && dir[0] == NULLC && DefaultDir[type] ) {
+    /* v2.10: ensure type is < NUM_FILE_TYPES */
+    if ( drive[0] == NULLC && dir[0] == NULLC && type < NUM_FILE_TYPES && DefaultDir[type] ) {
         DebugMsg(("get_fname: default drive+dir used: %s\n" ));
         _splitpath( DefaultDir[type], drive, dir, NULL, NULL );
     }
@@ -351,7 +366,16 @@ static void OPTQUAL Set_Cu( void ) { Options.case_sensitive = FALSE;  Options.co
 static void OPTQUAL Set_Cx( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = FALSE; }
 
 static void OPTQUAL Set_Zd( void ) { Options.line_numbers = TRUE; }
-static void OPTQUAL Set_Zi( void ) { Set_Zd(); Options.debug_symbols = CV4_SIGNATURE; }
+static void OPTQUAL Set_Zi( void )
+{
+    Set_Zd();
+    Options.debug_symbols = CV_SIGNATURE;
+    /* v2.10: added optional numeric argument for -Zi */
+    if ( OptValue <= CVEX_MAX )
+        Options.debug_ext = OptValue;
+    else
+        EmitWarn( 1, INVALID_CMDLINE_VALUE, "Zi" );
+}
 
 static void OPTQUAL Set_Zp( void )
 /********************************/
@@ -362,7 +386,7 @@ static void OPTQUAL Set_Zp( void )
             Options.fieldalign = power;
             return;
         }
-    EmitWarn( 1, INVALID_CMDLINE_VALUE, "-Zp" );
+    EmitWarn( 1, INVALID_CMDLINE_VALUE, "Zp" );
     return;
 }
 
@@ -419,7 +443,7 @@ static void OPTQUAL Set_W( void )
     if ( OptValue <= 4 )
         Options.warning_level = OptValue;
     else
-        EmitWarn( 1, INVALID_CMDLINE_VALUE, "/W" );
+        EmitWarn( 1, INVALID_CMDLINE_VALUE, "W" );
 }
 
 static void OPTQUAL Set_ofmt( void )
@@ -438,7 +462,7 @@ static void OPTQUAL Set_zt( void ) { Options.stdcall_decoration = OptValue; }
 static void OPTQUAL Set_h( void ) { usagex_msg();}
 
 #ifdef DEBUG_OUT
-static void OPTQUAL Set_d6( void )
+static void OPTQUAL Set_dt( void )
 /********************************/
 {
     Options.debug = TRUE;
@@ -446,15 +470,15 @@ static void OPTQUAL Set_d6( void )
     DebugMsg(( "debugging output on\n" ));
 }
 #if FASTPASS
-static void OPTQUAL Set_d7( void )
-/********************************/
+static void OPTQUAL Set_nfp( void )
+/*********************************/
 {
     Options.nofastpass = TRUE;
     DebugMsg(( "FASTPASS disabled\n" ));
 }
 #endif
-static void OPTQUAL Set_d8( void )
-/********************************/
+static void OPTQUAL Set_nbp( void )
+/*********************************/
 {
     Options.nobackpatch = TRUE;
     DebugMsg(( "backpatching disabled\n" ));
@@ -478,6 +502,9 @@ struct  cmdloption {
  */
 static struct cmdloption const cmdl_options[] = {
     { "?",      0,        Set_h },
+#ifdef DEBUG_OUT
+    { "af",     optofs( log_all_files ), Set_True },
+#endif
 #if BIN_SUPPORT
     { "bin",    OFORMAT_BIN | (SFORMAT_NONE << 8), Set_ofmt },
 #endif
@@ -491,15 +518,11 @@ static struct cmdloption const cmdl_options[] = {
     { "coff",   OFORMAT_COFF | (SFORMAT_NONE << 8), Set_ofmt },
 #endif
     { "c",      0,        Set_c },
-#ifdef DEBUG_OUT
-    { "d6",     0,        Set_d6 },
-#if FASTPASS
-    { "d7",     0,        Set_d7 },
-#endif
-    { "d8",     0,        Set_d8 },
-#endif
 #if COFF_SUPPORT && DJGPP_SUPPORT
     { "djgpp",  OFORMAT_COFF | (SFORMAT_DJGPP << 8), Set_ofmt },
+#endif
+#ifdef DEBUG_OUT
+    { "dt",     0,        Set_dt },
 #endif
     { "D^$",    0,        Set_D },
 #if ELF_SUPPORT
@@ -551,11 +574,17 @@ static struct cmdloption const cmdl_options[] = {
     { "mz",     OFORMAT_BIN | (SFORMAT_MZ << 8), Set_ofmt },
 #endif
 #endif
+#ifdef DEBUG_OUT
+    { "nbp",    0,                  Set_nbp },
+#endif
     { "nc=$",   OPTN_CODE_CLASS,    Set_n },
     { "nd=$",   OPTN_DATA_SEG,      Set_n },
+#if FASTPASS && defined(DEBUG_OUT)
+    { "nfp",    0,                  Set_nfp },
+#endif
     { "nm=$",   OPTN_MODULE_NAME,   Set_n },
+    { "nologo", 0,                  Set_nologo },
     { "nt=$",   OPTN_TEXT_SEG,      Set_n },
-    { "nologo", 0,        Set_nologo },
     { "omf",    OFORMAT_OMF | (SFORMAT_NONE << 8), Set_ofmt },
 #if COCTALS
     { "o",      optofs( allow_c_octals ),   Set_True },
@@ -588,7 +617,7 @@ static struct cmdloption const cmdl_options[] = {
     { "Zd",     0,        Set_Zd },
     { "Zf",     optofs( all_symbols_public ),  Set_True },
     { "Zg",     optofs( masm_compat_gencode ), Set_True },
-    { "Zi",     0,        Set_Zi },
+    { "Zi=#",   CVEX_NORMAL, Set_Zi },
     { "Zm",     optofs( masm51_compat ),      Set_True },
     { "Zne",    optofs( strict_masm_compat ), Set_True },
     { "Zp=#",   0,        Set_Zp },
@@ -602,6 +631,7 @@ static struct cmdloption const cmdl_options[] = {
     { "zld",    optofs( no_opt_farcall ),       Set_True },
 #if COFF_SUPPORT
     { "zlf",    optofs( no_file_entry ),        Set_True },
+    { "zlp",    optofs( no_static_procs ),      Set_True }, /* v2.10: added */
     { "zls",    optofs( no_section_aux_entry ), Set_True },
 #endif
     { "Zs",     optofs( syntax_check_only ), Set_True },
@@ -618,15 +648,16 @@ static struct cmdloption const cmdl_options[] = {
 
 /*
  * get a "name"
- * type=@ : filename
- * type=$ : (macro) identifier [=value]
- * type=0 : something else
+ * type=@ : filename ( -Fd, -Fi, -Fl, -Fo, -Fw, -I )
+ * type=$ : (macro) identifier [=value] ( -D, -nc, -nd, -nm, -nt )
+ * type=0 : something else ( -0..-10 )
  */
 static const char *GetNameToken( char *dst, const char *str, int max, char type )
 /*******************************************************************************/
 {
     bool equatefound = FALSE;
 
+    DebugMsg(("GetNameToken( %s, %u, '%c' ) enter, rspidx=%u\n", str, max, type, rspidx ));
     //while( isspace( *str ) ) ++str;  /* no spaces allowed! */
 is_quote:
     if( *str == '"' ) {
@@ -644,7 +675,12 @@ is_quote:
         }
     } else {
         for( ; max; max-- ) {
-            if ( *str == NULLC || *str == ' ' || *str == '\t' )
+            /* v2.10: don't stop for white spaces */
+            //if ( *str == NULLC || *str == ' ' || *str == '\t' )
+            if ( *str == NULLC )
+                break;
+            /* v2.10: don't stop for white spaces if filename is expected and true cmdline is parsed */
+            if ( ( *str == ' ' || *str == '\t' ) && ( rspidx || type != '@' ) )
                 break;
             if ( type == 0 )
                 if ( *str == '-'
@@ -684,7 +720,9 @@ static char *ReadParamFile( const char *name )
     env = NULL;
     file = fopen( name, "rb" );
     if( file == NULL ) {
-        EmitErr( CANNOT_OPEN_FILE, name, ErrnoStr() );
+        /* v2.10: changed to fatal error */
+        //EmitErr( CANNOT_OPEN_FILE, name, ErrnoStr() );
+        Fatal( CANNOT_OPEN_FILE, name, ErrnoStr() );
         return( NULL );
     }
     len = 0;
@@ -805,15 +843,16 @@ static void ProcessOption( const char **cmdline, char *buffer )
                 case '$':      /* collect an identifer+value */
                 case '@':      /* collect a filename */
                     OptName = buffer;
-#if 0 /* v2.05: removed */
+#if 0  /* v2.05: removed */
                     if ( rspidx )
                         p = GetNameToken( buffer, p, _MAX_PATH - 1, *opt );
                     else {
                         j = strlen( p );
-                        memcpy( buffer, p, (j >= _MAX_PATH) ? _MAX_PATH : j+1 );
+                        memcpy( buffer, p, (j >= _MAX_PATH) ? _MAX_PATH : j + 1 );
                         p += j;
                     }
 #else
+                    /* v2.10: spaces in filename now handled inside GetNameToken() */
                     p = GetNameToken( buffer, p, _MAX_PATH - 1, *opt );
 #endif
                     break;
@@ -935,10 +974,11 @@ char * EXPQUAL ParseCmdline( const char **cmdline, int *pCntArgs )
             }
             str++;
 #if 1 /* v2.06: was '0' in v2.05, now '1' again since it didn't work with quoted names */
+            /* todo: might be unnecessary since v.2.10, since GetNameToken() handles spaces inside filenames differently */
             if ( rspidx ) {
                 cmdsave[rspidx] = GetNameToken( paramfile, str, sizeof( paramfile ) - 1, '@' );
             } else {
-                strcpy( paramfile, str );
+                strcpy( paramfile, str ); /* fixme: no overflow check */
                 cmdsave[rspidx] = str + strlen(str);
             }
 #else

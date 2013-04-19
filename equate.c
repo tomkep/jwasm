@@ -20,6 +20,7 @@
 #include "fastpass.h"
 #include "listing.h"
 #include "input.h"
+#include "fixup.h"
 
 extern void myatoi128( const char *, uint_64[], int, int );
 
@@ -54,6 +55,7 @@ const int_64 minintvalues[] = { 0xffffffff00000000i64, 0xffffffff00000000i64,
 static void SetValue( struct asym *sym, struct expr *opndx )
 /**********************************************************/
 {
+
     sym->isequate = TRUE;
     sym->state = SYM_INTERNAL;
     sym->isdefined = TRUE;
@@ -83,9 +85,35 @@ static void SetValue( struct asym *sym, struct expr *opndx )
             sym->mem_type = opndx->sym->mem_type;
             sym->type = opndx->sym->type;
         }
-        sym->offset = opndx->sym->offset + opndx->value;
         sym->value3264 = 0; /* v2.09: added */
         sym->segment = opndx->sym->segment;
+#if 1 /* v2.10: added */
+        /* labels are supposed to be added to the current segment's label_list chain.
+         * this isn't done for alias equates, for various reasons.
+         * consequently, if the alias was forward referenced, ensure that a third pass
+         * will be done! regression test forward5.asm.
+         */
+        if ( sym->variable ) {
+            sym->offset = opndx->sym->offset + opndx->value;
+            if ( Parse_Pass == PASS_2 && sym->fwdref ) {
+#ifdef DEBUG_OUT
+                if ( !ModuleInfo.PhaseError )
+                    DebugMsg(("SetValue(%s): Phase error, enforced by alias equate\n", sym->name ));
+#endif
+                ModuleInfo.PhaseError = TRUE;
+            }
+        } else {
+            if( Parse_Pass != PASS_1 && sym->offset != ( opndx->sym->offset + opndx->value ) ) {
+#ifdef DEBUG_OUT
+                if ( !ModuleInfo.PhaseError )
+                    DebugMsg1(("SetValue(%s): Phase error, enforced by alias equate %" FX32 " != %" FX32 "\n", sym->name, sym->offset, opndx->sym->offset + opndx->value ));
+#endif
+                ModuleInfo.PhaseError = TRUE;
+            }
+            sym->offset = opndx->sym->offset + opndx->value;
+            BackPatch( sym );
+        }
+#endif
     }
     return;
 }
@@ -172,26 +200,47 @@ static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
             sym = SymCreate( name );
         } else {
             sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
+            sym->fwdref = TRUE;
         }
         //sym->variable  = TRUE;
+#if FASTPASS
+        sym->issaved = StoreState; /* v2.10: added */
+#endif
     //} else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->mem_type == MT_ABS ) {
     } else if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->mem_type == MT_EMPTY ) {
         sym_ext2int( sym );
         //sym->variable  = TRUE;
-    } else if ( sym->state != SYM_INTERNAL ||
-               ( sym->variable == FALSE &&
-                ( opnd.uvalue != sym->uvalue || opnd.hvalue != sym->value3264 ) ) ) {
-        EmitErr( SYMBOL_REDEFINITION, sym->name );
-        return( NULL );
-    }
 #if FASTPASS
-    /* v2.04a regression in v2.04. Do not save the variable when it
-     * is defined the first time */
-    if ( StoreState && sym->issaved == FALSE && sym->isdefined == TRUE ) {
-        SaveVariableState( sym );
+        sym->issaved = StoreState; /* v2.10: added */
+#endif
+    } else {
+        if ( sym->state != SYM_INTERNAL ||
+            ( sym->variable == FALSE &&
+             ( opnd.uvalue != sym->uvalue || opnd.hvalue != sym->value3264 ) ) ) {
+            EmitErr( SYMBOL_REDEFINITION, sym->name );
+            return( NULL );
+        }
+#if FASTPASS
+        /* v2.04a regression in v2.04. Do not save the variable when it
+         * is defined the first time
+         * v2.10: store state only when variable is changed and has been
+         * defined BEFORE SaveState() has been called.
+         */
+        //if ( StoreState && sym->issaved == FALSE && sym->isdefined == TRUE ) {
+        if ( StoreState && sym->issaved == FALSE ) {
+            SaveVariableState( sym );
+        }
+#endif
+    }
+    sym->variable = TRUE;
+#ifdef DEBUG_OUT
+    if ( Parse_Pass > PASS_1 ) {
+        if ( opnd.kind == EXPR_CONST && sym->uvalue != opnd.uvalue )
+            DebugMsg1(( "CreateAssemblyTimeVariable(%s): kind=%u, value changed ( %d -> %d )\n", name, opnd.kind, sym->uvalue, opnd.uvalue ) );
+        else if ( opnd.kind == EXPR_ADDR && sym->uvalue != ( opnd.uvalue + opnd.sym->uvalue ) )
+            DebugMsg1(( "CreateAssemblyTimeVariable(%s): kind=%u, value changed ( %d -> %d )\n", name, opnd.kind, sym->uvalue, opnd.uvalue + opnd.sym->uvalue ) );
     }
 #endif
-    sym->variable = TRUE;
     /* v2.09: allow internal variables to be set */
     if ( sym->predefined && sym->sfunc_ptr )
         sym->sfunc_ptr( sym, &opnd );
@@ -217,21 +266,32 @@ struct asym *CreateVariable( const char *name, int value )
     if( sym == NULL ) {
         sym = SymCreate( name );
 #if FASTPASS
-        sym->issaved = FALSE;
+        //sym->issaved = FALSE;
+        sym->issaved = StoreState; /* v2.10 */
 #endif
     } else if ( sym->state == SYM_UNDEFINED ) {
         sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
-    } else if ( sym->isequate == FALSE ) {
-        EmitErr( SYMBOL_REDEFINITION, name );
-        return( NULL );
-    }
+        sym->fwdref = TRUE;
 #if FASTPASS
-    /* v2.09: don't save variable when it is defined the first time */
-    //if ( StoreState && sym->saved == FALSE ) {
-    if ( StoreState && sym->issaved == FALSE && sym->isdefined == TRUE ) {
-        SaveVariableState( sym );
-    }
+        sym->issaved = StoreState; /* v2.10 */
 #endif
+    } else {
+        if ( sym->isequate == FALSE ) {
+            EmitErr( SYMBOL_REDEFINITION, name );
+            return( NULL );
+        }
+#if FASTPASS
+        /*
+         * v2.09: don't save variable when it is defined the first time
+         * v2.10: store state only when variable is changed and has been
+         * defined BEFORE SaveState() has been called.
+         */
+        //if ( StoreState && sym->issaved == FALSE && sym->isdefined == TRUE ) {
+        if ( StoreState && sym->issaved == FALSE ) {
+            SaveVariableState( sym );
+        }
+#endif
+    }
     sym->isdefined  = TRUE;
     sym->state    = SYM_INTERNAL;
     //sym->mem_type = MT_ABS;
@@ -344,7 +404,10 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
         rc = EvalOperand( &i, tokenarray, Token_Count, &opnd, EXPF_NOERRMSG | EXPF_NOLCREATE );
 
         /* v2.08: if it's a quoted string, handle it like a plain number */
-        if ( opnd.quoted_string ) {
+        /* v2.10: quoted_string field is != 0 if kind == EXPR_FLOAT,
+         * so this is a regression in v2.08-2.09.
+         */
+        if ( opnd.quoted_string && opnd.kind == EXPR_CONST ) {
             i--; /* v2.09: added; regression in v2.08 and v2.08a */
             goto check_single_number;
         }
@@ -373,6 +436,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
             sym->asmpass = Parse_Pass;
         } else if ( sym->state == SYM_UNDEFINED ) {
             sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
+            sym->fwdref = TRUE;
         } else if ( sym->state == SYM_EXTERNAL ) {
             sym_ext2int( sym );
         } else if ( cmpvalue ) {

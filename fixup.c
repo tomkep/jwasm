@@ -215,7 +215,7 @@ void store_fixup( struct fixup *fixup, int_32 *pdata )
         /* Djgpp's COFF variant needs special handling for
          * - at least - relative and direct 32-bit offsets.
          */
-        if ( fixup->sym && ModuleInfo.header_format == SFORMAT_DJGPP ) {
+        if ( fixup->sym && ModuleInfo.sub_format == SFORMAT_DJGPP ) {
             if ( fixup->type == FIX_RELOFF32 ) { /* probably also for 16-bit */
                 *pdata -= ( fixup->location + 4 );
             } else if ( fixup->type == FIX_OFF32 ) {
@@ -231,7 +231,7 @@ void store_fixup( struct fixup *fixup, int_32 *pdata )
             *pdata += fixup->sym->offset;
             fixup->offset         += fixup->sym->offset;
             /* and save symbol's segment in fixup */
-            fixup->segment = fixup->sym->segment;
+            fixup->segment_var = fixup->sym->segment;
         }
 #if 0   /* fixup without symbol: this is to be resolved internally! */
         else if ( fixup->sym == NULL && fixup->frame == EMPTY ) {

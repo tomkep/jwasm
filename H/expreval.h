@@ -91,7 +91,10 @@ struct expr {
     struct asm_tok  *base_reg;      /* EXPR_ADDR: base register token */
                                     /* EXPR_REG: register token */
     struct asm_tok  *idx_reg;       /* EXPR_ADDR: index register token */
-    struct asm_tok  *label_tok;     /* token holding the label (used inside expreval only) */
+    union {
+        struct asm_tok  *label_tok; /* token holding the label (EXPR_ADDR, used for overrides, inside expreval only) */
+        struct asm_tok  *type_tok;  /* v2.10: token if target type of a label (SYM_STACK, MT_PTR) is to be stored */
+    };
     struct asm_tok  *override;      /* EXPR_ADDR: token holding the override label */
                                     /* or segment register */
     enum special_token instr;       /* operator token */
@@ -105,12 +108,13 @@ struct expr {
         struct {
             unsigned indirect : 1;  /* indirect addressing used */
             unsigned explicit : 1;  /* Whether expression type explicitly given (to be removed!) */
-            unsigned abs      : 1;  /* external ABS */
+            unsigned is_abs   : 1;  /* external ABS */
             unsigned is_type  : 1;  /* constant is a type */
             unsigned is_opattr: 1;  /* current operator is OPATTR */
             unsigned negative : 1;  /* for EXPR_FLOAT only */
             //unsigned ftype    : 1;  /* for EXPR_FLOAT only (float type) */
             unsigned assumecheck: 1;/* v2.07: for ASSUMEd std registers */
+            unsigned is_dot: 1;     /* v2.10: see regression test dotop5.asm */
         };
     };
     struct asym     *sym;   /* label used */
@@ -121,10 +125,11 @@ struct expr {
 /* flags for last argument of EvalOperand() */
 enum expr_flags {
     EXPF_NOERRMSG  = 1,  /* suppress error messages */
-    EXPF_NOLCREATE = 2   /* don't create label if it isn't defined yet */
+    EXPF_NOLCREATE = 2,  /* don't create label if it isn't defined yet */
+    EXPF_ONEOPND   = 4,  /* private flag, used inside expreval.c only */
+    EXPF_IN_SQBR   = 8   /* private flag, used inside expreval.c only */
 };
 
-extern void         EmitConstError( const struct expr * );
 extern ret_code     EvalOperand( int *, struct asm_tok[], int, struct expr *, uint_8 );
 extern void         ExprEvalInit( void );
 

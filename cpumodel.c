@@ -356,7 +356,7 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
  * ModuleInfo.curr_cpu is the old OW Wasm value.
  * additional notes:
  * .[1|2|3|4|5|6]86 will reset .MMX, .K3D and .XMM,
- * OTOH, .MMX/.XMM won't automatically enable .586/.686
+ * OTOH, .MMX/.XMM won't automatically enable .586/.686 ( Masm does! )
 */
 
 ret_code SetCPU( enum cpu_info newcpu )

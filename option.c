@@ -737,9 +737,9 @@ static struct dll_desc *IncludeDll( const char *name )
     *q = node;
 
 #if AMD64_SUPPORT
-    ModuleInfo.imp_prefix = ( ( ModuleInfo.defOfssize == USE64 ) ? "__imp_" : "_imp_" );
+    ModuleInfo.g.imp_prefix = ( ( ModuleInfo.defOfssize == USE64 ) ? "__imp_" : "_imp_" );
 #else
-    ModuleInfo.imp_prefix = "_imp_";
+    ModuleInfo.g.imp_prefix = "_imp_";
 #endif
 
     return( node );
@@ -764,6 +764,26 @@ OPTFUNC( SetDllImport )
         if ( Parse_Pass == PASS_1 )
             ModuleInfo.CurrDll = IncludeDll( tokenarray[i].string_ptr );
         i++;
+    }
+    *pi = i;
+    return( NOT_ERROR );
+}
+#endif
+
+#if CVOSUPP
+OPTFUNC( SetCodeView )
+/********************/
+{
+    int i = *pi;
+    struct expr opnd;
+
+    if ( EvalOperand( &i, tokenarray, Token_Count, &opnd, 0 ) == ERROR )
+        return( ERROR );
+    if ( opnd.kind == EXPR_CONST ) {
+        ModuleInfo.cv_opt = opnd.value;
+    } else {
+        EmitError( CONSTANT_EXPECTED );
+        return( ERROR );
     }
     *pi = i;
     return( NOT_ERROR );
@@ -840,6 +860,9 @@ static const struct asm_option optiontab[] = {
 #endif
 #if DLLIMPORT
     { "DLLIMPORT",    SetDllImport   }, /* DLLIMPORT: <NONE|library> */
+#endif
+#if CVOSUPP
+    { "CODEVIEW",     SetCodeView    }, /* CODEVIEW: <value> */
 #endif
 };
 

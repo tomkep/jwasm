@@ -245,7 +245,9 @@ res(ALIGN,       align,       5, 0,                          DRT_ALIGN,   0,  P_
 res(EVEN,        even,        4, 0,                          DRT_ALIGN,   0,  P_86, 0)
 
 res(SEGMENT,     segment,     7, DF_LABEL|DF_NOSTRUC|DF_PROC,DRT_SEGMENT, 0,  P_86, 0)
-res(ENDS,        ends,        4, DF_LABEL|DF_PROC,           DRT_ENDS,    0,  P_86, 0)
+/* v2.10: ENDS should not trigger prologue creation if it is to end a structure */
+//res(ENDS,        ends,        4, DF_LABEL|DF_PROC,           DRT_ENDS,    0,  P_86, 0)
+res(ENDS,        ends,        4, DF_LABEL,                   DRT_ENDS,    0,  P_86, 0)
 res(GROUP,       group,       5, DF_LABEL,                   DRT_GROUP,   0,  P_86, 0)
 res(ASSUME,      assume,      6, 0,                          DRT_ASSUME,  0,  P_86, 0)
 

@@ -59,7 +59,7 @@
   active             on           done
   done               off          -
   --------------------------------------------------------
-  up to v2.04, there was a forth state:
+  up to v2.04, there was a fourth state:
   condition check    on           active, inactive
   it was necessary because lines may have been tokenized multiple times.
 */
@@ -285,7 +285,7 @@ ret_code CondAsmDirective( int i, struct asm_tok tokenarray[] )
         }
         i++;
         if ( tokenarray[i].token != T_COMMA ) {
-            EmitError( EXPECTING_COMMA );
+            EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
             return( ERROR );
         }
         i++;
@@ -585,7 +585,7 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
         }
         i++;
         if ( tokenarray[i].token != T_COMMA ) {
-            EmitError( EXPECTING_COMMA );
+            EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
             return( ERROR );
         }
         i++;
@@ -650,6 +650,19 @@ void CondCheckOpen( void )
     if( blocknestlevel > 0 ) {
         EmitErr( BLOCK_NESTING_ERROR, "if-else" );
     }
+    return;
+}
+
+int GetIfNestLevel( void )
+/************************/
+{
+    return( blocknestlevel );
+}
+
+void SetIfNestLevel( int newlevel )
+/*********************************/
+{
+    blocknestlevel = newlevel;
     return;
 }
 

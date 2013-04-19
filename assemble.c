@@ -63,8 +63,6 @@ jmp_buf jmpenv;
 
 #define USELSLINE 1 /* must match switch in listing.c! */
 
-extern void             ProcCheckOpen( void );
-
 extern uint_32          LastCodeBufSize;
 extern char             *DefaultDir[NUM_FILE_TYPES];
 extern const char       *ModelToken[];
@@ -92,10 +90,103 @@ static const struct format_options formatoptions[] = {
 
 struct module_info      ModuleInfo;
 unsigned int            Parse_Pass;     /* assembly pass */
-unsigned int            GeneratedCode;
+//unsigned int            GeneratedCode; /* v2.10: moved to ModuleInfo */
 struct qdesc            LinnumQueue;    /* queue of line_num_info items */
 
 bool write_to_file;     /* write object module */
+
+
+#if 0
+/* for OW, it would be good to remove the CharUpperA() emulation
+ * implemented in apiemu.c. Unfortunately, OW isn't happy with
+ * a local, simple version of _strupr() - it still wants to
+ * import CharUpperA.
+ */
+char * _strupr( char *src )
+{
+    char *dst;
+    for ( dst = src; *dst; dst++ )
+        if ( *dst >= 'a' && *dst <= 'z' )
+            *dst &= ~0x20;
+    return( src );
+}
+#endif
+
+#if COFF_SUPPORT || PE_SUPPORT
+
+/* struct to help convert section names in COFF, ELF, PE */
+struct conv_section {
+    uint_8 len;
+    uint_8 flags; /* see below */
+    const char *src;
+    const char *dst;
+};
+enum cvs_flags {
+    CSF_GRPCHK = 1
+};
+
+enum conv_section_index {
+    CSI_TEXT = 0,
+    CSI_DATA,
+    CSI_CONST,
+    CSI_BSS
+};
+
+/* order must match enum conv_section_index above */
+static const struct conv_section cst[] = {
+    { 5, CSF_GRPCHK, "_TEXT", ".text"  },
+    { 5, CSF_GRPCHK, "_DATA", ".data"  },
+    { 5, CSF_GRPCHK, "CONST", ".rdata" },
+    { 4, 0,          "_BSS",  ".bss"   }
+};
+
+/* order must match enum conv_section_index above */
+static const enum seg_type stt[] = {
+    SEGTYPE_CODE, SEGTYPE_DATA, SEGTYPE_DATA, SEGTYPE_BSS
+};
+
+/*
+ * translate section names (COFF+PE):
+ * _TEXT -> .text
+ * _DATA -> .data
+ * CONST -> .rdata
+ * _BSS  -> .bss
+ */
+
+char *ConvertSectionName( struct asym *sym, enum seg_type *pst, char *coffname )
+/******************************************************************************/
+{
+    int i;
+
+    for ( i = 0; i < sizeof( cst ) / sizeof( cst[0] ); i++ ) {
+        if ( memcmp( sym->name, cst[i].src, cst[i].len ) == 0 ) {
+            if ( sym->name[cst[i].len] == NULLC || ( sym->name[cst[i].len] == '$' && ( cst[i].flags & CSF_GRPCHK ) ) ) {
+
+                if ( pst ) {
+                    if ( i == CSI_BSS && ( (struct dsym *)sym)->e.seginfo->bytes_written != 0 )
+                        ; /* don't set segment type to BSS if the segment contains initialized data */
+                    else
+                        *pst = stt[i];
+                }
+
+                if ( sym->name[cst[i].len] == NULLC ) {
+#if DJGPP_SUPPORT
+                    /* DJGPP won't be happy with .rdata segment name */
+                    if( ModuleInfo.sub_format == SFORMAT_DJGPP && i == CSI_CONST )
+                        return( ".const" );
+#endif
+                    return( (char *)cst[i].dst );
+                }
+
+                strcpy( coffname, cst[i].dst );
+                strcat( coffname, sym->name+cst[i].len );
+                return( coffname );
+            }
+        }
+    }
+    return( sym->name );
+}
+#endif
 
 /* Write a byte to the segment buffer.
  * in OMF, the segment buffer is flushed when the max. record size is reached.
@@ -281,6 +372,7 @@ static ret_code WriteContent( void )
 #endif
     }
 #if DLLIMPORT
+    /* is the -Fd option given with a file name? */
     if ( Options.names[OPTN_LNKDEF_FN] ) {
         FILE *ld;
         struct dsym *curr;
@@ -379,8 +471,8 @@ void SortSegments( int type )
 
 /*
  * write the OMF/COFF/ELF header
- * for OMF, this is called twice, once after Pass 1 is done
- * and then again after assembly has finished without errors.
+ * for OMF, this is called twice, first time after Pass 1 is done (initial==TRUE)
+ * and then again after assembly has finished without errors (initial==FALSE).
  * for COFF/ELF/BIN, it's just called once after assembly passes.
  */
 static ret_code WriteHeader( bool initial )
@@ -404,28 +496,35 @@ static ret_code WriteHeader( bool initial )
     switch ( Options.output_format ) {
     case OFORMAT_OMF:
         if ( initial == TRUE ) {
-            omf_write_header();
+            omf_write_header(); /* write THEADR record */
             /* if( Options.no_dependencies == FALSE ) */
             if( Options.line_numbers )
-                omf_write_autodep();
+                omf_write_autodep(); /* write dependency COMENT records */
             if( ModuleInfo.segorder == SEGORDER_DOSSEG )
-                omf_write_dosseg();
+                omf_write_dosseg(); /* write dosseg COMENT records */
             else if( ModuleInfo.segorder == SEGORDER_ALPHA )
                 SortSegments( 1 );
-            omf_write_lib();
-            omf_write_lnames();
+            omf_write_lib(); /* write default lib COMENT records */
+            omf_write_lnames(); /* write LNAMES records */
         }
+        /* write SEGDEF records. Since these records contain the segment's length,
+         * the records have to be written again after the final assembly pass.
+         */
         omf_write_seg( initial );
         if ( initial == TRUE ) {
-            omf_write_grp();
-            omf_write_extdef();
-            //omf_write_comdef(); /* v2.09: comdef is called in extdef */
-            omf_write_alias();
+            omf_write_grp(); /* write GRPDEF records */
+            omf_write_extdef(); /* write EXTDEF + COMDEF records */
+            //omf_write_comdef(); /* v2.09: this is now called inside write_extdef */
+            omf_write_alias(); /* write ALIAS records */
         }
+        /* write PUBDEF records. Since the final value of offsets isn't known after
+         * the first pass, this has to be called again after the final pass.
+         */
         omf_write_public( initial );
         if ( initial == TRUE ) {
-            omf_write_export();
-            omf_end_of_pass1();
+            omf_write_export(); /* write export COMENT records */
+            /* (optionally) write end-of-pass-one COMENT record */
+            omf_end_of_pass1( ModuleInfo.g.start_fixup );
         }
         break;
 #if COFF_SUPPORT
@@ -750,66 +849,6 @@ static void ModulePassInit( void )
 #endif
 }
 
-void RunLineQueue( void )
-/***********************/
-{
-    struct input_status oldstat;
-    struct asm_tok *tokenarray;
-
-    DebugMsg1(( "RunLineQueue() enter\n" ));
-    /* v2.03: ensure the current source buffer is still aligned */
-    tokenarray = PushInputStatus( &oldstat );
-    GeneratedCode++;
-    while ( ( Token_Count = GetPreprocessedLine( CurrSource, tokenarray ) ) >= 0 ) {
-        if ( Token_Count )
-            ParseLine( tokenarray );
-    }
-#ifdef DEBUG_OUT
-    if ( ModuleInfo.EndDirFound == TRUE ) {
-        DebugMsg(("!!!!! Error: End directive found in generated-code parser loop!\n"));
-    }
-    lq_line = 0;
-#endif
-    GeneratedCode--;
-    PopInputStatus( &oldstat );
-
-    DebugMsg1(( "RunLineQueue() exit\n" ));
-    return;
-}
-
-#if 0 /* v2.09: obsolete, struct initialization does no longer generate code */
-
-/* this is called by InitStructuredVar(), which is a special case */
-
-void RunLineQueueEx( void )
-/*************************/
-{
-    struct input_status oldstat;
-    struct asm_tok *tokenarray;
-
-    DebugMsg1(( "RunLineQueueEx() enter\n" ));
-    tokenarray = PushInputStatus( &oldstat );
-    while ( ( Token_Count = GetPreprocessedLine( CurrSource, tokenarray ) ) >= 0 ) {
-        if ( Token_Count ) {
-            ParseLine( tokenarray );
-            /* handle special case 'structure initialization' */
-            if ( Options.preprocessor_stdout == TRUE )
-                WritePreprocessedLine( CurrSource );
-        }
-    }
-#ifdef DEBUG_OUT
-    if ( ModuleInfo.EndDirFound == TRUE ) {
-        DebugMsg(("!!!!! Error: End directive found in generated-code parser loop!\n"));
-    }
-    lq_line = 0;
-#endif
-    PopInputStatus( &oldstat );
-
-    DebugMsg1(( "RunLineQueueEx() exit\n" ));
-    return;
-}
-#endif
-
 #if 0 /* v2.07: removed */
 /* scan - and clear - global queue (EXTERNDEFs).
  * items which have been defined within the module
@@ -868,8 +907,11 @@ static void PassOneChecks( void )
 #endif
 
     /* check for open structures and segments has been done inside the
-     * END directive handling already */
-    ProcCheckOpen();
+     * END directive handling already
+     * v2.10: now done for PROCs as well, since procedures
+     * must be closed BEFORE segments are to be closed.
+     */
+    //ProcCheckOpen();
     HllCheckOpen();
     CondCheckOpen();
 
@@ -1029,7 +1071,7 @@ static void PassOneChecks( void )
         int j;
         struct asym * sym;
         struct fixup * fix;
-        for ( i = 0, j = 0, sym = curr->e.seginfo->labels;sym;sym = (struct asym *)((struct dsym *)sym)->next ) {
+        for ( i = 0, j = 0, sym = curr->e.seginfo->label_list; sym; sym = (struct asym *)((struct dsym *)sym)->next ) {
             i++;
             for ( fix = sym->bp_fixup; fix ; fix = fix->nextbp, j++ );
         }
@@ -1065,7 +1107,7 @@ static unsigned long OnePass( void )
     TypesInit();
     HllInit( Parse_Pass );
     MacroInit( Parse_Pass ); /* insert predefined macros */
-    AssumeInit();
+    AssumeInit( Parse_Pass );
     CmdlParamsInit( Parse_Pass );
 
     ModuleInfo.EndDirFound = FALSE;
@@ -1399,7 +1441,7 @@ static void AssembleInit( const char *source )
     //start_label   = NULL;
     //start_displ   = 0;
     write_to_file = FALSE;
-    GeneratedCode = 0;
+    //GeneratedCode = 0;
     LinnumQueue.head = NULL;
 
     SetFilenames( source );
@@ -1445,6 +1487,7 @@ static void AssembleFini( void )
     FreeLnameQueue();
 #if FASTMEM==0
     FreeLibQueue();
+    ContextFini();
 #endif
     InputFini();
     close_files();

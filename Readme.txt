@@ -40,14 +40,8 @@ JWasm Readme
       won't run on 64-bit Windows.
 
     - JWASMR.EXE is a DOS real-mode program which runs on any x86 cpu.
-      Similar to JWASMD.EXE it needs a MS-DOS v5 compatible DOS. Restrictions
-      of this version are:
-      - doesn't support long filenames
-      - doesn't support Open Watcom fastcall register convention
-      - supports OMF, BIN and MZ output formats only
-      - no support for 64-bit, SSSE3, SSE4 and AVX.
-      - no support for OPTION variants that are specific for 
-        COFF, ELF or 64-bit.
+      Similar to JWASMD.EXE it needs a MS-DOS v5 compatible DOS. This version
+      has some restrictions, to limit the amount of memory the binary will need.
 
     Memory requirements depend on the source which is assembled. The source
     itself is not kept in memory, but the symbol table is, and this table
@@ -148,7 +142,7 @@ JWasm Readme
      The default settings in Makefile will create both the Win32 and
     32bit-DOS binaries of JWasm.
 
-    (*): PellesC creates a slightly incompatible JWasm binary ( the least
+    (*): PellesC creates a slightly incompatible JWasm binary; the least
          significant bit of floats may differ from what Masm emits.
 
 
@@ -160,7 +154,7 @@ JWasm Readme
     <vc_dir>\VC\VCProjectDefaults. After this is done, JWasm can be
     selected as assembler inside the VS IDE.
 
-    b) VS 2010
+    b) VS 2010/2012
 
     - Unzip file VS2010CustomBuildRule.zip. The result are 3 files,
       jwasm.props, jwasm.targets and jwasm.xml.
@@ -171,7 +165,7 @@ JWasm Readme
 
     These people contributed to JWasm ( additions, bugfixes, bug reports):
 
-    agner, BlackVortex, drizz, Paul Edwards, filofel, Peter Flass,
+    agner, BlackVortex, dosfan01, drizz, Paul Edwards, filofel, Peter Flass,
     James C. Fuller, gfalen, habran, Japheth, Jimg, jj2007, Khusraw, 
     Alex Kozlov, Peter Kuznetsov, misca, Michal Necasek, H. Nidudsson,
     Nikitakita, Jose Pascoa, Terry Philips, qWord, RotateRight, Ito Toshimitsu,

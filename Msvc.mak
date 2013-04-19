@@ -50,16 +50,17 @@ lib = $(VCDIR)\Bin\lib.exe
 
 !if $(DEBUG)
 !if $(TRMEM)
-extra_c_flags = -Zd -Od -DDEBUG_OUT -DTRMEM
+extra_c_flags = -Zi -Od -DDEBUG_OUT -DTRMEM
 !else
-extra_c_flags = -Zd -Od -DDEBUG_OUT -FAa -Fa$* 
+#extra_c_flags = -Zi -Od -DDEBUG_OUT -FAa -Fa$* 
+extra_c_flags = -Z7 -Od -DDEBUG_OUT
 !endif
 !else
 extra_c_flags = -O2 -Gs -DNDEBUG
 #extra_c_flags = -Ox -DNDEBUG
 !endif
 
-c_flags =-D__NT__ $(extra_c_flags) $(c_flags64)
+c_flags =-D__NT__ $(extra_c_flags)
 
 # if MSVC++ 2005 EE is used:
 # 1. define __STDC_WANT_SECURE_LIB__=0 to avoid "deprecated" warnings
@@ -79,7 +80,7 @@ lflagsw = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /OPT:NOWIN98
 CC=$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(c_flags)
 
 .c{$(OUTD)}.obj:
-	@$(CC) -Fo$* $<
+	$(CC) -Fo$* $<
 
 proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
            $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \

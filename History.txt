@@ -1,6 +1,135 @@
 
    Changelog
 
+   04/17/2013, v2.10:
+
+   Bugfixes:
+   -  option -Zi: the CodeView symbolic debug info did contain type indices
+      of value 0 - which caused debuggers based on the MS debug engine to emit
+      a warning.
+   -  a struct definition just after PROC or LOCAL may have triggered
+      prologue generation, and thus error "statement not allowed inside struct
+      definition" did appear.
+   -  regression in v2.08-2.09 with option -Zne: a segment register override
+      may cause error 'invalid use of register'; regression test overrid3.asm.
+   -  regression in v2.08-2.09: a float as operand behind EQU was stored as
+      a number (value 0), not as text; regression test equate26.asm.
+   -  a forward reference might have caused an error if the reference was once
+      interpreted as a label and then as a structure name; regression test
+      struct34.asm.
+   -  regression in v2.09: if the difference of two labels ( at least one must
+      be a forward reference ) was stored in a byte variable, an error occured
+      if output format was COFF; regression test data10.asc.
+   -  ALIAS segment attribute: the alias name was likely to become "corrupted".
+   -  operators IMAGEREL and SECTIONREL were ignored if their operand was the
+      displacement of an indirect memory reference; regression test coffop.asc.
+   -  -pe: size of data directory for imports did comprise all import data.
+   -  -pe: in object table, the entry of the internally generated .reloc 
+      section may have been invalid.
+   -  -pe: the exported names table wasn't sorted in ascending order.
+   -  -coff: weak externals defined via "extern sym (altsym) ..." had 
+      characteristics IMAGE_WEAK_EXTERN_SEARCH_ALIAS instead of 
+      IMAGE_WEAK_EXTERN_SEARCH_LIBRARY.
+   -  ALIAS directive: the alias name in the object module wasn't decorated.
+   -  OMF format: a linker "pass separator" comment record was written in any
+      case; according to OMF docs it is NOT to be written if a starting 
+      address is present ( Masm also omits the record then ).
+   -  if the third argument of an instruction was a forward reference, error
+      'invalid instruction operands' was emitted in most cases; regression 
+      test forward4.asm.
+   -  strcpy() was used to copy overlapping strings when a macro was stored -
+      this may not work with all compilers; replaced by memmove(). 
+   -  comparison of pointer types ( with or without using TYPE operator ) had
+      problems; regression test types7.asm.
+   -  option -Fd without filename argument might have caused a GPF.
+   -  if a symbol with local scope was to be defined and the name was
+      referenced previously ( but not defined [yet]! ), a confusing error msg 
+      "Symbol already defined" was emitted; regression tests local2.aso and
+      proc5.aso.
+   -  -bin: absolute segments weren't fully supported; regression tests
+      absseg2.asm and absseg3.asm.
+   -  directives PUSHCONTEXT & POPCONTEXT did not behave exactly as in Masm;
+      regression test context2.asm.
+   -  -coff: if a section contained more than 0xffff relocations, the count
+      in the section header was truncated and flag IMAGE_SCN_LNK_NRELOC_OVFL
+      wasn't set.
+   -  comparison of GPR TYPEs did ignore ASSUME; regression test types8.asm.
+   -  INCLUDE directive: directory part of a relative path may have been 
+      ignored if the current source file wasn't in the current directory.
+   -  -coff: static (=private) PROCedures weren't included into the coff 
+      symbol table.
+   -  it was possible to change the ALIAS segment attribute; regression test
+      alias2.asc.
+   -  if OPATTR operand was an undefined struct member, an error was emitted;
+      regression test opattr3.asm.
+   -  if an alias defined via '=' or EQU directives was forward-referenced,
+      it might have failed to trigger a necessary phase error, resulting
+      in a premature end of the assembly task; regression test forward5.asm.
+   -  directive ENDP, v2.05-2.09: the matching of the labels ( PROC and 
+      associated ENDP ) was only tested with the length of the PROC label -
+      which wasn't reliable; regression test proc6.aso.
+   -  option -Zg, INVOKE directive: if an argument was to be extended from
+      WORD to DWORD, the hiword wasn't initialized to 0; regression test 
+      invoke21.asc.
+   -  type coercion inside brackets wasn't dereferenced for usage outside
+      the brackets; regression test ptr2.asm.
+   -  regression in v2.05-2.09, options -Fo, -Fl,...: white spaces in filename
+      argument did confuse the cmdline parser.
+   -  in v2.09, directive REP[EA]T may have triggered error 'too many arguments
+      in macro call' ( JWASMR.EXE only? ).
+   -  regression in v2.09: if a struct member was an alias for another struct
+      or union, it was not properly initialized; regression tests struct35.asm
+      and struct36.aso.
+   -  option -Zf: code labels created via '@@:' weren't sorted out.
+   -  regression in v2.05-2.09: code label @@: at the very beginning caused
+      problems ("symbol not defined" ).
+   -  regression in v2.07-2.09: if the member part in a "dot"-expression was
+      enclosed in (), it wasn't accepted; regression test dotop5.asm.
+   -  regression in v2.08-2.09: variable type was overwritten by assumed type;
+      regression test assume10.asm.
+   -  if a text macro expanded to a preprocessor directive and wasn't the 
+      first token in a line, the result might have been "unexpected";
+      regression test equate27.asm.
+   -  LODS[B|W|D|Q]: if optional operand contained a DS override, a DS prefix
+      byte was generated; regression test string3.asm.
+   -  INVOKE may have rejected a valid argument if it was a struct type with
+      size 4,6 or 8; regression test invoke22.asm.
+   -  using $ in an expression outside of segment block or struct/union was
+      not rejected; regression test equate28.aso.
+   -  regression in v2.06-2.09: use of an absolute external in an arithmetic
+      instruction may have suppressed generation of opsize prefix; regression
+      test extern12.asz.
+   -  EXITM directive inside a macro did not "fix" if-nesting-level issues
+      caused by the usage of GOTO; regression tests goto1.asm and goto2.asm.
+   -  LOW32 operator in 64-bit didn't always set 32-bit address fixup;
+      regression tests offset9.asm, offset11.asm.
+
+   Other changes:
+   -  CodeView symbolic debug info will contain array records.
+   -  CodeView symbolic debug info: Anonymous structs are now "unfolded";
+      this is a work-around for the MS debug engine.
+   -  Option -Zi got an optional numeric argument to control the extend
+      of debugging info that is emitted.
+   -  support for register variables in CodeView debug info (FASTCALL).
+   -  OPTION CODEVIEW added.
+   -  -pe: field TimeDateStamp in file header and in export directory now set
+      to current date & time.
+   -  -pe: some fields in optional header and section header rounded up to
+      alignment boundary to satisfy MS COFF specs.
+   -  directive LABEL syntax extension: optional array size argument.
+   -  Warning displayed if line number info is emitted for a segment without 
+      class 'CODE' ( Masm compatible ).
+   -  for improved Masm-compatibility, PUSH|POPCONTEXT ALL does no longer 
+      comprise PUSH|POPCONTEXT ALIGNMENT. 
+   -  samples Win32Tls and ComDat added.
+   -  -coff: support for COMDAT sections added.
+   -  -coff: cmdline option -zlp added.
+   -  if the file behind @ cmdline option cannot be opened, a FATAL error is
+      emitted ( Masm compatible ).
+   -  the register swapping in indirect addressing mode, which was previously
+      done only if option -Zg was active, is now the standard behavior ( Masm
+      compatible ).
+
    12/02/2012, v2.09:
 
    Bugfixes:

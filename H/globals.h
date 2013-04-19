@@ -48,8 +48,8 @@
 #define _MAX_DIR FILENAME_MAX
 #define _MAX_DRIVE 4
 #pragma warn(disable:2030) /* disable '=' used in a conditional expression */
-#pragma warn(disable:2229) /* disable 'local x is potentially used without ... */
-#pragma warn(disable:2231) /* disable enum value x not handled in switch statement */
+#pragma warn(disable:2229) /* disable 'local x is potentially used without ...' */
+#pragma warn(disable:2231) /* disable 'enum value x not handled in switch statement' */
 #elif defined(__BORLANDC__) || defined(__OCC__)
 #define _stricmp  stricmp
 #define _strnicmp strnicmp
@@ -65,7 +65,7 @@
 /* v2.06: obsolete */
 //#define MAX_RESW_LEN            31 /* max length of a reserved word */
 
-#define MAX_IF_NESTING          20 /* IFxx block nesting         */
+#define MAX_IF_NESTING          20 /* IFxx block nesting. Must be <=32, see condasm.c */
 //#define MAX_TEXTMACRO_NESTING   20
 #define MAX_SEG_NESTING         20 /* limit for segment nesting  */
 #ifdef __I86__
@@ -126,7 +126,7 @@
 #define AVXSUPP      1 /* support AVX extensions                 */
 #endif
 #if COFF_SUPPORT
-#define COMDATSUPP   0 /* support COMDAT segment attribute */
+#define COMDATSUPP   1 /* support COMDAT segment attribute */
 #else
 #define COMDATSUPP   0
 #endif
@@ -149,6 +149,9 @@
 #endif
 #ifndef DLLIMPORT
 #define DLLIMPORT    1 /* support OPTION DLLIMPORT               */
+#endif
+#ifndef CVOSUPP
+#define CVOSUPP      1 /* support OPTION CODEVIEW                */
 #endif
 #define MASM_SSE_MEMX 1 /* support 2 mem types for mmx/xmm       */
 #define PERCENT_OUT 1  /* 1=support %OUT directive               */
@@ -174,9 +177,10 @@
 #include "queue.h"
 
 /* JWasm version info */
-#define _BETA_
-#define _JWASM_VERSION_ "2.09" _BETA_
-#define _JWASM_VERSION_INT_ 209
+#define _JWASM_VERSION_STR_ "2.10"
+#define _JWASM_VERSION_INT_ 210
+#define _JWASM_VERSION_SUFFIX_
+#define _JWASM_VERSION_ _JWASM_VERSION_STR_ _JWASM_VERSION_SUFFIX_
 
 #define NULLC  '\0'
 //#define NULLS  ""
@@ -477,19 +481,19 @@ struct qitem {
     char value[1];
 };
 
-/* first 4 entries must match file type enum! */
+/* first 4 entries must match enum file_extensions! */
 enum opt_names {
     OPTN_ASM_FN,
     OPTN_ERR_FN,              /* -Fr option */
     OPTN_OBJ_FN,              /* -Fo option */
     OPTN_LST_FN,              /* -Fl option */
+#if DLLIMPORT
+    OPTN_LNKDEF_FN,           /* -Fd option */
+#endif
     OPTN_MODULE_NAME,         /* -nm option */
     OPTN_TEXT_SEG,            /* -nt option */
     OPTN_DATA_SEG,            /* -nd option */
     OPTN_CODE_CLASS,          /* -nc option */
-#if DLLIMPORT
-    OPTN_LNKDEF_FN,           /* -Fd option */
-#endif
 #if BUILD_TARGET
     OPTN_BUILD_TARGET,        /* -bt option */
 #endif
@@ -547,10 +551,40 @@ enum win64_flag_values {
     W64F_ALL = W64F_SAVEREGPARAMS | W64F_AUTOSTACKSP, /* all valid flags */
 };
 
+/* codeview debug info extend */
+enum cvex_values {
+    CVEX_MIN     = 0, /* globals */
+    CVEX_REDUCED = 1, /* globals and locals */
+    CVEX_NORMAL  = 2, /* globals, locals and types */
+    CVEX_MAX     = 3, /* globals, locals, types and constants */
+};
+
+/* codeview debug info option flags */
+enum cvoption_flags {
+    CVO_STATICTLS = 1, /* handle static tls */
+};
+
+enum seg_type {
+    SEGTYPE_UNDEF,
+    SEGTYPE_CODE,
+    SEGTYPE_DATA,
+    SEGTYPE_BSS,
+    SEGTYPE_STACK,
+    SEGTYPE_ABS,
+#if PE_SUPPORT
+    SEGTYPE_HDR,   /* only used in bin.c for better sorting */
+    SEGTYPE_CDATA, /* only used in bin.c for better sorting */
+    SEGTYPE_RELOC, /* only used in bin.c for better sorting */
+    SEGTYPE_RSRC,  /* only used in bin.c for better sorting */
+    SEGTYPE_ERROR, /* must be last - an "impossible" segment type */
+#endif
+};
+
 struct global_options {
     bool        quiet;                 /* -q option */
     bool        line_numbers;          /* -Zd option */
     uint_8      debug_symbols;         /* -Zi option */
+    uint_8      debug_ext;             /* -Zi option numeric argument */
     enum fpo    floating_point;        /* -FPi, -FPi87 */
 
     /* error handling stuff */
@@ -567,6 +601,7 @@ struct global_options {
 #endif
     uint_16     max_passes;              /* -pm option */
     bool        skip_preprocessor;       /* -sp option */
+    bool        log_all_files;           /* -lf option */
 #endif
     char        *names[OPTN_LAST];
     struct qitem *queues[OPTQ_LAST];
@@ -576,8 +611,11 @@ struct global_options {
     bool        no_comment_data_in_code_records; /* -zlc option */
     bool        no_opt_farcall;          /* -zld option */
 //    bool        no_dependencies;         /* -zld option */
+#if COFF_SUPPORT
     bool        no_file_entry;           /* -zlf option */
+    bool        no_static_procs;         /* -zlp option */
     bool        no_section_aux_entry;    /* -zls option  */
+#endif
     bool        no_cdecl_decoration;     /* -zcw & -zcm option */
     uint_8      stdcall_decoration;      /* -zt<0|1|2> option */
     bool        no_export_decoration;    /* -zze option */
@@ -625,7 +663,7 @@ struct MZDATA {
 #if DLLIMPORT
 struct dll_desc {
     struct dll_desc *next;
-    int cnt;
+    int cnt;     /* a function of this dll was used by INVOKE */
     char name[1];
 };
 #endif
@@ -633,7 +671,20 @@ struct dll_desc {
 /* Information about the module */
 
 struct input_queue;
-struct file_list;
+struct file_item;
+struct hll_item;
+struct context;
+
+struct fname_item {
+    char    *name;
+    char    *fullname;
+    time_t  mtime;
+#ifdef DEBUG_OUT
+    uint    included;
+    uint_32 lines;
+#endif
+};
+
 
 struct module_vars {
     unsigned            error_count;     /* total of errors so far */
@@ -652,14 +703,27 @@ struct module_vars {
 #if DLLIMPORT
     struct dll_desc     *DllQueue;       /* dlls of OPTION DLLIMPORT */
 #endif
+#if PE_SUPPORT || DLLIMPORT
+    char                *imp_prefix;
+#endif
     FILE                *curr_file[NUM_FILE_TYPES];  /* ASM, ERR, OBJ and LST */
     char                *curr_fname[NUM_FILE_TYPES];
-    struct fname_list   *FNames;         /* array of input files */
+    struct fname_item   *FNames;         /* array of input files */
     uint                cnt_fnames;      /* items in FNames array */
     char                *IncludePath;
     struct input_queue  *line_queue;     /* line queue */
-    struct file_list    *file_stack;     /* source item (file/macro) stack */
+    struct file_item    *file_stack;     /* source item (file/macro) stack */
     struct fixup        *start_fixup;    /* OMF only */
+    struct hll_item     *HllStack;       /* for .WHILE, .IF, .REPEAT */
+    struct hll_item     *HllFree;        /* v2.06: stack of free <struct hll>-items */
+    struct context      *ContextStack;
+    struct context      *ContextFree;    /* v2.10: "free items" heap implemented. */
+#if FASTPASS
+    struct context      *SavedContexts;
+    int                 cntSavedContexts;
+#endif
+    /* v2.10: moved here from module_info due to problems if @@: occured on the very first line */
+    unsigned            anonymous_label; /* "anonymous label" counter */
 };
 
 struct format_options;
@@ -672,7 +736,6 @@ struct module_info {
     struct dll_desc     *CurrDll;        /* OPTION DLLIMPORT dll */
 #endif
     const struct format_options *fmtopt; /* v2.07: added */
-    unsigned            anonymous_label; /* "anonymous label" counter */
     unsigned            hll_label;       /* hll directive label counter */
     enum dist_type      distance;        /* stack distance */
     enum model_type     model;           /* memory model */
@@ -694,6 +757,8 @@ struct module_info {
     unsigned char       Ofssize;         /* current offset size (USE16,USE32,USE64) */
     unsigned char       defOfssize;      /* default segment offset size (16,32 [,64]-bit) */
     unsigned char       wordsize;        /* current word size (2,4,8) */
+    unsigned char       inside_comment;  /* v2.10: moved from tokenize.c */
+
     unsigned            case_sensitive:1;     /* option casemap */
     unsigned            convert_uppercase:1;  /* option casemap */
     unsigned            procs_private:1; /* option proc:private */
@@ -739,15 +804,16 @@ struct module_info {
     unsigned char       prologuemode;    /* current PEM_ enum value for OPTION PROLOGUE */
     unsigned char       epiloguemode;    /* current PEM_ enum value for OPTION EPILOGUE */
     unsigned char       invoke_exprparm; /* flag: forward refs for INVOKE params ok? */
+#if CVOSUPP
+    unsigned char       cv_opt;          /* option codeview */
+#endif
     uint                srcfile;         /* current file - is a file stack index */
     struct dsym         *currseg;        /* currently active segment */
     struct dsym         *flat_grp;       /* magic FLAT group */
     struct asym         *start_label;    /* start label */
     uint_32             start_displ;     /* OMF only, displ for start label */
     uint_8              *pCodeBuff;
-#if PE_SUPPORT || DLLIMPORT
-    char                *imp_prefix;
-#endif
+    unsigned int        GeneratedCode;   /* nesting level generated code */
     /* input members */
     char                *currsource;     /* current source line */
     char                *CurrComment;    /* current comment */
@@ -771,18 +837,12 @@ struct format_options {
     const char formatname[6];
 };
 
-struct fname_list {
-    char    *name;
-    char    *fullname;
-    time_t  mtime;
-};
-
 /* global variables */
 
 extern struct global_options Options;
 extern struct module_info    ModuleInfo;
 extern unsigned int          Parse_Pass;    /* assembly pass */
-extern unsigned int          GeneratedCode; /* nesting level generated code */
+//extern unsigned int          GeneratedCode;  /* v2.10: moved to struct module_info */
 extern uint_8                MacroLevel;    /* macro nesting level */
 extern bool                  write_to_file; /* 1=write the object module */
 
@@ -804,10 +864,11 @@ extern int  __stdcall   AssembleModule( const char * );
 extern int              AssembleModule( const char * );
 #endif
 extern void             AddLinnumDataRef( uint_32 );
-extern void             RunLineQueue( void );
-extern void             RunLineQueueEx( void );
 extern void             SetMasm510( bool );
 extern void             close_files( void );
-extern char            *myltoa( uint_32 value, char *buffer, uint radix, bool sign, bool addzero );
+extern char             *myltoa( uint_32 value, char *buffer, uint radix, bool sign, bool addzero );
+#if COFF_SUPPORT || PE_SUPPORT
+extern char             *ConvertSectionName( struct asym *sym, enum seg_type *pst, char *buffer );
+#endif
 
 #endif

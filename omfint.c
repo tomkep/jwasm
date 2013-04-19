@@ -249,7 +249,7 @@ static int FFQUAL writeComent( struct omf_wfile *out, struct omf_rec *objr )
 
     WBegRec( out, CMD_COMENT );
     PutByte( out, objr->d.coment.attr );
-    PutByte( out, objr->d.coment.class );
+    PutByte( out, objr->d.coment.cmt_class );
     PutMem( out, objr->data, objr->length );
     WEndRec( out );
     return( 0 );
