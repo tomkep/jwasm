@@ -47,9 +47,11 @@ enum msgno {
     extern void DoDebugMsg1( const char *format, ... );
     #define DebugMsg( x ) DoDebugMsg x
     #define DebugMsg1( x ) DoDebugMsg1 x
+    #define DebugCmd( x ) x
 #else
     #define DebugMsg( x )
     #define DebugMsg1( x )
+    #define DebugCmd( x )
 #endif
 
 #if defined( __UNIX__ ) || defined ( __SW_BD )
@@ -58,17 +60,15 @@ enum msgno {
 #define errout stdout
 #endif
 
-extern void EmitError( int msgnum );
+extern void Fatal( int msgnum, ... );
+extern int  EmitError( int msgnum );
 extern int  EmitErr( int msgnum, ... );
 extern void EmitWarn( int level, int msgnum, ... );
 extern void PrintNote( int msgnum, ... );
 extern char *ErrnoStr( void );
-
-//#define EmitWarning( errno )  EmitWarn( 0,errno )
-//#define EmitIntErr( x )       printf( "Internal error %d\n", x )
-
-extern void   Fatal( unsigned msg, ... );
-extern void   SeekError( void );
-extern void   WriteError( void );
+extern int  write_logo( void );
+extern void PrintUsage( void );
+//extern void SeekError( void );
+extern void WriteError( void );
 
 #endif

@@ -1,7 +1,11 @@
 
 # this makefile creates the 32bit OS/2 binary of JWasm.
 # tools used:
-# - Open Watcom v1.7a/v1.8/v1.9
+# - Open Watcom v1.8/v1.9
+
+# Note that this makefile assumes that the OW environment is
+# set - the OW tools are to be found in the PATH and the INCLUDE
+# environment variable is set correctly.
 
 # 2011-07-09 -- rousseau at ecomstation.com -- fixed some stuff.
 # - Removed a trailing space after the '&' in the object-list on the 
@@ -55,25 +59,8 @@ CC=wcc386 -q -3$(CCV) -bc -bt=os2 $(inc_dirs) $(extra_c_flags) -fo$@
 .c{$(OUTD)}.obj:
    $(CC) $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
-           $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj &
-           $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  &
-           $(OUTD)/macro.obj    $(OUTD)/string.obj   $(OUTD)/condasm.obj &
-           $(OUTD)/types.obj    $(OUTD)/fpfixup.obj  $(OUTD)/invoke.obj  &
-           $(OUTD)/equate.obj   $(OUTD)/mangle.obj   $(OUTD)/loop.obj    &
-           $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   &
-           $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/label.obj   &
-           $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    &
-           $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   &
-           $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
-           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj&
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
-           $(OUTD)/listing.obj  $(OUTD)/safeseh.obj &
-           $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
-           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   &
-           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj&
-           $(OUTD)/cmdline.obj  $(OUTD)/linnum.obj   $(OUTD)/fastpass.obj
-######
+proj_obj = &
+!include owmod.inc
 
 TARGET1=$(OUTD)/$(name).exe
 
@@ -82,12 +69,12 @@ ALL: $(OUTD) $(TARGET1)
 $(OUTD):
 	@if not exist $(OUTD) mkdir $(OUTD)
 
-$(TARGET1): $(proj_obj)
+$(TARGET1): $(OUTD)/main.obj $(proj_obj)
 	$(LINK) @<<
-$(lflagso) file { $(proj_obj) } name $@ op stack=0x20000
+$(lflagso) file { $(OUTD)/main.obj $(proj_obj) } name $@ op stack=0x20000
 <<
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/globals.h
 	$(CC) msgtext.c
 
 $(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h

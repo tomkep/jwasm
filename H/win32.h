@@ -3,9 +3,10 @@
  * called directly by JWasm (in memalloc.c if FASTMEM=1).
  */
 
-#if defined(__WATCOMC__) || defined(__PCC__) || defined(__OCC__)
+//#if defined(__WATCOMC__) || defined(__PCC__) || defined(__OCC__)
+#if defined(__PCC__) || defined(__OCC__)
 /* __declspec(dllimport) is a problem if Win32 is linked statically (HX)
- * and WLINK is used. MS link is smarter, it knows what to do if a symbol
+ * and WLINK < v1.9 is used. MS link is smarter, it knows what to do if a symbol
  * has been declared with dllimport and then turns out to be static.
  */
 #define WINBASEAPI

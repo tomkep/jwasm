@@ -32,11 +32,13 @@
 #ifndef EXPREVAL_H
 #define EXPREVAL_H
 
+/* v2.11: EXPR_UNDEF changed to EXPR_ERROR, value -1 */
+
 enum exprtype {
     EXPR_EMPTY = EMPTY,
-    EXPR_UNDEF = 0,     /* undefined type when error occures or result is undefined */
-    EXPR_ADDR,          /* e.g. "foo", "seg foo" and "offset foo" */
-    EXPR_CONST,         /* constant; note that "label1 - label2" -> constant */
+    EXPR_ERROR = ERROR, /* undefined type when error occures or result is undefined */
+    EXPR_CONST = 0,     /* constant; note that "label1 - label2" -> constant */
+    EXPR_ADDR,          /* e.g. "foo", "seg foo" and "offset foo", also indirect mem ops */
     EXPR_REG,           /* register */
     EXPR_FLOAT          /* v2.05: float */
 };
@@ -125,12 +127,13 @@ struct expr {
 /* flags for last argument of EvalOperand() */
 enum expr_flags {
     EXPF_NOERRMSG  = 1,  /* suppress error messages */
-    EXPF_NOLCREATE = 2,  /* don't create label if it isn't defined yet */
+    EXPF_NOUNDEF   = 2,  /* don't accept or create undefined symbols */
     EXPF_ONEOPND   = 4,  /* private flag, used inside expreval.c only */
     EXPF_IN_SQBR   = 8   /* private flag, used inside expreval.c only */
 };
 
 extern ret_code     EvalOperand( int *, struct asm_tok[], int, struct expr *, uint_8 );
 extern void         ExprEvalInit( void );
+extern ret_code     EmitConstError( const struct expr * );
 
 #endif

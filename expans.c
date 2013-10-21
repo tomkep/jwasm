@@ -20,6 +20,7 @@
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
+#include "preproc.h"
 #include "expreval.h"
 #include "equate.h"
 #include "input.h"
@@ -36,10 +37,12 @@
 #define TEVALUE_UNSIGNED 1
 #define MAX_TEXTMACRO_NESTING 20
 
+extern char *GetMacroLine( struct macro_instance *, char * );
+
 int           MacroLocals;     /* counter for LOCAL names */
 uint_8        MacroLevel;      /* current macro nesting level */
 
-static const char __digits[] = "0123456789ABCDEF";
+static const char __digits[16] = {"0123456789ABCDEF"};
 
 static ret_code ExpandTMacro( char * const, struct asm_tok tokenarray[], int equmode, int level );
 
@@ -69,7 +72,7 @@ char *myltoa( uint_32 value, char *buffer, uint radix, bool sign, bool addzero )
     if ( addzero && ( *p > '9') ) /* v2: add a leading '0' if first digit is alpha */
         *dst++ = '0';
     memcpy( dst, p, &tmpbuf[33] + 1 - p );
-    DebugMsg1(("myltoa( value=%" FX32 "h, out=%s, radix=%u, sign=%u, %u)\n", saved_value, buffer, radix, sign, addzero ));
+    DebugMsg1(("myltoa( value=%" I32_SPEC "Xh, out=%s, radix=%u, sign=%u, %u)\n", saved_value, buffer, radix, sign, addzero ));
     return( buffer );
 }
 
@@ -92,6 +95,23 @@ int GetLiteralValue( char *buffer, const char *p )
     return( dest - buffer );
 }
 #endif
+
+/* Read the current (macro) queue until it's done. */
+
+static void SkipMacro( struct asm_tok tokenarray[] )
+/**************************************************/
+{
+    char buffer[MAX_LINE_LEN];
+
+    /* The queue isn't just thrown away, because any
+     * coditional assembly directives found in the source
+     * must be executed.
+     */
+     while ( GetTextLine( buffer ) ) {
+        Tokenize( buffer, 0, tokenarray, TOK_DEFAULT );
+    }
+
+}
 
 #ifdef __I86__
 #define PARMSTRINGSIZE ( MAX_LINE_LEN + 16 )
@@ -327,9 +347,9 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
                         i = Token_Count + 1;
                         DebugMsg1(( "RunMacro(%s.%u), num expansion: >%s<\n", macro->sym.name, parmidx, ptr ));
                         /* the % operator won't accept forward references.
-                         * v2.09: flag EXPF_NOLCREATE set.
+                         * v2.09: flag EXPF_NOUNDEF set.
                          */
-                        if ( EvalOperand( &i, tokenarray, max, &opndx, EXPF_NOLCREATE ) == ERROR )
+                        if ( EvalOperand( &i, tokenarray, max, &opndx, EXPF_NOUNDEF ) == ERROR )
                             opndx.llvalue = 0;
                         else if ( opndx.kind != EXPR_CONST ) {
                             EmitError( CONSTANT_EXPECTED );
@@ -598,21 +618,24 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
         if ( !( mflags & MF_NOSAVE ) )
             tokenarray = PushInputStatus( &oldstat );
 
-        NewLineQueue(); /* make sure the line queue is empty */
         /*
          * move the macro instance onto the file stack!
          * Also reset the current linenumber!
          */
-        PushMacro( &macro->sym, &mi );
+        mi.macro = &macro->sym;
+        PushMacro( &mi );
         MacroLevel++;
         oldifnesting = GetIfNestLevel(); /* v2.10 */
         cntgoto = 0; /* v2.10 */
         /* Run the assembler until we hit EXITM or ENDM.
          * Also handle GOTO and macro label lines!
+         * v2.08 no need anymore to check the queue level
+         * v2.11 GetPreprocessedLine() replaced by GetTextLine()
+         * and PreprocessLine().
          */
-        /* v2.08 no need anymore to check the queue level */
-        while ( ( Token_Count = GetPreprocessedLine( CurrSource, tokenarray ) ) >= 0 ) {
-            if ( Token_Count == 0 )
+
+        while ( GetTextLine( CurrSource ) ) {
+            if ( PreprocessLine( CurrSource, tokenarray ) == 0 )
                 continue;
             /* skip macro label lines */
             if ( tokenarray[0].token == T_COLON ) {
@@ -668,11 +691,11 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
                      */
                     if ( cntgoto ) {
                         mi.currline = NULL;
-                        SetMacroLineNumber( 0 );
+                        SetLineNumber( 0 );
                         SetIfNestLevel( oldifnesting );
                     }
 
-                    SkipCurrentQueue( tokenarray );
+                    SkipMacro( tokenarray );
                     *is_exitm = TRUE;
                     break;
 #if 0 /* won't happen anymore */
@@ -706,14 +729,14 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
                             }
                         }
                         if ( !lnode ) {
-                            /* v2.05: display error msg BEFORE SkipCurrentQueue()! */
+                            /* v2.05: display error msg BEFORE SkipMacro()! */
                             DebugMsg1(("RunMacro(%s): GOTO, label >%s< not found!\n", macro->sym.name, tokenarray[1].string_ptr ));
                             EmitErr( MACRO_LABEL_NOT_DEFINED, tokenarray[1].string_ptr );
                         } else {
                             DebugMsg1(("RunMacro(%s): GOTO, found label >%s<\n", macro->sym.name, ptr));
                             /* v2.10: rewritten, "if"-nesting-level handling added */
                             mi.currline = lnode;
-                            SetMacroLineNumber( i );
+                            SetLineNumber( i );
                             SetIfNestLevel( oldifnesting );
                             cntgoto++;
                             continue;
@@ -721,7 +744,7 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
                     } else {
                         EmitErr( SYNTAX_ERROR_EX, tokenarray->tokpos );
                     }
-                    SkipCurrentQueue( tokenarray );
+                    SkipMacro( tokenarray );
                     break;
                 }
             }
@@ -735,11 +758,12 @@ int RunMacro( struct dsym *macro, int idx, struct asm_tok tokenarray[], char *ou
              * when the top source level is reached again.
              */
             //if ( ModuleInfo.EndDirFound ) {
-            //    SkipCurrentQueue( tokenarray );
+            //    SkipMacro( tokenarray );
             //    *is_exitm = TRUE; /* force loop exit */
             //    break;
             //}
         } /* end while */
+
         MacroLevel--;
         if ( !(mflags & MF_NOSAVE ) )
             PopInputStatus( &oldstat );
@@ -958,8 +982,7 @@ static ret_code ExpandTMacro( char * const outbuf, struct asm_tok tokenarray[], 
     DebugMsg1(("ExpandTMacro(text=>%s< equm=%u lvl=%u) enter\n", outbuf, equmode, level ));
 
     if ( level >= MAX_TEXTMACRO_NESTING ) {
-        EmitError( MACRO_NESTING_LEVEL_TOO_DEEP );
-        return( ERROR );
+        return( EmitError( MACRO_NESTING_LEVEL_TOO_DEEP ) );
     }
 
     while ( expanded == TRUE ) {
@@ -1043,8 +1066,7 @@ static ret_code RebuildLine( const char *newstring, int i, struct asm_tok tokena
     }
     if ( newlen > oldlen )
         if ( ( pos_line + newlen - oldlen + rest ) >= MAX_LINE_LEN ) {
-            EmitErr( EXPANDED_LINE_TOO_LONG, tokenarray[0].tokpos );
-            return( ERROR );
+            return( EmitErr( EXPANDED_LINE_TOO_LONG, tokenarray[0].tokpos ) );
         }
 
     if ( addbrackets ) {
@@ -1178,8 +1200,7 @@ static ret_code ExpandToken( char *line, int *pi, struct asm_tok tokenarray[], i
 #if 1 /* v2.03: no error, just don't expand! */
                             continue;
 #else
-                            EmitErr( SYNTAX_ERROR_EX, sym->name );
-                            return( ERROR );
+                            return( EmitErr( SYNTAX_ERROR_EX, sym->name ) );
 #endif
                         }
                         /* v2.08: write optional code label. This has been
@@ -1246,10 +1267,10 @@ static ret_code ExpandToken( char *line, int *pi, struct asm_tok tokenarray[], i
             buffer[tmp] = NULLC;
             tmp = old_tokencount + 1;
             Token_Count = Tokenize( buffer, tmp, tokenarray, TOK_RESCAN );
-            if ( EvalOperand( &tmp, tokenarray, Token_Count, &opndx, EXPF_NOLCREATE ) == ERROR )
+            if ( EvalOperand( &tmp, tokenarray, Token_Count, &opndx, EXPF_NOUNDEF ) == ERROR )
                 opndx.value = 0; /* v2.09: assume value 0, don't return with ERROR */
             else if ( opndx.kind != EXPR_CONST ) {
-                /* v2.09: with flag EXPF_NOLCREATE, EvalOperand() will have returned
+                /* v2.09: with flag EXPF_NOUNDEF, EvalOperand() will have returned
                  * with error if there's an undefined symbol involved
                  */
                 //if ( opndx.sym && opndx.sym->state == SYM_UNDEFINED )
@@ -1502,13 +1523,12 @@ ret_code ExpandLine( char *string, struct asm_tok tokenarray[] )
         }
         if( rc == STRING_EXPANDED ) {
             DebugMsg1(( "ExpandLine(%s): expansion occured, retokenize\n", string ));
-            Token_Count = Tokenize( string, 0, tokenarray, TOK_RESCAN );
+            Token_Count = Tokenize( string, 0, tokenarray, TOK_RESCAN | TOK_LINE );
         } else
             break;
     } /* end for() */
     if ( lvl == MAX_TEXTMACRO_NESTING ) {
-        EmitError( MACRO_NESTING_LEVEL_TOO_DEEP );
-        return( ERROR );
+        return( EmitError( MACRO_NESTING_LEVEL_TOO_DEEP ) );
     }
     DebugMsg1(( "ExpandLine(>%s<) exit, rc=%u, token_count=%u\n", string, rc, Token_Count ));
     return( rc );

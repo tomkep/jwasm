@@ -187,8 +187,7 @@ ret_code ContextDirective( int i, struct asm_tok tokenarray[] )
             }
             if ( type ) {
                 DebugMsg(( "POPCONTEXT error, remaining type flags=%X\n", type ));
-                EmitErr( UNMATCHED_BLOCK_NESTING, tokenarray[start].tokpos );
-                return( ERROR );
+                return( EmitErr( UNMATCHED_BLOCK_NESTING, tokenarray[start].tokpos ) );
             }
         } else {
             DebugMsg(( "PUSHCONTEXT type=%X\n", type ));
@@ -241,8 +240,7 @@ ret_code ContextDirective( int i, struct asm_tok tokenarray[] )
     }
 
     if ( tokenarray[i].token != T_FINAL || type == -1 ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
     }
 
     return( NOT_ERROR );

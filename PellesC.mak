@@ -16,7 +16,7 @@ name = jwasm
 # PODIR  - root directory for compiler, linker, include and lib files
 
 !ifndef PODIR
-PODIR  = d:\PellesC
+PODIR  = \PellesC
 !endif
 
 !ifdef AMD64
@@ -49,28 +49,10 @@ lflagsw = $(LOPTD) /SUBSYSTEM:CONSOLE /map:$*.map
 CC=$(PODIR)\bin\pocc.exe $(inc_dirs) $(c_flags)
 
 .c{$(OUTD)}.obj:
-	@$(CC) -Fo$*.obj $<
+	$(CC) -Fo$*.obj $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
-           $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
-           $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  \
-           $(OUTD)/macro.obj    $(OUTD)/string.obj   $(OUTD)/condasm.obj \
-           $(OUTD)/types.obj    $(OUTD)/fpfixup.obj  $(OUTD)/invoke.obj  \
-           $(OUTD)/equate.obj   $(OUTD)/mangle.obj   $(OUTD)/loop.obj    \
-           $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   \
-           $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/label.obj   \
-           $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    \
-           $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   \
-           $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
-           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj\
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
-           $(OUTD)/listing.obj  $(OUTD)/safeseh.obj \
-           $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
-           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
-           $(OUTD)/apiemu.obj   $(OUTD)/dbgcv.obj    $(OUTD)/end.obj     \
-           $(OUTD)/cpumodel.obj $(OUTD)/cmdline.obj  $(OUTD)/linnum.obj  \
-           $(OUTD)/fastpass.obj
-######
+proj_obj = \
+!include msmod.inc
 
 !ifdef DOS
 # directory where HXDEV has been installed.

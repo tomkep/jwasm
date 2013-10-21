@@ -13,9 +13,9 @@
 
 #include "globals.h"
 #include "memalloc.h"
+#include "input.h"
 #include "parser.h"
 #include "reswords.h"
-#include "input.h"
 #include "tokenize.h"
 #include "condasm.h"
 #include "segment.h"
@@ -36,6 +36,7 @@
 #include "myassert.h"
 #include "linnum.h"
 #include "cpumodel.h"
+#include "lqueue.h"
 #if DLLIMPORT
 #include "mangle.h"
 #endif
@@ -63,28 +64,24 @@ jmp_buf jmpenv;
 
 #define USELSLINE 1 /* must match switch in listing.c! */
 
-extern uint_32          LastCodeBufSize;
+extern int_32           LastCodeBufSize;
 extern char             *DefaultDir[NUM_FILE_TYPES];
 extern const char       *ModelToken[];
 #if FASTMEM==0
 extern void             FreeLibQueue();
 #endif
 
-#ifdef DEBUG_OUT
-extern int lq_line;
-#endif
-
 /* parameters for output formats. order must match enum oformat */
 static const struct format_options formatoptions[] = {
 #if BIN_SUPPORT
-    { bin_init, BIN_DISALLOWED,  "BIN"  },
+    { bin_init,  BIN_DISALLOWED,    "BIN"  },
 #endif
-    { omf_init, OMF_DISALLOWED,  "OMF"  },
+    { omf_init,  OMF_DISALLOWED,    "OMF"  },
 #if COFF_SUPPORT
-    { NULL,     COFF32_DISALLOWED, "COFF" },
+    { coff_init, COFF32_DISALLOWED, "COFF" },
 #endif
 #if ELF_SUPPORT
-    { elf_init, ELF32_DISALLOWED,  "ELF"  },
+    { elf_init,  ELF32_DISALLOWED,  "ELF"  },
 #endif
 };
 
@@ -201,18 +198,18 @@ void OutputByte( unsigned char byte )
             //_asm int 3;
         }
 #endif
-        myassert( CurrSeg->e.seginfo->current_loc >= CurrSeg->e.seginfo->start_loc );
+        /**/myassert( CurrSeg->e.seginfo->current_loc >= CurrSeg->e.seginfo->start_loc );
         if( Options.output_format == OFORMAT_OMF && idx >= MAX_LEDATA_THRESHOLD ) {
             omf_FlushCurrSeg();
             idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
         }
-        //DebugMsg(("OutputByte: buff=%p, idx=%" FX32 ", byte=%X, codebuff[0]=%X\n", CurrSeg->e.seginfo->CodeBuffer, idx, byte, *CurrSeg->e.seginfo->CodeBuffer ));
+        //DebugMsg(("OutputByte: buff=%p, idx=%" I32_SPEC "X, byte=%X, codebuff[0]=%X\n", CurrSeg->e.seginfo->CodeBuffer, idx, byte, *CurrSeg->e.seginfo->CodeBuffer ));
         CurrSeg->e.seginfo->CodeBuffer[idx] = byte;
     }
 #if 1
     /* check this in pass 1 only */
     else if( CurrSeg->e.seginfo->current_loc < CurrSeg->e.seginfo->start_loc ) {
-        DebugMsg(("OutputByte: segment start loc changed from %" FX32 "h to %" FX32 "h\n",
+        DebugMsg(("OutputByte: segment start loc changed from %" I32_SPEC "Xh to %" I32_SPEC "Xh\n",
                   CurrSeg->e.seginfo->start_loc,
                   CurrSeg->e.seginfo->current_loc));
         CurrSeg->e.seginfo->start_loc = CurrSeg->e.seginfo->current_loc;
@@ -258,20 +255,20 @@ void OutputBytes( const unsigned char *pbytes, int len, struct fixup *fixup )
         if ( CurrSeg->e.seginfo->current_loc < CurrSeg->e.seginfo->start_loc )
             _asm int 3;
 #endif
-        myassert( CurrSeg->e.seginfo->current_loc >= CurrSeg->e.seginfo->start_loc );
+        /**/myassert( CurrSeg->e.seginfo->current_loc >= CurrSeg->e.seginfo->start_loc );
         if( Options.output_format == OFORMAT_OMF && ((idx + len) > MAX_LEDATA_THRESHOLD ) ) {
             omf_FlushCurrSeg();
             idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
         }
         if ( fixup )
             store_fixup( fixup, (int_32 *)pbytes );
-        //DebugMsg(("OutputBytes: buff=%p, idx=%" FX32 ", byte=%X\n", CurrSeg->e.seginfo->CodeBuffer, idx, *pbytes ));
+        //DebugMsg(("OutputBytes: buff=%p, idx=%" I32_SPEC "X, byte=%X\n", CurrSeg->e.seginfo->CodeBuffer, idx, *pbytes ));
         memcpy( &CurrSeg->e.seginfo->CodeBuffer[idx], pbytes, len );
     }
 #if 1
     /* check this in pass 1 only */
     else if( CurrSeg->e.seginfo->current_loc < CurrSeg->e.seginfo->start_loc ) {
-        DebugMsg(("OutputBytes: segment start loc changed from %" FX32 "h to %" FX32 "h\n",
+        DebugMsg(("OutputBytes: segment start loc changed from %" I32_SPEC "Xh to %" I32_SPEC "Xh\n",
                   CurrSeg->e.seginfo->start_loc,
                   CurrSeg->e.seginfo->current_loc));
         CurrSeg->e.seginfo->start_loc = CurrSeg->e.seginfo->current_loc;
@@ -295,7 +292,7 @@ ret_code SetCurrOffset( struct dsym *seg, uint_32 value, bool relative, bool sel
     if ( Options.output_format == OFORMAT_OMF ) {
         if ( seg == CurrSeg ) {
             if ( write_to_file == TRUE )
-                omf_FlushCurrSeg( );
+                omf_FlushCurrSeg();
 
         /* for debugging, tell if data is located in code sections*/
             if( select_data )
@@ -332,57 +329,38 @@ ret_code SetCurrOffset( struct dsym *seg, uint_32 value, bool relative, bool sel
     return( NOT_ERROR );
 }
 
-/* finish module writes
- * for OMF, just write the MODEND record
- * for COFF,ELF and BIN, write the section data and symbol table
- */
-static ret_code WriteContent( void )
-/**********************************/
+/* write object module */
+
+static ret_code WriteModule( struct module_info *modinfo )
+/********************************************************/
 {
-    DebugMsg(("WriteContent enter\n"));
-    switch ( Options.output_format ) {
-    case OFORMAT_OMF:
-        //if( ModendRec == NULL ) {
-        //    EmitError( UNEXPECTED_END_OF_FILE );
-        //    return( ERROR );
-        //}
-        /* -if Zi is set, write symbols and types */
-        if ( Options.debug_symbols )
-            omf_write_debug_tables();
-        omf_write_modend( ModuleInfo.g.start_fixup, ModuleInfo.start_displ );
-#if FASTMEM==0
-        LclFree( ModuleInfo.g.start_fixup );
-#endif
-        break;
-#if COFF_SUPPORT
-    case OFORMAT_COFF:
-        coff_write_data( &ModuleInfo );
-        coff_write_symbols( &ModuleInfo );
-        break;
-#endif
-#if ELF_SUPPORT
-    case OFORMAT_ELF:
-        elf_write_data( &ModuleInfo );
-        break;
-#endif
-#if BIN_SUPPORT
-    case OFORMAT_BIN:
-        bin_write_data( &ModuleInfo );
-        break;
-#endif
+    struct dsym *curr;
+
+    DebugMsg(("WriteModule enter\n"));
+
+    /* final checks */
+    /* check limit of segments */
+    for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
+        if ( curr->e.seginfo->Ofssize == USE16 && curr->sym.max_offset > 0x10000 ) {
+            if ( Options.output_format == OFORMAT_OMF )
+                EmitErr( SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
+            else
+                EmitWarn( 2, SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
+        }
     }
+
+    modinfo->g.WriteModule( modinfo );
+
 #if DLLIMPORT
     /* is the -Fd option given with a file name? */
     if ( Options.names[OPTN_LNKDEF_FN] ) {
         FILE *ld;
-        struct dsym *curr;
         ld = fopen( Options.names[OPTN_LNKDEF_FN], "w" );
         if ( ld == NULL ) {
-            EmitErr( CANNOT_OPEN_FILE, Options.names[OPTN_LNKDEF_FN], ErrnoStr() );
-            return( ERROR );
+            return( EmitErr( CANNOT_OPEN_FILE, Options.names[OPTN_LNKDEF_FN], ErrnoStr() ) );
         }
         for ( curr = SymTables[TAB_EXT].head; curr != NULL ; curr = curr->next ) {
-            DebugMsg(("WriteContent: ext=%s, isproc=%u, weak=%u\n", curr->sym.name, curr->sym.isproc, curr->sym.weak ));
+            DebugMsg(("WriteModule: ext=%s, isproc=%u, weak=%u\n", curr->sym.name, curr->sym.isproc, curr->sym.weak ));
             if ( curr->sym.isproc && ( curr->sym.weak == FALSE || curr->sym.iat_used ) &&
                 curr->sym.dll && *(curr->sym.dll->name) != NULLC ) {
                 int size;
@@ -395,163 +373,8 @@ static ret_code WriteContent( void )
         fclose( ld );
     }
 #endif
-    DebugMsg(("WriteContent exit\n"));
+    DebugMsg(("WriteModule exit\n"));
     return( NOT_ERROR );
-}
-
-#if BIN_SUPPORT
-static ret_code CheckExternal( void )
-/***********************************/
-{
-    struct dsym *curr;
-    for ( curr = SymTables[TAB_EXT].head; curr != NULL ; curr = curr->next )
-        if( curr->sym.weak == FALSE || curr->sym.used == TRUE ) {
-            DebugMsg(("CheckExternal: error, %s weak=%u\n", curr->sym.name, curr->sym.weak ));
-            EmitErr( FORMAT_DOESNT_SUPPORT_EXTERNALS, curr->sym.name );
-            return( ERROR );
-        }
-    return( NOT_ERROR );
-}
-#endif
-
-/* sort segments ( a simple bubble sort )
- * type = 0: sort by fileoffset (.DOSSEG )
- * type = 1: sort by name ( .ALPHA )
- * type = 2: sort by segment type+name ( PE format ). member lname_idx is misused here for "type"
- */
-
-void SortSegments( int type )
-/***************************/
-{
-    bool changed = TRUE;
-    bool swap;
-    struct dsym *curr;
-    //int index = 1;
-
-    while ( changed == TRUE ) {
-        struct dsym *prev = NULL;
-        changed = FALSE;
-        for( curr = SymTables[TAB_SEG].head; curr && curr->next ; prev = curr, curr = curr->next ) {
-            swap = FALSE;
-            switch (type ) {
-            case 0:
-                if ( curr->e.seginfo->fileoffset > curr->next->e.seginfo->fileoffset )
-                    swap = TRUE;
-                break;
-            case 1:
-                if ( strcmp( curr->sym.name, curr->next->sym.name ) > 0 )
-                    swap = TRUE;
-                break;
-            case 2:
-                if ( curr->e.seginfo->lname_idx > curr->next->e.seginfo->lname_idx ||
-                    ( curr->e.seginfo->lname_idx == curr->next->e.seginfo->lname_idx &&
-                    ( _stricmp( curr->sym.name, curr->next->sym.name ) > 0 ) ) )
-                    swap = TRUE;
-                break;
-            }
-            if ( swap ) {
-                struct dsym *tmp = curr->next;
-                changed = TRUE;
-                if ( prev == NULL ) {
-                    SymTables[TAB_SEG].head = tmp;
-                } else {
-                    prev->next = tmp;
-                }
-                curr->next = tmp->next;
-                tmp->next = curr;
-            }
-        }
-    }
-
-    /* v2.7: don't change segment indices! They're stored in fixup.frame_datum */
-    //for ( curr = SymTables[TAB_SEG].head; curr ; curr = curr->next ) {
-    //    curr->e.seginfo->seg_idx = index++;
-    //}
-}
-
-/*
- * write the OMF/COFF/ELF header
- * for OMF, this is called twice, first time after Pass 1 is done (initial==TRUE)
- * and then again after assembly has finished without errors (initial==FALSE).
- * for COFF/ELF/BIN, it's just called once after assembly passes.
- */
-static ret_code WriteHeader( bool initial )
-/*****************************************/
-{
-    ret_code    rc = NOT_ERROR;
-    struct dsym *curr;
-
-    DebugMsg(("WriteHeader(%u) enter\n", initial));
-
-    /* check limit of segments */
-    for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
-        if ( curr->e.seginfo->Ofssize == USE16 && curr->sym.max_offset > 0x10000 ) {
-            if ( Options.output_format == OFORMAT_OMF )
-                EmitErr( SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
-            else
-                EmitWarn( 2, SEGMENT_EXCEEDS_64K_LIMIT, curr->sym.name );
-        }
-    }
-
-    switch ( Options.output_format ) {
-    case OFORMAT_OMF:
-        if ( initial == TRUE ) {
-            omf_write_header(); /* write THEADR record */
-            /* if( Options.no_dependencies == FALSE ) */
-            if( Options.line_numbers )
-                omf_write_autodep(); /* write dependency COMENT records */
-            if( ModuleInfo.segorder == SEGORDER_DOSSEG )
-                omf_write_dosseg(); /* write dosseg COMENT records */
-            else if( ModuleInfo.segorder == SEGORDER_ALPHA )
-                SortSegments( 1 );
-            omf_write_lib(); /* write default lib COMENT records */
-            omf_write_lnames(); /* write LNAMES records */
-        }
-        /* write SEGDEF records. Since these records contain the segment's length,
-         * the records have to be written again after the final assembly pass.
-         */
-        omf_write_seg( initial );
-        if ( initial == TRUE ) {
-            omf_write_grp(); /* write GRPDEF records */
-            omf_write_extdef(); /* write EXTDEF + COMDEF records */
-            //omf_write_comdef(); /* v2.09: this is now called inside write_extdef */
-            omf_write_alias(); /* write ALIAS records */
-        }
-        /* write PUBDEF records. Since the final value of offsets isn't known after
-         * the first pass, this has to be called again after the final pass.
-         */
-        omf_write_public( initial );
-        if ( initial == TRUE ) {
-            omf_write_export(); /* write export COMENT records */
-            /* (optionally) write end-of-pass-one COMENT record */
-            omf_end_of_pass1( ModuleInfo.g.start_fixup );
-        }
-        break;
-#if COFF_SUPPORT
-    case OFORMAT_COFF:
-        coff_write_header( &ModuleInfo );
-        coff_write_section_table( &ModuleInfo );
-        break;
-#endif
-#if ELF_SUPPORT
-    case OFORMAT_ELF:
-        elf_write_header( &ModuleInfo );
-        break;
-#endif
-#if BIN_SUPPORT
-    case OFORMAT_BIN:
-        rc = CheckExternal(); /* check if externals are used */
-        break;
-#endif
-#ifdef DEBUG_OUT
-    default:
-        /* this shouldn't happen */
-        printf("unknown output format: %u\n", Options.output_format);
-        rc = ERROR;
-#endif
-    }
-    DebugMsg(("WriteHeader exit, rc=%d\n", rc));
-    return( rc );
 }
 
 #define is_valid_first_char( ch )  ( isalpha(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' || ch=='.' )
@@ -646,7 +469,6 @@ static void add_incpaths( void )
 static void CmdlParamsInit( int pass )
 /************************************/
 {
-    struct qitem *pq;
     DebugMsg(("CmdlParamsInit(%u) enter\n", pass));
 
 #if BUILD_TARGET
@@ -691,11 +513,6 @@ static void CmdlParamsInit( int pass )
         }
     }
 #endif
-
-    for ( pq = Options.queues[OPTQ_FINCLUDE]; pq; pq = pq->next ) {
-        DebugMsg(("add_include file: %s\n", pq->value ));
-        InputQueueFile( pq->value, NULL );
-    }
 
     if ( pass == PASS_1 ) {
         char *env;
@@ -778,7 +595,7 @@ static void ModulePassInit( void )
     struct dsym *curr;
 #endif
 
-    DebugMsg(( "ModulePassInit enter\n" ));
+    DebugMsg(( "ModulePassInit() enter\n" ));
     /* set default values not affected by the masm 5.1 compat switch */
     ModuleInfo.procs_private = FALSE;
     ModuleInfo.procs_export = FALSE;
@@ -792,7 +609,6 @@ static void ModulePassInit( void )
     //if ( StoreState == FALSE ) {
     if ( UseSavedState == FALSE ) {
 #endif
-        NewLineQueue(); /* ensure line queue is empty */
         ModuleInfo.langtype = Options.langtype;
         ModuleInfo.fctype = Options.fctype;
 #if AMD64_SUPPORT
@@ -899,9 +715,8 @@ static void PassOneChecks( void )
 {
     struct dsym *curr;
     struct dsym *next;
-#if FASTPASS
     struct qnode *q;
-#endif
+    struct qnode *qn;
 #ifdef DEBUG_OUT
     int cntUnusedExt = 0;
 #endif
@@ -923,6 +738,31 @@ static void PassOneChecks( void )
         DebugMsg(("PassOneChecks: undefined symbol %s\n", curr->sym.name ));
     }
 #endif
+    /* v2.04: check the publics queue.
+     * - only internal symbols can be public.
+     * - weak external symbols are filtered ( since v2.11 )
+     * - anything else is an error
+     * v2.11: moved here ( from inside the "#if FASTPASS"-block )
+     * because the loop will now filter weak externals [ this
+     * was previously done in GetPublicSymbols() ]
+     */
+    for( q = ModuleInfo.g.PubQueue.head, qn = (struct qnode *)&ModuleInfo.g.PubQueue ; q; q = q->next ) {
+
+        if ( q->sym->state == SYM_INTERNAL )
+            qn = q;
+        else if ( q->sym->state == SYM_EXTERNAL && q->sym->weak == TRUE ) {
+            DebugMsg(("PassOneChecks: public for weak external skipped: %s\n", q->sym->name ));
+            qn->next = q->next;
+            LclFree( q );
+            q = qn;
+        } else {
+            DebugMsg(("PassOneChecks: invalid public attribute for %s [state=%u weak=%u]\n", q->sym->name, q->sym->state, q->sym->weak ));
+#if FASTPASS
+            SkipSavedState();
+#endif
+            break;
+        }
+    }
 #if FASTPASS
     if ( SymTables[TAB_UNDEF].head ) {
         /* to force a full second pass in case of missing symbols,
@@ -946,29 +786,16 @@ static void PassOneChecks( void )
             break;
         }
     }
-    /* v2.04: scan the publics queue. This check was previously done
-     * in GetPublicData(), but there it works for OMF format only.
-     */
-    for( q = ModuleInfo.g.PubQueue.head; q; q = q->next ) {
-        const struct asym *sym = q->elmt;
-        if ( sym->state == SYM_INTERNAL )
-            continue;
-        if ( sym->state != SYM_EXTERNAL || sym->weak == FALSE )
-            SkipSavedState();
-            break;
-    }
 #if COFF_SUPPORT
     /* if there's an item in the safeseh list which is not an
      * internal proc, make a full second pass to emit a proper
      * error msg at the .SAFESEH directive
      */
-    if ( ModuleInfo.g.SafeSEHList.head ) {
-        struct qnode *node;
-        for ( node = ModuleInfo.g.SafeSEHList.head; node; node = node->next )
-            if ( ((struct asym *)node->elmt)->state != SYM_INTERNAL || ((struct asym *)node->elmt)->isproc == FALSE ) {
-                SkipSavedState();
-                break;
-            }
+    for ( q = ModuleInfo.g.SafeSEHQueue.head; q; q = q->next ) {
+        if ( q->sym->state != SYM_INTERNAL || q->sym->isproc == FALSE ) {
+            SkipSavedState();
+            break;
+        }
     }
 #endif
 
@@ -986,7 +813,7 @@ static void PassOneChecks( void )
             /* check if symbol is external or public */
             if ( sym == NULL ||
                 ( sym->state != SYM_EXTERNAL &&
-                 ( sym->state != SYM_INTERNAL || sym->public == FALSE ))) {
+                 ( sym->state != SYM_INTERNAL || sym->ispublic == FALSE ))) {
                 SkipSavedState();
                 break;
             }
@@ -1046,7 +873,7 @@ static void PassOneChecks( void )
             if ( curr->sym.altname->state == SYM_INTERNAL ) {
 #if COFF_SUPPORT || ELF_SUPPORT
                 /* for COFF/ELF, the altname must be public or external */
-                if ( curr->sym.altname->public == FALSE &&
+                if ( curr->sym.altname->ispublic == FALSE &&
                     ( Options.output_format == OFORMAT_COFF
 #if ELF_SUPPORT
                      || Options.output_format == OFORMAT_ELF
@@ -1078,6 +905,22 @@ static void PassOneChecks( void )
         DebugMsg(("PassOneChecks: segm=%s, labels=%u forward refs=%u\n", curr->sym.name, i, j));
     }
 #endif
+
+    if ( ModuleInfo.g.error_count == 0 ) {
+
+        /* make all symbols of type SYM_INTERNAL, which aren't
+         a constant, public.  */
+        if ( Options.all_symbols_public )
+            SymMakeAllSymbolsPublic();
+
+        if ( Options.syntax_check_only == FALSE )
+            write_to_file = TRUE;
+
+        if ( ModuleInfo.g.Pass1Checks )
+            ModuleInfo.g.Pass1Checks( &ModuleInfo );
+    }
+
+
     return;
 }
 
@@ -1093,8 +936,8 @@ static void PassOneChecks( void )
  *    - restore the state
  *    - read preprocessed lines and feed ParseLine() with it
  */
-static unsigned long OnePass( void )
-/**********************************/
+static int OnePass( void )
+/************************/
 {
 
     InputPassInit();
@@ -1156,21 +999,23 @@ static unsigned long OnePass( void )
         }
     } else
 #endif
-        while ( ModuleInfo.EndDirFound == FALSE && ( ( Token_Count = GetPreprocessedLine( CurrSource, ModuleInfo.tokenarray ) ) >= 0 ) ) {
-            if ( Token_Count ) {
-                ParseLine( ModuleInfo.tokenarray );
-                if ( Options.preprocessor_stdout == TRUE && Parse_Pass == PASS_1 )
-                    WritePreprocessedLine( CurrSource );
-            }
-
+    {
+        struct qitem *pq;
+        /* v2.11: handle -Fi files here ( previously in CmdlParamsInit ) */
+        for ( pq = Options.queues[OPTQ_FINCLUDE]; pq; pq = pq->next ) {
+            DebugMsg(("OnePass: force include of file: %s\n", pq->value ));
+            if ( SearchFile( pq->value, TRUE ) )
+                ProcessFile( ModuleInfo.tokenarray );
         }
+        ProcessFile( ModuleInfo.tokenarray ); /* process the main source file */
+    }
 
     LinnumFini();
 
     if ( Parse_Pass == PASS_1 )
         PassOneChecks();
 
-    ClearFileStack();
+    ClearSrcStack();
 
     return( 1 );
 }
@@ -1255,8 +1100,7 @@ static void ModuleInit( void )
     //SimpleType[ST_PROC].mem_type = MT_NEAR;
 
     memset( SymTables, 0, sizeof( SymTables[0] ) * TAB_LAST );
-    if ( ModuleInfo.fmtopt->init )
-        ModuleInfo.fmtopt->init( &ModuleInfo );
+    ModuleInfo.fmtopt->init( &ModuleInfo );
 
     return;
 }
@@ -1264,12 +1108,7 @@ static void ModuleInit( void )
 static void ReswTableInit( void )
 /*******************************/
 {
-    /* initialize reserved words hash table.
-     * this must be called for each source module.
-     */
     ResWordsInit();
-
-    /* this must be done AFTER ResWordsInit() */
     if ( Options.output_format == OFORMAT_OMF ) {
         /* DebugMsg(("InitAsm: disable IMAGEREL+SECTIONREL\n")); */
         /* for OMF, IMAGEREL and SECTIONREL are disabled */
@@ -1314,26 +1153,33 @@ static void open_files( void )
         DebugMsg(("open_files(): output, fopen(\"%s\") ok\n", CurrFName[OBJ] ));
     }
 
+    if( Options.write_listing ) {
+        CurrFile[LST] = fopen( CurrFName[LST], "wb" );
+        if ( CurrFile[LST] == NULL )
+            Fatal( CANNOT_OPEN_FILE, CurrFName[LST], ErrnoStr() );
+    }
     return;
 }
 
 void close_files( void )
 /**********************/
 {
+    /* v2.11: no fatal errors anymore if fclose() fails.
+     * That's because Fatal() may cause close_files() to be
+     * reentered and thus cause an endless loop.
+     */
+
     /* close ASM file */
     if( CurrFile[ASM] != NULL ) {
         if( fclose( CurrFile[ASM] ) != 0 )
-            Fatal( CANNOT_CLOSE_FILE, CurrFName[ASM], errno  );
+            EmitErr( CANNOT_CLOSE_FILE, CurrFName[ASM], errno );
         CurrFile[ASM] = NULL;
     }
-
-    if ( Options.output_format == OFORMAT_OMF )
-        omf_fini();
 
     /* close OBJ file */
     if ( CurrFile[OBJ] != NULL ) {
         if ( fclose( CurrFile[OBJ] ) != 0 )
-            Fatal( CANNOT_CLOSE_FILE, CurrFName[OBJ], errno  );
+            EmitErr( CANNOT_CLOSE_FILE, CurrFName[OBJ], errno );
         CurrFile[OBJ] = NULL;
     }
     /* delete the object module if errors occured */
@@ -1342,7 +1188,10 @@ void close_files( void )
         remove( CurrFName[OBJ] );
     }
 
-    LstCloseFile();
+    if( CurrFile[LST] != NULL ) {
+        fclose( CurrFile[LST] );
+        CurrFile[LST] = NULL;
+    }
 
     /* close ERR file */
     if ( CurrFile[ERR] != NULL ) {
@@ -1360,8 +1209,6 @@ static char *GetExt( int type )
 /*****************************/
 {
     switch ( type ) {
-    case ERR:
-        return( ERR_EXT );
     case OBJ:
 #if BIN_SUPPORT
         if ( Options.output_format == OFORMAT_BIN )
@@ -1379,6 +1226,8 @@ static char *GetExt( int type )
         return( OBJ_EXT );
     case LST:
         return( LST_EXT );
+    case ERR:
+        return( ERR_EXT );
     }
     return( NULL );
 }
@@ -1400,7 +1249,7 @@ static void SetFilenames( const char *name )
     char dir[_MAX_DIR];
     char fname[_MAX_FNAME];
     char ext[_MAX_EXT];
-    char path[ _MAX_PATH ];
+    char path[ FILENAME_MAX ];
 
     DebugMsg(("SetFilenames(\"%s\") enter\n", name ));
     //memset( CurrFName, 0, sizeof( CurrFName ) );
@@ -1460,6 +1309,8 @@ static void AssembleInit( const char *source )
     ModuleInit();
     CondInit();
     ExprEvalInit();
+    LstInit();
+
     DebugMsg(("AssembleInit() exit\n"));
     return;
 }
@@ -1474,9 +1325,7 @@ static void AssembleFini( void )
 /******************************/
 {
     int i;
-#ifdef DEBUG_OUT
     SegmentFini();
-#endif
     SymFini();
     ResWordsFini();
 #ifdef DEBUG_OUT
@@ -1484,10 +1333,10 @@ static void AssembleFini( void )
     MacroFini();
 #endif
     FreePubQueue();
-    FreeLnameQueue();
 #if FASTMEM==0
     FreeLibQueue();
     ContextFini();
+    HllFini();
 #endif
     InputFini();
     close_files();
@@ -1512,35 +1361,35 @@ static void AssembleFini( void )
 int EXPQUAL AssembleModule( const char *source )
 /**********************************************/
 {
-    unsigned long       prev_written = -1;
-    unsigned long       curr_written;
-    int                 starttime;
-    int                 endtime;
-    struct dsym         *dir;
+    uint_32       prev_written = -1;
+    uint_32       curr_written;
+    int           starttime;
+    int           endtime;
+    struct dsym   *seg;
 
     DebugMsg(("AssembleModule(\"%s\") enter\n", source ));
 
     memset( &ModuleInfo, 0, sizeof(ModuleInfo) );
-#ifdef DEBUG_OUT
-    ModuleInfo.cref = TRUE; /* enable debug displays */
-#endif
+    DebugCmd( ModuleInfo.cref = TRUE ); /* enable debug displays */
+
 #if 1 //def __SW_BD
-    /* if compiled as a dll/lib, fatal errors won't exit! */
+    /* fatal errors during assembly won't terminate the program,
+     * just the assembly step.!
+     */
     if ( setjmp( jmpenv ) ) {
-        if ( ModuleInfo.g.file_stack )
-            ClearFileStack(); /* avoid memory leaks! */
+        if ( ModuleInfo.g.src_stack )
+            ClearSrcStack(); /* avoid memory leaks! */
         goto done;
     }
 #endif
 
     AssembleInit( source );
 
-    LstOpenFile();
-
-#if 0 /* ndef __UNIX__ */
-    starttime = GetTickCount();
-#else
     starttime = clock();
+
+#if 0 /* 1=trigger a protection fault */
+    seg = NULL;
+    seg->sym.state = SYM_UNDEFINED;
 #endif
 
     for( Parse_Pass = PASS_1; ; Parse_Pass++ ) {
@@ -1548,46 +1397,31 @@ int EXPQUAL AssembleModule( const char *source )
         DebugMsg(( "*************\npass %u\n*************\n", Parse_Pass + 1 ));
         OnePass();
 
-        if ( Parse_Pass == PASS_1 && ModuleInfo.g.error_count == 0 ) {
-            DebugMsg(("AssembleModule(%u): pass 1 actions\n", Parse_Pass + 1));
-
-            /* make all symbols of type SYM_INTERNAL, which aren't
-             a constant, public.  */
-            if ( Options.all_symbols_public )
-                SymMakeAllSymbolsPublic();
-
-            if ( Options.syntax_check_only == FALSE )
-                write_to_file = TRUE;
-
-            if ( write_to_file && ( Options.output_format == OFORMAT_OMF ) ) {
-                WriteHeader( TRUE );
-            }
+        if( ModuleInfo.g.error_count > 0 ) {
+            DebugMsg(("AssembleModule(%u): errorcnt=%u\n", Parse_Pass + 1, ModuleInfo.g.error_count ));
+            break;
         }
 
-        DebugMsg(("AssembleModule(%u): errorcnt=%u\n", Parse_Pass + 1, ModuleInfo.g.error_count ));
-        if( ModuleInfo.g.error_count > 0 )
-            break;
-
-        DebugMsg(("AssembleModule(%u) segments:\n", Parse_Pass + 1));
-        for ( curr_written = 0, dir = SymTables[TAB_SEG].head; dir ; dir = dir->next ) {
+        /* calculate total size of segments */
+        for ( curr_written = 0, seg = SymTables[TAB_SEG].head; seg ; seg = seg->next ) {
             /* v2.04: use <max_offset> instead of <bytes_written>
              * (the latter is not always reliable due to backpatching).
              */
-            //curr_written += dir->e.seginfo->bytes_written;
-            curr_written += dir->sym.max_offset;
-            DebugMsg(("AssembleModule(%u): segm=%-8s start=%8" FX32 " max_ofs=%8" FX32 " written=%" FX32 "\n",
-                      Parse_Pass + 1, dir->sym.name,
-                      dir->e.seginfo->start_loc,
-                      dir->sym.max_offset,
-                      dir->e.seginfo->bytes_written ));
+            //curr_written += seg->e.seginfo->bytes_written;
+            curr_written += seg->sym.max_offset;
+            DebugMsg(("AssembleModule(%u): segm=%-8s start=%8" I32_SPEC "X max_ofs=%8" I32_SPEC "X written=%" I32_SPEC "X\n",
+                      Parse_Pass + 1, seg->sym.name, seg->e.seginfo->start_loc, seg->sym.max_offset,
+                      seg->e.seginfo->bytes_written ));
         }
 
-        DebugMsg(("AssembleModule(%u): PhaseError=%u, prev_written=%" FX32 ", curr_written=%" FX32 "\n", Parse_Pass + 1, ModuleInfo.PhaseError, prev_written, curr_written));
+        /* if there's no phase error and size of segments didn't change, we're done */
+        DebugMsg(("AssembleModule(%u): PhaseError=%u, prev_written=%" I32_SPEC "X, curr_written=%" I32_SPEC "X\n", Parse_Pass + 1, ModuleInfo.PhaseError, prev_written, curr_written));
         if( !ModuleInfo.PhaseError && prev_written == curr_written )
             break;
+
 #ifdef DEBUG_OUT
         if ( curr_written < prev_written && prev_written != -1 ) {
-            printf( "size shrank from %" FX32 " to %" FX32 " in pass %u\n", prev_written, curr_written, Parse_Pass + 1 );
+            printf( "size shrank from %" I32_SPEC "X to %" I32_SPEC "X in pass %u\n", prev_written, curr_written, Parse_Pass + 1 );
         }
 #endif
 
@@ -1603,10 +1437,10 @@ int EXPQUAL AssembleModule( const char *source )
         if ( Options.line_numbers ) {
 #if COFF_SUPPORT
             if ( Options.output_format == OFORMAT_COFF ) {
-                for( dir = SymTables[TAB_SEG].head; dir; dir = dir->next ) {
-                    if ( dir->e.seginfo->LinnumQueue )
-                        QueueDeleteLinnum( dir->e.seginfo->LinnumQueue );
-                    dir->e.seginfo->LinnumQueue = NULL;
+                for( seg = SymTables[TAB_SEG].head; seg; seg = seg->next ) {
+                    if ( seg->e.seginfo->LinnumQueue )
+                        QueueDeleteLinnum( seg->e.seginfo->LinnumQueue );
+                    seg->e.seginfo->LinnumQueue = NULL;
                 }
             } else {
 #endif
@@ -1628,23 +1462,14 @@ int EXPQUAL AssembleModule( const char *source )
 #else
         if ( CurrFile[LST] ) {
 #endif
-            LstCloseFile();
-            LstOpenFile();
+            rewind( CurrFile[LST] );
+            LstInit();
         }
     } /* end for() */
 
-    if ( ( Parse_Pass > PASS_1 ) && write_to_file ) {
-        uint_32 tmp = GetLineNumber();
-        set_curr_srcfile( 0, 0 ); /* no line reference for errors/warnings */
-        if ( Options.output_format == OFORMAT_OMF ) {
-            WriteContent();
-            WriteHeader( FALSE );
-        } else {
-            if ( WriteHeader( TRUE ) == NOT_ERROR )
-                WriteContent();
-        }
-        set_curr_srcfile( 0, tmp );
-    }
+    if ( ( Parse_Pass > PASS_1 ) && write_to_file )
+        WriteModule( &ModuleInfo );
+
     if ( ModuleInfo.pCodeBuff ) {
         LclFree( ModuleInfo.pCodeBuff );
     }
@@ -1653,14 +1478,10 @@ int EXPQUAL AssembleModule( const char *source )
     /* Write a symbol listing file (if requested) */
     LstWriteCRef();
 
-#if 0 /* ndef __UNIX__ */
-    endtime = GetTickCount();
-#else
     endtime = clock(); /* is in ms already */
-#endif
 
     sprintf( CurrSource, MsgGetEx( MSG_ASSEMBLY_RESULTS ),
-             GetFName( ModuleInfo.srcfile )->name,
+             GetFName( ModuleInfo.srcfile )->fname,
              GetLineNumber(),
              Parse_Pass + 1,
              endtime - starttime,
@@ -1672,7 +1493,6 @@ int EXPQUAL AssembleModule( const char *source )
     if ( CurrFile[LST] ) {
         LstPrintf( CurrSource );
         LstNL();
-        LstCloseFile();
     }
 #if 1 //def __SW_BD
 done:

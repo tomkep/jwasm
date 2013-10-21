@@ -6,7 +6,7 @@ struct line_num_info {
     uint_32 number; /* source line number (v2.06: changed to 32-bit */
     union {
         uint_32 offset;
-        /* the next struct is set if sym is != NULL */
+        /* the next struct is set if sym is != NULL ( COFF only ) */
         struct {
             uint_32 line_number:20,
                     file:12;
@@ -14,7 +14,7 @@ struct line_num_info {
     };
     union {
         uint srcfile;
-        struct asym *sym; /* used if number is 0 */
+        struct asym *sym; /* used if number is 0 ( COFF only ) */
     };
 };
 

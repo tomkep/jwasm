@@ -9,13 +9,14 @@
 ****************************************************************************/
 
 #include <ctype.h>
+#include <limits.h>
 
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
 #include "reswords.h"
 #include "expreval.h"
-#include "input.h"
+#include "lqueue.h"
 #include "equate.h"
 #include "assume.h"
 #include "segment.h"
@@ -29,6 +30,8 @@
 
 extern int_64           maxintvalues[];
 extern int_64           minintvalues[];
+extern enum special_token stackreg[];
+
 #ifdef __I86__
 #define NUMQUAL (long)
 #else
@@ -39,6 +42,7 @@ enum reg_used_flags {
     R0_USED       = 0x01, /* register contents of AX/EAX/RAX is destroyed */
     R0_H_CLEARED  = 0x02, /* 16bit: high byte of R0 (=AH) has been set to 0 */
     R0_X_CLEARED  = 0x04, /* 16bit: register R0 (=AX) has been set to 0 */
+    R2_USED       = 0x08, /* contents of DX is destroyed ( via CWD ); cpu < 80386 only */
 #if AMD64_SUPPORT
     RCX_USED      = 0x08, /* win64: register contents of CL/CX/ECX/RCX is destroyed */
     RDX_USED      = 0x10, /* win64: register contents of DL/DX/EDX/RDX is destroyed */
@@ -55,7 +59,7 @@ enum reg_used_flags {
 #endif
 };
 
-static int size_vararg;
+static int size_vararg; /* size of :VARARG arguments */
 static int fcscratch;  /* exclusively to be used by FASTCALL helper functions */
 
 struct fastcall_conv {
@@ -89,11 +93,6 @@ static const struct fastcall_conv fastcall_tab[] = {
 #endif
 };
 
-static const enum special_token stackreg[] = { T_SP, T_ESP,
-#if AMD64_SUPPORT
-T_RSP
-#endif
-};
 static const enum special_token regax[] = { T_AX, T_EAX,
 #if AMD64_SUPPORT
 T_RAX
@@ -193,13 +192,13 @@ static int ms64_fcstart( struct dsym const *proc, int numparams, int start, stru
 /*******************************************************************************************************************/
 {
     /* v2.04: VARARG didn't work */
-    if ( proc->e.procinfo->is_vararg ) {
+    if ( proc->e.procinfo->has_vararg ) {
         //numparams = ( tokenarray[start].token != T_FINAL ? 1 : 0 );
         for ( numparams = 0; tokenarray[start].token != T_FINAL; start++ )
             if ( tokenarray[start].token == T_COMMA )
                 numparams++;
     }
-    DebugMsg1(("ms64_fcstart(%s, numparams=%u) vararg=%u\n", proc->sym.name, numparams, proc->e.procinfo->is_vararg ));
+    DebugMsg1(("ms64_fcstart(%s, numparams=%u) vararg=%u\n", proc->sym.name, numparams, proc->e.procinfo->has_vararg ));
     if ( numparams < 4 )
         numparams = 4;
     else if ( numparams & 1 )
@@ -252,61 +251,84 @@ static int ms64_param( struct dsym const *proc, int index, struct dsym *param, b
     bool destroyed = FALSE;
 
     DebugMsg1(("ms64_param(%s, index=%u, param.memtype=%Xh, addr=%u) enter\n", proc->sym.name, index, param->sym.mem_type, addr ));
-    psize = SizeFromMemtype( param->sym.mem_type, USE64, param->sym.type );
+    /* v2.11: default size is 32-bit, not 64-bit */
+    if ( param->sym.is_vararg ) {
+        psize = 0;
+        if ( addr || opnd->instr == T_OFFSET )
+            psize = 8;
+        else if ( opnd->kind == EXPR_REG && opnd->indirect == FALSE )
+            psize = SizeFromRegister( opnd->base_reg->tokval );
+        else if ( opnd->mem_type != MT_EMPTY )
+            psize = SizeFromMemtype( opnd->mem_type, USE64, opnd->type );
+        if ( psize < 4 )
+            psize = 4;
+    } else
+        psize = SizeFromMemtype( param->sym.mem_type, USE64, param->sym.type );
+
+    /* check for register overwrites; v2.11: moved out the if( index >= 4 ) block */
+    if ( opnd->base_reg != NULL ) {
+        reg = opnd->base_reg->tokval;
+        if ( GetValueSp( reg ) & OP_R ) {
+            i = GetRegNo( reg );
+            if ( REGPAR_WIN64 & ( 1 << i ) ) {
+                base = GetParmIndex( i );
+                if ( *regs_used & ( 1 << ( base + RPAR_START ) ) )
+                    destroyed = TRUE;
+            } else if ( (*regs_used & R0_USED ) && ( ( GetValueSp( reg ) & OP_A ) || reg == T_AH ) ) {
+                destroyed = TRUE;
+            }
+        }
+    }
+    if ( opnd->idx_reg != NULL ) {
+        reg2 = opnd->idx_reg->tokval;
+        if ( GetValueSp( reg2 ) & OP_R ) {
+            i = GetRegNo( reg2 );
+            if ( REGPAR_WIN64 & ( 1 << i ) ) {
+                base = GetParmIndex( i );
+                if ( *regs_used & ( 1 << ( base + RPAR_START ) ) )
+                    destroyed = TRUE;
+            } else if ( (*regs_used & R0_USED ) && ( ( GetValueSp( reg2 ) & OP_A ) || reg2 == T_AH ) ) {
+                destroyed = TRUE;
+            }
+        }
+    }
+    if ( destroyed ) {
+        EmitErr( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE );
+        *regs_used = 0;
+    }
+
     if ( index >= 4 ) {
-        /* check for register overwrites */
-        if ( opnd->base_reg != NULL ) {
-            reg = opnd->base_reg->tokval;
-            if ( GetValueSp( reg ) & OP_R ) {
-                i = GetRegNo( reg );
-                if ( REGPAR_WIN64 & ( 1 << i ) ) {
-                    base = GetParmIndex( i );
-                    if ( *regs_used & ( 1 << ( base + RPAR_START ) ) )
-                        destroyed = TRUE;
-                } else if ( (*regs_used & R0_USED ) && ( ( GetValueSp( reg ) & OP_A ) || reg == T_AH ) ) {
-                    destroyed = TRUE;
-                }
-            }
-        }
-        if ( opnd->idx_reg != NULL ) {
-            reg2 = opnd->idx_reg->tokval;
-            if ( GetValueSp( reg2 ) & OP_R ) {
-                i = GetRegNo( reg2 );
-                if ( REGPAR_WIN64 & ( 1 << i ) ) {
-                    base = GetParmIndex( i );
-                    if ( *regs_used & ( 1 << ( base + RPAR_START ) ) )
-                        destroyed = TRUE;
-                } else if ( (*regs_used & R0_USED ) && ( ( GetValueSp( reg2 ) & OP_A ) || reg2 == T_AH ) ) {
-                    destroyed = TRUE;
-                }
-            }
-        }
-        if ( destroyed ) {
-            EmitErr( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE );
-            *regs_used = 0;
-        }
-        if ( opnd->indirect == FALSE && opnd->base_reg != NULL ) {
-            i = reg;
-            size = SizeFromRegister( reg );
-            if ( size != psize ) {
-                if ( param->sym.is_vararg == FALSE ) {
-                    DebugMsg(("ms64_param(%s, param=%u): type error size.p/a=%u/%u flags=%X\n", proc->sym.name, index, psize, size, *regs_used ));
+
+        if ( addr || psize > 8 ) {
+            if ( psize == 4 )
+                i = T_EAX;
+            else {
+                i = T_RAX;
+                if ( psize < 8 )
                     EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, index+1 );
-                }
-                psize = size;
             }
+            *regs_used |= R0_USED;
+            AddLineQueueX( " lea %r, %s", i, paramvalue );
+            AddLineQueueX( " mov [%r+%u], %r", T_RSP, NUMQUAL index*8, i );
+            DebugMsg(("ms64_param(%s, param=%u): ADDR flags=%X\n", proc->sym.name, index, *regs_used ));
+            return( 1 );
         }
-        if ( opnd->mem_type == MT_EMPTY && addr == FALSE ) {
+
+        if ( opnd->kind == EXPR_CONST ||
+           ( opnd->kind == EXPR_ADDR && opnd->indirect == FALSE && opnd->mem_type == MT_EMPTY && opnd->instr != T_OFFSET ) ) {
+
             /* v2.06: support 64-bit constants for params > 4 */
-            if ( psize == 8 && opnd->kind == EXPR_CONST &&
+            if ( psize == 8 &&
                 ( opnd->value64 > LONG_MAX || opnd->value64 < LONG_MIN ) ) {
                 AddLineQueueX( " mov %r ptr [%r+%u], %r ( %s )", T_DWORD, T_RSP, NUMQUAL index*8, T_LOW32, paramvalue );
                 AddLineQueueX( " mov %r ptr [%r+%u], %r ( %s )", T_DWORD, T_RSP, NUMQUAL index*8+4, T_HIGH32, paramvalue );
-            } else if ( param->sym.mem_type == MT_REAL8 && opnd->kind == EXPR_FLOAT ) {
-                *regs_used |= R0_USED;
-                AddLineQueueX( " mov %r, %r ptr %s", T_RAX, T_REAL8, paramvalue );
-                AddLineQueueX( " mov [%r+%u], %r", T_RSP, NUMQUAL index*8, T_RAX );
+
             } else {
+                /* v2.11: no expansion if target type is a pointer and argument is an address part */
+                if ( param->sym.mem_type == MT_PTR && opnd->kind == EXPR_ADDR && opnd->sym->state != SYM_UNDEFINED ) {
+                    DebugMsg(("ms64_param(%s, param=%u): MT_PTR, type error, psize=%u\n", proc->sym.name, index, psize ));
+                    EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, index+1 );
+                }
                 switch ( psize ) {
                 case 1:   i = T_BYTE; break;
                 case 2:   i = T_WORD; break;
@@ -315,50 +337,76 @@ static int ms64_param( struct dsym const *proc, int index, struct dsym *param, b
                 }
                 AddLineQueueX( " mov %r ptr [%r+%u], %s", i, T_RSP, NUMQUAL index*8, paramvalue );
             }
-            DebugMsg(("ms64_param(%s, param=%u): MT_EMPTY size.p/a=%u/%u flags=%X\n", proc->sym.name, index, psize, size, *regs_used ));
-        } else {
-            if ( addr == FALSE ) {
-                if ( opnd->indirect == FALSE && opnd->base_reg != NULL ) {
-                    DebugMsg(("ms64_param(%s, param=%u): REG size.p/a=%u/%u flags=%X\n", proc->sym.name, index, psize, size, *regs_used ));
-                } else {
-                    DebugMsg(("ms64_param(%s, param=%u): MEM size.p/a=%u/%u flags=%X\n", proc->sym.name, index, psize, size, *regs_used ));
-                    size = SizeFromMemtype( opnd->mem_type, USE64, opnd->type );
-                    if ( size != psize && param->sym.is_vararg == FALSE )
+            DebugMsg(("ms64_param(%s, param=%u): MT_EMPTY size.p=%u flags=%X\n", proc->sym.name, index, psize, *regs_used ));
+
+        } else if ( opnd->kind == EXPR_FLOAT  ) {
+
+            if ( param->sym.mem_type == MT_REAL8 ) {
+                AddLineQueueX( " mov %r ptr [%r+%u+0], %r (%s)", T_DWORD, T_RSP, NUMQUAL index*8, T_LOW32, paramvalue );
+                AddLineQueueX( " mov %r ptr [%r+%u+4], %r (%s)", T_DWORD, T_RSP, NUMQUAL index*8, T_HIGH32, paramvalue );
+            } else
+                AddLineQueueX( " mov %r ptr [%r+%u], %s", T_DWORD, T_RSP, NUMQUAL index*8, paramvalue );
+
+        } else { /* it's a register or variable */
+
+            if ( opnd->kind == EXPR_REG && opnd->indirect == FALSE ) {
+                size = SizeFromRegister( reg );
+                if ( size == psize )
+                    i = reg;
+                else {
+                    if ( size > psize || ( size < psize && param->sym.mem_type == MT_PTR ) ) {
+                        DebugMsg(("ms64_param(%s, param=%u): type error size.p/a=%u/%u flags=%X\n", proc->sym.name, index, psize, size, *regs_used ));
                         EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, index+1 );
-                    switch ( size ) {
+                        psize = size;
+                    }
+                    switch ( psize ) {
                     case 1:  i = T_AL;  break;
                     case 2:  i = T_AX;  break;
                     case 4:  i = T_EAX; break;
                     default: i = T_RAX; break;
                     }
                     *regs_used |= R0_USED;
-                    if ( size <= 8 )
-                        AddLineQueueX( " mov %r, %s", i, paramvalue );
-                    else {
-                        AddLineQueueX( " lea %r, %s", i, paramvalue );
-                    }
                 }
+                DebugMsg(("ms64_param(%s, param=%u): REG size.p/a=%u/%u flags=%X\n", proc->sym.name, index, psize, size, *regs_used ));
             } else {
-                if ( param->sym.is_vararg == TRUE )
-                    psize = 8;
+                if ( opnd->mem_type == MT_EMPTY )
+                    size = ( opnd->instr == T_OFFSET ? 8 : 4 );
+                else
+                    size = SizeFromMemtype( opnd->mem_type, USE64, opnd->type );
+                DebugMsg(("ms64_param(%s, param=%u): MEM size.p/a=%u/%u flags=%X\n", proc->sym.name, index, psize, size, *regs_used ));
                 switch ( psize ) {
-                case 4: i = T_EAX;   break;
-                case 8: i = T_RAX;   break;
-                default:
-                    EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, index+1 );
-                    i = T_RAX;
+                case 1:  i = T_AL;  break;
+                case 2:  i = T_AX;  break;
+                case 4:  i = T_EAX; break;
+                default: i = T_RAX; break;
                 }
                 *regs_used |= R0_USED;
-                AddLineQueueX( " lea %r, %s", i, paramvalue );
-                DebugMsg(("ms64_param(%s, param=%u): ADDR flags=%X\n", proc->sym.name, index, *regs_used ));
             }
+
+            /* v2.11: no expansion if target type is a pointer */
+            if ( size > psize || ( size < psize && param->sym.mem_type == MT_PTR ) ) {
+                EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, index+1 );
+            }
+            if ( size != psize ) {
+                if ( size == 4 ) {
+                    if ( IS_SIGNED( opnd->mem_type ) )
+                        AddLineQueueX( " movsxd %r, %s", i, paramvalue );
+                    else
+                        AddLineQueueX( " mov %r, %s", i, paramvalue );
+                } else
+                    AddLineQueueX( " mov%sx %r, %s", IS_SIGNED( opnd->mem_type ) ? "s" : "z", i, paramvalue );
+            } else if ( opnd->kind != EXPR_REG || opnd->indirect == TRUE )
+                AddLineQueueX( " mov %r, %s", i, paramvalue );
+
             AddLineQueueX( " mov [%r+%u], %r", T_RSP, NUMQUAL index*8, i );
         }
+
     } else if ( param->sym.mem_type == MT_REAL4 ||
                param->sym.mem_type == MT_REAL8 ) {
+
         /* v2.04: check if argument is the correct XMM register already */
-        if ( opnd->indirect == FALSE && opnd->base_reg != NULL ) {
-            reg = opnd->base_reg->tokval;
+        if ( opnd->kind == EXPR_REG && opnd->indirect == FALSE ) {
+
             if ( GetValueSp( reg ) & OP_XMM ) {
                 if ( reg == T_XMM0 + index )
                     DebugMsg(("ms64_param(%s, param=%u): argument optimized\n", proc->sym.name, index ));
@@ -383,45 +431,45 @@ static int ms64_param( struct dsym const *proc, int index, struct dsym *param, b
                 AddLineQueueX( " movq %r, %s", T_XMM0 + index, paramvalue );
         }
     } else {
+
         if ( addr || psize > 8 ) { /* psize > 8 shouldn't happen! */
-            if ( psize == 4 )
-                AddLineQueueX( " lea %r, %s", ms64_regs[index+2*4], paramvalue );
-            //else if ( psize > 4 ) /* v2.07: psize==0 happens for VARARG */
-            else if ( psize > 4 || param->sym.is_vararg )
-                AddLineQueueX( " lea %r, %s", ms64_regs[index+3*4], paramvalue );
+            if ( psize >= 4 )
+                AddLineQueueX( " lea %r, %s", ms64_regs[index+2*4+(psize > 4 ? 4 : 0)], paramvalue );
             else
                 EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, index+1 );
             *regs_used |= ( 1 << ( index + RPAR_START ) );
             return( 1 );
         }
         /* register argument? */
-        if ( opnd->indirect == FALSE && opnd->base_reg != NULL ) {
+        if ( opnd->kind == EXPR_REG && opnd->indirect == FALSE ) {
             reg = opnd->base_reg->tokval;
             size = SizeFromRegister( reg );
-        } else {
-            /* v2.09: ignore mem_type if expression is a constant.
-             * mem_type might be != EMPTY if a <struct>.<mbr> expression
-             * was parsed.
-             */
-            //if ( opnd->mem_type != MT_EMPTY )
-            if ( opnd->mem_type != MT_EMPTY && opnd->kind != EXPR_CONST )
-                size = SizeFromMemtype( opnd->mem_type, USE64, opnd->type );
-            else {
-                size = psize;
-            }
-        }
-        if ( size != psize && param->sym.is_vararg == FALSE ) {
+        } else if ( opnd->kind == EXPR_CONST || opnd->kind == EXPR_FLOAT ) {
+            size = psize;
+        } else if ( opnd->mem_type != MT_EMPTY ) {
+            size = SizeFromMemtype( opnd->mem_type, USE64, opnd->type );
+        } else if ( opnd->kind == EXPR_ADDR && opnd->sym->state == SYM_UNDEFINED ) {
+            DebugMsg1(("ms64_param(%s, param=%u): forward ref=%s, assumed size=%u\n", proc->sym.name, index, opnd->sym->name, psize ));
+            size = psize;
+        } else
+            size = ( opnd->instr == T_OFFSET ? 8 : 4 );
+
+        /* v2.11: allow argument extension, so long as the target isn't a pointer */
+        //if ( size != psize && param->sym.is_vararg == FALSE ) {
+        if ( size > psize || ( size < psize && param->sym.mem_type == MT_PTR ) ) {
             DebugMsg(("ms64_param(%s, param=%u): type error size.p/a=%u/%u flags=%X\n", proc->sym.name, index, psize, size, *regs_used ));
             EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, index+1 );
         }
-        switch ( size ) {
+        /* v2.11: use parameter size to allow argument extension */
+        //switch ( size ) {
+        switch ( psize ) {
         case 1: base =  0*4; break;
         case 2: base =  1*4; break;
         case 4: base =  2*4; break;
         default:base =  3*4; break;
         }
         /* optimization if the register holds the value already */
-        if ( opnd->indirect == FALSE && opnd->base_reg != NULL ) {
+        if ( opnd->kind == EXPR_REG && opnd->indirect == FALSE ) {
             if ( GetValueSp( reg ) & OP_R ) {
                 if ( ms64_regs[index+base] == reg ) {
                     DebugMsg(("ms64_param(%s, param=%u): argument optimized\n", proc->sym.name, index ));
@@ -435,9 +483,19 @@ static int ms64_param( struct dsym const *proc, int index, struct dsym *param, b
                 }
             }
         }
-        AddLineQueueX( " mov %r, %s", ms64_regs[index+base], paramvalue );
+        /* v2.11: allow argument extension */
+        if ( size < psize )
+            if ( size == 4 ) {
+                if ( IS_SIGNED( opnd->mem_type ) )
+                    AddLineQueueX( " movsxd %r, %s", ms64_regs[index+base], paramvalue );
+                else
+                    AddLineQueueX( " mov %r, %s", ms64_regs[index+2*4], paramvalue );
+            } else
+                AddLineQueueX( " mov%sx %r, %s", IS_SIGNED( opnd->mem_type ) ? "s" : "z", ms64_regs[index+base], paramvalue );
+        else
+            AddLineQueueX( " mov %r, %s", ms64_regs[index+base], paramvalue );
         *regs_used |= ( 1 << ( index + RPAR_START ) );
-        DebugMsg(("ms64_param(%s, param=%u): size=%u flags=%X\n", proc->sym.name, index, size, *regs_used ));
+        DebugMsg1(("ms64_param(%s, param=%u): size=%u flags=%X\n", proc->sym.name, index, size, *regs_used ));
     }
     return( 1 );
 }
@@ -449,11 +507,19 @@ static int ms64_param( struct dsym const *proc, int index, struct dsym *param, b
  * so it could be used by watc_param() as well.
  */
 
-static void GetSegmentPart( struct expr *opnd, char *buffer, const char *fullparam )
-/**********************************************************************************/
+static short GetSegmentPart( struct expr *opnd, char *buffer, const char *fullparam )
+/***********************************************************************************/
 {
+    short reg = T_NULL;
+    DebugMsg1(("GetSegmentPart(%s) enter [override=%s sym=%s segment=%s]\n",
+               fullparam, opnd->override ? opnd->override->string_ptr : "NULL",
+               opnd->sym ? opnd->sym->name : "NULL",
+               opnd->sym ? opnd->sym->segment ? opnd->sym->segment->name : "NULL" : "NULL" ));
     if ( opnd->override != NULL ) {
-        strcpy( buffer, opnd->override->string_ptr );
+        if ( opnd->override->token == T_REG )
+            reg = opnd->override->tokval;
+        else
+            strcpy( buffer, opnd->override->string_ptr );
     } else if ( opnd->sym != NULL && opnd->sym->segment != NULL ) {
         struct dsym *dir = GetSegm( opnd->sym );
         enum assume_segreg as;
@@ -464,11 +530,11 @@ static void GetSegmentPart( struct expr *opnd, char *buffer, const char *fullpar
             as = search_assume( (struct asym *)dir, ASSUME_CS, TRUE );
         if ( as != ASSUME_NOTHING ) {
             //GetResWName( segreg_tab[as], buffer );
-            GetResWName( T_ES + as, buffer ); /* v2.08: T_ES is first seg reg in special.h */
+            reg = T_ES + as; /* v2.08: T_ES is first seg reg in special.h */
         } else {
             struct asym *seg;
             seg = GetGroup( opnd->sym );
-            if (seg == NULL)
+            if ( seg == NULL )
                 seg = &dir->sym;
             if ( seg )
                 strcpy( buffer, seg->name );
@@ -478,12 +544,13 @@ static void GetSegmentPart( struct expr *opnd, char *buffer, const char *fullpar
             }
         }
     } else if ( opnd->sym && opnd->sym->state == SYM_STACK ) {
-        GetResWName( T_SS, buffer );
+        reg = T_SS;
     } else {
         strcpy( buffer,"seg " );
         strcat( buffer, fullparam );
     }
-    return;
+    DebugMsg1(("GetSegmentPart: reg%u, buffer=%s\n", reg, reg ? "" : buffer ));
+    return( reg );
 }
 
 #if OWFC_SUPPORT
@@ -509,7 +576,7 @@ static void watc_fcend( struct dsym const *proc, int numparams, int value )
 /*************************************************************************/
 {
     DebugMsg1(("watc_fcend(%s, %u, %u)\n", proc->sym.name, numparams, value ));
-    if ( proc->e.procinfo->is_vararg ) {
+    if ( proc->e.procinfo->has_vararg ) {
         AddLineQueueX( " add %r, %u", stackreg[ModuleInfo.Ofssize], NUMQUAL proc->e.procinfo->parasize + size_vararg );
     } else if ( fcscratch < proc->e.procinfo->parasize ) {
         AddLineQueueX( " add %r, %u", stackreg[ModuleInfo.Ofssize], NUMQUAL ( proc->e.procinfo->parasize - fcscratch ) );
@@ -569,8 +636,11 @@ static int watc_param( struct dsym const *proc, int index, struct dsym *param, b
         i = 0;
         if ( reg[1] != NULL ) {
             char buffer[128];
-            GetSegmentPart( opnd, buffer, paramvalue );
-            AddLineQueueX( "%r %s, %s", T_MOV, reg[0],  buffer );
+            short sreg;
+            if ( sreg = GetSegmentPart( opnd, buffer, paramvalue ) )
+                AddLineQueueX( "%r %s, %r", T_MOV, reg[0],  sreg );
+            else
+                AddLineQueueX( "%r %s, %s", T_MOV, reg[0],  buffer );
             i++;
         }
         AddLineQueueX( "%r %s, %r %s", opc, reg[i], qual, paramvalue );
@@ -648,6 +718,7 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
     int pushsize;
     int j;
     int fptrsize;
+    char Ofssize;
     bool addr = FALSE; /* ADDR operator found */
     struct expr opnd;
     char fullparam[MAX_LINE_LEN];
@@ -669,7 +740,7 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
 
 #if 1 /* v2.05 */
     psize = curr->sym.total_size;
-    DebugMsg1(("PushInvokeParam(%s,%u): memtype=%X, psize=%u\n", proc->sym.name, reqParam, curr->sym.mem_type, psize ));
+    DebugMsg1(("PushInvokeParam(%s,%u): pmtype=%Xh, psize=%u\n", proc->sym.name, reqParam, curr->sym.mem_type, psize ));
 #else
     /* set psize (size of parameter) */
     if ( curr->is_ptr ) {
@@ -678,7 +749,7 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
             psize += 2;
     } else
         psize = SizeFromMemtype( curr->sym.mem_type, curr->sym.Ofssize, curr->sym.type );
-    DebugMsg1(("PushInvokeParam(%s,%u): is_ptr=%u, memtype=%X, psize=%u\n", proc->sym.name, reqParam, curr->is_ptr, curr->sym.mem_type, psize ));
+    DebugMsg1(("PushInvokeParam(%s,%u): is_ptr=%u, pmtype=%Xh, psize=%u\n", proc->sym.name, reqParam, curr->is_ptr, curr->sym.mem_type, psize ));
 #endif
 
     /* ADDR: the argument's address is to be pushed? */
@@ -693,7 +764,10 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
     fullparam[tokenarray[j].tokpos - tokenarray[i].tokpos] = NULLC;
 
     j = i;
-    fptrsize = 2 + ( 2 << GetSymOfssize( &proc->sym ) );
+    /* v2.11: GetSymOfssize() doesn't work for state SYM_TYPE */
+    //fptrsize = 2 + ( 2 << GetSymOfssize( &proc->sym ) );
+    Ofssize = ( proc->sym.state == SYM_TYPE ? proc->sym.seg_ofssize : GetSymOfssize( &proc->sym ) );
+    fptrsize = 2 + ( 2 << Ofssize );
 
     if ( addr ) {
         /* v2.06: don't handle forward refs if -Zne is set */
@@ -701,11 +775,14 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
         if ( EvalOperand( &j, tokenarray, Token_Count, &opnd, ModuleInfo.invoke_exprparm ) == ERROR )
             return( ERROR );
 
-        /* DWORD (16bit) and FWORD(32bit) are treated like FAR ptrs */
-        if ( psize > fptrsize ) {
+        /* DWORD (16bit) and FWORD(32bit) are treated like FAR ptrs
+         * v2.11: argument may be a FAR32 pointer ( psize == 6 ), while
+         * fptrsize may be just 4!
+         */
+        //if ( psize > fptrsize ) {
+        if ( psize > fptrsize && fptrsize > 4 ) {
             /* QWORD is NOT accepted as a FAR ptr */
-            DebugMsg1(("PushInvokeParm(%u): error, psize=%u, fptrsize=%u\n",
-                      reqParam, psize, fptrsize));
+            DebugMsg1(("PushInvokeParm(%u): error, psize=%u, fptrsize=%u\n", reqParam, psize, fptrsize));
             EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1 );
             return( NOT_ERROR );
         }
@@ -731,11 +808,24 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
         } else {
         push_address:
 
-            /* push segment part of address? */
-            if ( curr->sym.isfar || psize == fptrsize ) {
+            /* push segment part of address?
+             * v2.11: do not assume a far pointer if psize == fptrsize
+             * ( parameter might be near32 in a 16-bit environment )
+             */
+            //if ( curr->sym.isfar || psize == fptrsize ) {
+            if ( curr->sym.isfar || psize > ( 2 << curr->sym.Ofssize ) ) {
 
-                GetSegmentPart( &opnd, buffer, fullparam );
-                AddLineQueueX( " push %s", buffer );
+                short sreg;
+                sreg = GetSegmentPart( &opnd, buffer, fullparam );
+                if ( sreg ) {
+                    /* v2.11: push segment part as WORD or DWORD depending on target's offset size
+                     * problem: "pushw ds" is not accepted, so just emit a size prefix.
+                     */
+                    if ( Ofssize != ModuleInfo.Ofssize || ( curr->sym.Ofssize == USE16 && CurrWordSize > 2 ) )
+                        AddLineQueue( " db 66h" );
+                    AddLineQueueX( " push %r", sreg );
+                } else
+                    AddLineQueueX( " push %s", buffer );
             }
             /* push offset part of address */
             if ( (ModuleInfo.curr_cpu & P_CPU_MASK ) < P_186 ) {
@@ -743,30 +833,30 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                 AddLineQueueX( " push %r", T_AX );
                 *r0flags |= R0_USED;
             } else {
-                if ( curr->sym.is_vararg &&
-                    opnd.Ofssize == USE_EMPTY &&
-                    opnd.sym )
+                if ( curr->sym.is_vararg && opnd.Ofssize == USE_EMPTY && opnd.sym )
                     opnd.Ofssize = GetSymOfssize( opnd.sym );
-                /* v2.04: expand 16-bit offset to 32 */
-                if ( opnd.Ofssize == USE16 && CurrWordSize > 2 ) {
-                    AddLineQueueX( " pushd offset %s", fullparam );
+                /* v2.04: expand 16-bit offset to 32
+                 * v2.11: also expand if there's an explicit near32 ptr requested in 16-bit
+                 */
+                //if ( opnd.Ofssize == USE16 && CurrWordSize > 2 ) {
+                if ( ( opnd.Ofssize == USE16 && CurrWordSize > 2 ) ||
+                    ( curr->sym.Ofssize == USE32 && CurrWordSize == 2 ) ) {
+                    AddLineQueueX( " pushd %r %s", T_OFFSET, fullparam );
+                } else if ( CurrWordSize > 2 && curr->sym.Ofssize == USE16 &&
+                           ( curr->sym.isfar || Ofssize == USE16 ) ) { /* v2.11: added */
+                    AddLineQueueX( " pushw %r %s", T_OFFSET, fullparam );
                 } else {
-                    AddLineQueueX( " push offset %s", fullparam );
+                    AddLineQueueX( " push %r %s", T_OFFSET, fullparam );
                     /* v2.04: a 32bit offset pushed in 16-bit code */
-                    if ( curr->sym.is_vararg &&
-                        CurrWordSize == 2 &&
-                        opnd.Ofssize > USE16 )
+                    if ( curr->sym.is_vararg && CurrWordSize == 2 && opnd.Ofssize > USE16 ) {
                         size_vararg += CurrWordSize;
+                    }
                 }
             }
         }
         if ( curr->sym.is_vararg ) {
-            size_vararg += CurrWordSize;
-            DebugMsg1(("PushInvokeParm(%u): %u added to size_vararg, now=%u\n", reqParam, CurrWordSize, size_vararg ));
-            if ( curr->sym.isfar ) {
-                size_vararg += CurrWordSize;
-                DebugMsg1(("PushInvokeParm(%u): %u added to size_vararg, now=%u\n", reqParam, CurrWordSize, size_vararg ));
-            }
+            size_vararg += CurrWordSize + ( curr->sym.isfar ? CurrWordSize : 0 );
+            DebugMsg1(("PushInvokeParm(%u): new value of size_vararg=%u [CurrWordSize=%u]\n", reqParam, size_vararg, CurrWordSize ));
         }
     } else { /* ! ADDR branch */
 
@@ -776,9 +866,14 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
             tokenarray[j+2].token == T_REG ) {
             int asize2;
             /* for pointers, segreg size is assumed to be always 2 */
-            if ( GetValueSp( tokenarray[j].tokval ) & OP_SR )
+            if ( GetValueSp( tokenarray[j].tokval ) & OP_SR ) {
                 asize2 = 2;
-            else
+                /* v2.11: if target and current src have different offset sizes,
+                 * the push of the segment register must be 66h-prefixed!
+                 */
+                if ( Ofssize != ModuleInfo.Ofssize || ( curr->sym.Ofssize == USE16 && CurrWordSize > 2 ) )
+                    AddLineQueue( " db 66h" );
+            } else
                 asize2 = SizeFromRegister( tokenarray[j].tokval );
             asize = SizeFromRegister( tokenarray[j+2].tokval );
             AddLineQueueX( " push %r", tokenarray[j].tokval );
@@ -799,6 +894,7 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
             if ( EvalOperand( &j, tokenarray, Token_Count, &opnd, ModuleInfo.invoke_exprparm ) == ERROR ) {
                 return( ERROR );
             }
+
             /* for a simple register, get its size */
             if ( opnd.kind == EXPR_REG && opnd.indirect == FALSE ) {
                 asize = SizeFromRegister( opnd.base_reg->tokval );
@@ -839,9 +935,9 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
 
 #ifdef DEBUG_OUT
         if ( opnd.sym )
-            DebugMsg1(("PushInvokeParam(%s, %u): arg name=%s, asize=%u, psize=%u\n", proc->sym.name, reqParam, opnd.sym->name, asize, psize));
+            DebugMsg1(("PushInvokeParam(%s, %u): arg name=%s, asize=%u, amtype=%xh psize=%u\n", proc->sym.name, reqParam, opnd.sym->name, asize, opnd.mem_type, psize));
         else
-            DebugMsg1(("PushInvokeParam(%s, %u): arg no name, asize=%u, psize=%u\n", proc->sym.name, reqParam, asize, psize));
+            DebugMsg1(("PushInvokeParam(%s, %u): arg no name, asize=%u, amtype=%xh psize=%u\n", proc->sym.name, reqParam, asize, opnd.mem_type, psize));
 #endif
         pushsize = CurrWordSize;
 
@@ -850,7 +946,9 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                 return( NOT_ERROR );
 
         /* v2.04: this check has been moved behind the fastcall_tab() call */
-        if ( asize > psize ) { /* argument's size too big? */
+        /* v2.11: if target is a pointer, sizes must match */
+        //if ( asize > psize ) { /* argument's size too big? */
+        if ( ( asize > psize ) || ( asize < psize && curr->sym.mem_type == MT_PTR ) ) {
             DebugMsg(("PushInvokeParm(%u): argsize error, arg size=%d, parm size=%d\n", reqParam, asize, psize));
             EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1 );
             return( NOT_ERROR );
@@ -880,15 +978,17 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                 *r0flags = 0;
             }
 
+            if ( curr->sym.is_vararg ) {
+                size_vararg += ( asize > pushsize ? asize : pushsize );
+                DebugMsg1(("PushInvokeParm(%u): asize=%u added to size_vararg, now=%u\n",
+                           reqParam, asize > pushsize ? asize : pushsize, size_vararg ));
+            }
             if ( asize > pushsize ) {
+
                 short dw = T_WORD;
                 if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ) {
                     pushsize = 4;
                     dw = T_DWORD;
-                }
-                if ( curr->sym.is_vararg ) {
-                    size_vararg += asize;
-                    DebugMsg1(("PushInvokeParm(%u): asize=%u added to size_vararg, now=%u\n", reqParam, asize, size_vararg ));
                 }
 
                 /* in params like "qword ptr [eax]" the typecast
@@ -899,14 +999,9 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                 }
 
                 while ( asize > 0 ) {
-#if 0
-                    if ( opnd.explicit ) {
-                        sprintf( buffer, " push %s", fullparam );
-                        asize = 0;
-                    } else if ( asize & 2 ) {
-#else
+
                     if ( asize & 2 ) {
-#endif
+
                         /* ensure the stack remains dword-aligned in 32bit */
                         if ( ModuleInfo.Ofssize > USE16 ) {
                             /* v2.05: better push a 0 word? */
@@ -924,107 +1019,157 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                         asize -= pushsize;
                     }
                 }
-                return( NOT_ERROR );
+                //return( NOT_ERROR );
+
             } else if ( asize < pushsize ) {
-                if ( curr->sym.is_vararg ) {
-                    size_vararg += pushsize;
-                    DebugMsg1(("PushInvokeParm(%u): %u added to size_vararg, now=%u\n", reqParam, pushsize, size_vararg ));
-                }
+
                 if ( psize > 4 ) {
                     DebugMsg1(("PushInvokeParm(%u): error, ADDR, psize=%u, is > 4\n",
                               reqParam, psize ));
                     EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1 );
                 }
-                //switch (sym->mem_type) {
-                switch ( opnd.mem_type ) {
-                case MT_BYTE:
-                case MT_SBYTE:
-                    if ( psize == 1 && curr->sym.is_vararg == FALSE ) {
-                        AddLineQueueX( " mov %r, %s", T_AL, fullparam );
-                        AddLineQueueX( " push %r", pushsize == 4 ? T_EAX : T_AX );
-                    } else if ( pushsize == 2 ) {
-                        if ( psize == 4 )
-                            AddLineQueue( " push 0" );
-                        AddLineQueueX( " mov %r, %s", T_AL, fullparam );
-                        if ( opnd.mem_type == MT_BYTE ) {
-                            if ( !( *r0flags & R0_H_CLEARED ))
-                                AddLineQueueX( " mov %r, 0", T_AH );
-                            *r0flags |= R0_H_CLEARED;
+                /* v2.11: added, use MOVSX/MOVZX if cpu >= 80386 */
+                if ( asize < 4 && psize > 2 && IS_SIGNED( opnd.mem_type ) && ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ) {
+                    AddLineQueueX( " movsx %r, %s", T_EAX, fullparam );
+                    AddLineQueueX( " push %r", T_EAX );
+                    *r0flags = R0_USED; /* reset R0_H_CLEARED  */
+                } else {
+                    //switch (sym->mem_type) {
+                    switch ( opnd.mem_type ) {
+                    case MT_BYTE:
+                    case MT_SBYTE:
+                        if ( psize == 1 && curr->sym.is_vararg == FALSE ) {
+                            AddLineQueueX( " mov %r, %s", T_AL, fullparam );
+                            AddLineQueueX( " push %r", regax[ModuleInfo.Ofssize] );
+                        } else if ( pushsize == 2 ) { /* 16-bit code? */
+                            if ( opnd.mem_type == MT_BYTE ) {
+                                if ( psize == 4 )
+                                    if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_186 )  {
+                                        if ( !(*r0flags & R0_X_CLEARED ) )
+                                            AddLineQueueX( " xor %r, %r", T_AX, T_AX );
+                                        *r0flags |= ( R0_X_CLEARED | R0_H_CLEARED );
+                                        AddLineQueueX( " push %r", T_AX );
+                                    } else
+                                        AddLineQueue( " push 0" );
+                                AddLineQueueX( " mov %r, %s", T_AL, fullparam );
+                                if ( !( *r0flags & R0_H_CLEARED )) {
+                                    AddLineQueueX( " mov %r, 0", T_AH );
+                                    *r0flags |= R0_H_CLEARED;
+                                }
+                            } else {
+                                AddLineQueueX( " mov %r, %s", T_AL, fullparam );
+                                *r0flags = 0; /* reset AH_CLEARED */
+                                AddLineQueue( " cbw" );
+                                if ( psize == 4 ) {
+                                    AddLineQueue( " cwd" );
+                                    AddLineQueueX( " push %r", T_DX );
+                                    *r0flags |= R2_USED;
+                                }
+                            }
+                            AddLineQueueX( " push %r", T_AX );
                         } else {
-                            *r0flags = 0; /* reset AH_CLEARED */
-                            AddLineQueue( " cbw" );
+                            AddLineQueueX( " mov%sx %r, %s", opnd.mem_type == MT_BYTE ? "z" : "s", T_EAX, fullparam );
+                            AddLineQueueX( " push %r", T_EAX );
                         }
-                        AddLineQueueX( " push %r", T_AX );
-                    } else {
-                        AddLineQueueX( " %r %r, %s", opnd.mem_type == MT_BYTE ? T_MOVZX : T_MOVSX, T_EAX, fullparam );
-                        AddLineQueueX( " push %r", T_EAX );
-                    }
-                    *r0flags |= R0_USED;
-                    break;
-                case MT_WORD:
-                case MT_SWORD:
-                    /* v2.04: use the Masm-compatible, non-destructive
-                     * PUSH if psize is 2.
-                     */
-                    //if ( Options.masm_compat_gencode ) {
-                    if ( Options.masm_compat_gencode || psize == 2 ) {
-                        /* v2.05: push a 0 word if argument is VARARG
-                         * v2.10: push a 0 word if psize != 2
+                        *r0flags |= R0_USED;
+                        break;
+                    case MT_WORD:
+                    case MT_SWORD:
+                        /* pushsize is 4 here, hence it's always 32-bit code!
+                         * v2.04: use the Masm-compatible, non-destructive
+                         * PUSH if psize is 2.
                          */
-                        //if ( curr->sym.is_vararg )
-                        if ( curr->sym.is_vararg || psize != 2 )
-                            AddLineQueueX( " pushw 0" );
-                        else {
+                        //if ( Options.masm_compat_gencode ) {
+                        /* v2.11: don't push 0 if src operand is signed */
+                        //if ( Options.masm_compat_gencode || psize == 2 ) {
+                        if ( opnd.mem_type == MT_WORD && ( Options.masm_compat_gencode || psize == 2 )) {
+                            /* v2.05: push a 0 word if argument is VARARG
+                             * v2.10: push a 0 word if psize != 2
+                             */
+                            //if ( curr->sym.is_vararg )
+                            if ( curr->sym.is_vararg || psize != 2 )
+                                AddLineQueueX( " pushw 0" );
+                            else {
 #if AMD64_SUPPORT
-                            AddLineQueueX( " sub %r, 2", stackreg[ModuleInfo.Ofssize] );
+                                AddLineQueueX( " sub %r, 2", stackreg[ModuleInfo.Ofssize] );
 #else
-                            AddLineQueueX( " sub %r, 2", T_ESP );
+                                AddLineQueueX( " sub %r, 2", T_ESP );
 #endif
+                            }
+                            AddLineQueueX( " push %s", fullparam );
+                        } else {
+                            AddLineQueueX( " mov%sx %r, %s", opnd.mem_type == MT_WORD ? "z" : "s", T_EAX, fullparam );
+                            AddLineQueueX( " push %r", T_EAX );
+                            *r0flags = R0_USED; /* reset R0_H_CLEARED  */
                         }
+                        break;
+                    default:
                         AddLineQueueX( " push %s", fullparam );
-                    } else {
-                        AddLineQueueX( " %r %r, %s", opnd.mem_type == MT_WORD ? T_MOVZX : T_MOVSX, T_EAX, fullparam );
-                        AddLineQueueX( " push %r", T_EAX );
-                        *r0flags = R0_USED; /* reset R0_H_CLEARED  */
                     }
-                    break;
-                default:
-                    AddLineQueueX( " push %s", fullparam );
                 }
             } else { /* asize == pushsize */
-                if (( pushsize == 2 ) || (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ))
+
+                /* v2.11: changed */
+                if ( IS_SIGNED( opnd.mem_type ) && psize > asize ) {
+                    if ( psize > 2 && (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ) ) {
+                        AddLineQueueX( " movsx %r, %s", T_EAX, fullparam );
+                        AddLineQueueX( " push %r", T_EAX );
+                        *r0flags = R0_USED; /* reset R0_H_CLEARED  */
+                    } else if ( pushsize == 2 && psize > 2 ) {
+                        AddLineQueueX( " mov %r, %s", T_AX, fullparam );
+                        AddLineQueueX( " cwd" );
+                        AddLineQueueX( " push %r", T_DX );
+                        AddLineQueueX( " push %r", T_AX );
+                        *r0flags = R0_USED | R2_USED;
+                    } else
+                        AddLineQueueX( " push %s", fullparam );
+                } else {
+                    if ( pushsize == 2 && psize > 2 ) {
+                        if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_186 )  {
+                            if ( !(*r0flags & R0_X_CLEARED ) )
+                                AddLineQueueX( " xor %r, %r", T_AX, T_AX );
+                            AddLineQueueX( " push %r", T_AX );
+                            *r0flags |= ( R0_USED | R0_X_CLEARED | R0_H_CLEARED );
+                        } else
+                            AddLineQueueX( " pushw 0" );
+                    }
                     AddLineQueueX( " push %s", fullparam );
-                else {
-                    AddLineQueueX( " push word ptr %s+2", tokenarray[i].string_ptr );
-                    AddLineQueueX( " push word ptr %s", tokenarray[i].string_ptr );
-                }
-                if ( curr->sym.is_vararg ) {
-                    size_vararg += pushsize;
-                    DebugMsg1(("PushInvokeParm(%u): asize=%u added to size_vararg, now=%u\n", reqParam, pushsize, size_vararg ));
                 }
             }
+
         } else { /* the parameter is a register or constant value! */
-            char is_r0 = FALSE;
+
+            //char is_r0 = FALSE;
             if ( opnd.kind == EXPR_REG ) {
                 int reg = opnd.base_reg->tokval;
                 uint optype = GetValueSp( reg );
 
+                /* v2.11 */
+                if ( curr->sym.is_vararg == TRUE && psize < pushsize )
+                    psize = pushsize;
+
                 /* v2.06: check if register is valid to be pushed.
-                 * ST(n), MMn, XMMn and special registers are NOT valid!
+                 * ST(n), MMn, XMMn, YMMn and special registers are NOT valid!
                  */
-                if ( optype & ( OP_STI | OP_MMX | OP_XMM | OP_RSPEC ) ) {
-                    EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1 );
-                    return( ERROR );
+                if ( optype & ( OP_STI | OP_MMX | OP_XMM
+#if AVXSUPP
+                               | OP_YMM
+#endif
+                               | OP_RSPEC ) ) {
+
+                    return( EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1 ) );
                 }
 
-                if ( reg == T_AH || ( optype & OP_A ) ) {
-                    is_r0 = TRUE;
-                    if ( *r0flags & R0_USED ) {
-                        EmitErr( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE );
-                        *r0flags = 0;
-                    }
+                if ( ( *r0flags & R0_USED ) && ( reg == T_AH || ( optype & OP_A ) ) ) {
+                    EmitErr( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE );
+                    *r0flags &= ~R0_USED;
+                } else if ( ( *r0flags & R2_USED ) && ( reg == T_DH || GetRegNo( reg ) == 2 ) ) {
+                    EmitErr( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE );
+                    *r0flags &= ~R2_USED;
                 }
-                if ( asize != psize || asize < pushsize ) {
+                /* v2.11: use target's "pushsize", not the current one */
+                //if ( asize != psize || asize < pushsize ) {
+                if ( asize != psize || asize < ( 2 << Ofssize ) ) {
                     /* register size doesn't match the needed parameter size.
                      */
                     if ( psize > 4 ) {
@@ -1032,58 +1177,100 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                                   reqParam, asize, psize, pushsize ));
                         EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1 );
                     }
+
                     if ( asize <= 2 && ( psize == 4 || pushsize == 4 ) ) {
-                        if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 &&
-                            asize == psize ) {
-                            if ( asize == 1 )
-                                reg = reg - T_AL + T_EAX;
-                            else
+                        if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 && asize == psize ) {
+                            if ( asize == 2 )
                                 reg = reg - T_AX + T_EAX;
+                            else {
+                                /* v2.11: hibyte registers AH, BH, CH, DH ( no 4-7 ) needs special handling */
+                                if ( reg < T_AH )
+                                    reg = reg - T_AL + T_EAX;
+                                else {
+                                    AddLineQueueX( " mov %r, %s", T_AL, fullparam );
+                                    *r0flags |= R0_USED;
+                                    reg = T_EAX;
+                                }
+                                asize = 2; /* done */
+                            }
+                        } else if ( IS_SIGNED( opnd.mem_type ) && pushsize < 4 ) {
+
+                            /* psize is 4 in this branch */
+                            if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ) {
+                                AddLineQueueX( " movsx %r, %s", T_EAX, fullparam );
+                                *r0flags = R0_USED;
+                                reg = T_EAX;
+                            } else {
+                                *r0flags = R0_USED | R2_USED;
+                                if ( asize == 1 ) {
+                                    if ( reg != T_AL )
+                                        AddLineQueueX( " mov %r, %s", T_AL, fullparam );
+                                    AddLineQueue( " cbw" );
+                                } else if ( reg != T_AX )
+                                    AddLineQueueX( " mov %r, %s", T_AX, fullparam );
+                                AddLineQueue( " cwd" );
+                                AddLineQueueX( " push %r", T_DX );
+                                reg = T_AX;
+                            }
                             asize = 2; /* done */
+
                         } else if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_186 ) {
+
                             if ( pushsize == 4 ) {
                                 if ( asize == 1 ) {
-                                    ;
+                                    /* handled below */
                                 } else if ( psize <= 2 ) {
 #if AMD64_SUPPORT
                                     AddLineQueueX( " sub %r, 2", stackreg[ModuleInfo.Ofssize] );
 #else
                                     AddLineQueueX( " sub %r, 2", T_ESP );
 #endif
+                                } else if ( IS_SIGNED( opnd.mem_type ) ) {
+                                    AddLineQueueX( " movsx %r, %s", T_EAX, fullparam );
+                                    *r0flags = R0_USED;
+                                    reg = T_EAX;
                                 } else {
                                     AddLineQueue( " pushw 0" );
                                 }
                             } else
                                 AddLineQueue( " pushw 0" );
+
                         } else {
-                            if ( !(*r0flags & R0_X_CLEARED) )
+
+                            if ( !(*r0flags & R0_X_CLEARED) ) {
+                                /* v2.11: extra check needed */
+                                if ( reg == T_AH || ( optype & OP_A ) )
+                                    EmitErr( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE );
                                 AddLineQueueX( " xor %r, %r", T_AX, T_AX );
+                            }
                             AddLineQueueX( " push %r", T_AX );
                             *r0flags = R0_USED | R0_H_CLEARED | R0_X_CLEARED;
                         }
                     }
 
                     if ( asize == 1 ) {
-                        if ( ( reg >= T_AH && reg <= T_BH ) || psize > 1 ) {
-                            if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ) {
-                                if ( pushsize == 4 )
-                                    reg = T_EAX;
-                                else
-                                    reg = T_AX;
-                                AddLineQueueX( " movzx %r, %s", reg, fullparam );
-                                *r0flags |= (R0_USED | R0_H_CLEARED );
+                        if ( ( reg >= T_AH && reg <= T_BH ) || psize != 1 ) {
+                            if ( psize != 1 && ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 ) {
+                                /* v2.10: consider signed type coercion! */
+                                AddLineQueueX( " mov%sx %r, %s", IS_SIGNED( opnd.mem_type ) ? "s" : "z",
+                                              regax[ModuleInfo.Ofssize], fullparam );
+                                *r0flags =  ( IS_SIGNED( opnd.mem_type ) ? R0_USED : R0_USED | R0_H_CLEARED );
                             } else {
                                 if ( reg != T_AL ) {
                                     AddLineQueueX( " mov %r, %s", T_AL, fullparam );
                                     *r0flags |= R0_USED;
                                     *r0flags &= ~R0_X_CLEARED;
                                 }
-                                if (!( *r0flags & R0_H_CLEARED )) {
-                                    AddLineQueueX( " mov %r, 0", T_AH );
-                                    *r0flags |= R0_H_CLEARED;
-                                }
-                                reg = T_AX;
+                                if ( psize != 1 ) /* v2.11: don't modify AH if paramsize is 1 */
+                                    if ( IS_SIGNED( opnd.mem_type ) ) {
+                                        AddLineQueue( " cbw" );
+                                        *r0flags &= ~( R0_H_CLEARED | R0_X_CLEARED );
+                                    } else if (!( *r0flags & R0_H_CLEARED )) {
+                                        AddLineQueueX( " mov %r, 0", T_AH );
+                                        *r0flags |= R0_H_CLEARED;
+                                    }
                             }
+                            reg = regax[ModuleInfo.Ofssize];
                         } else {
                             /* convert 8-bit to 16/32-bit register name */
                             if ( (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386) &&
@@ -1093,16 +1280,19 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                                 reg = reg - T_AL + T_AX;
                         }
                     }
+#if 0
                     if ( is_r0 && ( *r0flags & R0_USED ) ) {
                         EmitErr( REGISTER_VALUE_OVERWRITTEN_BY_INVOKE );
                         *r0flags = 0;
                     }
+#endif
                 }
                 AddLineQueueX( " push %r", reg );
                 /* v2.05: don't change psize if > pushsize */
                 if ( psize < pushsize )
                     /* v2.04: adjust psize ( for siz_vararg update ) */
                     psize = pushsize;
+
             } else { /* constant value */
 
                 /* v2.06: size check */
@@ -1121,18 +1311,20 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                         EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1 );
                 }
 
-                if ( psize < pushsize )  /* ensure that the default pushsize is met */
+                /* v2.11: don't use CurrWordSize */
+                //asize = CurrWordSize;
+                asize = 2 << Ofssize;
+
+                if ( psize < asize )  /* ensure that the default argsize (2,4,8) is met */
                     if ( psize == 0 && curr->sym.is_vararg ) {
                         /* v2.04: push a dword constant in 16-bit */
-                        if ( pushsize == 2 &&
+                        if ( asize == 2 &&
                             ( opnd.value > 0xFFFFL || opnd.value < -65535L ) )
                             psize = 4;
                         else
-                            psize = pushsize;
+                            psize = asize;
                     } else
-                        psize = pushsize;
-
-                asize = CurrWordSize;
+                        psize = asize;
 
                 if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_186 ) {
                     *r0flags |= R0_USED;
@@ -1165,23 +1357,32 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                         EmitErr( INVOKE_ARGUMENT_TYPE_MISMATCH, reqParam+1 );
                     }
                     AddLineQueueX( " push %r", T_AX );
-                } else {
-                    uint_16 instr = T_PUSH;
+                } else { /* cpu >= 80186 */
+                    char *instr = "";
+                    char *suffix;
                     int qual = EMPTY;
-                    if ( asize != psize ) {
+                    //if ( asize != psize ) {
+                    if ( psize != pushsize ) {
                         switch ( psize ) {
                         case 2:
-                            instr = T_PUSHW;
+                            instr = "w";
                             break;
                         case 6: /* v2.04: added */
-                            AddLineQueueX( " pushw (%s) shr 32", fullparam );
+                            /* v2.11: use pushw only for 16-bit target */
+                            if ( Ofssize == USE16 )
+                                suffix = "w";
+                            else if ( Ofssize == USE32 && CurrWordSize == 2 )
+                                suffix = "d";
+                            else
+                                suffix = "";
+                            AddLineQueueX( " push%s (%s) shr 32t", suffix, fullparam );
                             /* no break */
                         case 4:
                             if (( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_386 )
-                                instr = T_PUSHD;
+                                instr = "d";
                             else {
                                 AddLineQueueX( " pushw %r (%s)", T_HIGHWORD, fullparam );
-                                instr = T_PUSHW;
+                                instr = "w";
                                 qual = T_LOWWORD;
                             }
                             break;
@@ -1194,7 +1395,7 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                             if ( opnd.kind == EXPR_CONST || opnd.kind == EXPR_FLOAT ) {
                                 AddLineQueueX( " pushd %r (%s)", T_HIGH32, fullparam );
                                 qual = T_LOW32;
-                                instr = T_PUSHD;
+                                instr = "d";
                                 break;
                             }
                         default:
@@ -1204,9 +1405,9 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                         }
                     }
                     if ( qual != EMPTY )
-                        AddLineQueueX( " %r %r (%s)", instr, qual, fullparam );
+                        AddLineQueueX( " push%s %r (%s)", instr, qual, fullparam );
                     else
-                        AddLineQueueX( " %r %s", instr, fullparam );
+                        AddLineQueueX( " push%s %s", instr, fullparam );
                 }
             }
             if ( curr->sym.is_vararg ) {
@@ -1265,7 +1466,7 @@ ret_code InvokeDirective( int i, struct asm_tok tokenarray[] )
         /* fixme: if opnd.type is set, opnd.type MUST have state SYM_TYPE */
         if ( opnd.type != NULL && opnd.type->state == SYM_TYPE ) {
             sym = opnd.type;
-            DebugMsg(("InvokeDirective: opnd.type=>%s< mem_type=%Xh\n", sym->name, sym->mem_type ));
+            DebugMsg1(("InvokeDirective: opnd.type=>%s< mem_type=%Xh\n", sym->name, sym->mem_type ));
             proc = (struct dsym *)sym;
             //if ( opnd.label_tok != NULL ) /* v2.09: uselabel obsolete */
             //    uselabel = TRUE;
@@ -1291,9 +1492,8 @@ ret_code InvokeDirective( int i, struct asm_tok tokenarray[] )
 
     if( sym == NULL ) {
         /* v2.04: msg changed */
-        EmitErr( INVOKE_REQUIRES_PROTOTYPE );
-        //EmitErr( SYMBOL_NOT_DEFINED, name );
-        return( ERROR );
+        return( EmitErr( INVOKE_REQUIRES_PROTOTYPE ) );
+        //return( EmitErr( SYMBOL_NOT_DEFINED, name ) );
     }
     if( sym->isproc )  /* the most simple case: symbol is a PROC */
         ;
@@ -1312,16 +1512,14 @@ ret_code InvokeDirective( int i, struct asm_tok tokenarray[] )
         if ( proc->sym.mem_type != MT_PROC ) {
             DebugMsg(("InvokeDir: error proc.name=>%s< .mem_type=%Xh\n", proc->sym.name, proc->sym.mem_type ));
             DebugMsg(("InvokeDir: error sym.name=%s\n", sym ? sym->name : "" ));
-            EmitErr( INVOKE_REQUIRES_PROTOTYPE );
-            return( ERROR );
+            return( EmitErr( INVOKE_REQUIRES_PROTOTYPE ) );
         }
     isfnptr:
         /* get the pointer target */
         sym = proc->sym.target_type;
         DebugMsg1(("InvokeDir: proc=%s target_type=>%s<\n", proc->sym.name, sym ? sym->name : "NULL" ));
         if ( sym == NULL ) {
-            EmitErr( INVOKE_REQUIRES_PROTOTYPE );
-            return( ERROR );
+            return( EmitErr( INVOKE_REQUIRES_PROTOTYPE ) );
         }
     } else {
         DebugMsg(("InvokeDir: error, sym=%s state=%u memtype=%Xh [type=%s memtype=%Xh]\n",
@@ -1336,8 +1534,7 @@ ret_code InvokeDirective( int i, struct asm_tok tokenarray[] )
                       sym->target_type->ptr_memtype,
                       sym->target_type->isproc ));
 #endif
-        EmitErr( INVOKE_REQUIRES_PROTOTYPE );
-        return( ERROR );
+        return( EmitErr( INVOKE_REQUIRES_PROTOTYPE ) );
     }
     proc = (struct dsym *)sym;
     info = proc->e.procinfo;
@@ -1345,8 +1542,7 @@ ret_code InvokeDirective( int i, struct asm_tok tokenarray[] )
 #if 0 /* v2.05: can't happen anymore */
     /* does FASTCALL variant support INVOKE? */
     if ( proc->sym.langtype == LANG_FASTCALL && fastcall_tab[ModuleInfo.fctype].invokestart == NULL ) {
-        EmitError( FASTCALL_VARIANT_NOT_SUPPORTED );
-        return( ERROR );
+        return( EmitError( FASTCALL_VARIANT_NOT_SUPPORTED ) );
     }
 #endif
 
@@ -1354,8 +1550,6 @@ ret_code InvokeDirective( int i, struct asm_tok tokenarray[] )
 
     for ( curr = info->paralist, numParam = 0 ; curr ; curr = curr->nextparam, numParam++ );
     DebugMsg1(("InvokeDir: numparams=%u\n", numParam ));
-
-    NewLineQueue();
 
     if ( proc->sym.langtype == LANG_FASTCALL ) {
         fcscratch = 0;
@@ -1365,12 +1559,11 @@ ret_code InvokeDirective( int i, struct asm_tok tokenarray[] )
     curr = info->paralist;
     parmpos = i;
 
-    if ( !( info->is_vararg ) ) {
+    if ( !( info->has_vararg ) ) {
         /* check if there is a superfluous parameter in the INVOKE call */
         if ( PushInvokeParam( i, tokenarray, proc, NULL, numParam, &r0flags ) != ERROR ) {
             DebugMsg(("InvokeDir: superfluous argument, i=%u\n", i));
-            EmitErr( TOO_MANY_ARGUMENTS_TO_INVOKE );
-            return( ERROR );
+            return( EmitErr( TOO_MANY_ARGUMENTS_TO_INVOKE ) );
         }
     } else {
         int j = (Token_Count - i) / 2;
@@ -1452,8 +1645,8 @@ ret_code InvokeDirective( int i, struct asm_tok tokenarray[] )
     AddLineQueue( StringBufferEnd );
 
     if (( sym->langtype == LANG_C || sym->langtype == LANG_SYSCALL ) &&
-        ( info->parasize || ( info->is_vararg && size_vararg ) )) {
-        if ( info->is_vararg ) {
+        ( info->parasize || ( info->has_vararg && size_vararg ) )) {
+        if ( info->has_vararg ) {
             DebugMsg1(("InvokeDir: size of fix args=%u, var args=%u\n", info->parasize, size_vararg));
             AddLineQueueX( " add %r, %u", stackreg[ModuleInfo.Ofssize], NUMQUAL info->parasize + size_vararg );
         } else

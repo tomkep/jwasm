@@ -1,19 +1,23 @@
 
 # this makefile (NMake) creates the JWasm Win32 binary with MS Visual C++.
 # it has been tested with:
-# - VC++ Toolkit 2003 ( = VC++ 7.1 )
+# - VC++ 5
 # - VC++ 6
-# - VC++ 2005 EE (not recommended, also see definition of c_flags below)
+# - VC++ Toolkit 2003 ( = VC++ 7.1 )
+# - VC++ 2005 EE ( not recommended; creates slow binary )
+# - VC++ 2008 EE ( not recommended; creates slow binary )
 #
-# By setting DOS=1 one can additionally create a 32bit DOS binary.
-# This requires the HXDEV package.
+# optionally, a DOS binary can be created. Then the HXDEV package is needed.
+#
+# to use jwlink instead of MS link, enter: "nmake -f msvc.mak mslink=0
+# to additionally create a DOS binary, enter: "nmake -f msvc.mak dos=1 mslink=0"
 
 name = jwasm
-
-DOS=0
 WIN=1
 
-# use the MS linker or jwlink
+!ifndef DOS
+DOS=0
+!endif
 !ifndef MSLINK
 MSLINK=1
 !endif
@@ -25,9 +29,15 @@ MSLINK=1
 # HXDIR  - for DOS=1 only: root directory to search for stub LOADPEX.BIN,
 #          libs DKRNL32S.LIB + IMPHLP.LIB and tool PATCHPE.EXE.
 
+!ifndef VCDIR
 VCDIR  = \msvc71
+!endif
+!ifndef W32LIB
 W32LIB = \WinInc\Lib
+!endif
+!if $(DOS)
 HXDIR  = \HX
+!endif
 
 !ifndef DEBUG
 DEBUG=0
@@ -43,21 +53,23 @@ OUTD=MSVCR
 
 inc_dirs  = -IH -I"$(VCDIR)\include"
 
-TRMEM=0
-
 linker = $(VCDIR)\Bin\link.exe
 lib = $(VCDIR)\Bin\lib.exe
 
+!ifndef TRMEM
+TRMEM=0
+!endif
+
 !if $(DEBUG)
-!if $(TRMEM)
-extra_c_flags = -Zi -Od -DDEBUG_OUT -DTRMEM
-!else
 #extra_c_flags = -Zi -Od -DDEBUG_OUT -FAa -Fa$* 
 extra_c_flags = -Z7 -Od -DDEBUG_OUT
-!endif
 !else
 extra_c_flags = -O2 -Gs -DNDEBUG
 #extra_c_flags = -Ox -DNDEBUG
+!endif
+
+!if $(TRMEM)
+extra_c_flags = $(extra_c_flags) -DTRMEM -DFASTMEM=0
 !endif
 
 c_flags =-D__NT__ $(extra_c_flags)
@@ -67,43 +79,29 @@ c_flags =-D__NT__ $(extra_c_flags)
 # 2. define -GS- to disable security checks
 #c_flags =-D__NT__ $(extra_c_flags) -D__STDC_WANT_SECURE_LIB__=0 -GS-
 
-#lflags stuff
 #########
-LOPT = /NOLOGO
+
+# linker option /OPT:NOWIN98 is not accepted by all MS linkers
+#LOPT = /NOLOGO
+LOPT = /NOLOGO /OPT:NOWIN98
 !if $(DEBUG)
 LOPTD = /debug
 !endif
 
-lflagsd = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /Libpath:$(HXDIR)\lib /OPT:NOWIN98
-lflagsw = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /OPT:NOWIN98
+lflagsd = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map /Libpath:$(HXDIR)\lib
+lflagsw = $(LOPTD) /SUBSYSTEM:CONSOLE $(LOPT) /map:$^*.map
 
 CC=$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(c_flags)
 
 .c{$(OUTD)}.obj:
-	$(CC) -Fo$* $<
+	@$(CC) -Fo$* $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
-           $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
-           $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  \
-           $(OUTD)/macro.obj    $(OUTD)/string.obj   $(OUTD)/condasm.obj \
-           $(OUTD)/types.obj    $(OUTD)/fpfixup.obj  $(OUTD)/invoke.obj  \
-           $(OUTD)/equate.obj   $(OUTD)/mangle.obj   $(OUTD)/loop.obj    \
-           $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   \
-           $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/label.obj   \
-           $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    \
-           $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   \
-           $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
-           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj\
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
-           $(OUTD)/listing.obj  $(OUTD)/safeseh.obj \
-           $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
-           $(OUTD)/cmdline.obj  $(OUTD)/linnum.obj   $(OUTD)/fastpass.obj\
+proj_obj = \
+!include msmod.inc
+
 !if $(TRMEM)
-           $(OUTD)/trmem.obj    \
+proj_obj = $(proj_obj) $(OUTD)/trmem.obj
 !endif
-           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
-           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj
-######
 
 !if $(WIN)
 TARGET1=$(OUTD)\$(name).exe
@@ -124,31 +122,41 @@ $(lflagsw) $(OUTD)/main.obj $(OUTD)/$(name).lib
 /LIBPATH:"$(VCDIR)/Lib" "$(W32LIB)/kernel32.lib" /OUT:$@
 <<
 !else
-	@jwlink format windows pe file $(OUTD)/main.obj name $@ lib $(OUTD)/$(name).lib libpath "$(VCDIR)/Lib" lib "$(W32LIB)/kernel32.lib" op start=_mainCRTStartup, norelocs, eliminate, map=$(OUTD)/$(name).map
+	@jwlink @<<
+format windows pe file $(OUTD)/main.obj 
+name $@ 
+lib $(OUTD)/$(name).lib 
+libpath "$(VCDIR)/Lib" lib "$(W32LIB)/kernel32.lib" 
+op start=_mainCRTStartup, norelocs, eliminate, map=$(OUTD)/$(name).map
+#sort global op statics
+disable 173
+<<
 !endif
 
 $(OUTD)\$(name)d.exe : $(OUTD)/main.obj $(OUTD)/$(name).lib
 !if $(MSLINK)
 	@$(linker) @<<
 $(lflagsd) /NODEFAULTLIB initw32.obj $(OUTD)/main.obj $(OUTD)/$(name).lib /LIBPATH:$(VCDIR)\Lib
-libc.lib oldnames.lib /LIBPATH:$(HXDIR)\Lib dkrnl32s.lib imphlp.lib /STUB:$(HXDIR)\Bin\LOADPEX.BIN
+libc.lib oldnames.lib /LIBPATH:$(HXDIR)\Lib imphlp.lib dkrnl32s.lib /STUB:$(HXDIR)\Bin\LOADPEX.BIN
 /OUT:$@ /FIXED:NO
 <<
+	@$(HXDIR)\bin\patchpe $@
 !else
 	@jwlink @<<
-format windows pe file $(OUTD)/main.obj name $@ lib $(OUTD)/$(name).lib
-libpath $(VCDIR)/Lib lib $(HXDIR)/dkrnl32, $(HXDIR)/imphlp op start=_mainCRTStartup, norelocs, eliminate, map=$(OUTD)/$(name).map, stub=$(HXDIR)\Bin\LOADPEX.BIN
+format windows pe hx file $(HXDIR)/lib/initw32.obj, $(OUTD)/main.obj name $@ lib $(OUTD)/$(name).lib
+libpath $(VCDIR)/Lib
+libpath $(HXDIR)/Lib lib imphlp.lib, dkrnl32s.lib, hxemu387.lib reference EMUInit 
+op start=_start, eliminate, map=$(OUTD)/$(name)d.map, stub=$(HXDIR)\Bin\LOADPEX.BIN
 <<
 !endif
-	@$(HXDIR)\bin\patchpe $@
 
 $(OUTD)\$(name).lib : $(proj_obj)
 	@$(lib) /nologo /out:$(OUTD)\$(name).lib $(proj_obj)
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/globals.h
 	@$(CC) -Fo$* msgtext.c
 
-$(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h
+$(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h H/opndcls.h H/instravx.h
 	@$(CC) -Fo$* reswords.c
 
 ######

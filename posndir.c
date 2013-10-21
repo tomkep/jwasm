@@ -44,7 +44,9 @@
 static const uint_8 NopList16[] = {
     3,                  /* objlen of first NOP pattern */
     0x2E, 0x8b, 0xc0,   /* MOV AX,AX */
-    0x89, 0xc0,         /* MOV AX,AX */
+    /* v2.11: Masm v6+ uses 8B CO; Masm v5 uses 87 DB (xchg bx, bx) */
+    //0x89, 0xc0,         /* MOV AX,AX */
+    0x8b, 0xc0,         /* MOV AX,AX */
     0x90                /* NOP */
 };
 
@@ -98,34 +100,31 @@ ret_code OrgDirective( int i, struct asm_tok tokenarray[] )
     i++;
     /* v2.09: if -Zne is set, don't allow forward reference in ORG argument */
     //if ( ( ERROR == EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) ) )
-    if ( ( ERROR == EvalOperand( &i, tokenarray, Token_Count, &opndx, Options.strict_masm_compat ? EXPF_NOLCREATE : 0 ) ) )
+    if ( ( ERROR == EvalOperand( &i, tokenarray, Token_Count, &opndx, Options.strict_masm_compat ? EXPF_NOUNDEF : 0 ) ) )
         return( ERROR );
     if ( tokenarray[i].token != T_FINAL ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
     }
     if ( CurrStruct ) {
         if ( opndx.kind == EXPR_CONST )
             return( SetStructCurrentOffset( opndx.value ) );
     } else {
         if( CurrSeg == NULL ) {
-            EmitError( MUST_BE_IN_SEGMENT_BLOCK );
-            return( ERROR );
+            return( EmitError( MUST_BE_IN_SEGMENT_BLOCK ) );
         }
 #if FASTPASS
         if ( StoreState == FALSE ) FStoreLine(0);
 #endif
         /* v2.04: added */
-        if ( Parse_Pass == PASS_1 && CurrSeg->e.seginfo->FixupListHead )
-            CurrSeg->e.seginfo->FixupListHead->orgoccured = TRUE;
+        if ( Parse_Pass == PASS_1 && CurrSeg->e.seginfo->FixupList.head )
+            CurrSeg->e.seginfo->FixupList.head->orgoccured = TRUE;
 
         if ( opndx.kind == EXPR_CONST )
             return( SetCurrOffset( CurrSeg, opndx.value, FALSE, FALSE ) );
         else if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE )
             return( SetCurrOffset( CurrSeg, opndx.sym->offset + opndx.value, FALSE, FALSE ) );
     }
-    EmitError( ORG_NEEDS_A_CONSTANT_OR_LOCAL_OFFSET );
-    return( ERROR );
+    return( EmitError( ORG_NEEDS_A_CONSTANT_OR_LOCAL_OFFSET ) );
 }
 
 static void fill_in_objfile_space( uint size )
@@ -203,15 +202,14 @@ ret_code AlignDirective( int i, struct asm_tok tokenarray[] )
     switch( tokenarray[i].tokval ) {
     case T_ALIGN:
         i++;
-        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOLCREATE ) == ERROR )
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOUNDEF ) == ERROR )
             return( ERROR );
         if ( opndx.kind == EXPR_CONST ) {
             int_32 power;
             /* check that the parm is a power of 2 */
             for( power = 1; power < align_value; power <<= 1 );
             if( power != align_value ) {
-                EmitErr( POWER_OF_2, align_value );
-                return( ERROR );
+                return( EmitErr( POWER_OF_2, align_value ) );
             }
         } else if ( opndx.kind == EXPR_EMPTY ) { /* ALIGN without argument? */
             /* v2.03: special STRUCT handling was missing */
@@ -220,8 +218,7 @@ ret_code AlignDirective( int i, struct asm_tok tokenarray[] )
             else
                 align_value = GetCurrSegAlign();
         } else {
-            EmitError( CONSTANT_EXPECTED );
-            return( ERROR );
+            return( EmitError( CONSTANT_EXPECTED ) );
         }
         break;
     case T_EVEN:
@@ -230,8 +227,7 @@ ret_code AlignDirective( int i, struct asm_tok tokenarray[] )
         break;
     }
     if ( tokenarray[i].token != T_FINAL ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
     }
 
     /* ALIGN/EVEN inside a STRUCT definition? */
@@ -243,8 +239,7 @@ ret_code AlignDirective( int i, struct asm_tok tokenarray[] )
 #endif
     seg_align = GetCurrSegAlign(); /* # of bytes */
     if( seg_align <= 0 ) {
-        EmitError( MUST_BE_IN_SEGMENT_BLOCK );
-        return( ERROR );
+        return( EmitError( MUST_BE_IN_SEGMENT_BLOCK ) );
     }
     if( align_value > seg_align ) {
         if ( Parse_Pass == PASS_1 )
@@ -252,8 +247,8 @@ ret_code AlignDirective( int i, struct asm_tok tokenarray[] )
         //return( ERROR ); /* v2.0: don't exit */
     }
     /* v2.04: added, Skip backpatching after ALIGN occured */
-    if ( Parse_Pass == PASS_1 && CurrSeg && CurrSeg->e.seginfo->FixupListHead )
-        CurrSeg->e.seginfo->FixupListHead->orgoccured = TRUE;
+    if ( Parse_Pass == PASS_1 && CurrSeg && CurrSeg->e.seginfo->FixupList.head )
+        CurrSeg->e.seginfo->FixupList.head->orgoccured = TRUE;
     /* find out how many bytes past alignment we are & add the remainder */
     /* store temp. value */
     CurrAddr = GetCurrOffset();

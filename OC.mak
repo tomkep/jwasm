@@ -5,9 +5,9 @@ name = jwasm
 
 # directory paths to adjust
 # CCDIR  - root directory for compiler, linker, include and lib files
-
-CCDIR  = d:\OrangeC
-
+!ifndef CCDIR
+CCDIR  = \OC386
+!endif
 !ifndef DEBUG
 DEBUG=0
 !endif
@@ -21,8 +21,6 @@ OUTD=OCR
 !endif
 
 inc_dirs  = -IH -I"$(CCDIR)\include"
-
-TRMEM=0
 
 linker = $(CCDIR)\bin\olink.exe
 
@@ -50,40 +48,21 @@ CC=$(CCDIR)\bin\occ.exe /c /C+F -D__OCC__ $(inc_dirs) $(c_flags)
 	@set PATH=$(CCDIR)\bin;%PATH%
 	@$(CC) -o$* $<
 
-proj_obj = $(OUTD)\main.o     $(OUTD)\assemble.o $(OUTD)\assume.o  \
-           $(OUTD)\directiv.o $(OUTD)\posndir.o  $(OUTD)\segment.o \
-           $(OUTD)\expreval.o $(OUTD)\memalloc.o $(OUTD)\errmsg.o  \
-           $(OUTD)\macro.o    $(OUTD)\string.o   $(OUTD)\condasm.o \
-           $(OUTD)\types.o    $(OUTD)\fpfixup.o  $(OUTD)\invoke.o  \
-           $(OUTD)\equate.o   $(OUTD)\mangle.o   $(OUTD)\loop.o    \
-           $(OUTD)\parser.o   $(OUTD)\tokenize.o $(OUTD)\input.o   \
-           $(OUTD)\expans.o   $(OUTD)\symbols.o  $(OUTD)\label.o   \
-           $(OUTD)\fixup.o    $(OUTD)\codegen.o  $(OUTD)\data.o    \
-           $(OUTD)\reswords.o $(OUTD)\branch.o   $(OUTD)\queue.o   \
-           $(OUTD)\hll.o      $(OUTD)\proc.o     $(OUTD)\option.o  \
-           $(OUTD)\omf.o      $(OUTD)\omfint.o   $(OUTD)\omffixup.o\
-           $(OUTD)\coff.o     $(OUTD)\elf.o      $(OUTD)\bin.o     \
-           $(OUTD)\listing.o  $(OUTD)\safeseh.o \
-           $(OUTD)\context.o  $(OUTD)\extern.o   $(OUTD)\simsegm.o \
-           $(OUTD)\backptch.o $(OUTD)\msgtext.o  $(OUTD)\tbyte.o   \
-           $(OUTD)\dbgcv.o    $(OUTD)\end.o      $(OUTD)\cpumodel.o\
-           $(OUTD)\cmdline.o  $(OUTD)\apiemu.o   $(OUTD)\linnum.o  \
-           $(OUTD)\fastpass.o
-######
+!include gccmod.inc
 
 ALL: $(OUTD) $(OUTD)\$(name).exe
 
 $(OUTD):
 	@mkdir $(OUTD)
 
-$(OUTD)\$(name).exe : $(proj_obj)
+$(OUTD)\$(name).exe : $(OUTD)/main.o $(proj_obj)
 	@set ORANGEC=$(CCDIR)
 	@set PATH=$(CCDIR)\bin;%PATH%
 	$(linker) /c /T:CON32 /m /o$(OUTD)\$(name) @<<
-$(lflagsw) /L$(CCDIR)\Lib $(proj_obj) c0xpe.o "clwin.l" "climp.l"
+$(lflagsw) /L$(CCDIR)\Lib $(OUTD)\main.o $(proj_obj:/=\) c0xpe.o "clwin.l" "climp.l"
 <<
 
-$(OUTD)/msgtext.o: msgtext.c H/msgdef.h H/usage.h H/globals.h
+$(OUTD)/msgtext.o: msgtext.c H/msgdef.h H/globals.h
 	@set ORANGEC=$(CCDIR)
 	@set PATH=$(CCDIR)\bin;%PATH%
 	@$(CC) -o$* msgtext.c

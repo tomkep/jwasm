@@ -1,12 +1,13 @@
 
 # this makefile creates a DOS 16-bit real-mode version of JWasm (JWASMR.EXE).
 # tools used:
-# - Open Watcom v1.7a/v1.8/v1.9
+# - Open Watcom v1.8/v1.9
 
 name = JWasm
 
+!ifndef WATCOM
 WATCOM = \Watcom
-
+!endif
 !ifndef DEBUG
 DEBUG=0
 !endif
@@ -49,36 +50,17 @@ LOPTD = debug dwarf op symfile
 
 lflagsd = $(LOPTD) sys dos op map=$^*, stack=0x8400
 
-CC=$(WATCOM)\binnt\wcc -q -0 -w3 -zc -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -DAMD64_SUPPORT=0 -DSSSE3SUPP=0 -DSSE4SUPP=0 -DOWFC_SUPPORT=0 -DDLLIMPORT=0 -DAVXSUPP=0 -DPE_SUPPORT=0 -DVMXSUPP=0 -DSVMSUPP=0 -DCVOSUPP=0 -zt=12000
+CC=$(WATCOM)\binnt\wcc -q -0 -w3 -zc -ml -bc -bt=dos $(inc_dirs) $(extra_c_flags) -fo$@ -DFASTMEM=0 -DFASTPASS=0 -DCOFF_SUPPORT=0 -DELF_SUPPORT=0 -DAMD64_SUPPORT=0 -DSSSE3SUPP=0 -DSSE4SUPP=0 -DOWFC_SUPPORT=0 -DDLLIMPORT=0 -DAVXSUPP=0 -DPE_SUPPORT=0 -DVMXSUPP=0 -DSVMSUPP=0 -DCVOSUPP=0 -DCOMDATSUPP=0 -DSTACKBASESUPP=0 -zt=12000
 
 .c{$(OUTD)}.obj:
 	@$(CC) $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/input.obj   &
-           $(OUTD)/tokenize.obj $(OUTD)/parser.obj   $(OUTD)/segment.obj &
-           $(OUTD)/memalloc.obj $(OUTD)/cmdline.obj  $(OUTD)/condasm.obj &
-           $(OUTD)/expans.obj   $(OUTD)/expreval.obj $(OUTD)/symbols.obj &
-           $(OUTD)/codegen.obj  $(OUTD)/equate.obj   &
-           $(OUTD)/directiv.obj $(OUTD)/assume.obj   $(OUTD)/posndir.obj &
-           $(OUTD)/types.obj    $(OUTD)/invoke.obj   $(OUTD)/label.obj   &
-           $(OUTD)/errmsg.obj   $(OUTD)/macro.obj    $(OUTD)/string.obj  &
-           $(OUTD)/mangle.obj   $(OUTD)/loop.obj     $(OUTD)/backptch.obj&
-           $(OUTD)/fpfixup.obj  $(OUTD)/fixup.obj    $(OUTD)/data.obj    &
-           $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   &
-           $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
-           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj&
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
-           $(OUTD)/listing.obj  $(OUTD)/safeseh.obj &
-           $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
-           $(OUTD)/msgtext.obj  $(OUTD)/linnum.obj   &
-!if $(TRMEM)
-           $(OUTD)/trmem.obj    &
-!endif
-           $(OUTD)/tbyte.obj    $(OUTD)/cpumodel.obj&
-           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      
-######
+proj_obj = &
+!include owmod.inc
 
-TARGET=
+!if $(TRMEM)
+proj_obj += $(OUTD)/trmem.obj
+!endif
 
 ALL: $(OUTD) $(OUTD)/$(name)r.exe
 
@@ -87,16 +69,14 @@ $(OUTD):
 
 $(OUTD)/$(name)r.exe: $(OUTD)/$(name).lib $(OUTD)/main.obj
 	@set LIB=$(WATCOM)\Lib286;$(WATCOM)\Lib286\DOS
-	@$(LINK) @<<
-$(lflagsd) file $(OUTD)/main.obj name $@ lib $(OUTD)/$(name).lib
-<<
+	@$(LINK) $(lflagsd) file $(OUTD)/main.obj name $@ lib $(OUTD)/$(name).lib
 
 $(OUTD)/$(name).lib: $(proj_obj)
 	@cd $(OUTD)
 	@wlib -q -n $(name).lib $(proj_obj:$(OUTD)/=+)
 	@cd ..
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/globals.h
 	@$(CC) msgtext.c
 
 $(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h
@@ -104,7 +84,7 @@ $(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h
 
 ######
 
-clean:
-	@erase $(OUTD)\*.exe
-	@erase $(OUTD)\*.obj
-	@erase $(OUTD)\*.map
+clean: .SYMBOLIC
+	@if exist $(OUTD)\*.obj        erase $(OUTD)\*.obj
+	@if exist $(OUTD)\$(name)r.exe erase $(OUTD)\$(name)r.exe
+	@if exist $(OUTD)\$(name)r.map erase $(OUTD)\$(name)r.map

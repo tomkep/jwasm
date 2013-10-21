@@ -8,10 +8,12 @@ name = jwasm
 # directory paths to adjust
 # VCDIR  - root directory for VC compiler, linker, include and lib files
 # W32LIB - directory for Win32 import library files (kernel32.lib)
-
+!ifndef VCDIR
 VCDIR  = \msvc71
+!endif
+!ifndef W32LIB
 W32LIB = \wininc\lib
-
+!endif
 !ifndef DEBUG
 DEBUG=0
 !endif
@@ -57,25 +59,8 @@ CC=@$(VCDIR)\bin\cl.exe -c -nologo $(inc_dirs) $(c_flags)
 .c{$(OUTD)}.obj:
 	$(CC) -Fo$* $<
 
-proj_obj = $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
-           $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
-           $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  \
-           $(OUTD)/macro.obj    $(OUTD)/string.obj   $(OUTD)/condasm.obj \
-           $(OUTD)/types.obj    $(OUTD)/fpfixup.obj  $(OUTD)/invoke.obj  \
-           $(OUTD)/equate.obj   $(OUTD)/mangle.obj   $(OUTD)/loop.obj    \
-           $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   \
-           $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/label.obj   \
-           $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    \
-           $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   \
-           $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
-           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj\
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
-           $(OUTD)/listing.obj  $(OUTD)/safeseh.obj \
-           $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
-           $(OUTD)/cmdline.obj  $(OUTD)/linnum.obj   $(OUTD)/fastpass.obj\
-           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
-           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj
-######
+proj_obj = \
+!include msmod.inc
 
 ALL: $(OUTD) $(OUTD)\$(name).dll
 
@@ -92,7 +77,7 @@ $(lflagsw) $(OUTD)/$(name)s.lib
 $(OUTD)\$(name)s.lib : $(proj_obj)
 	@$(lib) /out:$(OUTD)\$(name)s.lib $(proj_obj)
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/globals.h
 	$(CC) -Fo$* msgtext.c
 
 $(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h

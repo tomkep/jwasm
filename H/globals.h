@@ -35,14 +35,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
-#include <time.h>
-#include <errno.h>
+#include <errno.h> /* needed for errno declaration ( "sometimes" it's defined in stdlib.h ) */
 
 #if defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__) /* avoid for MinGW! */
 #include "posixdef.h"  /* for POSIX based C runtimes */
 #elif defined(__POCC__)
-#define _MAX_PATH FILENAME_MAX
 #define _MAX_FNAME FILENAME_MAX
 #define _MAX_EXT FILENAME_MAX
 #define _MAX_DIR FILENAME_MAX
@@ -125,10 +122,8 @@
 #ifndef AVXSUPP
 #define AVXSUPP      1 /* support AVX extensions                 */
 #endif
-#if COFF_SUPPORT
-#define COMDATSUPP   1 /* support COMDAT segment attribute */
-#else
-#define COMDATSUPP   0
+#ifndef COMDATSUPP
+#define COMDATSUPP   1 /* support COMDAT segment attribute       */
 #endif
 
 /* other extension switches */
@@ -155,6 +150,10 @@
 #endif
 #define MASM_SSE_MEMX 1 /* support 2 mem types for mmx/xmm       */
 #define PERCENT_OUT 1  /* 1=support %OUT directive               */
+#ifndef STACKBASESUPP
+#define STACKBASESUPP 1 /* support OPTION STACKBASE              */
+#endif
+#define VARARGML 1    /* multi line vararg for macros */
 
 /* old Wasm extensions */
 #define PAGE4K       0 /* support 4kB-page OMF segment alignment */
@@ -177,32 +176,13 @@
 #include "queue.h"
 
 /* JWasm version info */
-#define _JWASM_VERSION_STR_ "2.10"
-#define _JWASM_VERSION_INT_ 210
+#define _JWASM_VERSION_STR_ "2.11"
+#define _JWASM_VERSION_INT_ 211
 #define _JWASM_VERSION_SUFFIX_
 #define _JWASM_VERSION_ _JWASM_VERSION_STR_ _JWASM_VERSION_SUFFIX_
 
 #define NULLC  '\0'
 //#define NULLS  ""
-
-/* uint_32 format specifier */
-#ifdef __I86__
-#define FX32 "lX"
-#define FU32 "lu"
-#else
-#define FX32 "X"
-#define FU32 "u"
-#endif
-
-#if defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__)
-#define I64X_SPEC "llX"
-#define I64x_SPEC "llx"
-#define I64d_SPEC "lld"
-#else
-#define I64X_SPEC "I64X"
-#define I64x_SPEC "I64x"
-#define I64d_SPEC "I64d"
-#endif
 
 #define is_valid_id_char( ch )  ( isalnum(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 #define is_valid_id_first_char( ch )  ( isalpha(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' || (ch == '.' && ModuleInfo.dotname == TRUE ))
@@ -221,12 +201,12 @@ enum {
     PASS_2
 };
 
-/* file extensions. Also see enum opt_names! */
+/* file extensions. Order must match first entries in enum opt_names! */
 enum file_extensions {
-    ASM, /* must be first */
-    ERR,
+    ASM, /* must be first; see SetFilenames() in assembly.c */
     OBJ,
-    LST
+    LST,
+    ERR,
 };
 
 #define NUM_FILE_TYPES 4
@@ -484,9 +464,9 @@ struct qitem {
 /* first 4 entries must match enum file_extensions! */
 enum opt_names {
     OPTN_ASM_FN,
-    OPTN_ERR_FN,              /* -Fr option */
     OPTN_OBJ_FN,              /* -Fo option */
     OPTN_LST_FN,              /* -Fl option */
+    OPTN_ERR_FN,              /* -Fr option */
 #if DLLIMPORT
     OPTN_LNKDEF_FN,           /* -Fd option */
 #endif
@@ -593,15 +573,19 @@ struct global_options {
     uint_8      warning_level;           /* -Wn option */
     bool        warning_error;           /* -WX option */
 #ifdef DEBUG_OUT
-    bool        debug;                   /* -d6 option */
-    bool        nobackpatch;             /* -d8 option */
+    bool        debug;                   /* -dt option */
+    bool        nobackpatch;             /* -nbp option */
 #if FASTPASS
-    bool        nofastpass;              /* -d7 option */
+    bool        nofastpass;              /* -nfp option */
     bool        print_linestore;         /* -ls option */
 #endif
     uint_16     max_passes;              /* -pm option */
     bool        skip_preprocessor;       /* -sp option */
-    bool        log_all_files;           /* -lf option */
+    bool        log_all_files;           /* -af option */
+    bool        dump_reswords;           /* -dr option */
+    bool        dump_reswords_hash;      /* -drh option */
+    bool        dump_symbols;            /* -ds option */
+    bool        dump_symbols_hash;       /* -dsh option */
 #endif
     char        *names[OPTN_LAST];
     struct qitem *queues[OPTQ_LAST];
@@ -622,8 +606,8 @@ struct global_options {
     bool        entry_decorated;         /* -zzs option  */
     bool        write_listing;           /* -Fl option  */
     bool        write_impdef;            /* -Fd option  */
-    bool        case_sensitive;          /* -Cp,-Cx,-Cu options */
-    bool        convert_uppercase;       /* -Cp,-Cx,-Cu options */
+    bool        case_sensitive;          /* -C<p|x|u> options */
+    bool        convert_uppercase;       /* -C<p|x|u> options */
     bool        preprocessor_stdout;     /* -EP option  */
     bool        masm51_compat;           /* -Zm option  */
     bool        strict_masm_compat;      /* -Zne option  */
@@ -670,36 +654,34 @@ struct dll_desc {
 
 /* Information about the module */
 
-struct input_queue;
-struct file_item;
+struct src_item;
 struct hll_item;
 struct context;
 
 struct fname_item {
-    char    *name;
-    char    *fullname;
-    time_t  mtime;
+    char    *fname;
+    //char    *fullname; /* v2.11: removed */
+    //time_t  mtime; /* v2.11: removed */
 #ifdef DEBUG_OUT
     uint    included;
     uint_32 lines;
 #endif
 };
 
+struct module_info;
 
 struct module_vars {
     unsigned            error_count;     /* total of errors so far */
     unsigned            warning_count;   /* total of warnings so far */
     unsigned            num_segs;        /* number of segments in module */
-    /* v2.07: GlobalQueue is obsolete */
-    //struct qdesc        GlobalQueue;     /* GLOBAL items ( =externdefs ) */
+    //struct qdesc        GlobalQueue;     /* GLOBAL items ( =externdefs ); v2.07: obsolete  */
     struct qdesc        PubQueue;        /* PUBLIC items */
     struct qdesc        LnameQueue;      /* LNAME items (segments, groups and classes) */
 #if COFF_SUPPORT
-    struct qdesc        SafeSEHList;     /* list of safeseh handlers */
+    struct qdesc        SafeSEHQueue;    /* list of safeseh handlers */
 #endif
     struct qdesc        LibQueue;        /* includelibs */
-    //struct symbol_queue AltQueue;        /* weak externals */
-    struct qdesc        AltQueue;        /* weak externals */
+    //struct qdesc        AltQueue;        /* weak externals; v2.11: obsolete */
 #if DLLIMPORT
     struct dll_desc     *DllQueue;       /* dlls of OPTION DLLIMPORT */
 #endif
@@ -711,9 +693,13 @@ struct module_vars {
     struct fname_item   *FNames;         /* array of input files */
     uint                cnt_fnames;      /* items in FNames array */
     char                *IncludePath;
-    struct input_queue  *line_queue;     /* line queue */
-    struct file_item    *file_stack;     /* source item (file/macro) stack */
-    struct fixup        *start_fixup;    /* OMF only */
+    struct qdesc        line_queue;      /* line queue */
+    struct src_item     *src_stack;      /* source item (files & macros) stack */
+    union {
+        struct fixup    *start_fixup;    /* OMF only */
+        struct asym     *start_label;    /* non-OMF only: start label */
+    };
+    uint_32             start_displ;     /* OMF only, optional displ for start label */
     struct hll_item     *HllStack;       /* for .WHILE, .IF, .REPEAT */
     struct hll_item     *HllFree;        /* v2.06: stack of free <struct hll>-items */
     struct context      *ContextStack;
@@ -724,6 +710,16 @@ struct module_vars {
 #endif
     /* v2.10: moved here from module_info due to problems if @@: occured on the very first line */
     unsigned            anonymous_label; /* "anonymous label" counter */
+#if STACKBASESUPP
+    struct asym         *StackBase;
+    struct asym         *ProcStatus;
+#endif
+    ret_code (* WriteModule)( struct module_info * );
+    ret_code (* EndDirHook)( struct module_info * );
+    ret_code (* Pass1Checks)( struct module_info * );
+#if PE_SUPPORT
+    uint_8              pe_flags;        /* for PE */
+#endif
 };
 
 struct format_options;
@@ -785,7 +781,7 @@ struct module_info {
 #if ELF_SUPPORT || AMD64_SUPPORT
         struct {
 #if ELF_SUPPORT
-        uint_8          elf_osabi;       /* for ELF   */
+        uint_8          elf_osabi;       /* for ELF */
 #endif
 #if AMD64_SUPPORT
         uint_8          win64_flags;     /* for WIN64 + PE(32+) */
@@ -793,7 +789,7 @@ struct module_info {
         };
 #endif
 #if MZ_SUPPORT
-        struct MZDATA   mz_data;         /* for MZ    */
+        struct MZDATA   mz_data;         /* for MZ */
 #endif
     };
 #endif
@@ -807,11 +803,9 @@ struct module_info {
 #if CVOSUPP
     unsigned char       cv_opt;          /* option codeview */
 #endif
-    uint                srcfile;         /* current file - is a file stack index */
+    uint                srcfile;         /* main source file - is an index for FNames[] */
     struct dsym         *currseg;        /* currently active segment */
     struct dsym         *flat_grp;       /* magic FLAT group */
-    struct asym         *start_label;    /* start label */
-    uint_32             start_displ;     /* OMF only, displ for start label */
     uint_8              *pCodeBuff;
     unsigned int        GeneratedCode;   /* nesting level generated code */
     /* input members */
@@ -820,6 +814,9 @@ struct module_info {
     struct asm_tok      *tokenarray;     /* start token buffer */
     char                *stringbufferend;/* start free space in string buffer */
     int                 token_count;     /* number of tokens in curr line */
+#if STACKBASESUPP
+    uint                basereg[3];      /* stack base register (16-, 32-, 64-bit */
+#endif
     char                name[_MAX_FNAME];/* name of module */
 };
 
@@ -863,7 +860,7 @@ extern int  __stdcall   AssembleModule( const char * );
 #else
 extern int              AssembleModule( const char * );
 #endif
-extern void             AddLinnumDataRef( uint_32 );
+extern void             AddLinnumDataRef( uint, uint_32 );
 extern void             SetMasm510( bool );
 extern void             close_files( void );
 extern char             *myltoa( uint_32 value, char *buffer, uint radix, bool sign, bool addzero );

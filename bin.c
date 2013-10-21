@@ -11,6 +11,7 @@
 
 #include <stddef.h>
 #include <ctype.h>
+#include <time.h>
 
 #include "globals.h"
 #include "memalloc.h"
@@ -19,6 +20,7 @@
 #include "omfspec.h"
 #include "bin.h"
 #include "listing.h"
+#include "lqueue.h"
 #include "myassert.h"
 
 #if BIN_SUPPORT
@@ -58,12 +60,12 @@ static const struct MZDATA mzdata = {0x1E, 0x10, 0, 0xFFFF };
 
 #if SECTORMAP
 /* these strings are to be moved to ltext.h */
-static const char * const szCaption = "Binary Map:";
-static const char * const szCaption2= "Segment                  Pos(file)     RVA  Size(fil) Size(mem)";
-static const char * const szSep     = "---------------------------------------------------------------";
-static const char * const szHeader  = "<header>";
-static const char * const szSegLine = "%-24s %8" FX32 " %8" FX32 " %9" FX32 " %9" FX32;
-static const char * const szTotal   = "%-42s %9" FX32 " %9" FX32;
+static const char szCaption[]  = { "Binary Map:" };
+static const char szCaption2[] = { "Segment                  Pos(file)     RVA  Size(fil) Size(mem)" };
+static const char szSep[]      = { "---------------------------------------------------------------" };
+static const char szHeader[]   = { "<header>" };
+static const char szSegLine[]  = { "%-24s %8" I32_SPEC "X %8" I32_SPEC "X %9" I32_SPEC "X %9" I32_SPEC "X" };
+static const char szTotal[]    = { "%-42s %9" I32_SPEC "X %9" I32_SPEC "X" };
 #endif
 
 struct calc_param {
@@ -108,38 +110,37 @@ static const enum seg_type flat_order[] = {
 };
 #define SIZE_PEFLAT ( sizeof( flat_order ) / sizeof( flat_order[0] ) )
 
-static int pe_flags;
 enum pe_flags_values {
     PEF_MZHDR = 0x01,  /* 1=create mz header */
 };
 
+#define hdrname ".hdr$"
 
-static const char *hdrname = ".hdr$";
-static const char *hdrattr = "read public 'HDR'";
-static const char *edataname = ".edata";
-static const char *edataattr = "FLAT read public alias('.rdata') 'DATA'";
-static const char *idataname = ".idata$";
-//static const char *idataattr = "FLAT read public 'DATA'";
-static const char *idataattr = "FLAT read public alias('.rdata') 'DATA'";
+static const char hdrattr[]   = { "read public 'HDR'" };
+static const char edataname[] = { ".edata" };
+static const char edataattr[] = { "FLAT read public alias('.rdata') 'DATA'" };
+static const char idataname[] = { ".idata$" };
+//static const char idataattr[] = { "FLAT read public 'DATA'" };
+static const char idataattr[] = { "FLAT read public alias('.rdata') 'DATA'" };
 
-static const char *mzcode[] = {
-    "db 'M','Z'",        /* e_magic */
-    "dw 80h, 1, 0, 4",   /* e_cblp, e_cp, e_crlc, e_cparhdr */
-    "dw 0, -1, 0, 0B8h", /* e_minalloc, e_maxalloc, e_ss, e_sp */
-    "dw 0, 0, 0, 40h",   /* e_csum, e_ip, e_cs, e_sp, e_lfarlc */
-    "org 40h",           /* e_lfanew, will be set by program */
-    "push cs",
-    "pop ds",
-    "mov dx,@F - 40h",
-    "mov ah,9",
-    "int 21h",
-    "mov ax,4C01h",
-    "int 21h",
-    "@@:",
-    "db 'This is a PE executable',13,10,'$'",
-    NULL
+static const char mzcode[] = {
+    "db 'MZ'\0"           /* e_magic */
+    "dw 80h, 1, 0, 4\0"   /* e_cblp, e_cp, e_crlc, e_cparhdr */
+    "dw 0, -1, 0, 0B8h\0" /* e_minalloc, e_maxalloc, e_ss, e_sp */
+    "dw 0, 0, 0, 40h\0"   /* e_csum, e_ip, e_cs, e_sp, e_lfarlc */
+    "org 40h\0"           /* e_lfanew, will be set by program */
+    "push cs\0"
+    "pop ds\0"
+    "mov dx,@F - 40h\0"
+    "mov ah,9\0"
+    "int 21h\0"
+    "mov ax,4C01h\0"
+    "int 21h\0"
+    "@@:\0"
+    "db 'This is a PE executable',0Dh,0Ah,'$'"
 };
 
+/* default 32-bit PE header */
 static const struct IMAGE_PE_HEADER32 pe32def = {
     'P'+ ('E' << 8 ),
     { IMAGE_FILE_MACHINE_I386, 0, 0, 0, 0, sizeof( struct IMAGE_OPTIONAL_HEADER32 ),
@@ -147,32 +148,33 @@ static const struct IMAGE_PE_HEADER32 pe32def = {
     },
     { IMAGE_NT_OPTIONAL_HDR32_MAGIC,
     5,1,0,0,0,0,0,0, /* linkervers maj/min, sizeof code/init/uninit, entrypoint, base code/data */
-    0x400000,
-    0x1000, 0x200, /* SectionAlignment, FileAlignment */
-    4,0,0,0,4,0, /* OSversion maj/min, Imagevers maj/min, Subsystemvers maj/min */
-    0,0,0,0, /* Win32vers, sizeofimage, sizeofheaders, checksum */
-    IMAGE_SUBSYSTEM_WINDOWS_CUI,0,
-    0x100000,0x1000,
-    0x100000,0x1000,
-    0, IMAGE_NUMBEROF_DIRECTORY_ENTRIES,
+    0x400000,        /* image base */
+    0x1000, 0x200,   /* SectionAlignment, FileAlignment */
+    4,0,0,0,4,0,     /* OSversion maj/min, Imagevers maj/min, Subsystemvers maj/min */
+    0,0,0,0,         /* Win32vers, sizeofimage, sizeofheaders, checksum */
+    IMAGE_SUBSYSTEM_WINDOWS_CUI,0,  /* subsystem, dllcharacteristics */
+    0x100000,0x1000, /* sizeofstack reserve/commit */
+    0x100000,0x1000, /* sizeofheap reserve/commit */
+    0, IMAGE_NUMBEROF_DIRECTORY_ENTRIES, /* loaderflags, numberofRVAandSizes */
     }
 };
 #if AMD64_SUPPORT
+/* default 64-bit PE header */
 static const struct IMAGE_PE_HEADER64 pe64def = {
     'P'+ ('E' << 8 ),
     { IMAGE_FILE_MACHINE_AMD64, 0, 0, 0, 0, sizeof( struct IMAGE_OPTIONAL_HEADER64 ),
     IMAGE_FILE_RELOCS_STRIPPED | IMAGE_FILE_EXECUTABLE_IMAGE | IMAGE_FILE_LINE_NUMS_STRIPPED | IMAGE_FILE_LOCAL_SYMS_STRIPPED | IMAGE_FILE_LARGE_ADDRESS_AWARE | IMAGE_FILE_32BIT_MACHINE
     },
     { IMAGE_NT_OPTIONAL_HDR64_MAGIC,
-    5,1,0,0,0,0,0, /* linkervers maj/min, sizeof code/init/uninit, entrypoint, base code */
-    0x400000,
-    0x1000, 0x200, /* SectionAlignment, FileAlignment */
-    4,0,0,0,4,0,
-    0,0,0,0,
-    IMAGE_SUBSYSTEM_WINDOWS_CUI,0,
-    0x100000,0x1000,
-    0x100000,0x1000,
-    0, IMAGE_NUMBEROF_DIRECTORY_ENTRIES,
+    5,1,0,0,0,0,0,   /* linkervers maj/min, sizeof code/init data/uninit data, entrypoint, base code RVA */
+    0x400000,        /* image base */
+    0x1000, 0x200,   /* SectionAlignment, FileAlignment */
+    4,0,0,0,4,0,     /* OSversion maj/min, Imagevers maj/min, Subsystemvers maj/min */
+    0,0,0,0,         /* Win32vers, sizeofimage, sizeofheaders, checksum */
+    IMAGE_SUBSYSTEM_WINDOWS_CUI,0,  /* subsystem, dllcharacteristics */
+    0x100000,0x1000, /* sizeofstack reserve/commit */
+    0x100000,0x1000, /* sizeofheap reserve/commit */
+    0, IMAGE_NUMBEROF_DIRECTORY_ENTRIES, /* loaderflags, numberofRVAandSizes */
     }
 };
 #endif
@@ -212,7 +214,7 @@ static void CalcOffset( struct dsym *curr, struct calc_param *cp )
 
     if ( curr->e.seginfo->segtype == SEGTYPE_ABS ) {
         curr->e.seginfo->start_offset = curr->e.seginfo->abs_frame << 4;
-        DebugMsg(("CalcOffset(%s): abs seg, offset=%" FX32 "h\n",
+        DebugMsg(("CalcOffset(%s): abs seg, offset=%" I32_SPEC "Xh\n",
                   curr->sym.name, curr->e.seginfo->start_offset ));
         return;
     } else if ( curr->e.seginfo->info )
@@ -229,7 +231,7 @@ static void CalcOffset( struct dsym *curr, struct calc_param *cp )
 
     if ( grp == NULL ) {
         offset = cp->fileoffset - cp->sizehdr;  // + alignbytes;
-        DebugMsg(("CalcOffset(%s): fileofs=%" FX32 "h, ofs=%" FX32 "h\n", curr->sym.name, cp->fileoffset, offset ));
+        DebugMsg(("CalcOffset(%s): fileofs=%" I32_SPEC "Xh, ofs=%" I32_SPEC "Xh\n", curr->sym.name, cp->fileoffset, offset ));
     } else {
 #if PE_SUPPORT
         if ( ModuleInfo.sub_format == SFORMAT_PE )
@@ -241,7 +243,7 @@ static void CalcOffset( struct dsym *curr, struct calc_param *cp )
                 offset = 0;
             } else
                 offset = grp->sym.total_size + alignbytes;
-        DebugMsg(("CalcOffset(%s): fileofs=%" FX32 "h, alignbytes=%lu, ofs=%" FX32 "h, group=%s, grp.ofs=%" FX32 "h\n",
+        DebugMsg(("CalcOffset(%s): fileofs=%" I32_SPEC "Xh, alignbytes=%" I32_SPEC "u, ofs=%" I32_SPEC "Xh, group=%s, grp.ofs=%" I32_SPEC "Xh\n",
                   curr->sym.name, cp->fileoffset, alignbytes, offset, grp->sym.name, grp->sym.offset ));
     }
 
@@ -299,10 +301,10 @@ static void CalcOffset( struct dsym *curr, struct calc_param *cp )
         }
     }
 #if PE_SUPPORT
-    DebugMsg(("CalcOffset(%s) exit: seg.fileofs=%" FX32 "h, seg.start_offset=%" FX32 "h, endofs=%" FX32 "h fileofs=%" FX32 "h rva=%" FX32 "h\n",
+    DebugMsg(("CalcOffset(%s) exit: seg.fileofs=%" I32_SPEC "Xh, seg.start_offset=%" I32_SPEC "Xh, endofs=%" I32_SPEC "Xh fileofs=%" I32_SPEC "Xh rva=%" I32_SPEC "Xh\n",
               curr->sym.name, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset, offset, cp->fileoffset, cp->rva ));
 #else
-    DebugMsg(("CalcOffset(%s) exit: seg.fileofs=%" FX32 "h, seg.start_offset=%" FX32 "h, endofs=%" FX32 "h fileofs=%" FX32 "h\n",
+    DebugMsg(("CalcOffset(%s) exit: seg.fileofs=%" I32_SPEC "Xh, seg.start_offset=%" I32_SPEC "Xh, endofs=%" I32_SPEC "Xh fileofs=%" I32_SPEC "Xh\n",
               curr->sym.name, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset, offset, cp->fileoffset ));
 #endif
 
@@ -331,7 +333,7 @@ static int GetSegRelocs( uint_16 *pDst )
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
             continue;
-        for ( fixup = curr->e.seginfo->FixupListHead; fixup; fixup = fixup->nextrlc ) {
+        for ( fixup = curr->e.seginfo->FixupList.head; fixup; fixup = fixup->nextrlc ) {
             switch ( fixup->type ) {
             case FIX_PTR32:
             case FIX_PTR16:
@@ -339,7 +341,7 @@ static int GetSegRelocs( uint_16 *pDst )
                 /* ignore fixups for absolute segments */
                 if ( fixup->sym && fixup->sym->segment && ((struct dsym *)fixup->sym->segment)->e.seginfo->segtype == SEGTYPE_ABS )
                     break;
-                DebugMsg(("GetSegRelocs: found seg-related fixup at %s.%" FX32 "\n", curr->sym.name, fixup->location ));
+                DebugMsg(("GetSegRelocs: found seg-related fixup at %s.%" I32_SPEC "X\n", curr->sym.name, fixup->location ));
                 count++;
                 if ( pDst ) {
                     /* v2.04: fixed */
@@ -361,7 +363,7 @@ static int GetSegRelocs( uint_16 *pDst )
                     };
 
                     valueofs = loc;
-                    DebugMsg(("GetSegRelocs: location=%" FX32 " fileofs=%" FX32 " segofs=%" FX32 " grpofs=%" FX32 ", fixup value: %X %X\n",
+                    DebugMsg(("GetSegRelocs: location=%" I32_SPEC "X fileofs=%" I32_SPEC "X segofs=%" I32_SPEC "X grpofs=%" I32_SPEC "X, fixup value: %X %X\n",
                               fixup->location, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset: 0, valueofs, valueseg ));
                     *pDst++ = valueofs;
                     *pDst++ = valueseg;
@@ -408,13 +410,13 @@ static uint_32 GetImageSize( bool memimage )
             vsize += curr->e.seginfo->start_loc;
         if ( memimage )
             tmp += vsize;
-        DebugMsg(("GetImageSize(%s): fileofs=%" FX32 "h, max_offs=%" FX32 "h start=%" FX32 "h\n",
+        DebugMsg(("GetImageSize(%s): fileofs=%" I32_SPEC "Xh, max_offs=%" I32_SPEC "Xh start=%" I32_SPEC "Xh\n",
                   curr->sym.name, curr->e.seginfo->fileoffset, curr->sym.max_offset, curr->e.seginfo->start_loc ));
         if ( size < tmp )
             size = tmp;
         first = FALSE;
     }
-    DebugMsg(("GetImageSize(%u)=%" FX32 "h\n", memimage, size ));
+    DebugMsg(("GetImageSize(%u)=%" I32_SPEC "Xh\n", memimage, size ));
     return( size );
 }
 
@@ -448,8 +450,8 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
     if ( curr->e.seginfo->segtype == SEGTYPE_ABS )
         return( NOT_ERROR );
 
-    DebugMsg(("DoFixup(%s) enter, segment start ofs=%" FX32 "h\n", curr->sym.name, curr->e.seginfo->start_offset ));
-    for ( fixup = curr->e.seginfo->FixupListHead; fixup; fixup = fixup->nextrlc ) {
+    DebugMsg(("DoFixup(%s) enter, segment start ofs=%" I32_SPEC "Xh\n", curr->sym.name, curr->e.seginfo->start_offset ));
+    for ( fixup = curr->e.seginfo->FixupList.head; fixup; fixup = fixup->nextrlc ) {
         codeptr.db = curr->e.seginfo->CodeBuffer +
             ( fixup->location - curr->e.seginfo->start_loc );
 
@@ -460,7 +462,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             if ( fixup->sym->variable ) {
                 seg = (struct dsym *)fixup->segment_var;
                 offset = 0;
-                DebugMsg(("DoFixup(%s, %04" FX32 ", %s): variable, fixup->segment=%Xh fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
+                DebugMsg(("DoFixup(%s, %04" I32_SPEC "X, %s): variable, fixup->segment=%Xh fixup->offset=%" I32_SPEC "Xh, fixup->sym->offset=%" I32_SPEC "Xh\n",
                           curr->sym.name, fixup->location, fixup->sym->name, seg, fixup->offset, fixup->sym->offset ));
             } else {
                 seg = (struct dsym *)fixup->sym->segment;
@@ -474,7 +476,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             switch ( fixup->type ) {
             case FIX_OFF32_IMGREL:
                 value = ( fixup->offset + offset + seg->e.seginfo->start_offset ) - cp->imagestart;
-                DebugMsg(("DoFixup(%s): IMGREL, loc=%" FX32 " value=%" FX32 " seg.start=%" FX32 " imagestart=%" FX32 "\n",
+                DebugMsg(("DoFixup(%s): IMGREL, loc=%" I32_SPEC "X value=%" I32_SPEC "X seg.start=%" I32_SPEC "X imagestart=%" I32_SPEC "X\n",
                           curr->sym.name, fixup->location, value, seg->e.seginfo->start_offset, cp->imagestart ));
                 break;
             case FIX_OFF32_SECREL:
@@ -489,13 +491,13 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
                         if ( segfirst->sym.name_size == namlen &&
                             ( memcmp( segfirst->sym.name, seg->sym.name, namlen ) == 0 ) ) {
                             value = ( fixup->offset + offset + seg->e.seginfo->start_offset ) - segfirst->e.seginfo->start_offset;
-                            DebugMsg(("DoFixup(%s): SECREL, primary seg=%s, start_offset=%" FX32 "\n",
+                            DebugMsg(("DoFixup(%s): SECREL, primary seg=%s, start_offset=%" I32_SPEC "X\n",
                                       curr->sym.name, segfirst->sym.name, segfirst->e.seginfo->start_offset ));
                             break;
                         }
                     }
                 }
-                DebugMsg(("DoFixup(%s): SECREL, loc=%" FX32 ", value=%" FX32 "\n",
+                DebugMsg(("DoFixup(%s): SECREL, loc=%" I32_SPEC "X, value=%" I32_SPEC "X\n",
                         curr->sym.name, fixup->location, value ));
                 break;
             case FIX_RELOFF8:
@@ -503,7 +505,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             case FIX_RELOFF32:
                 /* v1.96: special handling for "relative" fixups */
                 value = seg->e.seginfo->start_offset + fixup->offset + offset;
-                DebugMsg(("DoFixup(%s): RELOFFx, loc=%" FX32 ", sym=%s, [start_offset=%" FX32 "h, fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
+                DebugMsg(("DoFixup(%s): RELOFFx, loc=%" I32_SPEC "X, sym=%s, [start_offset=%" I32_SPEC "Xh, fixup->offset=%" I32_SPEC "Xh, fixup->sym->offset=%" I32_SPEC "Xh\n",
                         curr->sym.name, fixup->location, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, offset ));
                 break;
             default:
@@ -523,7 +525,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
                 } else
                     value = (seg->e.seginfo->start_offset & 0xF) + fixup->offset + offset;
 
-                DebugMsg(("DoFixup(%s): loc=%04" FX32 ", sym=%s, target->start_offset=%" FX32 "h, fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
+                DebugMsg(("DoFixup(%s): loc=%04" I32_SPEC "X, sym=%s, target->start_offset=%" I32_SPEC "Xh, fixup->offset=%" I32_SPEC "Xh, fixup->sym->offset=%" I32_SPEC "Xh\n",
                         curr->sym.name, fixup->location, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, offset ));
                 break;
             }
@@ -532,7 +534,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             /* v2.10: member segment_var is for assembly-time variables only */
             //seg = (struct dsym *)fixup->segment_var;
             seg = NULL;
-            DebugMsg(("DoFixup(%s, %04" FX32 ", %s): target segment=0, fixup->offset=%" FX32 "h, fixup->sym->offset=%" FX32 "h\n",
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X, %s): target segment=0, fixup->offset=%" I32_SPEC "Xh, fixup->sym->offset=%" I32_SPEC "Xh\n",
                       curr->sym.name, fixup->location, fixup->sym ? fixup->sym->name : "", fixup->offset ? offset : 0 ));
             value = 0;
         }
@@ -542,13 +544,13 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             //*codeptr.db += (value - fixup->location + 1) & 0xff;
             /* changed in v1.95 */
             *codeptr.db += (value - (fixup->location + curr->e.seginfo->start_offset) - 1) & 0xff;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_RELOFF8, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_RELOFF8, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
             break;
         case FIX_RELOFF16:
             //*codeptr.dw += (value - fixup->location + 2) & 0xffff;
             /* changed in v1.95 */
             *codeptr.dw += (value - (fixup->location + curr->e.seginfo->start_offset) - 2) & 0xffff;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_RELOFF16, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dw ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_RELOFF16, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dw ));
             break;
         case FIX_RELOFF32:
 #if AMD64_SUPPORT
@@ -560,27 +562,27 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             //*codeptr.dd += (value - fixup->location + 4);
             /* changed in v1.95 */
             *codeptr.dd += (value - (fixup->location + curr->e.seginfo->start_offset) - 4);
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_RELOFF32, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_RELOFF32, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
             break;
         case FIX_OFF8:
             *codeptr.db = value & 0xff;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF8, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF8, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
             break;
         case FIX_OFF16:
             *codeptr.dw = value & 0xffff;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF16, value=%" FX32 "h, target=%p *target=%Xh\n", curr->sym.name, fixup->location, value, codeptr, *codeptr.dw ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF16, value=%" I32_SPEC "Xh, target=%p *target=%Xh\n", curr->sym.name, fixup->location, value, codeptr, *codeptr.dw ));
             break;
         case FIX_OFF32:
             *codeptr.dd = value;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF32, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF32, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
             break;
         case FIX_OFF32_IMGREL:
             *codeptr.dd = value;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF32_IMGREL, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF32_IMGREL, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
             break;
         case FIX_OFF32_SECREL:
             *codeptr.dd = value;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF32_SECREL, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF32_SECREL, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
             break;
 #if AMD64_SUPPORT
         case FIX_OFF64:
@@ -590,12 +592,12 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             else
 #endif
                 *codeptr.dq = value;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_OFF64, value=%" FX32 "h, *target=%" I64X_SPEC "h\n", curr->sym.name, fixup->location, value, *codeptr.dq ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF64, value=%" I32_SPEC "Xh, *target=%" I64_SPEC "Xh\n", curr->sym.name, fixup->location, value, *codeptr.dq ));
             break;
 #endif
         case FIX_HIBYTE:
             *codeptr.db = (value >> 8) & 0xff;
-            DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_HIBYTE, value=%" FX32 "h, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_HIBYTE, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
             break;
         case FIX_SEG:
             /* absolute segments are ok */
@@ -607,25 +609,25 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             }
 #if MZ_SUPPORT
             if ( ModuleInfo.sub_format == SFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_SEG frame=%u, ", curr->sym.name, fixup->location, fixup->frame_type ));
+                DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_SEG frame=%u, ", curr->sym.name, fixup->location, fixup->frame_type ));
                 if ( fixup->sym->state == SYM_GRP ) {
                     seg = (struct dsym *)fixup->sym;
                     *codeptr.dw = seg->sym.offset >> 4;
-                    DebugMsg(("GROUP symbol, offset=%" FX32 "h codeptr=%p\n", seg->sym.offset, codeptr ));
+                    DebugMsg(("GROUP symbol, offset=%" I32_SPEC "Xh codeptr=%p\n", seg->sym.offset, codeptr ));
                 } else if ( fixup->sym->state == SYM_SEG ) {
                     /* v2.04: added */
                     seg = (struct dsym *)fixup->sym;
                     *codeptr.dw = ( seg->e.seginfo->start_offset + ( seg->e.seginfo->group ? seg->e.seginfo->group->offset : 0 ) ) >> 4;
-                    DebugMsg(("SEGMENT symbol, start_offset=%" FX32 "h\n", seg->e.seginfo->start_offset ));
+                    DebugMsg(("SEGMENT symbol, start_offset=%" I32_SPEC "Xh\n", seg->e.seginfo->start_offset ));
                 //} else if ( seg->e.seginfo->group ) {
                 } else if ( fixup->frame_type == FRAME_GRP ) {
                     /* v2.04: changed */
                     //*codeptr.dw = (seg->e.seginfo->start_offset + seg->e.seginfo->group->offset) >> 4;
                     *codeptr.dw = seg->e.seginfo->group->offset >> 4;
-                    DebugMsg(("group.offset=%" FX32 "h\n", seg->e.seginfo->group->offset ));
+                    DebugMsg(("group.offset=%" I32_SPEC "Xh\n", seg->e.seginfo->group->offset ));
                 } else {
                     *codeptr.dw = seg->e.seginfo->start_offset >> 4;
-                    DebugMsg(("segment.offset=%" FX32 "h\n", seg->e.seginfo->start_offset ));
+                    DebugMsg(("segment.offset=%" I32_SPEC "Xh\n", seg->e.seginfo->start_offset ));
                 }
                 break;
             }
@@ -642,7 +644,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
 #endif
 #if MZ_SUPPORT
             if ( ModuleInfo.sub_format == SFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_PTR16, seg->start=%Xh\n", curr->sym.name, fixup->location, seg->e.seginfo->start_offset ));
+                DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_PTR16, seg->start=%Xh\n", curr->sym.name, fixup->location, seg->e.seginfo->start_offset ));
                 *codeptr.dw = value & 0xffff;
                 codeptr.dw++;
                 //if ( seg->e.seginfo->group ) { /* v2.04: changed */
@@ -670,7 +672,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
 #endif
 #if MZ_SUPPORT
             if ( ModuleInfo.sub_format == SFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %04" FX32 "): FIX_PTR32\n", curr->sym.name, fixup->location ));
+                DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_PTR32\n", curr->sym.name, fixup->location ));
                 *codeptr.dd = value;
                 codeptr.dd++;
                 //if (seg->e.seginfo->group ) { /* v2.04: changed */
@@ -687,7 +689,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             }
 #endif
         default:
-            DebugMsg(("DoFixup(%s, %04" FX32 "): invalid fixup %u\n", curr->sym.name, fixup->location, fixup->type ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): invalid fixup %u\n", curr->sym.name, fixup->location, fixup->type ));
             EmitErr( INVALID_FIXUP_TYPE, ModuleInfo.fmtopt->formatname, fixup->type, curr->sym.name, fixup->location );
             //return( ERROR );
         }
@@ -697,24 +699,24 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
 
 #if PE_SUPPORT
 
-void pe_create_MZ_header( void )
-/******************************/
+static void pe_create_MZ_header( struct module_info *modinfo )
+/************************************************************/
 {
-    int i;
+    const char *p;
     struct asym *sym;
 
     DebugMsg(("pe_create_MZ_header enter\n" ));
-    if ( Parse_Pass == PASS_1 && SymSearch( ".hdr$1" ) == NULL )
-        pe_flags |= PEF_MZHDR;
-    if ( pe_flags & PEF_MZHDR ) {
+    if ( Parse_Pass == PASS_1 && SymSearch( hdrname "1" ) == NULL )
+        modinfo->g.pe_flags |= PEF_MZHDR;
+    if ( modinfo->g.pe_flags & PEF_MZHDR ) {
         DebugMsg(("pe_create_MZ_header: generate code\n" ));
         AddLineQueueX("%r DOTNAME", T_OPTION );
         AddLineQueueX("%s1 %r USE16 %r %s", hdrname, T_SEGMENT, T_WORD, hdrattr );
-        for( i = 0; mzcode[i]; i++ )
-            AddLineQueue( mzcode[i] );
+        for( p = mzcode; p < mzcode + sizeof( mzcode ); p += strlen( p ) + 1 )
+            AddLineQueue( p );
         AddLineQueueX("%s1 %r", hdrname, T_ENDS );
         RunLineQueue();
-        if ( ( sym = SymSearch( ".hdr$1" ) ) && sym->state == SYM_SEG )
+        if ( ( sym = SymSearch( hdrname "1" ) ) && sym->state == SYM_SEG )
            (( struct dsym *)sym)->e.seginfo->segtype = SEGTYPE_HDR;
     }
 }
@@ -727,7 +729,7 @@ static void set_file_flags( struct asym *sym, struct expr *opnd )
     struct dsym *pehdr;
     struct IMAGE_PE_HEADER32 *pe;
 
-    pehdr = ( struct dsym *)SymSearch( ".hdr$2" );
+    pehdr = ( struct dsym *)SymSearch( hdrname "2" );
     if ( !pehdr )
         return;
     pe = (struct IMAGE_PE_HEADER32 *)pehdr->e.seginfo->CodeBuffer;
@@ -763,9 +765,9 @@ void pe_create_PE_header( void )
 #if AMD64_SUPPORT
         }
 #endif
-        pehdr = ( struct dsym *)SymSearch( ".hdr$2" );
+        pehdr = ( struct dsym *)SymSearch( hdrname "2" );
         if ( pehdr == NULL ) {
-            pehdr = (struct dsym *)CreateIntSegment( ".hdr$2", "HDR", 2, ModuleInfo.defOfssize, TRUE );
+            pehdr = (struct dsym *)CreateIntSegment( hdrname "2", "HDR", 2, ModuleInfo.defOfssize, TRUE );
             pehdr->e.seginfo->group = &ModuleInfo.flat_grp->sym;
             pehdr->e.seginfo->combine = COMB_ADDOFF;  /* PUBLIC */
             pehdr->e.seginfo->characteristics = (IMAGE_SCN_MEM_READ >> 24);
@@ -781,8 +783,8 @@ void pe_create_PE_header( void )
         pehdr->e.seginfo->segtype = SEGTYPE_HDR;
         pehdr->e.seginfo->CodeBuffer = LclAlloc( size );
         memcpy( pehdr->e.seginfo->CodeBuffer, p, size );
-#ifdef __UNIX__
-        time((long *)(pehdr->e.seginfo->CodeBuffer+offsetof( struct IMAGE_PE_HEADER32, FileHeader.TimeDateStamp )));
+#if 0 //def __UNIX__
+        time((int_32 *)(pehdr->e.seginfo->CodeBuffer+offsetof( struct IMAGE_PE_HEADER32, FileHeader.TimeDateStamp )));
 #else
         time((time_t *)(pehdr->e.seginfo->CodeBuffer+offsetof( struct IMAGE_PE_HEADER32, FileHeader.TimeDateStamp )));
 #endif
@@ -797,8 +799,8 @@ void pe_create_PE_header( void )
 
 #define CHAR_READONLY ( IMAGE_SCN_MEM_READ >> 24 )
 
-void pe_create_section_table( void )
-/**********************************/
+static void pe_create_section_table( void )
+/*****************************************/
 {
     int i;
     struct dsym *objtab;
@@ -808,10 +810,10 @@ void pe_create_section_table( void )
 
     DebugMsg(("pe_create_section table enter\n" ));
     if ( Parse_Pass == PASS_1 ) {
-        objtab = ( struct dsym *)SymSearch( ".hdr$3" );
+        objtab = ( struct dsym *)SymSearch( hdrname "3" );
         if ( !objtab ) {
             bCreated = TRUE;
-            objtab = (struct dsym *)CreateIntSegment( ".hdr$3", "HDR", 2, ModuleInfo.defOfssize, TRUE );
+            objtab = (struct dsym *)CreateIntSegment( hdrname "3", "HDR", 2, ModuleInfo.defOfssize, TRUE );
             objtab->e.seginfo->group = &ModuleInfo.flat_grp->sym;
             objtab->e.seginfo->combine = COMB_ADDOFF;  /* PUBLIC */
         }
@@ -892,8 +894,8 @@ static int compare_exp( const void *p1, const void *p2 )
     return( strcmp( ((struct expitem *)p1)->name, ((struct expitem *)p2)->name ) );
 }
 
-void pe_emit_export_data( void )
-/******************************/
+static void pe_emit_export_data( void )
+/*************************************/
 {
     struct dsym *curr;
     int_32 timedate;
@@ -906,7 +908,7 @@ void pe_emit_export_data( void )
 
     DebugMsg(("pe_emit_export_data enter\n" ));
     for( curr = SymTables[TAB_PROC].head, cnt = 0; curr; curr = curr->nextproc ) {
-        if( curr->e.procinfo->export )
+        if( curr->e.procinfo->isexport )
             cnt++;
     }
     if ( cnt ) {
@@ -914,7 +916,7 @@ void pe_emit_export_data( void )
         AddLineQueueX( "%r DOTNAME", T_OPTION );
         /* create .edata segment */
         AddLineQueueX( "%s %r %r %s", edataname, T_SEGMENT, T_DWORD, edataattr );
-#ifdef __UNIX__
+#if 0 //def __UNIX__
         time( &timedate );
 #else
         time( (time_t *)&timedate );
@@ -928,7 +930,7 @@ void pe_emit_export_data( void )
          */
         pitems = (struct expitem *)myalloca( cnt * sizeof( struct expitem ) );
         for( curr = SymTables[TAB_PROC].head, pexp = pitems, i = 0; curr; curr = curr->nextproc ) {
-            if( curr->e.procinfo->export ) {
+            if( curr->e.procinfo->isexport ) {
                 pexp->name = curr->sym.name;
                 pexp->idx  = i++;
                 pexp++;
@@ -942,7 +944,7 @@ void pe_emit_export_data( void )
          */
         AddLineQueueX( "@%s_func %r DWORD", name, T_LABEL );
         for( curr = SymTables[TAB_PROC].head; curr; curr = curr->nextproc ) {
-            if( curr->e.procinfo->export )
+            if( curr->e.procinfo->isexport )
                 AddLineQueueX( "DD %r %s", T_IMAGEREL, curr->sym.name );
         }
 
@@ -964,7 +966,7 @@ void pe_emit_export_data( void )
         AddLineQueueX( "@%s_name DB '%s',0", name, fname );
 
         for( curr = SymTables[TAB_PROC].head; curr; curr = curr->nextproc ) {
-            if( curr->e.procinfo->export ) {
+            if( curr->e.procinfo->isexport ) {
                 Mangle( &curr->sym, StringBufferEnd );
                 AddLineQueueX( "@%s DB '%s',0", curr->sym.name, Options.no_export_decoration ? curr->sym.name : StringBufferEnd );
             }
@@ -984,8 +986,8 @@ void pe_emit_export_data( void )
  * .idata$6: strings
  */
 
-void pe_emit_import_data( void )
-/******************************/
+static void pe_emit_import_data( void )
+/*************************************/
 {
     struct dll_desc *p;
     int type = 0;
@@ -1135,7 +1137,7 @@ static void pe_set_base_relocs( struct dsym *reloc )
     for ( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         if ( curr->e.seginfo->segtype == SEGTYPE_HDR )
             continue;
-        for ( fixup = curr->e.seginfo->FixupListHead; fixup; fixup = fixup->nextrlc ) {
+        for ( fixup = curr->e.seginfo->FixupList.head; fixup; fixup = fixup->nextrlc ) {
             switch ( fixup->type ) {
             case FIX_OFF16:
             case FIX_OFF32:
@@ -1176,7 +1178,7 @@ static void pe_set_base_relocs( struct dsym *reloc )
     for ( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         if ( curr->e.seginfo->segtype == SEGTYPE_HDR )
             continue;
-        for ( fixup = curr->e.seginfo->FixupListHead; fixup; fixup = fixup->nextrlc ) {
+        for ( fixup = curr->e.seginfo->FixupList.head; fixup; fixup = fixup->nextrlc ) {
             switch ( fixup->type ) {
             case FIX_OFF16: ftype = IMAGE_REL_BASED_LOW; break;
             case FIX_OFF32: ftype = IMAGE_REL_BASED_HIGHLOW; break;
@@ -1253,9 +1255,9 @@ static void pe_set_values( struct calc_param *cp )
     char *secname;
     char buffer[MAX_ID_LEN+1];
 
-    mzhdr  = ( struct dsym *)SymSearch( ".hdr$1" );
-    pehdr  = ( struct dsym *)SymSearch( ".hdr$2" );
-    objtab = ( struct dsym *)SymSearch( ".hdr$3" );
+    mzhdr  = ( struct dsym *)SymSearch( hdrname "1" );
+    pehdr  = ( struct dsym *)SymSearch( hdrname "2" );
+    objtab = ( struct dsym *)SymSearch( hdrname "3" );
 
     /* make sure all header objects are in FLAT group */
     mzhdr->e.seginfo->group = &ModuleInfo.flat_grp->sym;
@@ -1315,7 +1317,7 @@ static void pe_set_values( struct calc_param *cp )
             cp->rva = (cp->rva + (align - 1)) & (~(align-1));
         }
         CalcOffset( curr, cp );
-        DebugMsg(("pe_set_values: section %s, start ofs=%" FX32 "h, size=%" FX32 "h, file ofs=%" FX32 "h\n",
+        DebugMsg(("pe_set_values: section %s, start ofs=%" I32_SPEC "Xh, size=%" I32_SPEC "Xh, file ofs=%" I32_SPEC "Xh\n",
                   curr->sym.name, curr->e.seginfo->start_offset, curr->sym.max_offset - curr->e.seginfo->start_loc, curr->e.seginfo->fileoffset ));
     }
 
@@ -1382,20 +1384,20 @@ static void pe_set_values( struct calc_param *cp )
             }
         }
         if ( curr->next && curr->next->e.seginfo->lname_idx != i ) {
-            DebugMsg(("pe_set_values: object %.8s, VA=%" FX32 " size=%" FX32 " phys ofs/size=%" FX32 "h/%" FX32 "h\n",
+            DebugMsg(("pe_set_values: object %.8s, VA=%" I32_SPEC "X size=%" I32_SPEC "X phys ofs/size=%" I32_SPEC "Xh/%" I32_SPEC "Xh\n",
                   section->Name, section->VirtualAddress, section->Misc.VirtualSize, section->PointerToRawData, section->SizeOfRawData ));
             section++;
         }
     }
 
 
-    if ( ModuleInfo.start_label ) {
+    if ( ModuleInfo.g.start_label ) {
 #if AMD64_SUPPORT
         if ( ModuleInfo.defOfssize == USE64 )
-            ph64->OptionalHeader.AddressOfEntryPoint = ((struct dsym *)ModuleInfo.start_label->segment)->e.seginfo->start_offset + ModuleInfo.start_label->offset;
+            ph64->OptionalHeader.AddressOfEntryPoint = ((struct dsym *)ModuleInfo.g.start_label->segment)->e.seginfo->start_offset + ModuleInfo.g.start_label->offset;
         else
 #endif
-            ph32->OptionalHeader.AddressOfEntryPoint = ((struct dsym *)ModuleInfo.start_label->segment)->e.seginfo->start_offset + ModuleInfo.start_label->offset;
+            ph32->OptionalHeader.AddressOfEntryPoint = ((struct dsym *)ModuleInfo.g.start_label->segment)->e.seginfo->start_offset + ModuleInfo.g.start_label->offset;
     } else {
         DebugMsg(("pe_set_values: warning: not start label found\n" ));
         EmitWarn( 2, NO_START_LABEL );
@@ -1484,14 +1486,30 @@ static void pe_set_values( struct calc_param *cp )
     //mzhdr->e.seginfo->group = NULL;
 }
 
+/* v2.11: this function is called when the END directive has been found.
+ * Previously the code was run inside EndDirective() directly.
+ */
+
+static ret_code pe_enddirhook( struct module_info *modinfo )
+/**********************************************************/
+{
+    pe_create_MZ_header( modinfo );
+    //pe_create_PE_header(); /* the PE header is created when the .MODEL directive is found */
+    pe_emit_export_data();
+    if ( modinfo->g.DllQueue )
+        pe_emit_import_data();
+    pe_create_section_table();
+    return( NOT_ERROR );
+}
+
 #endif
 
 /* write section contents
  * this is done after the last step only!
  */
 
-ret_code bin_write_data( struct module_info *modinfo )
-/****************************************************/
+static ret_code bin_write_module( struct module_info *modinfo )
+/*************************************************************/
 {
     struct dsym *curr;
     uint_32 size;
@@ -1509,7 +1527,7 @@ ret_code bin_write_data( struct module_info *modinfo )
 #endif
     struct calc_param cp = { TRUE, 0 };
 
-    DebugMsg(("bin_write_data: enter\n" ));
+    DebugMsg(("bin_write_module: enter\n" ));
 
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
         /* reset the offset fields of segments */
@@ -1526,7 +1544,7 @@ ret_code bin_write_data( struct module_info *modinfo )
     case SFORMAT_MZ:
         reloccnt = GetSegRelocs( NULL );
         cp.sizehdr = (reloccnt * 4 + modinfo->mz_data.ofs_fixups + (modinfo->mz_data.alignment - 1)) & ~(modinfo->mz_data.alignment-1);
-        DebugMsg(("bin_write_data: MZ format, fixups=%u, sizehdr=%" FX32 "\n", reloccnt, cp.sizehdr ));
+        DebugMsg(("bin_write_module: MZ format, fixups=%u, sizehdr=%" I32_SPEC "X\n", reloccnt, cp.sizehdr ));
         break;
 #endif
     default:
@@ -1546,22 +1564,21 @@ ret_code bin_write_data( struct module_info *modinfo )
     cp.rva = 0;
     if ( modinfo->sub_format == SFORMAT_PE ) {
         if ( ModuleInfo.model == MODEL_NONE ) {
-            EmitErr( MODEL_IS_NOT_DECLARED );
-            return( ERROR );
+            return( EmitErr( MODEL_IS_NOT_DECLARED ) );
         }
         pe_set_values( &cp );
     } else
 #endif
     if ( modinfo->segorder == SEGORDER_DOSSEG ) {
-        DebugMsg(("bin_write_data: .DOSSEG active\n" ));
+        DebugMsg(("bin_write_module: .DOSSEG active\n" ));
         /* for .DOSSEG, regroup segments (CODE, UNDEF, DATA, BSS) */
         for ( i = 0 ; i < SIZE_DOSSEG; i++ ) {
-            DebugMsg(("bin_write_data: searching segment types %Xh\n", dosseg_order[i] ));
+            DebugMsg(("bin_write_module: searching segment types %Xh\n", dosseg_order[i] ));
             for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
                 if ( curr->e.seginfo->segtype != dosseg_order[i] )
                     continue;
                 CalcOffset( curr, &cp );
-                DebugMsg(("bin_write_data: section %s, start ofs=%" FX32 "h, size=%" FX32 "h, file ofs=%" FX32 "h\n",
+                DebugMsg(("bin_write_module: section %s, start ofs=%" I32_SPEC "Xh, size=%" I32_SPEC "Xh, file ofs=%" I32_SPEC "Xh\n",
                           curr->sym.name, curr->e.seginfo->start_offset, curr->sym.max_offset - curr->e.seginfo->start_loc, curr->e.seginfo->fileoffset ));
             }
         }
@@ -1569,17 +1586,17 @@ ret_code bin_write_data( struct module_info *modinfo )
     } else { /* segment order .SEQ (default) and .ALPHA */
         
         if ( modinfo->segorder == SEGORDER_ALPHA ) {
-            DebugMsg(("bin_write_data: .ALPHA active\n" ));
+            DebugMsg(("bin_write_module: .ALPHA active\n" ));
             SortSegments( 1 );
         }
         for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
             /* ignore absolute segments */
             CalcOffset( curr, &cp );
-            DebugMsg(("bin_write_data(%s): start ofs=%" FX32 "h, size=%" FX32 "h, file ofs=%" FX32 "h, grp=%s\n",
+            DebugMsg(("bin_write_module(%s): start ofs=%" I32_SPEC "Xh, size=%" I32_SPEC "Xh, file ofs=%" I32_SPEC "Xh, grp=%s\n",
                       curr->sym.name, curr->e.seginfo->start_offset, curr->sym.max_offset - curr->e.seginfo->start_loc, curr->e.seginfo->fileoffset, (curr->e.seginfo->group ? curr->e.seginfo->group->name : "NULL" )));
         }
     }
-    DebugMsg(("bin_write_data: all CalcOffset() done\n" ));
+    DebugMsg(("bin_write_module: all CalcOffset() done\n" ));
 
     /* handle relocs */
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
@@ -1600,10 +1617,9 @@ ret_code bin_write_data( struct module_info *modinfo )
     /* for plain binaries make sure the start label is at
      * the beginning of the first segment */
     if ( modinfo->sub_format == SFORMAT_NONE ) {
-        if ( modinfo->start_label ) {
-            if ( cp.entryoffset == -1 || cp.entryseg != modinfo->start_label->segment ) {
-                EmitError( START_LABEL_INVALID );
-                return( ERROR );
+        if ( modinfo->g.start_label ) {
+            if ( cp.entryoffset == -1 || cp.entryseg != modinfo->g.start_label->segment ) {
+                return( EmitError( START_LABEL_INVALID ) );
             }
         }
     }
@@ -1623,7 +1639,7 @@ ret_code bin_write_data( struct module_info *modinfo )
         pMZ->e_crlc    = reloccnt;
         pMZ->e_cparhdr = cp.sizehdr >> 4; /* size header in paras */
         sizeheap = GetImageSize( TRUE ) - sizetotal;
-        DebugMsg(( "bin_write_data: MZ, sizetotal=%" FX32 "h sizeheap=%" FX32 "h\n", sizetotal, sizeheap ));
+        DebugMsg(( "bin_write_module: MZ, sizetotal=%" I32_SPEC "Xh sizeheap=%" I32_SPEC "Xh\n", sizetotal, sizeheap ));
         pMZ->e_minalloc = sizeheap / 16 + ((sizeheap % 16) ? 1 : 0); /* heap min */
         if ( pMZ->e_minalloc < modinfo->mz_data.heapmin )
             pMZ->e_minalloc = modinfo->mz_data.heapmin;
@@ -1637,9 +1653,10 @@ ret_code bin_write_data( struct module_info *modinfo )
             uint_32 addr = stack->e.seginfo->start_offset;
             if ( stack->e.seginfo->group )
                 addr += stack->e.seginfo->group->offset;
-            DebugMsg(("bin_write_data: MZ, stack=%" FX32 "h ofs=%" FX32 "h\n", addr, stack->sym.offset ));
+            DebugMsg(("bin_write_module: MZ, stack=%" I32_SPEC "Xh ofs=%" I32_SPEC "Xh\n", addr, stack->sym.max_offset ));
             pMZ->e_ss = (addr >> 4) + ((addr & 0xF) ? 1 : 0); /* SS */
-            pMZ->e_sp = stack->sym.offset; /* SP */
+            /* v2.11: changed sym.offset to sym.max_offset */
+            pMZ->e_sp = stack->sym.max_offset; /* SP */
         } else {
             EmitWarn( 2, NO_STACK );
         }
@@ -1647,26 +1664,26 @@ ret_code bin_write_data( struct module_info *modinfo )
 
         /* set entry CS:IP if defined */
 
-        if ( modinfo->start_label ) {
+        if ( modinfo->g.start_label ) {
             uint_32 addr;
-            curr = (struct dsym *)modinfo->start_label->segment;
-            DebugMsg(("bin_write_data, start_label: offs=%" FX32 "h, seg.offs=%" FX32 "h, group.offs=%" FX32 "h\n",
-                      modinfo->start_label->offset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset : 0 ));
+            curr = (struct dsym *)modinfo->g.start_label->segment;
+            DebugMsg(("bin_write_module, start_label: offs=%" I32_SPEC "Xh, seg.offs=%" I32_SPEC "Xh, group.offs=%" I32_SPEC "Xh\n",
+                      modinfo->g.start_label->offset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset : 0 ));
             if ( curr->e.seginfo->group ) {
                 addr = curr->e.seginfo->group->offset;
-                pMZ->e_ip = (addr & 0xF ) + curr->e.seginfo->start_offset + modinfo->start_label->offset; /* IP */
+                pMZ->e_ip = (addr & 0xF ) + curr->e.seginfo->start_offset + modinfo->g.start_label->offset; /* IP */
                 pMZ->e_cs = addr >> 4; /* CS */
             } else {
                 addr = curr->e.seginfo->start_offset;
-                pMZ->e_ip = (addr & 0xF ) + modinfo->start_label->offset; /* IP */
+                pMZ->e_ip = (addr & 0xF ) + modinfo->g.start_label->offset; /* IP */
                 pMZ->e_cs = addr >> 4; /* CS */
             }
         } else {
-            DebugMsg(("bin_write_data, ModuleInfo->start_label=%p\n", modinfo->start_label ));
+            DebugMsg(("bin_write_module, ModuleInfo->start_label=%p\n", modinfo->g.start_label ));
             EmitWarn( 2, NO_START_LABEL );
         }
         pMZ->e_lfarlc = modinfo->mz_data.ofs_fixups;
-        DebugMsg(("bin_write_data: MZ, mzdata ofs_fixups=%Xh, alignment=%Xh\n", modinfo->mz_data.ofs_fixups, modinfo->mz_data.alignment ));
+        DebugMsg(("bin_write_module: MZ, mzdata ofs_fixups=%Xh, alignment=%Xh\n", modinfo->mz_data.ofs_fixups, modinfo->mz_data.alignment ));
         GetSegRelocs( (uint_16 *)( hdrbuf + pMZ->e_lfarlc ) );
         break;
 #endif
@@ -1700,7 +1717,7 @@ ret_code bin_write_data( struct module_info *modinfo )
 
 #ifdef DEBUG_OUT
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
-        DebugMsg(("bin_write_data(%s): type=%u written=%" FX32 " max=%" FX32 " start=%" FX32 " fileofs=%" FX32 "\n",
+        DebugMsg(("bin_write_module(%s): type=%u written=%" I32_SPEC "X max=%" I32_SPEC "X start=%" I32_SPEC "X fileofs=%" I32_SPEC "X\n",
                 curr->sym.name, curr->e.seginfo->segtype,
                 curr->e.seginfo->bytes_written,
                 curr->sym.max_offset,
@@ -1712,7 +1729,7 @@ ret_code bin_write_data( struct module_info *modinfo )
     /* write sections */
     for( curr = SymTables[TAB_SEG].head, first = TRUE; curr; curr = curr->next ) {
         if ( curr->e.seginfo->segtype == SEGTYPE_ABS ) {
-            DebugMsg(("bin_write_data(%s): ABS segment not written\n", curr->sym.name ));
+            DebugMsg(("bin_write_module(%s): ABS segment not written\n", curr->sym.name ));
             continue;
         }
 #if PE_SUPPORT
@@ -1733,7 +1750,7 @@ ret_code bin_write_data( struct module_info *modinfo )
                 if ( dir->e.seginfo->bytes_written )
                     break;
             if ( !dir ) {
-                DebugMsg(("bin_write_data(%s): segment not written, size=% " FX32 "h sizemem=%" FX32 "\n",
+                DebugMsg(("bin_write_module(%s): segment not written, size=% " I32_SPEC "Xh sizemem=%" I32_SPEC "X\n",
                           curr->sym.name, size, sizemem ));
                 size = 0;
             }
@@ -1747,7 +1764,7 @@ ret_code bin_write_data( struct module_info *modinfo )
         LstNL();
 #endif
         if ( size != 0 && curr->e.seginfo->CodeBuffer ) {
-            DebugMsg(("bin_write_data(%s): write %" FX32 "h bytes at offset %" FX32 "h, initialized bytes=%lu, buffer=%p\n",
+            DebugMsg(("bin_write_module(%s): write %" I32_SPEC "Xh bytes at offset %" I32_SPEC "Xh, initialized bytes=%" I32_SPEC "u, buffer=%p\n",
                       curr->sym.name, size, curr->e.seginfo->fileoffset, curr->e.seginfo->bytes_written, curr->e.seginfo->CodeBuffer ));
             fseek( CurrFile[OBJ], curr->e.seginfo->fileoffset, SEEK_SET );
 #ifdef __I86__
@@ -1759,7 +1776,7 @@ ret_code bin_write_data( struct module_info *modinfo )
 #endif
         }
 #ifdef DEBUG_OUT
-        else DebugMsg(("bin_write_data(%s): nothing written\n", curr->sym.name ));
+        else DebugMsg(("bin_write_module(%s): nothing written\n", curr->sym.name ));
 #endif
         first = FALSE;
     }
@@ -1792,15 +1809,30 @@ ret_code bin_write_data( struct module_info *modinfo )
     LstPrintf( szTotal, " ", sizetotal, sizeheap );
     LstNL();
 #endif
-    DebugMsg(("bin_write_data: exit\n"));
+    DebugMsg(("bin_write_module: exit\n"));
 
     return( NOT_ERROR );
 }
 #endif
 
-void bin_init( struct module_info *modinfo )
-/***************************š**************/
+static ret_code bin_check_external( struct module_info *modinfo )
+/***************************************************************/
 {
+    struct dsym *curr;
+    for ( curr = SymTables[TAB_EXT].head; curr != NULL ; curr = curr->next )
+        if( curr->sym.weak == FALSE || curr->sym.used == TRUE ) {
+            DebugMsg(("CheckExternal: error, %s weak=%u\n", curr->sym.name, curr->sym.weak ));
+            return( EmitErr( FORMAT_DOESNT_SUPPORT_EXTERNALS, curr->sym.name ) );
+        }
+    return( NOT_ERROR );
+}
+
+
+void bin_init( struct module_info *modinfo )
+/******************************************/
+{
+    modinfo->g.WriteModule = bin_write_module;
+    modinfo->g.Pass1Checks = bin_check_external;
     switch ( modinfo->sub_format ) {
 #if MZ_SUPPORT
     case SFORMAT_MZ:
@@ -1809,7 +1841,7 @@ void bin_init( struct module_info *modinfo )
 #endif
 #if PE_SUPPORT
     case SFORMAT_PE:
-        pe_flags = 0;
+        modinfo->g.EndDirHook = pe_enddirhook; /* v2.11 */
         break;
 #endif
     }

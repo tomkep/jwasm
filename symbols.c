@@ -28,6 +28,8 @@
 *
 ****************************************************************************/
 
+#include <time.h>
+
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
@@ -64,14 +66,13 @@
  * MSVC is a bit faster then.
  */
 #define USEFIXSYMCMP 0 /* 1=don't use a function pointer for string compare */
+#define USESTRFTIME 0 /* 1=use strftime() */
 
 #if USEFIXSYMCMP
 #define SYMCMP( x, y, z ) ( ModuleInfo.case_sensitive ? memcmp( x, y, z ) : _memicmp( x, y, z ) )
 #else
 #define SYMCMP( x, y, z ) SymCmpFunc( x, y, z )
 #endif
-
-#define DUMPSYMBOLS 0 /* for debug version only*/
 
 extern struct asym *FileCur;  /* @FileCur symbol    */
 extern struct asym *LineCur;  /* @Line symbol       */
@@ -92,6 +93,7 @@ static unsigned      SymCount;    /* Number of symbols in global table */
 static char          szDate[12];  /* value of @Date symbol */
 static char          szTime[12];  /* value of @Time symbol */
 
+#if USESTRFTIME
 #if defined(__WATCOMC__) || defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__)
 static const char szDateFmt[] = "%D"; /* POSIX date (mm/dd/yy) */
 static const char szTimeFmt[] = "%T"; /* POSIX time (HH:MM:SS) */
@@ -100,8 +102,9 @@ static const char szTimeFmt[] = "%T"; /* POSIX time (HH:MM:SS) */
 static const char szDateFmt[] = "%x"; /* locale's date */
 static const char szTimeFmt[] = "%X"; /* locale's time */
 #endif
+#endif
 
-static struct asym  *symPC = NULL;
+static struct asym *symPC; /* the $ symbol */
 
 struct tmitem {
     const char *name;
@@ -128,7 +131,7 @@ static const struct tmitem tmtab[] = {
 struct eqitem {
     const char *name;
     uint_32 value;
-    internal_func sfunc_ptr;
+    void (* sfunc_ptr)( struct asym *, void * );
     struct asym **store;
 };
 
@@ -167,10 +170,7 @@ static unsigned int hashpjw( const char *s )
 void SymSetCmpFunc( void )
 /************************/
 {
-    if ( ModuleInfo.case_sensitive == TRUE )
-        SymCmpFunc = memcmp;
-    else
-        SymCmpFunc = _memicmp;
+    SymCmpFunc = ( ModuleInfo.case_sensitive == TRUE ? memcmp : (StrCmpFunc)_memicmp );
     return;
 }
 
@@ -231,10 +231,14 @@ struct asym *SymAlloc( const char *name )
 
     sym = LclAlloc( sizeof( struct dsym ) );
     memset( sym, 0, sizeof( struct dsym ) );
+#if 1
+    /* the tokenizer ensures that identifiers are within limits, so
+     * this check probably is redundant */
     if( len > MAX_ID_LEN ) {
         EmitError( IDENTIFIER_TOO_LONG );
         len = MAX_ID_LEN;
     }
+#endif
     sym->name_size = len;
     sym->list = ModuleInfo.cref;
     sym->mem_type = MT_EMPTY;
@@ -263,7 +267,7 @@ struct asym *SymFind( const char *name )
     i = hashpjw( name );
 
     if ( CurrProc ) {
-        for( lsym = &lsym_table[ i % LHASH_TABLE_SIZE ]; *lsym; lsym = &((*lsym)->next) ) {
+        for( lsym = &lsym_table[ i % LHASH_TABLE_SIZE ]; *lsym; lsym = &((*lsym)->nextitem ) ) {
             if ( len == (*lsym)->name_size && SYMCMP( name, (*lsym)->name, len ) == 0 ) {
                 DebugMsg1(("SymFind(%s): found in local table, state=%u, local=%u\n", name, (*lsym)->state, (*lsym)->scoped ));
                 return( *lsym );
@@ -271,7 +275,7 @@ struct asym *SymFind( const char *name )
         }
     }
 
-    for( gsym = &gsym_table[ i % GHASH_TABLE_SIZE ]; *gsym; gsym = &((*gsym)->next) ) {
+    for( gsym = &gsym_table[ i % GHASH_TABLE_SIZE ]; *gsym; gsym = &((*gsym)->nextitem ) ) {
         if ( len == (*gsym)->name_size && SYMCMP( name, (*gsym)->name, len ) == 0 ) {
             DebugMsg1(("SymFind(%s): found, state=%u memtype=%X lang=%u\n", name, (*gsym)->state, (*gsym)->mem_type, (*gsym)->langtype ));
             return( *gsym );
@@ -312,13 +316,11 @@ struct asym *SymLookup( const char *name )
     return( sym );
 }
 
-/* this function also creates a label if it isn't defined yet,
- * but the label is preferably created in the local namespace
- * of the current procedure if bLocal==TRUE.
+/* SymLookupLocal() creates a local label if it isn't defined yet.
  * called by LabelCreate() [see labels.c]
  */
-struct asym *SymLookupLabel( const char *name, int bLocal )
-/*********************************************************/
+struct asym *SymLookupLocal( const char *name )
+/*********************************************/
 {
     //struct asym      **sym_ptr;
     struct asym      *sym;
@@ -326,57 +328,28 @@ struct asym *SymLookupLabel( const char *name, int bLocal )
     sym = SymFind( name );
     if ( sym == NULL ) {
         sym = SymAlloc( name );
-        if ( CurrProc && bLocal && ModuleInfo.scoped ) {
-            sym->scoped = TRUE;
-            /* add the label to the local hash table */
-            //sym->next = *lsym;
-            *lsym = sym;
-            DebugMsg1(("SymLookupLabel(%s): local symbol created in %s\n", name, CurrProc->sym.name));
-        } else {
-            DebugMsg1(("SymLookupLabel(%s): global symbol created\n", name));
-            //sym->next = *gsym;
-            *gsym = sym;
-            SymCount++;
-        }
-    } else if( sym->state == SYM_UNDEFINED &&
-               sym->scoped == FALSE && CurrProc && bLocal && ModuleInfo.scoped ) {
-        /* the label was defined due to a FORWARD reference.
-         * Its scope is to be changed from global to local.
-         */
         sym->scoped = TRUE;
-        /* remove the label from the global hash table */
-        *gsym = sym->next;
-        SymCount--;
         /* add the label to the local hash table */
         //sym->next = *lsym;
-        sym->next = NULL;
         *lsym = sym;
-        DebugMsg1(("SymLookupLabel(%s): label moved into %s's local namespace\n", sym->name, CurrProc->sym.name ));
+        DebugMsg1(("SymLookupLocal(%s): local symbol created in %s\n", name, CurrProc->sym.name));
+    } else if( sym->state == SYM_UNDEFINED && sym->scoped == FALSE ) {
+        /* if the label was defined due to a FORWARD reference,
+         * its scope is to be changed from global to local.
+         */
+        /* remove the label from the global hash table */
+        *gsym = sym->nextitem;
+        SymCount--;
+        sym->scoped = TRUE;
+        /* add the label to the local hash table */
+        //sym->next = *lsym;
+        sym->nextitem = NULL;
+        *lsym = sym;
+        DebugMsg1(("SymLookupLocal(%s): label moved into %s's local namespace\n", sym->name, CurrProc->sym.name ));
     }
 
-    DebugMsg1(("SymLookupLabel(%s): found, state=%u, defined=%u\n", name, sym->state, sym->isdefined));
+    DebugMsg1(("SymLookupLocal(%s): found, state=%u, defined=%u\n", name, sym->state, sym->isdefined));
     return( sym );
-}
-
-static void FreeASym( struct asym *sym )
-/**************************************/
-{
-    //DebugMsg(("FreeASym: delete %s, state=%X\n", sym->name, sym->state));
-#if FASTPASS==0 /* v2.09: why is this FASTPASS and not FASTMEM? */
-    struct fixup     *curr;
-    struct fixup     *next;
-
-    if ( Parse_Pass == PASS_1 ) /* why pass one only? */
-        for( curr = sym->bp_fixup ; curr; ) {
-            next = curr->nextbp;
-            LclFree( curr );
-            curr = next;
-        }
-#endif
-#if FASTMEM==0
-    if ( sym->name_size ) LclFree( sym->name );
-#endif
-    LclFree( sym );
 }
 
 /* free state-specific info of a symbol */
@@ -424,8 +397,9 @@ static void free_ext( struct asym *sym )
             LclFree( sym->string_ptr );
         break;
 #ifdef DEBUG_OUT 
-    case SYM_STACK: /* to be removed, this can't happen anymore. */
-        if ( sym->mem_type == MT_TYPE && *sym->type->name == NULLC ) {
+    case SYM_STACK:
+        /* to be removed, this can't happen anymore. */
+        if ( sym->mem_type == MT_TYPE && *sym->type->name == NULLC ) { 
             DebugMsg(( "free_ext: case SYM_STACK, sym=%s with private type\n", sym->name ));
             /* symbol has a "private" type */
             SymFree( sym->type );
@@ -435,26 +409,37 @@ static void free_ext( struct asym *sym )
     }
 }
 
-/* free a symbol directly without a try to find it first
- * (it's not in global namespace)
+/* free a symbol.
+ * the symbol is no unlinked from hash tables chains,
+ * hence it is assumed that this is either not needed
+ * or done by the caller.
  */
+
 void SymFree( struct asym *sym )
 /******************************/
 {
     //DebugMsg(("SymFree: free %X, name=%s, state=%X\n", sym, sym->name, sym->state));
     free_ext( sym );
 #if FASTMEM==0
-    /* there are some items which are located in static memory! */
-    /* v2.09: obsolete */
-    //if ( sym->isstatic == FALSE )
+    if ( sym->state != SYM_EXTERNAL ) {
+        struct fixup *fix;
+        for( fix = sym->bp_fixup ; fix; ) {
+            struct fixup *next = fix->nextbp;
+            DebugMsg(("SymFree: free bp fixup %p\n", fix ));
+            LclFree( fix );
+            fix = next;
+        }
+    }
+    if ( sym->name_size ) LclFree( sym->name );
 #endif
-        FreeASym( sym );
+    LclFree( sym );
     return;
 }
 
 /* add a symbol to local table and set the symbol's name.
  * the previous name was "", the symbol wasn't in a symbol table.
- * this function is called for PROC parameters ( see proc.c ).
+ * Called by:
+ * - ParseParams() in proc.c for procedure parameters.
  */
 struct asym *SymAddLocal( struct asym *sym, const char *name )
 /************************************************************/
@@ -473,13 +458,15 @@ struct asym *SymAddLocal( struct asym *sym, const char *name )
     sym->name_size = strlen( name );
     sym->name = LclAlloc( sym->name_size + 1 );
     memcpy( sym->name, name, sym->name_size + 1 );
-    sym->next = NULL;
+    sym->nextitem = NULL;
     *lsym = sym;
     return( sym );
 }
 
-#if 1
-/* add a symbol to the global symbol table */
+/* add a symbol to the global symbol table.
+ * Called by:
+ * - RecordDirective() in types.c to add bitfield fields (which have global scope).
+ */
 
 struct asym *SymAddGlobal( struct asym *sym )
 /*******************************************/
@@ -488,12 +475,11 @@ struct asym *SymAddGlobal( struct asym *sym )
         EmitErr( SYMBOL_ALREADY_DEFINED, sym->name );
         return( NULL );
     }
-    sym->next = NULL;
+    sym->nextitem = NULL;
     *gsym = sym;
     SymCount++;
     return( sym );
 }
-#endif
 
 struct asym *SymCreate( const char *name )
 /****************************************/
@@ -538,7 +524,7 @@ void SymMakeAllSymbolsPublic( void )
     struct asym  *sym;
 
     for( i = 0; i < GHASH_TABLE_SIZE; i++ ) {
-        for( sym = gsym_table[i]; sym; sym = sym->next ) {
+        for( sym = gsym_table[i]; sym; sym = sym->nextitem ) {
             if ( sym->state == SYM_INTERNAL &&
                 /* v2.07: MT_ABS is obsolete */
                 //sym->mem_type != MT_ABS &&  /* no EQU or '=' constants */
@@ -547,8 +533,8 @@ void SymMakeAllSymbolsPublic( void )
                 sym->included == FALSE && /* v2.09: symbol already added to public queue? */
                 //sym->scoped == FALSE && /* v2.09: no procs that are marked as "private" */
                 sym->name[1] != '&' && /* v2.10: no @@ code labels */
-                sym->public == FALSE ) {
-                sym->public = TRUE;
+                sym->ispublic == FALSE ) {
+                sym->ispublic = TRUE;
                 AddPublicData( sym );
             }
         }
@@ -566,7 +552,19 @@ void SymFini( void )
     unsigned i;
 #endif
 
-#if defined( DEBUG_OUT )
+#ifdef DEBUG_OUT
+    if ( Options.dump_symbols_hash ) {
+        for( i = 0; i < GHASH_TABLE_SIZE; i++ ) {
+            struct asym  *sym = gsym_table[i];
+            if ( sym ) {
+                printf("%4u ", i );
+                for( ; sym; sym = sym->nextitem ) {
+                    printf("%-16s ", sym->name );
+                }
+                printf("\n" );
+            }
+        }
+    }
     DumpSymbols();
 #endif
 
@@ -576,7 +574,7 @@ void SymFini( void )
         struct asym  *sym;
         struct asym  *next;
         for( sym = gsym_table[i]; sym; ) {
-            next = sym->next;
+            next = sym->nextitem;
             SymFree( sym );
             SymCount--;
             sym = next;
@@ -600,12 +598,20 @@ void SymInit( void )
     DebugMsg(("SymInit() enter\n"));
     SymCount = 0;
 
+    /* v2.11: ensure CurrProc is NULL - might be a problem if multiple files are assembled */
+    CurrProc = NULL;
+
     memset( gsym_table, 0, sizeof(gsym_table) );
 
     time_of_day = time( NULL );
     now = localtime( &time_of_day );
+#if USESTRFTIME
     strftime( szDate, 9, szDateFmt, now );
     strftime( szTime, 9, szTimeFmt, now );
+#else
+    sprintf( szDate, "%02u/%02u/%02u", now->tm_mon + 1, now->tm_mday, now->tm_year % 100 );
+    sprintf( szTime, "%02u:%02u:%02u", now->tm_hour, now->tm_min, now->tm_sec );
+#endif
 
     for( i = 0; i < sizeof(tmtab) / sizeof(tmtab[0]); i++ ) {
         sym = SymCreate( tmtab[i].name );
@@ -664,7 +670,7 @@ void SymPassInit( int pass )
      */
     for( i = 0; i < GHASH_TABLE_SIZE; i++ ) {
         struct asym *sym;
-        for( sym = gsym_table[i]; sym; sym = sym->next ) {
+        for( sym = gsym_table[i]; sym; sym = sym->nextitem ) {
             if ( sym->predefined == FALSE ) {
                 /* v2.04: all symbol's "defined" flag is now reset. */
                 // if ( sym->state == SYM_TMACRO ||
@@ -693,7 +699,7 @@ void SymGetAll( struct asym **syms )
 
     /* copy symbols to table */
     for( i = j = 0; i < GHASH_TABLE_SIZE; i++ ) {
-        for( sym = gsym_table[i]; sym; sym = sym->next ) {
+        for( sym = gsym_table[i]; sym; sym = sym->nextitem ) {
             syms[j++] = sym;
         }
     }
@@ -711,7 +717,7 @@ struct asym *SymEnum( struct asym *sym, int *pi )
         *pi = 0;
         sym = gsym_table[*pi];
     } else {
-        sym = sym->next;
+        sym = sym->nextitem;
     }
 
     /* v2.10: changed from for() to while() */
@@ -722,78 +728,85 @@ struct asym *SymEnum( struct asym *sym, int *pi )
     return( sym );
 }
 
-#if defined( DEBUG_OUT )
+#ifdef DEBUG_OUT
 
-#if DUMPSYMBOLS
 static void DumpSymbol( struct asym *sym )
 /****************************************/
 {
     struct dsym *dir;
     char        *type;
+    uint_64     value = sym->uvalue;
     //const char  *langtype;
 
     dir = (struct dsym *)sym;
 
     switch( sym->state ) {
     case SYM_UNDEFINED:
-        type = "UNDEFINED";
+        type = "Undefined";
         break;
     case SYM_INTERNAL:
         if ( sym->isproc )
-            type = "PROCEDURE";
+            type = "Procedure";
         //else if ( sym->mem_type == MT_ABS )
-        else if ( sym->segment == NULL )
-            type = "NUMBER";
+        else if ( sym->segment == NULL ) {
+            type = "Number";
+            value += ((uint_64)(uint_32)sym->value3264) << 32;
+        } else if ( sym->mem_type == MT_NEAR || sym->mem_type == MT_FAR )
+            type = "Code Label";
         else
-            type = "INTERNAL";
+            type = "Data Label";
         break;
     case SYM_EXTERNAL:
         if ( sym->isproc )
-            type = "PROTO";
-        else if ( sym->comm )
-            type = "COMMUNAL";
+            type = "Proto";
+        else if ( sym->iscomm )
+            type = "Communal";
+        else if ( sym->mem_type == MT_EMPTY )
+            type = "Number (ext)";
+        else if ( sym->mem_type == MT_NEAR || sym->mem_type == MT_FAR )
+            type = "Code (ext)";
         else
-            type = "EXTERNAL";
+            type = "Data (ext)";
         break;
     case SYM_SEG:
-        type = "SEGMENT";
+        type = "Segment";
         break;
     case SYM_GRP:
-        type = "GROUP";
+        type = "Group";
         break;
     case SYM_STACK: /* should never be found in global table */
-        type = "STACK VAR";
+        type = "Stack Var";
         break;
     case SYM_STRUCT_FIELD: /* record bitfields are in global namespace! */
-        type = "STRUCT FIELD";
+        type = "Struct Field";
         break;
     case SYM_TYPE:
         switch ( sym->typekind ) {
-        case TYPE_UNION:   type = "UNION";     break;
-        case TYPE_TYPEDEF: type = "TYPEDEF";   break;
-        case TYPE_RECORD:  type = "RECORD";    break;
-        default:           type = "STRUCTURE"; break;
+        case TYPE_STRUCT:  type = "Structure"; break;
+        case TYPE_UNION:   type = "Union";     break;
+        case TYPE_TYPEDEF: type = "Typedef";   break;
+        case TYPE_RECORD:  type = "Record";    break;
+        default:           type = "Undef Type";break;
         }
         break;
     case SYM_ALIAS:
-        type = "ALIAS";
+        type = "Alias";
         break;
     case SYM_MACRO:
-        type = "MACRO";
+        type = "Macro";
         break;
     case SYM_TMACRO:
-        type = "TEXT";
+        type = "Text";
         break;
     //case SYM_CLASS_LNAME: /* never stored in global or local table */
     //    type = "CLASS";
     //    break;
     default:
-        type = "UNKNOWN";
+        type = "Unknown";
         break;
     }
-    DebugMsg(( "%8p: %-30s %-12s  %8" FX32 "  %8p %8p %8p %s\n", sym, sym->name, type, sym->offset, dir->e, sym->name, sym->next, sym->public ? "PUBLIC " : "" ));
+    printf( "%-12s  %16" I64_SPEC "X  %8p %c %8p %s\n", type, value, dir->e, sym->ispublic ? 'X' : ' ', sym->name, sym->name );
 }
-#endif
 
 static void DumpSymbols( void )
 /*****************************/
@@ -809,12 +822,17 @@ static void DumpSymbols( void )
     unsigned            curr = 0;
 
     DebugMsg(("DumpSymbols enter\n"));
+    if ( Options.dump_symbols ) {
+        printf( "   # Addr     Type                     Value    Ext    P  pName   Name\n" );
+        printf( "-----------------------------------------------------------------------------\n" );
+    }
     for( i = 0; i < GHASH_TABLE_SIZE; i++ ) {
-        for( sym = gsym_table[i], curr = 0; sym; sym = sym->next ) {
+        for( sym = gsym_table[i], curr = 0; sym; sym = sym->nextitem ) {
             curr++;
-#if DUMPSYMBOLS
-            DumpSymbol( sym );
-#endif
+            if ( Options.dump_symbols ) {
+                printf("%4u %8p ", i, sym );
+                DumpSymbol( sym );
+            }
         }
         count += curr;
         if ( curr == 0 )

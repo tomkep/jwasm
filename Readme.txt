@@ -111,39 +111,36 @@ JWasm Readme
 
     name         tool chain used               creates binary for
     ---------------------------------------------------------------
-    Makefile     Open Watcom v1.7a-v1.9        Win32, DOS (32-bit)
-    OWDOS16.MAK  Open Watcom v1.7a-v1.9        DOS (16-bit)
-    OWOS2.MAK    Open Watcom v1.7a-v1.9        OS/2 (32-bit)
-    OWLinux.MAK  Open Watcom v1.7a-v1.9        Linux
-    Msvc.MAK     VC++ TK 2003/VC++ 2005 EE     Win32 [, DOS (32-bit)]
+    Makefile     Open Watcom v1.8-v1.9         Win32 [, DOS (32-bit)]
+    OWDOS16.MAK  Open Watcom v1.8-v1.9         DOS (16-bit)
+    OWOS2.MAK    Open Watcom v1.8-v1.9         OS/2 (32-bit)
+    OWLinux.MAK  Open Watcom v1.8-v1.9         Linux
+    OWWinDll.MAK Open Watcom v1.8-v1.9         Win32 (JWasm.dll)
+    Msvc.MAK     VC++ TK 2003/VC++ 2008 EE     Win32 [, DOS (32-bit)]
     Msvc64.MAK   VC++ 2010                     Win64
-    PCC.MAK      PCC                           Win32
-    BCC.MAK      Borland C++ Cmdline Tools     Win32
+    MsvcDll.MAK  VC++ TK 2003                  Win32 (JWasm.dll)
     GccWin.MAK   GCC, MinGW/Cygwin             Win32
+    GccWin64.MAK GCC, MinGW-w64                Win64
     GccDos.MAK   GCC, DJGPP                    DOS (32-bit)
     GccUnix.MAK  GCC, FreeBSD/Linux            FreeBSD [, Linux]
-    TCC.MAK      Tiny C                        Win32
+    ---------------------------------------------------------------
+    BCC.MAK      Borland C++ Cmdline Tools     Win32
     OC.MAK       Orange C                      Win32
-    GccWin64.MAK GCC, MinGW-w64                Win64
+    PCC.MAK      PCC                           Win32
+    PellesC.MAK  Pelles C v7                   Win32, Win64
+    TCC.MAK      Tiny C                        Win32
     IntelC32.MAK Intel C++ Compiler, MSVC      Win32
     IntelC64.MAK Intel C++ Compiler, MSVC      Win64
-    ---------------------------------------------------------------
-    OWWinDll.MAK Open Watcom v1.7a-v1.9        Win32 (JWasm.dll)
-    MsvcDll.MAK  VC++ TK 2003                  Win32 (JWasm.dll)
-    PellesC.MAK  Pelles C v7                   Win32, Win64 (*)
 
      The makefiles that use the OW tool chain are supposed to be run
-    with Open Watcom's WMake, MSVC.MAK and IntelC*.mak should be run with
+    with Open Watcom's WMake, Msvc*.MAK and IntelC*.MAK should be run with
     MS NMAKE, PellesC.MAK expects POMAKE and for Gcc*.MAK GNU make is to be
     used.
 
     More detailed information may be found in the makefiles themselves!
 
-     The default settings in Makefile will create both the Win32 and
-    32bit-DOS binaries of JWasm.
-
-    (*): PellesC creates a slightly incompatible JWasm binary; the least
-         significant bit of floats may differ from what Masm emits.
+    Please note that only the binaries created with toolchains Open Watcom,
+    VC++ and GCC are regularily tested to pass the JWasm regression test.
 
 
     7. Using JWasm with Visual Studio
@@ -166,8 +163,8 @@ JWasm Readme
     These people contributed to JWasm ( additions, bugfixes, bug reports):
 
     agner, BlackVortex, dosfan01, drizz, Paul Edwards, filofel, Peter Flass,
-    James C. Fuller, gfalen, habran, Japheth, Jimg, jj2007, Khusraw, 
-    Alex Kozlov, Peter Kuznetsov, misca, Michal Necasek, H. Nidudsson,
+    James C. Fuller, gfalen, habran, Japheth, Jimg, jj2007, John Hankinson,
+    Khusraw, Alex Kozlov, Peter Kuznetsov, misca, Michal Necasek, H. Nidudsson,
     Nikitakita, Jose Pascoa, Terry Philips, qWord, RotateRight, Ito Toshimitsu,
     Vortex.
 

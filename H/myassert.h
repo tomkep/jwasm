@@ -29,24 +29,17 @@
 ****************************************************************************/
 
 #ifndef MYASSERT_H
+#define MYASSERT_H
 
-#if defined( __WATCOMC__ ) && !defined( __AXP__ )
-#pragma aux InternalError aborts;
-#endif
-
-extern int InternalError( const char *file, unsigned line );
-
-#ifndef __FNAME__
-#define __FNAME__ __FILE__
-#endif
 
 #ifdef NDEBUG
-#   define never_reach()    ((void)0)
-#   define myassert(expr)   ((void)0)
+#define myassert(expr)   ((void)0)
 #else
-#   define never_reach()    InternalError(__FNAME__,__LINE__)
-#   define myassert(expr)   ((void)((expr) ? 0 : InternalError(__FNAME__,__LINE__)))
+#if defined( __WATCOMC__ )
+#pragma aux InternalError aborts;
+#endif
+extern int InternalError( const char *file, unsigned line );
+#define myassert(expr)   ((void)((expr) ? 0 : InternalError(__FILE__,__LINE__)))
 #endif
 
-#define MYASSERT_H  1
 #endif

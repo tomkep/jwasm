@@ -35,7 +35,7 @@
 
 struct cv_primitive_type {
     uint_16 size:3, /* see CV_PDS_ below */
-    reserved:1,
+    reserved:1,     /* added to size in CV8? */
     type:4,         /* see CV_PDT_ below */
     mode:3,         /* see CV_PDM_ below */
     reserved2:1;
@@ -49,18 +49,20 @@ typedef uint_16 cv_typeref;
 typedef uint_32 cv_typeref;
 #endif
 
+/* bits 4-7 of predefined primitive types */
 enum cv_predef_type_types {
-    CV_PDT_SPECIAL           = 0x00,
-    CV_PDT_SIGNED_INTEGRAL   = 0x01,
-    CV_PDT_UNSIGNED_INTEGRAL = 0x02,
-    CV_PDT_BOOLEAN           = 0x03,
-    CV_PDT_REAL              = 0x04,
-    CV_PDT_COMPLEX           = 0x05,
-    CV_PDT_SPECIAL2          = 0x06,
-    CV_PDT_REAL_INT_VALUE    = 0x07
+    CV_PDT_SPECIAL           = 0x00, /* CV_PDS_SPECIAL_xxx  */
+    CV_PDT_SIGNED_INTEGRAL   = 0x01, /* CV_PDS_INTEGRAL_xxx */
+    CV_PDT_UNSIGNED_INTEGRAL = 0x02, /* CV_PDS_INTEGRAL_xxx */
+    CV_PDT_BOOLEAN           = 0x03, /* CV_PDS_INTEGRAL_xxx */
+    CV_PDT_REAL              = 0x04, /* CV_PDS_REAL_xxx     */
+    CV_PDT_COMPLEX           = 0x05, /* CV_PDS_REAL_xxx     */
+    CV_PDT_SPECIAL2          = 0x06, /* CV_PDS_SPECIAL2_xxx */
+    CV_PDT_REAL_INT_VALUE    = 0x07  /* CV_PDS_REAL_INT_xxx */
     /* values 08-0F are reserved */
 };
 
+/* bits 0-2 of predefined primitive types */
 enum cv_predef_type_sizes {
     CV_PDS_SPECIAL_NO_TYPE           = 0x00,
     CV_PDS_SPECIAL_ABSOLUTE          = 0x01,
@@ -74,13 +76,27 @@ enum cv_predef_type_sizes {
     CV_PDS_INTEGRAL_2BYTE            = 0x01,
     CV_PDS_INTEGRAL_4BYTE            = 0x02,
     CV_PDS_INTEGRAL_8BYTE            = 0x03,
+    /* values 4-7 reserved */
     CV_PDS_REAL_32BIT                = 0x00,
     CV_PDS_REAL_64BIT                = 0x01,
     CV_PDS_REAL_80BIT                = 0x02,
     CV_PDS_REAL_128BIT               = 0x03,
-    CV_PDS_REAL_48BIT                = 0x04
+    CV_PDS_REAL_48BIT                = 0x04,
+    /* values 5-7 reserved */
+    CV_PDS_SPECIAL2_BIT              = 0x00,
+    CV_PDS_SPECIAL2_PASCAL_CHAR      = 0x01,
+    /* values 2-7 reserved? */
+    CV_PDS_REAL_INT_CHAR             = 0x00,
+    CV_PDS_REAL_INT_WCHAR            = 0x01,
+    CV_PDS_REAL_INT_SINT16           = 0x02,
+    CV_PDS_REAL_INT_UINT16           = 0x03,
+    CV_PDS_REAL_INT_SINT32           = 0x04,
+    CV_PDS_REAL_INT_UINT32           = 0x05,
+    CV_PDS_REAL_INT_SINT64           = 0x06,
+    CV_PDS_REAL_INT_UINT64           = 0x07,
 };
 
+/* bits 8-10 of predefined primitive types */
 enum cv_predef_type_modes {
     CV_PDM_DIRECT            = 0x00,
     CV_PDM_NEARPTR           = 0x01,
@@ -89,6 +105,7 @@ enum cv_predef_type_modes {
     CV_PDM_NEAR32PTR         = 0x04,
     CV_PDM_FAR32PTR          = 0x05,
     CV_PDM_NEAR64PTR         = 0x06
+    /* value 7 reserved */
 };
 
 struct cv_attribute {
@@ -373,7 +390,7 @@ enum cv4_symbol_types {
     CV4_S_LPROC32  = 0x0204,
     CV4_S_GPROC32  = 0x0205,
     //CV4_S_BLOCK32  = 0x0207,
-    //CV4_S_REGREL32 = 0x020C,
+    CV4_S_REGREL32 = 0x020C,
     CV4_S_LTHREAD32 = 0x020D,
     CV4_S_GTHREAD32 = 0x020E,
 };
@@ -394,6 +411,7 @@ enum cv5_symbol_types {
     //CV5_S_PUB32    = 0x1009,
     CV5_S_LPROC32  = 0x100A,
     CV5_S_GPROC32  = 0x100B,
+    CV5_S_REGREL32  = 0x100D,
     CV5_S_LTHREAD32 = 0x100E,
     CV5_S_GTHREAD32 = 0x100F,
     CV5_S_COMPILE  = 0x1013, /* not documented in VC50 Spec */
@@ -414,6 +432,7 @@ enum cv8_symbol_types {
     CV8_S_GDATA32  = 0x110D,
     CV8_S_LPROC32  = 0x110F,
     CV8_S_GPROC32  = 0x1110,
+    CV8_S_REGREL32  = 0x1111,
     CV8_S_LTHREAD32 = 0x1112,
     CV8_S_GTHREAD32 = 0x1113,
 };
@@ -455,6 +474,7 @@ enum cv_symbol_types {
     //S_PUB32    = CV4_S_PUB32,
     S_LPROC32  = CV4_S_LPROC32,
     S_GPROC32  = CV4_S_GPROC32,
+    S_REGREL32  = CV4_S_REGREL32,
     S_LTHREAD32 = CV4_S_LTHREAD32,
     S_GTHREAD32 = CV4_S_GTHREAD32,
 #else
@@ -464,6 +484,7 @@ enum cv_symbol_types {
     //S_PUB32    = CV5_S_PUB32,
     S_LPROC32  = CV5_S_LPROC32,
     S_GPROC32  = CV5_S_GPROC32,
+    S_REGREL32  = CV5_S_REGREL32,
     S_LTHREAD32 = CV5_S_LTHREAD32,
     S_GTHREAD32 = CV5_S_GTHREAD32,
 #endif
@@ -502,6 +523,9 @@ enum cv_machines {
     CV_MACH_80386   = 3,
     CV_MACH_80486   = 4,
     CV_MACH_PENTIUM = 5,
+    CV_MACH_P2      = 6, /* also Pentium Pro */
+    CV_MACH_P3      = 7,
+    CV_MACH_AMD64   = 0xD0,
 };
 
 enum cv_languages {
@@ -634,6 +658,31 @@ struct cv_symrec_lproc32 { /* S_LPROC32, S_GPROC32 */
     uint_16 segment;
 #endif
     uint_8 flags;     /* see enum cv_proc_flags */
+    // length-prefixed name
+};
+
+enum cv_registers {
+    CV_REG_START32 = 17,  /* 17-24 are 32-bit GPRs */
+    CV_REG_ESP = CV_REG_START32+4,
+    CV_REG_EBP = CV_REG_START32+5,
+#if AMD64_SUPPORT
+    CV_REG_AMD64_START32 = 360, /* 360-367 are 32-bit GPRs R8D-R15D - undocumented! */
+    CV_REG_AMD64_START64 = 328, /* 328-343 are 64-bit GPRs - undocumented! */
+    CV_REG_RSP = CV_REG_AMD64_START64+7,
+    CV_REG_RBP = CV_REG_AMD64_START64+6,
+#endif
+};
+
+struct cv_symrec_regrel32 { /* S_REGREL32 */
+    struct cv_symrec sr;
+    int_32 offset;
+#if CV_SIGNATURE==CV4_SIGNATURE
+    uint_16 reg;
+    cv_typeref type;
+#else
+    cv_typeref type;
+    uint_16 reg;
+#endif
     // length-prefixed name
 };
 

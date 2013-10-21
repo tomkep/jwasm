@@ -26,6 +26,6 @@ comm v6:0		;positive value expected
 
 comm ax:word	;invalid identifier
 comm v7,word	;syntax error
-comm v7:44ud	;syntax error
+comm v7:44ud	;missing operator in expression
 
 	end

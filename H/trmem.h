@@ -98,8 +98,8 @@ _trmem_hdl _trmem_open(
     void (*__free)(void*),
     void * (*__realloc)(void*,size_t),
     void * (*__expand)(void*,size_t),
-    int *__prt_parm,
-    void (*__prt_line)( int *__prt_parm, const char *__buf, size_t __len ),
+    FILE *__prt_parm,
+    void (*__prt_line)( FILE *__prt_parm, const char *__buf, size_t __len ),
     unsigned __flags
 );
 
@@ -140,12 +140,13 @@ unsigned _trmem_prt_list( _trmem_hdl );
 unsigned long _trmem_get_current_usage( _trmem_hdl );
 unsigned long _trmem_get_peak_usage( _trmem_hdl );
 
-_trmem_who  _trmem_guess_who( void );
-
-    #pragma aux _trmem_guess_who = \
-        0x8b 0x45 0x04      /*  mov eax,[ebp+4] */ \
-        parm caller         [] \
-        value               [eax] \
-        modify exact        [eax];
+_trmem_who  _trmem_guess_who( void * );
+#ifdef __WATCOMC__
+#pragma aux _trmem_guess_who = \
+    0x8b 0x45 0x04      /*  mov eax,[ebp+4] */ \
+    parm caller         [] \
+    value               [eax] \
+    modify exact        [eax];
+#endif
 
 #endif

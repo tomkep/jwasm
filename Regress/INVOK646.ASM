@@ -1,29 +1,39 @@
 
 ;--- test 64-bit invoke with VARARG parameter
+;--- also see vararg64.asm
 
 ifdef __JWASM__
 	.x64
 	.model flat, fastcall
+	option win64:2
 endif
 
 	.data
-vq	dq 0
-vd	dd 0
-vw	dw 0
-vb	db 0
+uvq	label qword
+uvd	label dword
+uvw	label word
+uvb	label byte
+svq	label sqword
+svd	label sdword
+svw	label sword
+svb	label sbyte
+	dq 0
+
 	.code
 
 p1 proc a1:VARARG
 p1 endp
 
 	invoke p1, 0
-	ret
 
-	invoke p1, 1,2,3,4
-	invoke p1, vq,vd,vw,vb
-	invoke p1, 1,2,3,4,5,6
-	invoke p1, 1,2,3,4,vb,vw
-	invoke p1, 1,2,3,4,addr vb,addr vw
+	invoke p1, 1, 2, 3, 4
+	invoke p1, uvq, uvd, uvw, uvb
+	invoke p1, svq, svd, svw, svb
+	invoke p1, 1, 2, 3, 4, 5, 6
+	invoke p1, 1, 2, 3, 4, uvb, uvw, uvd, uvq
+	invoke p1, 1, 2, 3, 4, svb, svw, svd, svq
+	invoke p1, 1, 2, 3, 4, addr uvb, addr uvw
+	invoke p1, 1, 2, 3, 4, offset uvb, offset uvw
 	ret
 
 	end

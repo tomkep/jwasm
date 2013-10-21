@@ -11,6 +11,10 @@ p2 typedef proto far    stdcall :word
 p3 typedef proto near32 stdcall :word
 p4 typedef proto far32  stdcall :word
 
+;--- duplicate type definition ( was a problem in 2.09-2.10 )
+p3 typedef proto near32 stdcall :word
+p4 typedef proto far32  stdcall :word
+
 	.CODE
 
 	call near32 ptr [bx]

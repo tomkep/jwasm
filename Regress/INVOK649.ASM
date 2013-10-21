@@ -5,6 +5,7 @@
 ifdef __JWASM__
 	.x64
 	.model flat, fastcall
+	option win64:2
 endif
 
 	.data

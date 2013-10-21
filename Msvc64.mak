@@ -14,8 +14,12 @@ name = jwasm
 # which are to be found in \<MSVS root>\Common7\IDE, must then be copied
 # manually to a directory in the path ( here: d:\msvc10\bin ).
 
+!ifndef VCDIR
 VCDIR  = d:\msvc10
+!endif
+!ifndef W64LIB
 W64LIB = \WinInc\Lib64
+!endif
 
 VCBIN  = $(VCDIR)\bin\x86_amd64
 PATH   = $(VCDIR)\bin;$(PATH)
@@ -39,17 +43,11 @@ OUTD=MSVC64R
 
 inc_dirs  = -IH -I"$(VCDIR)\include"
 
-TRMEM=0
-
 linker = $(VCBIN)\link.exe
 lib = $(VCBIN)\lib.exe
 
 !if $(DEBUG)
-!if $(TRMEM)
-extra_c_flags = -Zd -Od -DDEBUG_OUT -DTRMEM
-!else
 extra_c_flags = -Zd -Od -DDEBUG_OUT -FAa -Fa$* 
-!endif
 !else
 extra_c_flags = -O2 -Ox -GS- -DNDEBUG
 #extra_c_flags = -Ox -DNDEBUG
@@ -76,29 +74,8 @@ CC=$(VCBIN)\cl.exe -c -nologo $(inc_dirs) $(c_flags)
 .c{$(OUTD)}.obj:
 	@$(CC) -Fo$* $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  \
-           $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj \
-           $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  \
-           $(OUTD)/macro.obj    $(OUTD)/string.obj   $(OUTD)/condasm.obj \
-           $(OUTD)/types.obj    $(OUTD)/fpfixup.obj  $(OUTD)/invoke.obj  \
-           $(OUTD)/equate.obj   $(OUTD)/mangle.obj   $(OUTD)/loop.obj    \
-           $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   \
-           $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/label.obj   \
-           $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    \
-           $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   \
-           $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  \
-           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj\
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     \
-           $(OUTD)/listing.obj  $(OUTD)/safeseh.obj \
-           $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj \
-           $(OUTD)/cmdline.obj  $(OUTD)/linnum.obj   $(OUTD)/fastpass.obj\
-!if $(TRMEM)
-           $(OUTD)/trmem.obj    \
-!endif
-           $(OUTD)/backptch.obj $(OUTD)/msgtext.obj  $(OUTD)/tbyte.obj   \
-           $(OUTD)/dbgcv.obj    $(OUTD)/end.obj      $(OUTD)/cpumodel.obj
-######
-
+proj_obj = \
+!include msmod.inc
 
 ALL: $(OUTD) $(OUTD)\$(name).exe
 
@@ -118,7 +95,7 @@ $(lflagsw) $(OUTD)/main.obj $(OUTD)/$(name).lib
 $(OUTD)\$(name).lib : $(proj_obj)
 	@$(lib) /nologo /out:$(OUTD)\$(name).lib $(proj_obj)
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/globals.h
 	@$(CC) -Fo$* msgtext.c
 
 $(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h

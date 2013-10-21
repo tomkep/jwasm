@@ -66,7 +66,7 @@ extern void     MacroFini( void );
 
 extern struct asym *SetTextMacro( struct asm_tok[], struct asym *, const char *, const char * ); /* EQU for texts */
 extern struct asym *AddPredefinedText( const char *, const char * );
-extern void        TextItemError( struct asm_tok * );
+extern int         TextItemError( struct asm_tok * );
 
 extern void     StringInit( void );
 #ifdef DEBUG_OUT

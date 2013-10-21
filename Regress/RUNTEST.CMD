@@ -1,38 +1,39 @@
 @echo off
 rem tools: jwasm, jwlink, jfc, ms link (COFF)
+jwasm -q -bin *.asm
 for %%f in (*.asm) do call :cmpbin %%f
+jwasm -q -mz *.asn
 for %%f in (*.asn) do call :cmpmz  %%f
+jwasm -q -omf -eq *.aso
 for %%f in (*.aso) do call :cmperr %%f
+jwasm -q -omf *.asz
 for %%f in (*.asz) do call :lnkomf %%f
 call :safeseh
 call :coff
 call :coffdbg
 rem ifdef calls jwasmr ( won't run in 64-bit Windows )
 call :ifdef
+call :omf
 call :pe
 call :zne
 call :zg
+call :zd
 call :bin
 exit
 
 :cmpbin
-jwasm -q -bin %1
 ..\tools\jfc %~n1.BIN %~n1.EXP
 goto end
 
 :cmpmz
-jwasm -q -mz %1
 ..\tools\jfc %~n1.EXE %~n1.EXP
 goto end
 
 :cmperr
-jwasm -q -omf %1 >NUL
 ..\tools\jfc %~n1.ERR %~n1.EXP
 goto end
 
 :lnkomf
-jwasm -q -omf %1
-if errorlevel 1 goto end
 ..\tools\jwlink op q,nofar format dos file %~n1.OBJ
 ..\tools\jfc %~n1.EXE %~n1.EXP
 goto end
@@ -73,6 +74,10 @@ if errorlevel 1 goto end
 jwasm -q -coff SEH64.ASC
 if errorlevel 1 goto end
 ..\tools\jfc -co SEH64.OBJ SEH64.EXP
+
+jwasm -q -coff SEH642.ASC
+if errorlevel 1 goto end
+..\tools\jfc -co SEH642.OBJ SEH642.EXP
 
 jwasm -q -win64 MOV643.ASC
 if errorlevel 1 goto end
@@ -120,6 +125,14 @@ rem COMDAT object module
 jwasm -q -coff COMDAT2.ASC
 ..\tools\jfc -co COMDAT2.OBJ COMDAT2.EXP
 
+rem 64-bit SEH unwind errors
+jwasm -q -coff -eq PROC644.ASC
+..\tools\jfc PROC644.ERR PROC644.EXP
+
+rem CV4 debug info and multiple code sections 
+jwasm -q -coff -Zi CVCOFF1.ASC
+..\tools\jfc -co CVCOFF1.OBJ CVCOFF1.EXP
+
 goto end
 
 :coffdbg
@@ -132,6 +145,24 @@ goto end
 ..\owdos16r\jwasmr -q -zlc -zld ISDEF.ASC
 if errorlevel 1 goto end
 ..\tools\jfc ISDEF.OBJ ISDEF.EXP
+goto end
+
+:omf
+jwasm -q -Cu CASEMAP1.ASC
+if errorlevel 1 goto end
+..\tools\jfc CASEMAP1.OBJ CASEMAP1.EXP
+
+jwasm -q EXTERN14.ASC
+if errorlevel 1 goto end
+..\tools\jfc EXTERN14.OBJ EXTERN14.EXP
+
+jwasm -q PUBLIC2.ASC
+if errorlevel 1 goto end
+..\tools\jfc PUBLIC2.OBJ PUBLIC2.EXP
+
+jwasm -q EXTERN15.ASC
+if errorlevel 1 goto end
+..\tools\jfc EXTERN15.OBJ EXTERN15.EXP
 goto end
 
 :pe
@@ -150,6 +181,11 @@ jwasm -q -Zg -bin LOCAL3.ASC
 
 jwasm -q -Zg -bin INVOKE21.ASC
 ..\tools\jfc INVOKE21.BIN INVOKE21.EXP
+goto end
+
+:zd
+jwasm -q -Zd -omf LINNUM.ASC
+..\tools\jfc LINNUM.OBJ LINNUM.EXP
 goto end
 
 :bin

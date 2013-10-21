@@ -1,26 +1,6 @@
 /****************************************************************************
 *
-*                            Open Watcom Project
-*
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
-*
-*  ========================================================================
-*
-*    This file contains Original Code and/or Modifications of Original
-*    Code as defined in and that are subject to the Sybase Open Watcom
-*    Public License version 1.0 (the 'License'). You may not use this file
-*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
-*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
-*    provided with the Original Code and Modifications, and is also
-*    available at www.sybase.com/developer/opensource.
-*
-*    The Original Code and all software distributed under the License are
-*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
-*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
-*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
-*    NON-INFRINGEMENT. Please see the License for the specific language
-*    governing rights and limitations under the License.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -28,50 +8,24 @@
 *
 ****************************************************************************/
 
-/*
- * if TRMEM is defined, trmem functions are used which will help tracking
- * memory usage.
- */
-
 #if defined(__UNIX__) && defined(__GNUC__)
     #include <sys/mman.h>
 #endif
 
 #include "globals.h"
-
-/* FASTMEM is a simple memory alloc approach which allocates chunks of 512 kB
- * and will release it only at MemFini().
- *
- * May be considered to create an additional "line heap" to store lines of
- * loop macros and generated code - since this is hierarchical, a simple
- * Mark/Release mechanism will do the memory management.
- * currently generated code lines are stored in the C heap, while
- * loop macro lines go to the "fastmem" heap.
- */
-#if FASTMEM
- #define BLKSIZE 0x80000
- #ifndef __UNIX__
-  #if defined(__OS2__)
-   #include "os2.h"
-  #elif defined(__DJGPP__)
-   #include "dpmi.h"
-  #else
-   #include "win32.h"
-  #endif
- #endif
-#endif
+#include "memalloc.h"
 
 /* what items are stored in the heap?
  * - symbols + symbol names ( asym, dsym; symbol.c )
  * - macro lines ( StoreMacro(); macro.c )
  * - file names ( CurrFName[]; assemble.c )
  * - temp items + buffers ( omf.c, bin.c, coff.c, elf.c )
- * - contexts ( context.c )
+ * - contexts ( reused; context.c )
  * - codeview debug info ( dbgcv.c )
  * - library names ( includelib; directiv.c )
  * - src lines for FASTPASS ( fastpass.c )
  * - fixups ( fixup.c )
- * - hll items (reused!) ( .IF, .WHILE, .REPEAT; hll.c )
+ * - hll items (reused; .IF, .WHILE, .REPEAT; hll.c )
  * - one big input buffer ( src line buffer, tokenarray, string buffer; input.c )
  * - src filenames array ( AddFile(); input.c )
  * - line number info ( -Zd, -Zi; linnum.c )
@@ -90,32 +44,38 @@
  * - procedure prologue argument, debug info ( proc.c )
  */
 
-#include "memalloc.h"
+#if FASTMEM
 
-#ifdef TRMEM
-#include <fcntl.h>
-#ifdef __UNIX__
- #include <unistd.h>
-#else
- #include <io.h>
+/* FASTMEM is a simple memory alloc approach which allocates chunks of 512 kB
+ * and will release it only at MemFini().
+ *
+ * May be considered to create an additional "line heap" to store lines of
+ * loop macros and generated code - since this is hierarchical, a simple
+ * Mark/Release mechanism will do the memory management.
+ * currently generated code lines are stored in the C heap, while
+ * loop macro lines go to the "fastmem" heap.
+ */
+
+#define BLKSIZE 0x80000
+
+#ifndef __UNIX__
+  #if defined(__OS2__)
+   #include <os2.h>
+  #elif defined(__DJGPP__)
+   #include <dpmi.h>
+  #else
+   #include "win32.h"
+  #endif
 #endif
-#include <sys/stat.h>
-#include "trmem.h"
 
-static _trmem_hdl   memHandle;
-static int          memFile;     /* file handle we'll write() to */
-static int          memcalls;
-#endif
-
-#ifdef TRMEM
-static void memLine( int *fh, const char *buf, unsigned size )
-{
-    write( 2, "***", 3 );
-    write( 2, buf, size );
-    if( *fh != -1 ) {
-        write( *fh, buf, size );
-    }
-}
+struct linked_list {
+    struct linked_list *next;
+};
+static struct linked_list *pBase; /* start list of 512 kB blocks; to be moved to ModuleInfo.g */
+static uint_8 *pCurr; /* points into current block; to be moved to ModuleInfo.g */
+static uint currfree; /* free memory left in current block; to be moved to ModuleInfo.g */
+#ifdef DEBUG_OUT
+static int blocks;    /* number of blocks allocated so far; to be moved to ModuleInfo.g */
 #endif
 
 #if defined(__UNIX__) && defined(__WATCOMC__)
@@ -138,94 +98,83 @@ uint_32 sys_call2( uint_32 func, uint_32 r_ebx, uint_32 r_ecx );
 struct mmap {
     uint_32 base;   /* linear base (or 0) */
     uint_32 size;   /* size in bytes */
-    uint_32 access; /* prot_read + prot_write = 3 */
-    uint_32 flags;  /* 0x22 = map_anonymous + map_private */
+    uint_32 access; /* 3 = PROT_READ | PROT_WRITE */
+    uint_32 flags;  /* 0x22 = MAP_PRIVATE | MAP_ANON */
     uint_32 fd;     /* should be -1 */
     uint_32 offset; /* ignored */
 };
-/* 0x22 = MAP_PRIVATE | MAP_ANON */
-static struct mmap mymmap = {0, 0, 3, 0x22, -1, 0};
-#endif
-#if defined(__GNUC__)
-uint_32 mymmap_size = 0;   /* size in bytes */
+static struct mmap mymmap = { 0, 0, 3, 0x22, -1, 0 };
 #endif
 
-#if FASTMEM
-struct linked_list {
-    void *next;
-};
-static uint_8 *pBase; /* start list of 512 kB blocks; to be moved to ModuleInfo.g */
-static uint_8 *pCurr; /* points into current block; to be moved to ModuleInfo.g */
-static int currfree;  /* free memory left in current block; to be moved to ModuleInfo.g */
-#ifdef DEBUG_OUT
-static int blocks;    /* number of blocks allocated so far; to be moved to ModuleInfo.g */
+#ifndef __UNIX__
+ #if defined(__OS2__)
+  #define BLKALLOC( p, size ) DosAllocMem( (void**)&p, size, PAG_COMMIT|PAG_READ|PAG_WRITE )
+  #define BLKFREE( p )        DosFreeMem( p )
+ #elif defined(__NT__) || defined(_WIN64)
+  #define BLKALLOC( p, size ) p = (uint_8 *)VirtualAlloc( NULL, size, MEM_COMMIT, PAGE_READWRITE )
+  #define BLKFREE( p )        VirtualFree( p, 0, MEM_RELEASE )
+ #else
+  #define BLKALLOC( p, size ) p = malloc( size )
+  #define BLKFREE( p )        free( p )
+ #endif
+#else
+ #if defined(__WATCOMC__)
+  #define BLKALLOC( p, size_ ) mymmap.size = size_; \
+                              p = (uint_8 *)sys_call1( SYS_mmap, (uint_32)&mymmap )
+  #define BLKFREE( p )        sys_call2( SYS_munmap, (uint_32)p, 0 )
+ #else
+  #define BLKALLOC( p, size ) p = (uint_8 *)mmap( 0, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0 ); \
+                              if ( p == MAP_FAILED ) p = NULL
+  #define BLKFREE( p )        munmap( (void *)p, 0 )
+ #endif
 #endif
+
+#endif /* FASTMEM */
+
+#ifdef DEBUG_OUT
+static uint_32 memcalls = 0;
+static uint_32 memstart;
+#endif
+
+#ifdef TRMEM /* track memory allocation? */
+
+#include "trmem.h"
+
+extern _trmem_hdl   hTrmem;
+#define malloc( x ) _trmem_alloc( x, _trmem_guess_who( &x ), hTrmem )
+#define free( x )   _trmem_free( x, _trmem_guess_who( &x ), hTrmem )
+
 #endif
 
 void MemInit( void )
 /******************/
 {
-#ifdef TRMEM
-    memFile = _open( "~jwasm.trk", O_WRONLY | O_CREAT | O_TRUNC, S_IREAD | S_IWRITE );
-    memHandle = _trmem_open( malloc, free, realloc, _expand, &memFile, memLine,
-        _TRMEM_ALLOC_SIZE_0 |
-        _TRMEM_FREE_NULL |
-        _TRMEM_OUT_OF_MEMORY |
-        _TRMEM_CLOSE_CHECK_FREE
-    );
-    if( memHandle == NULL ) {
-        exit( EXIT_FAILURE );
-    }
-    memcalls = 0;
-#endif
 #if FASTMEM
     pBase = NULL;
     currfree = 0;
-#ifdef DEBUG_OUT
-    blocks = 0;
+    DebugCmd( blocks = 0 );
 #endif
-#endif
+    DebugCmd( memstart = memcalls );
 }
 
 void MemFini( void )
 /******************/
 {
-#ifdef TRMEM
-    if( memHandle != NULL ) {
-        _trmem_prt_list( memHandle );
-        _trmem_close( memHandle );
-        if( memFile != -1 ) {
-            _close( memFile );
-        }
-        memHandle = NULL;
-    }
-#endif
 
 #if FASTMEM
 #ifdef DEBUG_OUT
     if ( Options.quiet == FALSE )
-        printf("memory used: %u kB\n", (blocks * BLKSIZE - currfree) / 1024);
+        printf( "memory used: %u kB\n", (blocks * BLKSIZE - currfree) / 1024 );
 #endif
-    while (pBase) {
-        //uint_8 *pNext = *((uint_8 * *)pBase);
-        uint_8 *pNext = ((struct linked_list *)pBase)->next;
-#ifndef __UNIX__
- #if defined(__OS2__)
-        DosFreeMem( pBase );
- #elif defined(__NT__) || defined(_WIN64)
-        VirtualFree( pBase, 0, MEM_RELEASE );
- #else
-        free( pBase );
- #endif
-#else
-  #if defined(__WATCOMC__)
-        sys_call2( SYS_munmap, (uint_32)pBase, 0 );
-  #else
-        munmap( (void *)pBase, 0 );
-  #endif
-#endif
+    while ( pBase ) {
+        struct linked_list *pNext = pBase->next;
+        BLKFREE( pBase );
         pBase = pNext;
     }
+#endif
+#ifdef DEBUG_OUT
+    if ( memcalls != memstart )
+        printf("still allocated memory blocks : %u\n", memcalls - memstart );
 #endif
 }
 
@@ -235,64 +184,19 @@ void *LclAlloc( size_t size )
     void        *ptr;
 
 #if FASTMEM
-    //size = (size + 3) & ~3;
     size = (size + sizeof(void *)-1) & ~(sizeof(void *)-1);
     if ( currfree < size ) {
-        DebugMsg(("LclAlloc: new block, req. size=%Xh\n", size ));
-        if ( size > BLKSIZE - sizeof( struct linked_list ) ) {
-#ifndef __UNIX__
- #if defined(__OS2__)
-            DosAllocMem( (void**)&pCurr, size + sizeof( struct linked_list ), PAG_COMMIT|PAG_READ|PAG_WRITE);
- #elif defined(__NT__) || defined(_WIN64)
-            pCurr = (uint_8 *)VirtualAlloc( NULL, size + sizeof( struct linked_list ), MEM_COMMIT, PAGE_READWRITE );
- #else
-            pCurr = malloc( size + sizeof( struct linked_list ) );
- #endif
-#else
- #if defined(__GNUC__)
-            mymmap_size = size + sizeof( struct linked_list );
-            pCurr = (char *)mmap( 0, mymmap_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0 );
-            if ( pCurr == MAP_FAILED )
-                pCurr = NULL;
- #else
-            mymmap.size = size + sizeof( struct linked_list );
-            pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
- #endif
-#endif
-            currfree = size;
-        } else {
-#ifndef __UNIX__
- #if defined(__OS2__)
-            DosAllocMem( (void **)&pCurr, BLKSIZE, PAG_COMMIT|PAG_READ|PAG_WRITE );
- #elif defined(__NT__) || defined(_WIN64)
-            pCurr = (uint_8 *)VirtualAlloc(NULL, BLKSIZE, MEM_COMMIT, PAGE_READWRITE);
- #else
-            pCurr = malloc( BLKSIZE );
- #endif
-#else
- #if defined(__GNUC__)
-            mymmap_size = BLKSIZE;
-            pCurr = (char *)mmap( 0, mymmap_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0 );
-            if ( pCurr == MAP_FAILED )
-                pCurr = NULL;
- #else
-            mymmap.size = BLKSIZE;
-            pCurr = (char *)sys_call1( SYS_mmap, (uint_32)&mymmap);
- #endif
-#endif
-            currfree = BLKSIZE - sizeof( struct linked_list );
-        }
+        DebugMsg(("LclAlloc: new block needed, req. size=%Xh > currfree=%Xh\n", size, currfree ));
+        currfree = ( size <= ( BLKSIZE - sizeof( struct linked_list ) ) ? BLKSIZE - sizeof( struct linked_list ) : size );
+        BLKALLOC( pCurr, currfree + sizeof( struct linked_list ) );
         if ( !pCurr ) {
             currfree = 0;
             Fatal( OUT_OF_MEMORY );
         }
-        //*(uint_8 * *)pCurr = pBase;
         ((struct linked_list *)pCurr)->next = pBase;
-        pBase = pCurr;
+        pBase = (struct linked_list *)pCurr;
         pCurr += sizeof( struct linked_list );
-#ifdef DEBUG_OUT
-        blocks++;
-#endif
+        DebugCmd( blocks++ );
     }
     ptr = pCurr;
     pCurr += size;
@@ -300,12 +204,9 @@ void *LclAlloc( size_t size )
 
 #else /* ! FASTMEM */
 
-#ifdef TRMEM
-    ptr = _trmem_alloc( size, _trmem_guess_who(), memHandle );
-    memcalls++;
-    DebugMsg(("LclAlloc(0x%X)=%X cnt=%d\n", size, ptr, memcalls ));
-#else
     ptr = malloc( size );
+#ifdef TRMEM
+    DebugMsg1(("LclAlloc(0x%X)=%p cnt=%" I32_SPEC "u\n", size, ptr, ++memcalls ));
 #endif
     if( ptr == NULL ) {
         Fatal( OUT_OF_MEMORY );
@@ -320,12 +221,9 @@ void LclFree( void *ptr )
 {
     if( ptr != NULL ) {
 #ifdef TRMEM
-        _trmem_free( ptr, _trmem_guess_who(), memHandle );
-        DebugMsg(("LclFree(0x%X) cnt=%d\n", ptr, memcalls ));
-        memcalls--;
-#else
-        free( ptr );
+        DebugMsg1(("LclFree(0x%p) cnt=%" I32_SPEC "u\n", ptr, --memcalls ));
 #endif
+        free( ptr );
     }
 }
 #endif
@@ -335,26 +233,18 @@ void *MemAlloc( size_t size )
 {
     void        *ptr;
     ptr = malloc( size );
-#ifdef TRMEM
-    memcalls++;
-    DebugMsg(("MemAlloc(0x%X)=%X cnt=%d\n", size, ptr, memcalls ));
-#endif
+    DebugMsg1(("MemAlloc(0x%X)=%p cnt=%" I32_SPEC "u\n", size, ptr, ++memcalls ));
     if( ptr == NULL ) {
         Fatal( OUT_OF_MEMORY );
     }
-#if 0
-    memset( ptr, 0xff, size );
-#endif
+    //memset( ptr, 0xff, size );
     return( ptr );
 }
 
 void MemFree( void *ptr )
 /***********************/
 {
-#ifdef TRMEM
-    DebugMsg(("MemFree(0x%X) cnt=%d\n", ptr, memcalls ));
-    memcalls--;
-#endif
+    DebugMsg1(("MemFree(0x%p) cnt=%" I32_SPEC "u\n", ptr, --memcalls ));
     free( ptr );
     return;
 }
@@ -372,26 +262,3 @@ void *MemRealloc( void *ptr, size_t size )
     return( new );
 }
 #endif
-
-#if 0 //def DEBUG_OUT
-#ifdef __WATCOMC__
-/* the C heap is used for line queues only - due to speed issues. */
-/* so this heap check function has become less useful. */
-void heap( char *func )
-/*********************/
-{
-    switch(_heapchk()) {
-    case _HEAPBADNODE:
-    case _HEAPBADBEGIN:
-    DebugMsg(("Function : %s - ", func ));
-        DebugMsg(("ERROR - heap is damaged\n"));
-        exit(1);
-        break;
-    default:
-        break;
-    }
-}
-#endif
-#endif
-
-

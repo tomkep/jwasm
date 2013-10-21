@@ -1,11 +1,11 @@
 
 # This makefile (NMake) creates the JWasm Win32 binary with TCC.
-# There are lots of warnings about unknown excape characters in msgdef.h!
-# The resulting JWasm binary runs pretty slow.
 
 name = jwasm
-TCCDIR  = \tcc
 
+!ifndef TCCDIR
+TCCDIR  = \tcc
+!endif
 !ifndef DEBUG
 DEBUG=0
 !endif
@@ -16,6 +16,8 @@ OUTD=TCCD
 OUTD=TCCR
 !endif
 
+!include gccmod.inc
+
 inc_dirs  = -IH -I"$(TCCDIR)\include"
 
 !if $(DEBUG)
@@ -24,15 +26,19 @@ extra_c_flags = -g -DDEBUG_OUT
 extra_c_flags = -DNDEBUG
 !endif
 
-CC=@$(TCCDIR)\tcc.exe $(inc_dirs) -D__NT__ $(extra_c_flags)
+CC=@$(TCCDIR)\tcc.exe -c $(inc_dirs) -D__NT__ $(extra_c_flags)
+
+.c{$(OUTD)}.o:
+	@$(CC) -o$*.o $<
 
 ALL: $(OUTD) $(OUTD)\$(name).exe
 
 $(OUTD):
 	@mkdir $(OUTD)
 
-$(OUTD)\$(name).exe: *.c
-	$(CC) -o $(OUTD)\$(name).exe *.c
+$(OUTD)\$(name).exe : $(OUTD)/main.o $(proj_obj)
+	$(TCCDIR)\tcc.exe -o$(OUTD)\jwasm.exe $(OUTD)/main.o $(proj_obj)
 
 clean:
 	@erase $(OUTD)\$(name).exe
+	@erase $(OUTD)\*.o

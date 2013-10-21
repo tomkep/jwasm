@@ -16,7 +16,7 @@
 #include "segment.h"
 #include "extern.h"
 #include "fixup.h"
-#include "input.h"
+#include "lqueue.h"
 #include "tokenize.h"
 #include "expreval.h"
 #include "types.h"
@@ -33,7 +33,7 @@
 #endif
 
 /* prototypes */
-extern ret_code      process_address( struct code_info *, unsigned, struct expr * );
+extern ret_code idata_fixup( struct code_info *, unsigned, struct expr * );
 
 struct code_line {
     const char *src;
@@ -103,15 +103,11 @@ ret_code StartupExitDirective( int i, struct asm_tok tokenarray[] )
     LstWriteSrcLine();
 
     if( ModuleInfo.model == MODEL_NONE ) {
-        EmitError( MODEL_IS_NOT_DECLARED );
-        return( ERROR );
+        return( EmitError( MODEL_IS_NOT_DECLARED ) );
     }
     if ( ModuleInfo.Ofssize > USE16 ) {
-        EmitErr( DOES_NOT_WORK_WITH_32BIT_SEGMENTS, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( DOES_NOT_WORK_WITH_32BIT_SEGMENTS, tokenarray[i].string_ptr ) );
     }
-
-    NewLineQueue();
 
     switch( tokenarray[i].tokval ) {
     case T_DOT_STARTUP:
@@ -193,9 +189,6 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
 /*********************************************************/
 {
     struct expr         opndx;
-    struct fixup        *fix;
-    struct asym         *sym;
-    struct code_info    CodeInfo;
 
     DebugMsg1(("EndDirective enter\n"));
 
@@ -219,12 +212,12 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
         tokenarray[i+1].string_ptr = "";
         Token_Count = i+1;
     }
-    if( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR ) {
+    /* v2.11: flag EXPF_NOUNDEF added - will return ERROR if start label isn't defined */
+    if( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOUNDEF ) == ERROR ) {
         return( ERROR );
     }
     if( tokenarray[i].token != T_FINAL ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
     }
 
     if ( CurrStruct ) {
@@ -235,81 +228,63 @@ ret_code EndDirective( int i, struct asm_tok tokenarray[] )
     /* v2.10: check for open PROCedures */
     ProcCheckOpen();
 
+    /* check type of start label. Must be a symbolic code label, internal or external */
+    if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE &&
+        ( opndx.mem_type == MT_NEAR || opndx.mem_type == MT_FAR || ( opndx.mem_type == MT_EMPTY && opndx.instr == T_OFFSET ) ) &&
+        opndx.sym && (  opndx.sym->state == SYM_INTERNAL || opndx.sym->state == SYM_EXTERNAL ) ) {
+
+        DebugMsg(("EndDirective: start label=%s, add=%" I32_SPEC "Xh\n", opndx.sym->name, opndx.value ));
+
+        if ( Options.output_format == OFORMAT_OMF ) {
+            struct code_info    CodeInfo;
+            /* fixme: no need to create the fixup here, should be done in omf_write_modend() */
+            //CodeInfo.token = T_NULL; /* v2.09: T_NULL has no entry in optable_idx[] */
+            //CodeInfo.pinstr = &InstrTable[IndexFromToken( T_NULL )];
+            CodeInfo.opnd[0].InsFixup = NULL;
+            CodeInfo.token = T_NOP;
+            CodeInfo.pinstr = &InstrTable[IndexFromToken( T_NOP )];
+            CodeInfo.flags = 0;
+            CodeInfo.mem_type = MT_EMPTY;
+            idata_fixup( &CodeInfo, 0, &opndx );
+#if FASTMEM==0
+            LclFree( ModuleInfo.g.start_fixup );
+#endif
+            ModuleInfo.g.start_fixup = CodeInfo.opnd[0].InsFixup;
+            ModuleInfo.g.start_displ = opndx.value;
+        } else {
+            /* Masm silently ignores start for -coff if an offset was given */
+            //if ( opndx.value )
+            //   emit a warning
+
+            if ( opndx.sym->state != SYM_EXTERNAL && opndx.sym->ispublic == FALSE ) {
+                opndx.sym->ispublic = TRUE;
+                AddPublicData( opndx.sym );
+            }
+            ModuleInfo.g.start_label = opndx.sym;
+        }
+    } else if ( opndx.kind != EXPR_EMPTY ) {
+#ifdef DEBUG_OUT
+        if ( opndx.kind != EXPR_ADDR || opndx.indirect == TRUE ) {
+            DebugMsg(("EndDirective: start address invalid, opndx.kind=%X indirect=%u\n", opndx.kind, opndx.indirect ));
+        } else if ( opndx.sym == NULL ) {
+            DebugMsg(("EndDirective: start symbol=NULL\n" ));
+        } else if ( opndx.sym->state != SYM_INTERNAL && opndx.sym->state != SYM_EXTERNAL ) {
+            DebugMsg(("EndDirective: start address invalid, sym->state=%X\n", opndx.sym->state ));
+        } else {
+            DebugMsg(("EndDirective: start address not a code label, mem_type=%Xh\n", opndx.mem_type ));
+        }
+#endif
+        return( EmitError( OPERAND_MUST_BE_RELOCATABLE ) );
+    }
+
     /* close open segments */
     SegmentModuleExit();
 
-#if PE_SUPPORT
-    if ( ModuleInfo.sub_format == SFORMAT_PE ) {
-        pe_create_MZ_header();
-        //pe_create_PE_header();
-        pe_emit_export_data();
-        if ( ModuleInfo.g.DllQueue )
-            pe_emit_import_data();
-        pe_create_section_table();
-    }
-#endif
+    if ( ModuleInfo.g.EndDirHook )
+        ModuleInfo.g.EndDirHook( &ModuleInfo );
 
     ModuleInfo.EndDirFound = TRUE;
-    //CodeInfo.token = T_NULL; /* v2.09: T_NULL has no entry in optable_idx[] */
-    //CodeInfo.pinstr = &InstrTable[IndexFromToken( T_NULL )];
-    CodeInfo.token = T_NOP;
-    CodeInfo.pinstr = &InstrTable[IndexFromToken( T_NOP )];
-    CodeInfo.opnd[0].InsFixup = NULL;
-    CodeInfo.flags = 0;
-    CodeInfo.mem_type = MT_EMPTY;
 
-    if( opndx.kind == EXPR_EMPTY ) {
-        ;
-    } else if ( opndx.sym && ( opndx.sym->state == SYM_UNDEFINED ) ) {
-        EmitErr( SYMBOL_NOT_DEFINED, opndx.sym->name );
-        return( ERROR );
-    } else {
-        char error = TRUE;
-        if ( opndx.kind == EXPR_ADDR && opndx.indirect == FALSE ) {
-            process_address( &CodeInfo, 0, &opndx );
-            fix = CodeInfo.opnd[0].InsFixup;
-            if ( fix )
-                sym = fix->sym;
-            if ( fix == NULL || sym == NULL ) {
-                DebugMsg(("EndDirective: start address invalid, fix=%p, sym=%p\n", fix, sym ));
-            } else if ( sym->state == SYM_INTERNAL || sym->state == SYM_EXTERNAL ) {
-                /* MT_PROC is most likely obsolete, used by TYPEDEF only */
-                if ( opndx.mem_type == MT_NEAR || opndx.mem_type == MT_FAR || opndx.mem_type == MT_PROC )
-                    error = FALSE;
-                else {
-                    DebugMsg(("EndDirective: start address not a code label, mem_type=%Xh\n", opndx.mem_type ));
-                }
-            } else {
-                DebugMsg(("EndDirective: start address invalid, sym->state=%X\n", sym->state ));
-            }
-        } else {
-            DebugMsg(("EndDirective: start address invalid, opndx.kind=%X\n", opndx.kind ));
-        }
-        if ( error ) {
-            EmitError( OPERAND_MUST_BE_RELOCATABLE );
-            return( ERROR );
-        }
-    }
-
-    if ( Options.output_format == OFORMAT_OMF ) {
-#if FASTMEM==0
-        LclFree( ModuleInfo.g.start_fixup );
-#endif
-        ModuleInfo.g.start_fixup = CodeInfo.opnd[0].InsFixup;
-        ModuleInfo.start_displ = opndx.value;
-    } else {
-        /* Masm silently ignores start for -coff if an offset was given */
-        //if ( opndx.kind == EXPR_EMPTY || opndx.value )
-        if ( opndx.kind == EXPR_EMPTY )
-            return( NOT_ERROR );
-
-        if ( sym->state != SYM_EXTERNAL && sym->public == FALSE ) {
-            sym->public = TRUE;
-            AddPublicData( sym );
-        }
-        DebugMsg(("EndDirective: start label=%p\n", sym ));
-        ModuleInfo.start_label = sym;
-    }
     return( NOT_ERROR );
 }
 

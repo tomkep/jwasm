@@ -1,39 +1,41 @@
 
+;--- arithmetic instructions
+;--- see arith2.asm for immediate as second operand
+;--- note that jwasm's code generation is to match Masm v8. 
+;--- Masm v6 encodes the cmp instruction differently if 
+;--- operands are byte registers.
+
 	.386
 	.model flat
 
 	.code
 
-vb	db 0
-vw	dw 0
-vd	dd 0
-vq	dq 0
+vb	label byte
+vw	label word
+vd	label dword
 
 op macro instr
 ;;
 	instr al,cl
-	instr al,1
 	instr al,vb
-	instr vb,1
+	instr bl,cl
+	instr bl,vb
 	instr vb,al
+	instr vb,bl
 ;;
 	instr ax,cx
-	instr ax,1
 	instr ax,vw
-	instr ax,1234h
-	instr bx,1234h
-	instr vw,1
-	instr vw,1234h
+	instr bx,cx
+	instr bx,vw
 	instr vw,ax
+	instr vw,bx
 ;;
 	instr eax,ecx
-	instr eax,1
 	instr eax,vd
-	instr eax,1234h
-	instr ebx,1234h
-	instr vd,1
-	instr vd,1234h
+	instr ebx,ecx
+	instr ebx,vd
 	instr vd,eax
+	instr vd,ebx
 	endm
 
 	for x,<add,or,adc,sbb,and,sub,xor,cmp>

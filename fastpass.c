@@ -28,9 +28,13 @@
 
 #if FASTPASS
 
-struct mod_state modstate; /* struct to store assembly status */
-static struct line_item *LineStoreHead;
-static struct line_item *LineStoreTail;
+extern uint_32 list_pos;  /* current LST file position */
+
+static struct mod_state modstate; /* struct to store assembly status */
+static struct {
+    struct line_item *head;
+    struct line_item *tail;
+} LineStore;
 struct line_item *LineStoreCurr; /* must be global! */
 bool StoreState;
 bool UseSavedState;
@@ -49,7 +53,7 @@ static void SaveState( void )
     StoreState = TRUE;
     UseSavedState = TRUE;
     modstate.init = TRUE;
-    modstate.EquHead = modstate.EquTail = NULL;
+    modstate.Equ.head = modstate.Equ.tail = NULL;
 
     memcpy( &modstate.modinfo, (uint_8 *)&ModuleInfo + sizeof( struct module_vars ), sizeof( modstate.modinfo ) );
 
@@ -60,8 +64,8 @@ static void SaveState( void )
     DebugMsg(( "SaveState exit\n" ));
 }
 
-void StoreLine( char *srcline, uint_32 list_pos, int flags )
-/**********************************************************/
+void StoreLine( const char *srcline, int flags, uint_32 lst_position )
+/********************************************************************/
 {
     int i,j;
     char *p;
@@ -85,14 +89,14 @@ void StoreLine( char *srcline, uint_32 list_pos, int flags )
     } else {
         LineStoreCurr->srcfile = get_curr_srcfile();
     }
-    LineStoreCurr->list_pos = list_pos;
+    LineStoreCurr->list_pos = ( lst_position ? lst_position : list_pos );
     if ( j ) {
         memcpy( LineStoreCurr->line, srcline, i );
         memcpy( LineStoreCurr->line + i, ModuleInfo.CurrComment, j + 1 );
     } else
         memcpy( LineStoreCurr->line, srcline, i + 1 );
 
-    DebugMsg1(("StoreLine(>%s<, listpos=%u): cur=%X\n", LineStoreCurr->line, list_pos, LineStoreCurr ));
+    DebugMsg1(("StoreLine(>%s<, lst_position=%u): cur=%X\n", LineStoreCurr->line, lst_position, LineStoreCurr ));
 
     /* v2.08: don't store % operator at pos 0 */
     for ( p = LineStoreCurr->line; *p && isspace(*p); p++ );
@@ -103,11 +107,11 @@ void StoreLine( char *srcline, uint_32 list_pos, int flags )
     if ( Options.print_linestore )
         printf("%s\n", LineStoreCurr->line );
 #endif
-    if ( LineStoreHead )
-        LineStoreTail->next = LineStoreCurr;
+    if ( LineStore.head )
+        LineStore.tail->next = LineStoreCurr;
     else
-        LineStoreHead = LineStoreCurr;
-    LineStoreTail = LineStoreCurr;
+        LineStore.head = LineStoreCurr;
+    LineStore.tail = LineStoreCurr;
 }
 
 /* an error has been detected in pass one. it should be
@@ -146,11 +150,11 @@ void SaveVariableState( struct asym *sym )
     p->hvalue    = sym->value3264; /* v2.05: added */
     p->mem_type  = sym->mem_type;  /* v2.07: added */
     p->isdefined = sym->isdefined;
-    if ( modstate.EquTail ) {
-        modstate.EquTail->next = p;
-        modstate.EquTail = p;
+    if ( modstate.Equ.tail ) {
+        modstate.Equ.tail->next = p;
+        modstate.Equ.tail = p;
     } else {
-        modstate.EquHead = modstate.EquTail = p;
+        modstate.Equ.head = modstate.Equ.tail = p;
     }
 //    printf("state of symbol >%s< saved, value=%u, defined=%u\n", sym->name, sym->value, sym->defined);
 }
@@ -162,7 +166,7 @@ struct line_item *RestoreState( void )
     if ( modstate.init ) {
         struct equ_item *curr;
         /* restore values of assembly time variables */
-        for ( curr = modstate.EquHead; curr; curr = curr->next ) {
+        for ( curr = modstate.Equ.head; curr; curr = curr->next ) {
             DebugMsg1(("RestoreState: sym >%s<, value=%Xh (hvalue=%Xh), defined=%u\n", curr->sym->name, curr->lvalue, curr->hvalue, curr->isdefined ));
             /* v2.07: MT_ABS is obsolete */
             //if ( curr->sym->mem_type == MT_ABS ) {
@@ -183,18 +187,18 @@ struct line_item *RestoreState( void )
 
 #if 0
     /* v2.05: AFAICS this can't happen anymore. */
-    if ( LineStoreHead == NULL ) {
+    if ( LineStore.head == NULL ) {
         struct line_item *endl = LclAlloc( sizeof( struct line_item ) + 3 );
         endl->next = NULL;
         endl->srcfile = 0;
         endl->lineno = GetLineNumber();
         endl->list_pos = 0;
         strcpy( endl->line, "END");
-        LineStoreHead = endl;
-        DebugMsg(("RestoreState: LineStoreHead was NULL !!!\n" ));
+        LineStore.head = endl;
+        DebugMsg(("RestoreState: LineStore.head was NULL !!!\n" ));
     }
 #endif
-    return( LineStoreHead );
+    return( LineStore.head );
 }
 
 #if FASTMEM==0
@@ -206,7 +210,7 @@ void FreeLineStore( void )
 /************************/
 {
     struct line_item *next;
-    for ( LineStoreCurr = LineStoreHead; LineStoreCurr; ) {
+    for ( LineStoreCurr = LineStore.head; LineStoreCurr; ) {
         next = LineStoreCurr->next;
         LclFree( LineStoreCurr );
         LineStoreCurr = next;
@@ -219,8 +223,8 @@ void FastpassInit( void )
 {
     StoreState = FALSE;
     modstate.init = FALSE;
-    LineStoreHead = NULL;
-    LineStoreTail = NULL;
+    LineStore.head = NULL;
+    LineStore.tail = NULL;
     UseSavedState = FALSE;
 }
 

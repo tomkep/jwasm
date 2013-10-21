@@ -60,8 +60,8 @@
 extern struct ReservedWord  ResWordTable[];
 
 #ifdef DEBUG_OUT
-extern int cnttok0;
-extern int cnttok1;
+int_32 cnttok0;
+int_32 cnttok1;
 extern struct asm_tok *end_tokenarray;
 extern char           *end_stringbuf;
 #endif
@@ -102,7 +102,11 @@ static bool IsMultiLine( struct asm_tok tokenarray[] )
     /* don't concat macros */
     if ( tokenarray[i].token == T_ID ) {
         sym = SymSearch( tokenarray[i].string_ptr );
-        if ( sym && ( sym->state == SYM_MACRO ) )
+        if ( sym && ( sym->state == SYM_MACRO )
+#if VARARGML
+            && sym->mac_multiline == FALSE  /* v2.11: added */
+#endif
+           )
             return( FALSE );
     } else if ( tokenarray[i].token == T_INSTRUCTION ||
                ( tokenarray[i].token == T_DIRECTIVE &&
@@ -347,17 +351,18 @@ static ret_code get_string( struct asm_tok *buf, struct line_status *p )
             //*src != NULLC && !isspace( *src ) && *src != ',' && *src != ';' && *src != ')'; ) {
             //*src && !isspace( *src ) && *src != ',' && *src != ')' && *src != '<' && *src != '%'; ) {
             *src && !isspace( *src ) && *src != ',' && *src != ')' && *src != '%'; ) {
-            if ( p->flags == TOK_DEFAULT ) { /* fixme: '\' in <>-literals are handled ALWAYS */
-                if ( *src == '\\' ) {
-                    if ( ConcatLine( src, count, dst, p ) != EMPTY ) {
-                        DebugMsg1(("Tokenize.get_string: backslash concatenation: >%s<\n", src ));
-                        p->flags3 |= TF3_ISCONCAT;
-                        if ( count )
-                            continue;
-                        return( EMPTY );
-                    }
-                } else if ( *src == ';' )
-                    break;
+            if ( *src == ';' && p->flags == TOK_DEFAULT )
+                break;
+            /* v2.11: handle '\' also for expanded lines */
+            //if (  *src == '\\' && !( p->flags & TOK_NOCURLBRACES ) ) {
+            if (  *src == '\\' && ( p->flags == TOK_DEFAULT || ( p->flags & TOK_LINE ) ) ) {
+                if ( ConcatLine( src, count, dst, p ) != EMPTY ) {
+                    DebugMsg1(("Tokenize.get_string: backslash concatenation: >%s<\n", src ));
+                    p->flags3 |= TF3_ISCONCAT;
+                    if ( count )
+                        continue;
+                    return( EMPTY );
+                }
             }
             /* v2.08: handle '!' operator */
             if ( *src == '!' && *(src+1) && count < MAX_STRING_LEN - 1 )
@@ -422,6 +427,13 @@ static ret_code get_special_symbol( struct asm_tok *buf, struct line_status *p )
         buf->string_ptr = "%";
         break;
     case '(' : /* 0x28: T_OP_BRACKET operator - needs a matching ')' */
+        /* v2.11: reset c-expression flag if a macro function call is detected */
+        if ( ( p->flags2 & DF_CEXPR ) && p->index && (buf-1)->token == T_ID ) {
+            struct asym *sym = SymSearch( (buf-1)->string_ptr );
+            if ( sym && ( sym->state == SYM_MACRO ) && sym->isfunc )
+                p->flags2 &= ~DF_CEXPR;
+        }
+        /* no break */
     case ')' : /* 0x29: T_CL_BRACKET */
     case '*' : /* 0x2A: binary operator */
     case '+' : /* 0x2B: unary|binary operator */
@@ -654,7 +666,7 @@ static ret_code get_number( struct asm_tok *buf, struct line_status *p )
         buf->token = T_NUM;
         buf->numbase = base;
         buf->itemlen = dig_end - dig_start;
-        //DebugMsg(("get_number: inp=%s, value=%" FX32 "\n", p->input, buf->value64 ));
+        //DebugMsg(("get_number: inp=%s, value=%" I32_SPEC "X\n", p->input, buf->value64 ));
     } else {
         buf->token = T_BAD_NUM;
         DebugMsg(("get_number: BAD_NUMBER (%s), radix=%u, base=%u, ptr=>%s<, digits_seen=%Xh\n", dig_start, ModuleInfo.radix, base, ptr, digits_seen ));
@@ -755,7 +767,7 @@ continue_scan:
         return( NOT_ERROR );
     }
     index = FindResWord( p->output, size );
-    if( index == -1 ) {
+    if( index == 0 ) {
         /* if ID begins with a DOT, check for OPTION DOTNAME.
          * if not set, skip the token and return a T_DOT instead!
          */
@@ -774,7 +786,9 @@ continue_scan:
     p->input = src;
     p->output = dst;
     buf->tokval = index; /* is a enum instr_token value */
-    if ( ! ( ResWordTable[index].flags & RWF_SPECIAL ) ) {
+    /* v2.11: RWF_SPECIAL now obsolete */
+    //if ( ! ( ResWordTable[index].flags & RWF_SPECIAL ) ) {
+    if ( index >= SPECIAL_LAST ) {
 
         //  DebugMsg(("found item >%s< in instruction table, rm=%X\n", buf->string_ptr, InstrTable[index].rm_byte));
 
@@ -847,9 +861,10 @@ continue_scan:
     case RWT_RES_ID: /* DUP, ADDR, FLAT, VARARG, language types [, FRAME (64-bit)] */
         buf->token = T_RES_ID;
         break;
-    default:
-        DebugMsg(("get_id: found unknown type=%u\n", SpecialTable[index].type ));
-        buf->token = T_ID; /* shouldn't happen */
+    default: /* shouldn't happen */
+        DebugMsg(("get_id: error, unknown type in SpecialTable[%u]=%u\n", index, SpecialTable[index].type ));
+        /**/myassert( 0 );
+        buf->token = T_ID;
         buf->idarg = 0;
         break;
     }
@@ -873,8 +888,8 @@ continue_scan:
 
 #define is_valid_id_start( ch )  ( isalpha(ch) || ch=='_' || ch=='@' || ch=='$' || ch=='?' )
 
-ret_code GetToken( struct asm_tok *token, struct line_status *p )
-/***************************************************************/
+ret_code GetToken( struct asm_tok token[], struct line_status *p )
+/****************************************************************/
 {
     if( isdigit( *p->input ) ) {
         return( get_number( token, p ) );
@@ -886,10 +901,9 @@ ret_code GetToken( struct asm_tok *token, struct line_status *p )
 #else
               is_valid_id_char(*(p->input+1)) &&
 #endif
-              ( p->last_token != T_REG &&
-               p->last_token != T_CL_BRACKET &&
-               p->last_token != T_CL_SQ_BRACKET &&
-               p->last_token != T_ID ) ) {
+              /* v2.11: member last_token has been removed */
+              //( p->last_token != T_REG &&  p->last_token != T_CL_BRACKET && p->last_token != T_CL_SQ_BRACKET && p->last_token != T_ID ) ) {
+              ( p->index == 0 || ( token[-1].token != T_REG && token[-1].token != T_CL_BRACKET && token[-1].token != T_CL_SQ_BRACKET && token[-1].token != T_ID ) ) ) {
         return( get_id( token, p ) );
 #if BACKQUOTES
     } else if( *p->input == '`' && Options.strict_masm_compat == FALSE ) {
@@ -931,7 +945,7 @@ int Tokenize( char *line, unsigned int start, struct asm_tok tokenarray[], unsig
     p.input = line;
     p.start = line;
     p.index = start;
-    p.last_token = T_FINAL;
+    //p.last_token = T_FINAL; /* v2.11: last_token is obsolete */
     p.flags = flags;
     p.flags2 = 0;
     p.flags3 = 0;
@@ -979,7 +993,7 @@ int Tokenize( char *line, unsigned int start, struct asm_tok tokenarray[], unsig
 
         if( *p.input == NULLC ) {
             /* if a comma is last token, concat lines ... with some exceptions
-             * v2.05: moved from GetPreprocessedLine(). Moved because the
+             * v2.05: moved from PreprocessLine(). Moved because the
              * concatenation may be triggered by a comma AFTER expansion.
              */
             if ( p.index > 1 &&
@@ -1045,10 +1059,10 @@ int Tokenize( char *line, unsigned int start, struct asm_tok tokenarray[], unsig
                 }
             }
         }
-
-        p.last_token = tokenarray[p.index].token;
+        //p.last_token = tokenarray[p.index].token; /* v2.11: last_token is obsolete */
         p.index++;
         if( p.index >= MAX_TOKEN ) {
+            DebugMsg1(("tokenize: token index %u >= MAX_TOKEN (=%u), line=>%s<\n", p.index, MAX_TOKEN, line ));
             EmitError( TOO_MANY_TOKENS );
             p.index = start;
             goto skipline;

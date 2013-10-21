@@ -36,7 +36,8 @@
 #define GetPtr( x, y ) x->y
 #endif
 
-static short resw_table[ HASH_TABITEMS ];
+/* reserved words hash table */
+static uint_16 resw_table[ HASH_TABITEMS ];
 
 /* define unary operand (LOW, HIGH, OFFSET, ...) type flags */
 enum unary_operand_types {
@@ -132,9 +133,9 @@ enum opnd_variants {
 #define OpCls( op1, op2, op3 ) OPC_ ## op1 ## op2 ## op3
 
 const struct instr_item InstrTable[] = {
-#define ins(tok,string,len,  opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
+#define ins(tok, string, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
     { opcls, byte1_info, prefix, 1, rm_info, op_dir, 0, cpu, opcode, rm_byte },
-#define insx(tok,string,len, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) \
+#define insx(tok,string, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) \
     { opcls, byte1_info, prefix, 1, rm_info, op_dir, 0, cpu, opcode, rm_byte },
 #define insn(tok,suffix,     opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
     { opcls, byte1_info, prefix, 0, rm_info, op_dir, 0, cpu, opcode, rm_byte },
@@ -142,7 +143,7 @@ const struct instr_item InstrTable[] = {
     { opcls, byte1_info, prefix, 1, rm_info, op_dir, 0, cpu, opcode, rm_byte },
 #include "instruct.h"
 #include "instr64.h"
-ins (NULL,0,0,OpCls(NONE,NONE,NONE),0,0,0,0,0,0,0) /* last (dummy) entry */
+ins (NULL,0,OpCls(NONE,NONE,NONE),0,0,0,0,0,0,0) /* last entry - needed for its ".first" (=1) field */
 #undef insm
 #undef insn
 #undef insx
@@ -154,11 +155,11 @@ ins (NULL,0,0,OpCls(NONE,NONE,NONE),0,0,0,0,0,0,0) /* last (dummy) entry */
 
 const struct special_item SpecialTable[] = {
     { 0, 0, 0, 0, 0 }, /* dummy entry for T_NULL */
-#define res(tok, string, len, type, value, bytval, flags, cpu, sflags ) \
+#define res(tok, string, type, value, bytval, flags, cpu, sflags ) \
     { value, sflags, cpu, bytval, type },
 #include "special.h"
 #undef res
-#define res(tok, string, len, value, bytval, flags, cpu, sflags ) \
+#define res(tok, string, value, bytval, flags, cpu, sflags ) \
     { value, sflags, cpu, bytval, RWT_DIRECTIVE },
 #include "directve.h"
 #undef res
@@ -167,18 +168,18 @@ const struct special_item SpecialTable[] = {
 /* define symbolic indices for InstrTable[] */
 
 enum res_idx {
-#define  ins(tok,string,len, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I,
-#define insx(tok,string,len, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) T_ ## tok ## _I,
-#define insn(tok,suffix,     opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix,
-#define insm(tok,suffix,     opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix,
+#define  ins(tok, string, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix) T_ ## tok ## _I,
+#define insx(tok, string, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix,flgs) T_ ## tok ## _I,
+#define insn(tok, suffix, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix) T_ ## tok ## _ ## suffix,
+#define insm(tok, suffix, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix) T_ ## tok ## _ ## suffix,
 #include "instruct.h"
 #undef insm
 #undef insn
 #undef ins
 
-#define  ins(tok,string,len, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I64,
-#define insn(tok,suffix,     opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix ## _I64,
-#define insm(tok,suffix,     opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix ## _I64,
+#define  ins(tok, string, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix) T_ ## tok ## _I64,
+#define insn(tok, suffix, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix) T_ ## tok ## _ ## suffix ## _I64,
+#define insm(tok, suffix, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix) T_ ## tok ## _ ## suffix ## _I64,
 #include "instr64.h"
 #undef insm
 #undef insn
@@ -192,12 +193,12 @@ enum res_idx {
  * one entry in InstrTable.
  */
 
-short optable_idx[] = {
+uint_16 optable_idx[] = {
 
-#define  ins(tok,string,len, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I,
-#define insx(tok,string,len, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) T_ ## tok ## _I,
-#define insn(tok,suffix,     opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
-#define insm(tok,suffix,     opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define  ins( tok, string, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix) T_ ## tok ## _I,
+#define insx( tok, string, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix,flgs) T_ ## tok ## _I,
+#define insn( tok, suffix, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix)
+#define insm( tok, suffix, opcls, byte1_info, op_dir, rm_info, opcode, rm_byte, cpu, prefix)
 #include "instruct.h"
 #undef insm
 #undef insn
@@ -208,7 +209,7 @@ short optable_idx[] = {
      * 64-bit are only needed in InstrTable[]. For optable_idx[], a
      * patch is done (see patchtabr[])
      */
-//#define  ins(tok,string,len, op1,op2,op3, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I64,
+//#define  ins(tok,string, op1,op2,op3, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _I64,
 //#define insn(tok,suffix, op1,op2,op3, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix ## _I64,
 //#define insm(tok,suffix, op1,op2,op3, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) T_ ## tok ## _ ## suffix ## _I64,
 //#include "instr64.h"
@@ -217,7 +218,7 @@ short optable_idx[] = {
 //#undef ins
 
 #if AVXSUPP
-#define avxins( tok, string, len, cpu, flgs ) T_ ## tok ## _I,
+#define avxins( tok, string, cpu, flgs ) T_ ## tok ## _I,
 #include "instravx.h"
 #undef avxins
 #endif
@@ -235,24 +236,24 @@ const struct opnd_class opnd_clstab[] = {
 /* create the strings for all reserved words */
 
 static const char resw_strings[] = {
-#define res(tok, string, len, type, value, bytval, flags, cpu, sflags) \
+#define res(tok, string, type, value, bytval, flags, cpu, sflags) \
  # string
 #include "special.h"
 #undef res
-#define res(tok, string, len, value, bytval, flags, cpu, sflags) \
+#define res(tok, string, value, bytval, flags, cpu, sflags) \
  # string
 #include "directve.h"
 #undef res
 
-#define ins(tok,string,len, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
+#define ins(tok,string, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
  # string
-#define insn(tok,suffix,    opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
-#define insm(tok,suffix,    opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
-#define insx(tok,string,len,opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) \
+#define insn(tok,suffix, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insm(tok,suffix, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insx(tok,string, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs) \
  # string
 #include "instruct.h"
 #if AVXSUPP
-#define avxins( tok, string, len, cpu, flgs ) # string
+#define avxins( tok, string, cpu, flgs ) # string
 #include "instravx.h"
 #undef avxins
 #endif
@@ -266,32 +267,34 @@ static const char resw_strings[] = {
 
 /* create the 'reserved words' table (ResWordTable).
  * this table's entries will be used to create the instruction hash table.
+ * v2.11: RWF_SPECIAL flag removed:
+ * { 0, sizeof(#string)-1, RWF_SPECIAL | flags, NULL },
  */
 struct ReservedWord ResWordTable[] = {
     { 0, 0, 0, NULL }, /* dummy entry for T_NULL */
-#define res(tok, string, len, type, value, bytval, flags, cpu, sflags) \
-    { 0, len, RWF_SPECIAL | flags, NULL },
+#define res(tok, string, type, value, bytval, flags, cpu, sflags) \
+    { 0, sizeof(#string)-1, flags, NULL },
 #include "special.h"
 #undef res
-#define res(tok, string, len, value, bytval, flags, cpu, sflags) \
-    { 0, len, RWF_SPECIAL | flags, NULL },
+#define res(tok, string, value, bytval, flags, cpu, sflags) \
+    { 0, sizeof(#string)-1, flags, NULL },
 #include "directve.h"
 #undef res
 
-#define ins(tok,string,len, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
-    { 0, len, 0, NULL },
-#define insn(tok,suffix,    opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
-#define insm(tok,suffix,    opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
-#define insx(tok,string,len,opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flags) \
-    { 0, len, flags, NULL },
+#define ins(tok,string,  opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix) \
+    { 0, sizeof(#string)-1, 0, NULL },
+#define insn(tok,suffix, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insm(tok,suffix, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insx(tok,string, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flags) \
+    { 0, sizeof(#string)-1, flags, NULL },
 #include "instruct.h"
 #undef insx
 #undef insm
 #undef insn
 #undef ins
 #if AVXSUPP
-#define avxins( tok, string, len, cpu, flgs ) \
-    { 0, len, RWF_VEX, NULL },
+#define avxins( tok, string, cpu, flgs ) \
+    { 0, sizeof(#string)-1, RWF_VEX, NULL },
 #include "instravx.h"
 #undef avxins
 #endif
@@ -332,7 +335,9 @@ const uint_8 vex_flags[] = {
     VX_NND,      /* VCVTTPD2DQ     */
     VX_NND,      /* VCVTPD2PS      */
     VX_NND,      /* VMOVDDUP       */
-#define avxins( tok, string, len, cpu, flgs ) flgs,
+    VX_L|VX_NND, /* VMOVMSKPD      */ /* v2.11 */
+    VX_L|VX_NND, /* VMOVMSKPS      */ /* v2.11 */
+#define avxins( tok, string, cpu, flgs ) flgs,
 #include "instravx.h"
 #undef avxins
 };
@@ -354,6 +359,7 @@ static const enum instr_token patchtab64[] = {
 
 /* keywords to be removed for 64-bit */
 static const enum instr_token patchtab32[] = {
+    T_TR3,          /* registers invalid for IA32+              */
     T_DOT_SAFESEH,  /* directives invalid for IA32+             */
     T_AAA,          /* instructions invalid for IA32+           */
     T_JCXZ,         /* 1. branch instructions invalid for IA32+ */
@@ -361,7 +367,7 @@ static const enum instr_token patchtab32[] = {
 };
 
 struct replace_ins {
-    short         tok; /* is an optable_idx[] index */
+    uint_16       tok; /* is an optable_idx[] index */
     enum res_idx  idx32;
     enum res_idx  idx64;
 };
@@ -397,13 +403,14 @@ static struct qdesc renamed_keys = { NULL, NULL };
 /* global queue of "disabled" reserved words.
  * just indices of ResWordTable[] are used.
  */
-static short RemovedFirst = EMPTY;
-static short RemovedTail  = EMPTY;
+static struct {
+    uint_16 Head;
+    uint_16 Tail;
+} Removed = { 0, 0 };
 
 #if AMD64_SUPPORT
 static bool  b64bit = FALSE; /* resw tables in 64bit mode? */
 #endif
-static bool  fInit = FALSE;  /* init flag */
 
 static unsigned int get_hash( const char *s, unsigned char size )
 /***************************************************************/
@@ -421,17 +428,17 @@ static unsigned int get_hash( const char *s, unsigned char size )
     return( h % HASH_TABITEMS );
 }
 
-int FindResWord( const char *name, unsigned char size )
-/*****************************************************/
+uint FindResWord( const char *name, unsigned char size )
+/******************************************************/
 /* search reserved word in hash table */
 {
     struct ReservedWord *inst;
-    int i;
+    uint i;
 #ifdef BASEPTR
     __segment seg = FP_SEG( resw_strings );
 #endif
 
-    for( i = resw_table[ get_hash( name, size ) ]; i != EMPTY; i = inst->next ) {
+    for( i = resw_table[ get_hash( name, size ) ]; i != 0; i = inst->next ) {
         inst = &ResWordTable[i];
         /* check if the name matches the entry for this inst in AsmChars */
         //if( name[ inst->len ] == NULLC && _strnicmp( name, inst->name, inst->len ) == 0) {
@@ -439,7 +446,7 @@ int FindResWord( const char *name, unsigned char size )
             return( i );
         }
     }
-    return( -1 );
+    return( 0 );
 }
 
 /* add reserved word to hash table */
@@ -458,9 +465,9 @@ static void AddResWord( int token )
 
     /* sort the items of a line by length! */
 
-    for( curr = resw_table[i], old = EMPTY; curr != EMPTY && ResWordTable[curr].len <= ResWordTable[token].len; old = curr, curr = ResWordTable[curr].next );
+    for( curr = resw_table[i], old = 0; curr != 0 && ResWordTable[curr].len <= ResWordTable[token].len; old = curr, curr = ResWordTable[curr].next );
 
-    if ( old == EMPTY ) {
+    if ( old == 0 ) {
         ResWordTable[token].next = resw_table[i];
         resw_table[i] = token;
     } else {
@@ -485,9 +492,9 @@ static int RemoveResWord( int token )
 
     i = get_hash( ResWordTable[token].name, ResWordTable[token].len );
 
-    for( curr = resw_table[i], old = EMPTY ; curr != EMPTY ; old = curr, curr = ResWordTable[curr].next )  {
+    for( curr = resw_table[i], old = 0 ; curr != 0 ; old = curr, curr = ResWordTable[curr].next )  {
         if( curr == token ) {
-            if ( old != EMPTY )
+            if ( old != 0 )
                 ResWordTable[old].next = ResWordTable[curr].next;
             else
                 resw_table[i] = ResWordTable[curr].next;
@@ -506,7 +513,7 @@ struct rename_node {
     uint_8 length;
 };
 
-/* Rename a keyword.
+/* Rename a keyword - used by OPTION RENAMEKEYWORD.
  * - token: keyword to rename
  * - newname: new name of keyword
  * - length: length of new name
@@ -515,7 +522,12 @@ struct rename_node {
 void RenameKeyword( uint token, const char *newname, uint_8 length )
 /******************************************************************/
 {
-    struct rename_node *rn;
+    struct rename_node *curr;
+    struct rename_node *prev;
+
+    /* v2.11: do nothing if new name matches current name */
+    if ( ResWordTable[token].len == length && !_memicmp( newname, ResWordTable[token].name, length ) )
+        return;
 
     RemoveResWord( token );
     /* if it is the first rename action for this keyword,
@@ -523,19 +535,40 @@ void RenameKeyword( uint token, const char *newname, uint_8 length )
      */
     if ( ResWordTable[token].name >= resw_strings &&
         ResWordTable[token].name < ( resw_strings + sizeof( resw_strings ) ) ) {
-        rn = LclAlloc( sizeof( struct rename_node ) );
-        rn->next = NULL;
-        rn->name = ResWordTable[token].name;
-        rn->token = token;
-        rn->length = ResWordTable[token].len;
+        curr = LclAlloc( sizeof( struct rename_node ) );
+        curr->next = NULL;
+        curr->name = ResWordTable[token].name;
+        curr->token = token;
+        curr->length = ResWordTable[token].len;
         if ( renamed_keys.head == NULL ) {
-            renamed_keys.head = renamed_keys.tail = rn;
+            renamed_keys.head = renamed_keys.tail = curr;
         } else {
-            ((struct rename_node *)renamed_keys.tail)->next = rn;
-            renamed_keys.tail = rn;
+            ((struct rename_node *)renamed_keys.tail)->next = curr;
+            renamed_keys.tail = curr;
         }
     } else {
         LclFree( (void *)ResWordTable[token].name );
+#if 1
+        /* v2.11: search the original name. if the "new" names matches
+         * the original name, restore the name pointer */
+        for ( curr = renamed_keys.head, prev = NULL; curr; prev = curr ) {
+            if ( curr->token == token ) {
+                if ( curr->length == length && !memcmp( newname, curr->name, length ) ) {
+                    if ( prev )
+                        prev->next = curr->next;
+                    else
+                        renamed_keys.head = curr->next;
+                    if ( renamed_keys.tail == curr )
+                        renamed_keys.tail = prev;
+                    ResWordTable[token].name = curr->name;
+                    ResWordTable[token].len = curr->length;
+                    AddResWord( token );
+                    return;
+                }
+                break;
+            }
+        }
+#endif
     }
     ResWordTable[token].name = LclAlloc( length );
     /* convert to lowercase? */
@@ -617,13 +650,13 @@ void DisableKeyword( uint token )
 {
     if ( !( ResWordTable[token].flags & RWF_DISABLED ) ) {
         RemoveResWord( token );
-        ResWordTable[token].next = EMPTY;
+        ResWordTable[token].next = 0;
         ResWordTable[token].flags |= RWF_DISABLED;
-        if ( RemovedFirst == EMPTY )
-            RemovedFirst = RemovedTail = token;
+        if ( Removed.Head == 0 )
+            Removed.Head = Removed.Tail = token;
         else {
-            ResWordTable[RemovedTail].next = token;
-            RemovedTail = token;
+            ResWordTable[Removed.Tail].next = token;
+            Removed.Tail = token;
         }
     }
 }
@@ -635,7 +668,7 @@ bool IsKeywordDisabled( const char *name, int len )
 /*************************************************/
 {
     uint  token;
-    for ( token = RemovedFirst; token != EMPTY; token = ResWordTable[token].next )
+    for ( token = Removed.Head; token != 0; token = ResWordTable[token].next )
         if( ResWordTable[token].name[ len ] == NULLC && _memicmp( name, ResWordTable[token].name, len ) == 0 )
             return( TRUE );
     return( FALSE );
@@ -660,89 +693,67 @@ char *GetResWName( uint resword, char *buff )
     return( buff );
 }
 
-/* ResWordsInit() is called once per module */
+/* ResWordsInit() initializes the reserved words hash array ( resw_table[] )
+ * and also the reserved words string pointers ( ResWordTable[].name + ResWordTable[].len )
+ */
 
 void ResWordsInit( void )
 /***********************/
 {
-    int next;
     int i;
+    const char *p = resw_strings;
+
+    /* exit immediately if table is already initialized */
+    if ( ResWordTable[1].name )
+        return;
 
     DebugMsg(("ResWordsInit() enter\n"));
 
-    if( fInit == FALSE ) {  /* if not initialized */
-        const char *p = resw_strings;
-        fInit = TRUE;
-        /* if first call, initialize hash table (in IA32 mode) */
-        for ( i = 0; i < HASH_TABITEMS; i++ )
-            resw_table[i] = EMPTY;
-#if AVXSUPP && AMD64_SUPPORT
-        /* currently these flags must be set manually, since the
-         * RWF_ flags aren't contained in instravx.h */
-        ResWordTable[T_VPEXTRQ].flags |= RWF_X64;
-        ResWordTable[T_VPINSRQ].flags |= RWF_X64;
-#endif
-        /* v2.09: start with index = 1, since index 0 is now T_NULL */
-        for( i = 1; i < sizeof( ResWordTable ) / sizeof( ResWordTable[0] ); i++ ) {
-            ResWordTable[i].name = p;
-            p += ResWordTable[i].len;
-#if AMD64_SUPPORT /* don't add the words specific to x64 */
-            if ( !(ResWordTable[i].flags & RWF_X64 ) )
-#endif
-                AddResWord( i );
-        }
-    } else {
-        /* reenter disabled keywords */
-        for( i = RemovedFirst; i != EMPTY; i = next ) {
-            next = ResWordTable[i].next;
-            ResWordTable[i].flags &= ~RWF_DISABLED;
-#if AMD64_SUPPORT /* don't add the words specific to x64 */
-            if ( !(ResWordTable[i].flags & RWF_X64 ) )
-#endif
-                AddResWord( i );
-            DebugMsg(("ResWordsInit(): %s reenabled\n", GetResWName( i, NULL ) ));
-        }
-        RemovedFirst = RemovedTail = EMPTY;
-    }
-#if 0 //def DEBUG_OUT
-    DebugMsg(("SpecialTable\n"));
-    DebugMsg(("keyword             value   sflags  cpu val8 type\n"));
-    DebugMsg(("-------------------------------------------------\n"));
-    for ( i = 1; i < sizeof( SpecialTable ) / sizeof( SpecialTable[0] ); i++ ) {
-        DebugMsg(("%-16s %8X %8X %4X %4X  %2X\n", GetResWName( i, NULL ),
-                  SpecialTable[i].value, SpecialTable[i].sflags,
-                  SpecialTable[i].cpu, SpecialTable[i].bytval,
-                  SpecialTable[i].type ));
-    }
-    DebugMsg(("-------------------------------------------------\n"));
+    /* clear hash table */
+    memset( &resw_table, 0, sizeof( resw_table ) );
 
-    DebugMsg(("\nInstructionTable\n"));
-    DebugMsg(("keyword          cls cpu opc rmb b1 rmi pfx fst\n"));
-    DebugMsg(("-------------------------------------------------------\n"));
-    for ( i = INS_FIRST_1 + 1; i < sizeof( ResWordTable ) / sizeof( ResWordTable[0]; i++ ) {
-        const struct instr_item *ins = &InstrTable[IndexFromToken( i )];
-        DebugMsg(("%-16s %02X %4X  %02X  %02X %2u %X   %X   %u\n", GetResWName( i, NULL ),
-                  ins->opclsidx,
-                  ins->cpu, ins->opcode, ins->rm_byte, ins->byte1_info,
-                  ins->rm_info, ins->allowed_prefix, ins->first ));
-    }
-    DebugMsg(("---------------------------------------------------------------\n"));
+#if AVXSUPP && AMD64_SUPPORT
+    /* currently these flags must be set manually, since the
+     * RWF_ flags aren't contained in instravx.h */
+    ResWordTable[T_VPEXTRQ].flags |= RWF_X64;
+    ResWordTable[T_VPINSRQ].flags |= RWF_X64;
 #endif
+
+    /* initialize ResWordTable[].name and .len.
+     * add keyword to hash table ( unless it is 64-bit only ).
+     * v2.09: start with index = 1, since index 0 is now T_NULL
+     */
+    for( i = 1; i < sizeof( ResWordTable ) / sizeof( ResWordTable[0] ); i++ ) {
+        ResWordTable[i].name = p;
+        p += ResWordTable[i].len;
+#if AMD64_SUPPORT /* don't add the words specific to x64 */
+        if ( !(ResWordTable[i].flags & RWF_X64 ) )
+#endif
+            AddResWord( i );
+    }
     DebugMsg(("ResWordsInit() exit\n"));
     return;
 }
 
-/* ResWordsFini() is called once per module */
+/* ResWordsFini() is called once per module
+ * it restores the resword table
+ */
 
 void ResWordsFini( void )
 /***********************/
 {
+    int i;
+    int next;
 #if RENAMEKEY
     struct rename_node  *rencurr;
 #endif
+
     DebugMsg(("ResWordsFini() enter\n"));
 #if RENAMEKEY
-    /* restore renamed keywords */
+    /* restore renamed keywords.
+     * the keyword has to removed ( and readded ) from the hash table,
+     * since its position most likely will change.
+     */
     for ( rencurr = renamed_keys.head; rencurr; ) {
         struct rename_node *tmp = rencurr->next;
         RemoveResWord( rencurr->token );
@@ -758,12 +769,58 @@ void ResWordsFini( void )
     }
     renamed_keys.head = NULL;
 #endif
+
+    /* reenter disabled keywords */
+    for( i = Removed.Head; i != 0; i = next ) {
+        next = ResWordTable[i].next;
+        ResWordTable[i].flags &= ~RWF_DISABLED;
+#if AMD64_SUPPORT /* don't add the words specific to x64 */
+        if ( !(ResWordTable[i].flags & RWF_X64 ) )
+#endif
+            AddResWord( i );
+        DebugMsg(("ResWordsInit(): %s reenabled\n", GetResWName( i, NULL ) ));
+    }
+    Removed.Head = Removed.Tail = 0;
+
     return;
 }
 
 #ifdef DEBUG_OUT
 
-#define RWLOG 1
+void DumpResWords( void )
+/***********************/
+{
+    int i;
+
+    printf("SpecialTable\n");
+    printf("   # keyword             value   sflags  cpu val8 type flg len\n");
+    printf("--------------------------------------------------------------\n");
+    /* start with index 1 ( index 0 is T_NULL ) */
+    for ( i = 1; i < sizeof( SpecialTable ) / sizeof( SpecialTable[0] ); i++ ) {
+        printf("%4u %-16s %8X %8X %4X %4X  %2X  %2X %3u\n", i, GetResWName( i, NULL ),
+               SpecialTable[i].value, SpecialTable[i].sflags,
+               SpecialTable[i].cpu, SpecialTable[i].bytval,
+               SpecialTable[i].type, ResWordTable[i].flags, ResWordTable[i].len );
+    }
+    printf("--------------------------------------------------------------\n");
+
+    printf("\nitems in InstrTable[]: %u\n", sizeof( InstrTable ) / sizeof( InstrTable[0] ) );
+    printf("items in optable_idx[]: %u, used by ResWordTable items %u-%u\n",
+           sizeof( optable_idx ) / sizeof( optable_idx[0] ), INS_FIRST_1 + 1, sizeof( ResWordTable ) / sizeof( ResWordTable[0] ) - 1 );
+
+    printf("\nInstructionTable\n");
+    printf("   # keyword          cls cpu opc rmb b1 rmi pfx fst idx flg len\n");
+    printf("----------------------------------------------------------------\n");
+    for ( i = INS_FIRST_1 + 1; i < sizeof( ResWordTable ) / sizeof( ResWordTable[0] ); i++ ) {
+        const struct instr_item *ins = &InstrTable[IndexFromToken( i )];
+        printf("%4u %-16s %02X %4X  %02X  %02X %2u %X   %X   %u  %4u %3X %3u\n", i, GetResWName( i, NULL ),
+               ins->opclsidx,
+               ins->cpu, ins->opcode, ins->rm_byte, ins->byte1_info,
+               ins->rm_info, ins->allowed_prefix, ins->first,
+               IndexFromToken( i ), ResWordTable[i].flags, ResWordTable[i].len );
+    }
+    printf("----------------------------------------------------------------\n");
+}
 
 void DumpInstrStats( void )
 /*************************/
@@ -775,35 +832,30 @@ void DumpInstrStats( void )
     unsigned            curr = 0;
     unsigned            num[8] = {0,0,0,0,0,0,0,0};
 
-    if ( !fInit )
-        return;
-#if RWLOG
-    DebugMsg(("\nReserved Word Hash Table\n"));
-    DebugMsg(("Idx keywords\n"));
-    DebugMsg(("---------------------------\n"));
-#endif
+    if ( Options.dump_reswords_hash ) {
+        printf("\nReserved Word Hash Table\n");
+        printf("Idx keywords\n");
+        printf("---------------------------\n");
+    }
+
     for( i = 0; i < HASH_TABITEMS; i++ ) {
-#if RWLOG
-        DebugMsg(("%3u ", i ));
-#endif
-        for( inst = resw_table[i], curr = 0; inst != EMPTY; inst = ResWordTable[inst].next ) {
-#if RWLOG
-            DebugMsg((" %-8s", GetResWName( inst, NULL ) ));
-#endif
+        if ( Options.dump_reswords_hash )
+            printf("%3u ", i );
+        for( inst = resw_table[i], curr = 0; inst != 0; inst = ResWordTable[inst].next ) {
+            if ( Options.dump_reswords_hash )
+                printf(" %-8s", GetResWName( inst, NULL ) );
             curr++;
         }
-#if RWLOG
-        DebugMsg(("\n" ));
-#endif
+        if ( Options.dump_reswords_hash )
+            printf("\n" );
         count += curr;
         if ( curr <= 7 )
             num[curr]++;
         if (max < curr)
             max = curr;
     }
-#if RWLOG
-    DebugMsg(("---------------------------\n"));
-#endif
+    if ( Options.dump_reswords_hash )
+        printf("---------------------------\n");
     if ( Options.quiet == FALSE ) {
         printf( "%u items in resw table, max items/line=%u ", count, max );
         printf( "[0=%u 1=%u %u %u %u %u %u %u]\n", num[0], num[1], num[2], num[3], num[4], num[5], num[6], num[7] );

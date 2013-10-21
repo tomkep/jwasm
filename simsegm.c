@@ -14,7 +14,7 @@
 #include "memalloc.h"
 #include "parser.h"
 #include "segment.h"
-#include "input.h"
+#include "lqueue.h"
 #include "expreval.h"
 #include "fastpass.h"
 #include "listing.h"
@@ -24,12 +24,6 @@
 #include "myassert.h"
 
 #define DEFAULT_STACK_SIZE      1024
-
-#ifdef __I86__
-#define NUMQUAL (long)
-#else
-#define NUMQUAL
-#endif
 
 extern const char szDgroup[];
 
@@ -221,8 +215,6 @@ ret_code SimplifiedSegDir( int i, struct asm_tok tokenarray[] )
         return( ERROR );
     }
 
-    NewLineQueue();
-
     if( type != SIM_STACK )
         close_currseg();  /* emit a "xxx ENDS" line to close current seg */
 
@@ -254,7 +246,7 @@ ret_code SimplifiedSegDir( int i, struct asm_tok tokenarray[] )
          */
         //FStoreLine();
         SetSimSeg( SIM_STACK, NULL );
-        AddLineQueueX( "ORG 0%xh", NUMQUAL opndx.value );
+        AddLineQueueX( "ORG 0%xh", opndx.value );
         EndSimSeg( SIM_STACK );
         /* add stack to dgroup for some segmented models */
         if ( !init )
@@ -319,7 +311,6 @@ void SetModelDefaultSegNames( void )
 
 /* Called by SetModel() [.MODEL directive].
  * Initializes simplified segment directives.
- * NewLineQueue() has already been called,
  * and the caller will run RunLineQueue() later.
  * Called for each pass.
  */
@@ -366,7 +357,6 @@ void ModelSimSegmExit( void )
 {
     /* a model is set. Close current segment if one is open. */
     if ( CurrSeg ) {
-        NewLineQueue();
         close_currseg();
         RunLineQueue();
     }

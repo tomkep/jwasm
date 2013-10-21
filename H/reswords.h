@@ -32,12 +32,24 @@
 #ifndef _RESWORDS_H_INCLUDED
 #define _RESWORDS_H_INCLUDED
 
+enum reservedword_flags {
+    //RWF_SPECIAL  = 1, /* keyword is NO instruction; v2.11: obsolete */
+    RWF_DISABLED = 1, /* keyword disabled */
+    RWF_IA32     = 2, /* keyword specific to IA32 mode */
+#if AMD64_SUPPORT
+    RWF_X64      = 4, /* keyword specific to IA32+ mode */
+#endif
+#if AVXSUPP
+    RWF_VEX      = 8, /* keyword triggers VEX encoding */
+#endif
+};
+
 /* structure of items in the "reserved names" table ResWordTable[] */
 
 struct ReservedWord {
-    short next;              /* index next entry (used for hash table) */
-    unsigned char len;       /* length of reserved word, i.e. 'AX' = 2 */
-    unsigned char flags;
+    uint_16 next;     /* index next entry (used for hash table) */
+    uint_8 len;       /* length of reserved word, i.e. 'AX' = 2 */
+    uint_8 flags;     /* see enum reservedword_flags */
 #if 0 /* __I86__ ( may be activated for JWASMR, see reswords.c) */
     const char __based( void ) *name;
 #else
@@ -45,19 +57,7 @@ struct ReservedWord {
 #endif
 };
 
-enum reservedword_flags {
-    RWF_SPECIAL  = 1, /* keyword is NO instruction */
-    RWF_DISABLED = 2, /* keyword disabled */
-    RWF_IA32     = 4, /* keyword specific to IA32 mode */
-#if AMD64_SUPPORT
-    RWF_X64      = 8, /* keyword specific to IA32+ mode */
-#endif
-#if AVXSUPP
-    RWF_VEX      = 0x10, /* keyword triggers VEX encoding */
-#endif
-};
-
-extern int      FindResWord( const char *, unsigned char );
+extern uint     FindResWord( const char *, unsigned char );
 extern char     *GetResWName( uint, char * );
 extern bool     IsKeywordDisabled( const char *, int );
 extern void     DisableKeyword( uint );
@@ -69,5 +69,8 @@ extern void     Set64Bit( bool );
 #endif
 extern void     ResWordsInit( void );
 extern void     ResWordsFini( void );
+#ifdef DEBUG_OUT
+extern void     DumpResWords( void );
+#endif
 
 #endif

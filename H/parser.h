@@ -38,11 +38,11 @@
 /* define tokens for SpecialTable (registers, operators, ... ) */
 enum special_token {
     T_NULL,
-#define  res(token, string, len, type, value, bytval, flags, cpu, sflags) T_ ## token ,
+#define  res(token, string, type, value, bytval, flags, cpu, sflags) T_ ## token ,
 #include "special.h"
 #undef res
 /* define tokens for SpecialTable (directives) */
-#define  res(token, string, len, value, bytval, flags, cpu, sflags) T_ ## token ,
+#define  res(token, string, value, bytval, flags, cpu, sflags) T_ ## token ,
 #include "directve.h"
 #undef res
 SPECIAL_LAST
@@ -52,10 +52,10 @@ SPECIAL_LAST
 
 enum instr_token {
     INS_FIRST_1 = SPECIAL_LAST - 1, /* to ensure tokens are unique */
-#define  ins(token, string, len, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix ) T_ ## token ,
-#define insx(token, string, len, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs ) T_ ## token ,
-#define insn(tok,suffix, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
-#define insm(tok,suffix, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define  ins(token, string, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix ) T_ ## token ,
+#define insx(token, string, opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix,flgs ) T_ ## token ,
+#define insn(tok, suffix,   opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
+#define insm(tok, suffix,   opcls, byte1_info,op_dir,rm_info,opcode,rm_byte,cpu,prefix)
 #include "instruct.h"
 #undef insm
 #undef insn
@@ -63,7 +63,7 @@ enum instr_token {
 #undef ins
 #if AVXSUPP
 #define VEX_START  T_VBROADCASTSS  /* first VEX encoded item */
-#define avxins(token, string, len, cpu, flgs ) T_V ## token ,
+#define avxins(token, string, cpu, flgs ) T_V ## token ,
 #include "instravx.h"
 #undef avxins
 #endif
@@ -93,9 +93,9 @@ extern struct symbol_queue SymTables[];
 /*
  values for <rm_info> (3 bits)
  000            -> has rm_byte with w-, d- and/or s-bit in opcode
- 001( no_RM   ) -> no rm_byte
+ 001( no_RM   ) -> no rm_byte - may have w-bit
  010( no_WDS  ) -> has rm_byte, but w-bit, d-bit, s-bit of opcode are absent
- 011( R_in_OP ) -> no rm_byte, reg field is included in opcode
+ 011( R_in_OP ) -> no rm_byte, reg field (if any) is included in opcode
  */
 enum rm_info {
     no_RM   = 0x1,
@@ -128,8 +128,9 @@ enum special_type {
 
 // values for sflags if register
 enum op1_flags {
-    SFR_SIZMSK = 0x1F, /* size in bits 0-4 */
-    SFR_IREG = 0x20,
+    SFR_SIZMSK  = 0x1F, /* size in bits 0-4 */
+    SFR_IREG    = 0x20,
+    SFR_SSBASED = 0x40, /* v2.11: added */
 };
 
 #if AMD64_SUPPORT
@@ -226,8 +227,13 @@ enum directive_type {
 
 struct opnd_item {
     enum operand_type type;
-    int_32            data;
-    int_32            datahigh; /* needed for OP_I48 and OP_I64 */
+    union {
+        struct {
+            int_32    data32l;
+            int_32    data32h; /* needed for OP_I48 and OP_I64 */
+        };
+        uint_64       data64;
+    };
     struct fixup      *InsFixup;
 };
 
@@ -294,7 +300,7 @@ struct code_info {
 //#define CurrWordSize WordSize.value
 extern const struct instr_item   InstrTable[];   /* instruction table */
 extern const struct special_item SpecialTable[]; /* rest of res words */
-extern short                     optable_idx[];  /* helper, access thru IndexFromToken() only */
+extern uint_16                   optable_idx[];  /* helper, access thru IndexFromToken() only */
 
 #define IndexFromToken( tok )  optable_idx[ ( tok ) - SPECIAL_LAST ]
 
@@ -302,16 +308,16 @@ extern int        SizeFromMemtype( enum memtype, int, struct asym * );
 extern ret_code   MemtypeFromSize( int, enum memtype * );
 extern int        SizeFromRegister( int );
 extern ret_code   GetLangType( int *, struct asm_tok[], enum lang_type * );
-extern void       EmitConstError( const struct expr * );
 
 extern void       sym_add_table( struct symbol_queue *, struct dsym * );
 extern void       sym_remove_table( struct symbol_queue *, struct dsym * );
 extern void       sym_ext2int( struct asym * );
 
 extern int        OperandSize( enum operand_type, const struct code_info * );
-extern void       find_frame( const struct asym *sym );
-extern void       find_frame2( const struct asym *sym );
+extern void       set_frame( const struct asym *sym );
+extern void       set_frame2( const struct asym *sym );
 extern ret_code   ParseLine( struct asm_tok[] );
+extern void       ProcessFile( struct asm_tok[] );
 
 extern void       WritePreprocessedLine( const char * );
 

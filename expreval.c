@@ -38,11 +38,10 @@
 #include "segment.h"
 #include "proc.h"
 #include "assume.h"
-#include "input.h"
 #include "tokenize.h"
 #include "types.h"
 #include "label.h"
-#include "data.h"
+#include "atofloat.h"
 #include "myassert.h"
 
 #define ALIAS_IN_EXPR 1 /* allow alias names in expression */
@@ -59,15 +58,22 @@
 #define ERRLOC( i )
 #endif
 
+#if STACKBASESUPP==0
+extern enum special_token basereg[];
+#else
+extern uint_32          StackAdj;
+#endif
+
 #ifdef DEBUG_OUT
 static int evallvl = 0;
 #endif
 
 /* the following static variables should be moved to ModuleInfo. */
 static struct asym *thissym; /* helper symbol for THIS operator */
-static struct asym *nullstruct; /* used for T_DOT if there's no current type */
-static struct asym *nullmbr; /* used for T_DOT if struct is a forward ref */
+static struct asym *nullstruct; /* used for T_DOT if second op is a forward ref */
+static struct asym *nullmbr; /* used for T_DOT if "current" struct is a forward ref */
 static int (* fnEmitErr)( int, ... );
+static int noEmitErr( int msg, ... );
 
 /* code label type values - returned by SIZE and TYPE operators */
 enum labelsize {
@@ -77,12 +83,6 @@ enum labelsize {
     //LS_NEAR64 = 0xFF08,
     LS_FAR16  = 0xFF05,
     LS_FAR32  = 0xFF06,
-};
-
-static const uint_16 tbaseptr[] = { T_BP, T_EBP
-#if AMD64_SUPPORT
-, T_RBP
-#endif
 };
 
 static void init_expr( struct expr *opnd )
@@ -351,17 +351,17 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
     int         j;
     char        labelbuff[16];/* for anonymous labels */
 
-    DebugMsg1(("%u get_operand(start=%u >%s<) enter, memtype=%Xh\n", evallvl, i, tokenarray[i].tokpos, opnd->mem_type ));
+    DebugMsg1(("%u get_operand(idx=%u >%s<) enter [memtype=%Xh]\n", evallvl, i, tokenarray[i].tokpos, opnd->mem_type ));
     switch( tokenarray[i].token ) {
     case T_NUM:
-        DebugMsg1(("%u get_operand: T_NUM (%s, base=%u, len=%u)\n", evallvl, tokenarray[i].string_ptr, tokenarray[i].numbase, tokenarray[i].itemlen ));
+        DebugMsg1(("%u get_operand: T_NUM, %s, base=%u, len=%u\n", evallvl, tokenarray[i].string_ptr, tokenarray[i].numbase, tokenarray[i].itemlen ));
         opnd->kind = EXPR_CONST;
         myatoi128( tokenarray[i].string_ptr, &opnd->llvalue, tokenarray[i].numbase, tokenarray[i].itemlen );
         //opnd->llvalue = tokenarray[i].value64;
         //opnd->hlvalue = ( tokenarray[i].numflg == NF_NULL ? 0 : *(uint_64 *)( tokenarray[i].string_ptr - sizeof(uint_64) ) );
         break;
     case T_STRING:
-        DebugMsg1(("%u get_operand: T_STRING (%s), size=%u\n", evallvl, tokenarray[i].string_ptr, tokenarray[i].stringlen ));
+        DebugMsg1(("%u get_operand: T_STRING, %s, size=%u\n", evallvl, tokenarray[i].string_ptr, tokenarray[i].stringlen ));
         /* string enclosed in <> or {} are rejected since v1.94! */
         if ( tokenarray[i].string_delim != '"' && tokenarray[i].string_delim != '\'') {
             if ( opnd->is_opattr ) /* OPATTR operator accepts anything! */
@@ -388,34 +388,28 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
             opnd->chararray[j-1] = *tmp++;
         break;
     case T_REG:
-        DebugMsg1(( "%u get_operand: T_REG (%s, #=%u)\n", evallvl, tokenarray[i].string_ptr, tokenarray[i].bytval ));
+        DebugMsg1(( "%u get_operand: T_REG, string=%s, tokval=%u, regno=%u\n", evallvl, tokenarray[i].string_ptr, tokenarray[i].tokval, tokenarray[i].bytval ));
         opnd->kind = EXPR_REG;
         opnd->base_reg = &tokenarray[i];
         j = tokenarray[i].tokval;
-#if 1
-        /* this check was previously done in the parser.
-         Check if the register needs an extensions (which are bit masks).
-         If no, then check if the cpu is sufficient.
-         */
+
+        /* check if cpu is sufficient for register */
         if( ( ( GetCpuSp( j ) & P_EXT_MASK ) &&
-            (( GetCpuSp( j ) & ModuleInfo.curr_cpu & P_EXT_MASK) == 0) ||
-              ( ModuleInfo.curr_cpu & P_CPU_MASK ) < ( GetCpuSp( j ) & P_CPU_MASK ) ) ) {
-            return( fnEmitErr( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE ) );
+             (( GetCpuSp( j ) & ModuleInfo.curr_cpu & P_EXT_MASK) == 0) ||
+             ( ModuleInfo.curr_cpu & P_CPU_MASK ) < ( GetCpuSp( j ) & P_CPU_MASK ) ) ) {
+            /* v2.11: do not exit in indirect mode; avoids additional syntax error caused by ']' */
+            if ( flags & EXPF_IN_SQBR ) {
+                opnd->kind = EXPR_ERROR;
+                fnEmitErr( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
+            } else
+                return( fnEmitErr( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE ) );
         }
-#endif
+
         if( flags & EXPF_IN_SQBR ) {
             /* a valid index register? */
             if ( GetSflagsSp( j ) & SFR_IREG ) {
                 opnd->indirect = TRUE;
                 opnd->assumecheck = TRUE;
-
-                /* v2.06: in strict Masm mode, a base/index register must not
-                 * be preceded by "<segreg|segment>:" INSIDE the brackets!
-                 */
-                /* v2.08: test moved to colon_op() */
-                //if ( Options.strict_masm_compat && tokenarray[i-1].token == T_COLON )
-                //    fnEmitErr( INVALID_USE_OF_REGISTER );
-
             } else if ( GetValueSp( j ) & OP_SR ) {
                 /* a segment register inside square brackets is only
                  * accepted by Masm if it is the segment part of an
@@ -430,55 +424,21 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                     return( fnEmitErr( INVALID_USE_OF_REGISTER ) );
                 }
             } else {
-                return( fnEmitErr( MUST_BE_INDEX_OR_BASE_REGISTER ) );
+                if ( opnd->is_opattr ) /* v2.11: just set error for opattr */
+                    opnd->kind = EXPR_ERROR;
+                else
+                    return( fnEmitErr( MUST_BE_INDEX_OR_BASE_REGISTER ) );
             }
-#if 0 /* v2.08: now done in calculate() for [] and () op */
-        } else if( j == T_ST ) {
-
-            struct expr sti;
-            char cl_bracket;
-
-            /* read st(i), put i into st_idx */
-            i++;
-            switch( tokenarray[i].token ) {
-            case T_OP_BRACKET:    /* syntax st(0) */
-            case T_OP_SQ_BRACKET: /* syntax st[0] */
-                /* v2.06: added: skip the opening bracket! This ensures that
-                 * evaluate() will definitely stop at the closing bracket.
-                 * The type of the closing bracket must be checked then! */
-                *start = i+1;
-                init_expr( &sti );
-                if( evaluate( &sti, start, tokenarray, end, 0 ) == ERROR ) {
-                    return( ERROR );
-                }
-                cl_bracket = ( tokenarray[i].token == T_OP_BRACKET ? T_CL_BRACKET : T_CL_SQ_BRACKET );
-                if( tokenarray[*start].token != cl_bracket ) {
-                    return( fnEmitErr( MISSING_RIGHT_PARENTHESIS_IN_EXPRESSION ) );
-                }
-                if( sti.kind != EXPR_CONST ) {
-                    return( fnEmitErr( CONSTANT_OPERAND_EXPECTED ) );
-                }
-                opnd->st_idx = sti.value;
-                break;
-            default:
-                opnd->st_idx = 0; /* st = st(0) */
-                break;
-            }
-#endif
         }
         break;
     case T_ID:
         tmp = tokenarray[i].string_ptr;
-        if ( opnd->type ) {
-            DebugMsg1(("%u get_operand: T_ID (%s, type=%s)\n", evallvl, tokenarray[i].string_ptr, opnd->type->name ));
+        //if ( opnd->type ) { /* v2.11 */
+        if ( opnd->is_dot ) {
+            DebugMsg1(("%u get_operand: T_ID, is_dot=1, id=%s, opnd.type=%s\n", evallvl, tokenarray[i].string_ptr, opnd->type ? opnd->type->name : "NULL" ));
             opnd->value = 0;
-            if ( opnd->type == nullstruct )
-                sym = NULL;
-            else {
-                sym = SearchNameInStruct( opnd->type, tmp, &opnd->uvalue, 0 );
-                DebugMsg1(("get_operand(%s): SearchNameInStruct(%s)=%X, offset=%u\n",
-                           tokenarray[i].string_ptr, opnd->type->name, sym, opnd->uvalue));
-            }
+            sym = ( opnd->type ? SearchNameInStruct( opnd->type, tmp, &opnd->uvalue, 0 ) : NULL );
+            DebugMsg1(("get_operand(%s): is_dot, sym=%s, offset=%" I32_SPEC "Xh\n", tmp, sym ? sym->name : "NULL", opnd->uvalue ));
             if ( sym == NULL ) {
                 sym = SymSearch( tmp );
                 if ( sym ) {
@@ -497,6 +457,7 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                          * yet, because there's no way to find out if a register assume
                          * did set field 'type'.
                          * v2.09: oldstructs condition added, see regression test dotop4.asm.
+                         * v2.11: fixme? opnd->type may be NULL here?
                          */
                         //if ( sym == opnd->type || opnd->type->isdefined == FALSE )
                         if ( sym == opnd->type || opnd->type->isdefined == FALSE || ModuleInfo.oldstructs )
@@ -517,14 +478,15 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                          * if the symbol is not a type, it's an error which can
                          * be detected in pass 1 already. dot_op() will emit
                          * 'struct field expected' if sym isn't cleared.
+                         * v2.11: always clear sym.
                          */
-                        if ( opnd->type != nullstruct )
-                            sym = NULL;
+                        //if ( opnd->type != nullstruct )
+                        sym = NULL;
                     }
                 }
             }
         } else {
-            DebugMsg1(("%u get_operand: T_ID (%s)\n", evallvl, tokenarray[i].string_ptr ));
+            DebugMsg1(("%u get_operand: T_ID, id=%s\n", evallvl, tokenarray[i].string_ptr ));
             /* ensure anonym labels are uppercase */
             /* v2.06: changed. Previously member 'string_ptr' was used to
              * store the anonymous label, but one cannot safely assume that
@@ -552,7 +514,7 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
             /* for OPATTR, anything is ok */
             if ( opnd->is_opattr ) {
                 DebugMsg1(( "get_operand(%s): OPATTR, symbol invalid\n", tokenarray[i].string_ptr ));
-                opnd->kind = EXPR_UNDEF;
+                opnd->kind = EXPR_ERROR;
                 break;
             }
 #if 0 /* v2.10: obsolete, since fnEmitErr() won't display anything in "EQU" mode */
@@ -571,21 +533,28 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                 fnEmitErr( INVALID_SYMBOL_TYPE_IN_EXPRESSION, sym->name );
                 return( ERROR );
             }
+            /* v2.11: flag EXPF_NOUNDEF won't accept undefined symbols anymore.
+             * previously, it did just avoid to create a label with state SYM_UNDEFINED -
+             * hence the old name, EXPF_NOLCREATE
+             */
             //if( Parse_Pass == PASS_1 ) {
-            if( Parse_Pass == PASS_1 ) {
+            if( Parse_Pass == PASS_1 && !( flags & EXPF_NOUNDEF ) ) {
                 /* if symbol wasn't found, assume it is a forward ref! */
                 if ( sym == NULL ) {
-                    if ( opnd->type == NULL && !( flags & EXPF_NOLCREATE ) ) { /* added v1.95 */
+                    /* v2.11: flag EXPF_NOLCREATE has got another meaning */
+                    //if ( opnd->type == NULL && !( flags & EXPF_NOLCREATE ) ) { /* added v1.95 */
+                    if ( opnd->type == NULL ) {
                         sym = SymLookup( tmp );
                         sym->state = SYM_UNDEFINED;
                         sym_add_table( &SymTables[TAB_UNDEF], (struct dsym *)sym ); /* add UNDEFINED */
                         DebugMsg1(("get_operand(%s): symbol not (yet) defined, CurrProc=%s\n", tmp, CurrProc ? CurrProc->sym.name : "NULL" ));
-                        /* v2.08: if changed */
-                    // } else if ( opnd->type == NULL || opnd->type != nullstruct ) {
-                    } else if ( opnd->type == NULL || opnd->type->typekind != TYPE_NONE ) {
+                    
+                    // } else if ( opnd->type == NULL || opnd->type != nullstruct ) { /* v2.08: if changed */
+                    // } else if ( opnd->type == NULL || opnd->type->typekind != TYPE_NONE ) { /* v2.11: if changed */
+                    } else if ( opnd->type->typekind != TYPE_NONE ) {
                         /* no struct or struct is known and defined */
                         DebugMsg(("get_operand(%s): symbol error (type=%s kind=%u)\n", tmp, opnd->type ? opnd->type->name : "NULL", opnd->type ? opnd->type->typekind : 0 ));
-                        if ( opnd->type && *opnd->type->name )
+                        if ( *opnd->type->name )
                             fnEmitErr( MEMBER_NOT_DEFINED, opnd->type->name, tmp );
                         else
                             fnEmitErr( SYMBOL_NOT_DEFINED, tmp );
@@ -630,7 +599,7 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
             /* v2.09: no structinfo data for typedefs */
             if ( sym->typekind != TYPE_TYPEDEF && ((struct dsym *)sym)->e.structinfo->isOpen ) {
                 DebugMsg1(("get_operand(%s): struct/union definition isn't closed!\n", sym->name ));
-                opnd->kind = EXPR_UNDEF;
+                opnd->kind = EXPR_ERROR;
                 break;
             }
             /* skip "alias" types */
@@ -716,11 +685,19 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                 /* since there is no fixup for auto variables, the "offset"
                  must be stored in the <value> field */
                 if ( sym->state == SYM_STACK ) {
+#if STACKBASESUPP
+                    opnd->llvalue = sym->offset + StackAdj;
+#else
                     opnd->llvalue = sym->offset;
+#endif
                     opnd->indirect = TRUE;
                     /* v2.10: base register values now set here */
                     opnd->base_reg = &tokenarray[i];
-                    tokenarray[i].tokval = tbaseptr[ModuleInfo.Ofssize];
+#if STACKBASESUPP
+                    tokenarray[i].tokval = CurrProc->e.procinfo->basereg;
+#else
+                    tokenarray[i].tokval = basereg[ModuleInfo.Ofssize];
+#endif
                     tokenarray[i].bytval = GetRegNo( tokenarray[i].tokval );
                 }
                 opnd->sym = sym;
@@ -747,9 +724,9 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
     case T_RES_ID:
         DebugMsg1(("%u get_operand: T_RES_ID (>%s<, value=%X)\n", evallvl, tokenarray[i].string_ptr, tokenarray[i].tokval));
         if ( tokenarray[i].tokval == T_FLAT ) {
-            /* v2.09: query NOLCREATE flag */
+            /* v2.09: query NOUNDEF flag */
             //if ( error_msg ) { /* don't define FLAT group in EQU expression! */
-            if ( ( flags & EXPF_NOLCREATE ) == 0 ) {
+            if ( ( flags & EXPF_NOUNDEF ) == 0 ) {
                 /* v2.08 cpu check added */
                 if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < P_386 ) {
                     fnEmitErr( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
@@ -796,8 +773,12 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
         return( ERROR );
     }
     (*idx)++;
-    DebugMsg1(("%u get_operand exit, ok, kind=%u value=%" I64X_SPEC " hvalue=%" I64X_SPEC " mem_type=%Xh abs=%u string=%s is_type=%u type=>%s<\n",
-              evallvl, opnd->kind, opnd->llvalue, opnd->hlvalue, opnd->mem_type, opnd->is_abs, opnd->quoted_string ? opnd->quoted_string->string_ptr : "NULL", opnd->is_type, opnd->type ? opnd->type->name : "NULL" ));
+    DebugMsg1(("%u get_operand exit, ok, kind=%u value=%" I64_SPEC "X hvalue=%" I64_SPEC "X mem_type=%Xh abs=%u string=%s is_type=%u type=>%s< sym=%s mbr=%s\n",
+               evallvl, opnd->kind, opnd->llvalue, opnd->hlvalue, opnd->mem_type, opnd->is_abs,
+               opnd->quoted_string ? opnd->quoted_string->string_ptr : "NULL",
+               opnd->is_type, opnd->type ? opnd->type->name : "NULL",
+               opnd->sym ? opnd->sym->name : "NULL",
+               opnd->mbr ? opnd->mbr->name : "NULL" ));
     return( NOT_ERROR );
 }
 
@@ -1138,7 +1119,7 @@ static ret_code sizlen_op( int oper, struct expr *opnd1, struct expr *opnd2, str
 static ret_code type_op( int oper, struct expr *opnd1, struct expr *opnd2, struct asym *sym, char *name )
 /*******************************************************************************************************/
 {
-    DebugMsg1(("type_op: argument kind=%u memtype=%X sym=%s type=%s instr=%d istype=%u explicit=%u\n",
+    DebugMsg1(("type_op: opnd2 kind=%u memtype=%X sym=%s type=%s instr=%d istype=%u explicit=%u\n",
                opnd2->kind,
                opnd2->mem_type,
                sym ? sym->name : "NULL",
@@ -1148,6 +1129,18 @@ static ret_code type_op( int oper, struct expr *opnd1, struct expr *opnd2, struc
                opnd2->explicit ));
     opnd1->kind = EXPR_CONST;
     /* TYPE accepts arrays/structs/unions */
+    /* v2.11: if memtype isn't empty, ignore any unary operator
+     * test cases:
+     * - type qword ptr sym.
+     * - type qword ptr offset sym
+     * operators LOW, HIGH, LOWWORD, HIGHWORD, LOW32, HIGH32,
+     * OFFSET, IMAGEREL, SECTIONREL and LROFFSET
+     * will set opnd.memtype to MT_EMPTY.
+     */
+    if( opnd2->instr != EMPTY && opnd2->mem_type != MT_EMPTY ) {
+        opnd2->instr = EMPTY;
+        sym = NULL;
+    }
     if( opnd2->instr != EMPTY ) {
         if ( opnd2->sym ) {
             switch ( opnd2->instr ) {
@@ -1265,7 +1258,8 @@ static ret_code type_op( int oper, struct expr *opnd1, struct expr *opnd2, struc
         if ( opnd1->mem_type == MT_EMPTY )
             opnd1->mem_type = opnd2->mem_type;
 #endif
-        if ( opnd2->type ) {
+        //if ( opnd2->type ) { /* v2.10a: see types14.asm */
+        if ( opnd2->type && opnd2->mbr == NULL ) {
             opnd1->type_tok = opnd2->type_tok;
             opnd1->type = opnd2->type;
             opnd1->value = opnd1->type->total_size;
@@ -1372,16 +1366,15 @@ static ret_code opattr_op( int oper, struct expr *opnd1, struct expr *opnd2, str
     if ( opnd2->kind == EXPR_REG && opnd2->indirect == FALSE )
         opnd1->value |= OPATTR_REGISTER;
 
-    //if ( opnd2->kind != EXPR_UNDEF && ( opnd2->sym == 0 || opnd2->sym->isdefined == TRUE ) )
-    if ( opnd2->kind != EXPR_UNDEF && opnd2->kind != EXPR_FLOAT && ( opnd2->sym == NULL || opnd2->sym->isdefined == TRUE ) )
+    //if ( opnd2->kind != EXPR_ERROR && ( opnd2->sym == 0 || opnd2->sym->isdefined == TRUE ) )
+    if ( opnd2->kind != EXPR_ERROR && opnd2->kind != EXPR_FLOAT && ( opnd2->sym == NULL || opnd2->sym->isdefined == TRUE ) )
         opnd1->value |= OPATTR_DEFINED; 
 
-    if ( opnd2->sym && opnd2->sym->state == SYM_STACK ||
-        ( opnd2->indirect == TRUE &&
-         opnd2->base_reg != NULL &&
-         ( opnd2->base_reg->tokval == T_ESP ||
-          opnd2->base_reg->tokval == T_EBP ||
-          opnd2->base_reg->tokval == T_BP ) ) )
+    if ( ( opnd2->sym && opnd2->sym->state == SYM_STACK ) ||
+        ( opnd2->indirect && opnd2->base_reg &&
+         /* v2.11: use new flag SFR_SSBASED */
+         //( opnd2->base_reg->tokval == T_ESP || opnd2->base_reg->tokval == T_EBP || opnd2->base_reg->tokval == T_BP ) ) )
+         ( GetSflagsSp( opnd2->base_reg->tokval ) & SFR_SSBASED ) ) )
         opnd1->value |= OPATTR_SSREL;
 
     if ( opnd2->sym && opnd2->sym->state == SYM_EXTERNAL )
@@ -1679,6 +1672,8 @@ static ret_code (* const unaryop[])( int, struct expr *, struct expr *, struct a
 };
 #undef res
 
+/* plus_op() is called by [], () and + operator handlers */
+
 static ret_code plus_op( struct expr *opnd1, struct expr *opnd2 )
 /***************************************************************/
 {
@@ -1901,7 +1896,13 @@ static ret_code minus_op( struct expr *opnd1, struct expr *opnd2 )
             if ( opnd1->sym->state == SYM_UNDEFINED ||
                 opnd2->sym->state == SYM_UNDEFINED ) {
                 opnd1->value = 1;
-                /* 2.09: make sure an undefined label is returned */
+                /* 2.09: make sure an undefined label is returned in opnd.sym.
+                 * expression type has to be ADDR then; see equate22.aso.
+                 * 2.11: returning EXPR_ADDR may cause problems -
+                 * it may make the code longer than necessary, thus
+                 * triggering an unnecessary jump extension.
+                 * so it is returned only if the expression is used to define an equate.
+                 */
                 if ( opnd1->sym->state != SYM_UNDEFINED ) {
                     opnd1->sym = opnd2->sym;
                     opnd1->label_tok = opnd2->label_tok;
@@ -1950,7 +1951,7 @@ static ret_code struct_field_error( struct expr *opnd )
 /*****************************************************/
 {
     if ( opnd->is_opattr ) {
-        opnd->kind = EXPR_UNDEF;
+        opnd->kind = EXPR_ERROR;
         return( NOT_ERROR );
     }
     return( fnEmitErr( STRUCTURE_FIELD_EXPECTED ) );
@@ -1992,7 +1993,7 @@ static ret_code dot_op( struct expr *opnd1, struct expr *opnd2 )
     if ( opnd2->kind == EXPR_REG )
         opnd2->kind = EXPR_ADDR;
 
-#if 1 /* fixme: to be removed */
+    /* forward ref to a struct: [reg].<struct> */
     if ( opnd2->sym && opnd2->sym->state == SYM_UNDEFINED && Parse_Pass == PASS_1 ) {
         DebugMsg(("dot_op: forward reference %s, replaced by null struct type\n", opnd2->sym->name ));
         if ( !nullstruct )
@@ -2002,7 +2003,6 @@ static ret_code dot_op( struct expr *opnd1, struct expr *opnd2 )
         opnd2->sym = NULL;
         opnd2->kind = EXPR_CONST;
     }
-#endif
 
     if( check_same( opnd1, opnd2, EXPR_ADDR ) ) {
 
@@ -2295,7 +2295,7 @@ static ret_code colon_op( struct expr *opnd1, struct expr *opnd2 )
 static ret_code positive_op( struct expr *opnd1, struct expr *opnd2 )
 /*******************************************************************/
 {
-    DebugMsg1(("positive_op: value=%" I64X_SPEC " high=%" I64X_SPEC "\n", opnd2->llvalue, opnd2->hlvalue ));
+    DebugMsg1(("positive_op: value=%" I64_SPEC "X high=%" I64_SPEC "X\n", opnd2->llvalue, opnd2->hlvalue ));
     /*
      * The formats allowed are:
      *        + constant
@@ -2323,7 +2323,7 @@ static ret_code positive_op( struct expr *opnd1, struct expr *opnd2 )
 static ret_code negative_op( struct expr *opnd1, struct expr *opnd2 )
 /*******************************************************************/
 {
-    DebugMsg1(("negative_op: value=%" I64X_SPEC " high=%" I64X_SPEC "\n", opnd2->llvalue, opnd2->hlvalue ));
+    DebugMsg1(("negative_op: value=%" I64_SPEC "X high=%" I64_SPEC "X\n", opnd2->llvalue, opnd2->hlvalue ));
     /*
      * The formats allowed are:
      *        - constant
@@ -2503,6 +2503,17 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
      */
     opnd1->quoted_string = NULL;
 
+    /* v2.11: added check to ensure constant fits in 64-bits */
+    if ( opnd2->hlvalue ) {
+        /* opattr and unary +/- are ok, they can handle 128-bits */
+        if ( opnd2->is_opattr || ( ( oper->token == '+' || oper->token == '-' ) && oper->specval == UNARY_PLUSMINUS ) )
+            ;
+        else {
+            DebugMsg(("%u calculate(%s): value too large\n", evallvl, oper->string_ptr ));
+            return( fnEmitErr( CONSTANT_VALUE_TOO_LARGE_EX, opnd2->hlvalue, opnd2->value64 ) );
+        }
+    }
+
     switch( oper->token ) {
     case T_OP_SQ_BRACKET:
         /* v2.07: the ASSUMEs are now checked only when operator [] is done.
@@ -2625,7 +2636,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
          *        register * scaling factor ( 1, 2, 4 or 8 )
          *                   386 only
          */
-        DebugMsg1(("calculate(*): kind=%u-%u value=%" I64d_SPEC "-%" I64d_SPEC " mbr=%X-%X\n",
+        DebugMsg1(("calculate(*): kind=%u-%u value=%" I64_SPEC "d-%" I64_SPEC "d mbr=%X-%X\n",
                    opnd1->kind,    opnd2->kind,
                    opnd1->value64, opnd2->value64,
                    opnd1->mbr,     opnd2->mbr ));
@@ -2670,7 +2681,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
          * The only formats allowed are:
          *        constant / constant
          */
-        DebugMsg1(("calculate(/): t1-t2 kind %u-%u values %" I64d_SPEC "-%" I64d_SPEC "\n",
+        DebugMsg1(("calculate(/): t1-t2 kind %u-%u values %" I64_SPEC "d-%" I64_SPEC "d\n",
                    opnd1->kind,    opnd2->kind,
                    opnd1->value64, opnd2->value64 ));
         MakeConst( opnd1 );
@@ -2795,7 +2806,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
             return( ConstError( opnd1, opnd2 ) );
         }
 
-        DebugMsg1(("calculate(%s): values=%I64u/%I64u is_type=%u/%u memtypes=%X/%X\n", oper->string_ptr,
+        DebugMsg1(("calculate(%s): values=%" I64_SPEC "d/%" I64_SPEC "d is_type=%u/%u memtypes=%X/%X\n", oper->string_ptr,
                    opnd1->value64, opnd2->value64, opnd1->is_type, opnd2->is_type, opnd1->mem_type, opnd2->mem_type  ));
         switch( oper->tokval ) {
         case T_EQ:
@@ -2836,7 +2847,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
             break;
         case T_SHL:
             /* v2.04: check for shift count < 0 */
-            DebugMsg1(("calculate(SHL): value=%" I64X_SPEC " << %lu (max=%u)\n", opnd1->llvalue, opnd2->value, 8 * sizeof( opnd1->llvalue ) ));
+            DebugMsg1(("calculate(SHL): value=%" I64_SPEC "X << %" I32_SPEC "u (max=%u)\n", opnd1->llvalue, opnd2->value, 8 * sizeof( opnd1->llvalue ) ));
             if ( opnd2->value < 0 )
                 fnEmitErr( COUNT_MUST_BE_POSITIVE_OR_ZERO );
             else if ( opnd2->value >= ( 8 * sizeof( opnd1->llvalue ) ) )
@@ -3041,7 +3052,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
 
 #ifdef DEBUG_OUT
     if ( opnd1->hlvalue ) {
-        DebugMsg1(("%u calculate(%s) exit, ok kind=%u value=0x%" I64X_SPEC "_%016" I64X_SPEC " memtype=0x%X indirect=%u type=>%s<\n",
+        DebugMsg1(("%u calculate(%s) exit, ok kind=%u value=0x%" I64_SPEC "X_%016" I64_SPEC "X memtype=0x%X indirect=%u type=>%s<\n",
                    evallvl,
                    oper->string_ptr,
                    opnd1->kind,
@@ -3049,7 +3060,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
                    opnd1->mem_type,
                    opnd1->indirect, opnd1->type ? opnd1->type->name : "NULL" ));
     } else if ( opnd1->hvalue ) {
-        DebugMsg1(("%u calculate(%s) exit, ok kind=%u value=%" I64d_SPEC"(0x%" I64X_SPEC") memtype=0x%X indirect=%u type=>%s<\n",
+        DebugMsg1(("%u calculate(%s) exit, ok kind=%u value=%" I64_SPEC"d(0x%" I64_SPEC "X) memtype=0x%X indirect=%u type=>%s<\n",
                    evallvl,
                    oper->string_ptr,
                    opnd1->kind,
@@ -3099,15 +3110,12 @@ static void PrepareOp( struct expr *opnd, const struct expr *old, const struct a
         //} else if ( !ModuleInfo.oldstructs ) {
         /* v2.08: reverted, replaced by changes in dot_op() and get_operand(), case T_STYPE */
         //} else if ( old->sym && old->sym->mem_type == MT_EMPTY && !ModuleInfo.oldstructs ) {
-        } else if ( !ModuleInfo.oldstructs ) {
-            if ( !nullstruct ) {
-                nullstruct = CreateTypeSymbol( NULL, "", FALSE );
-                //nullstruct->typekind = TYPE_STRUCT;
-            }
-            DebugMsg1(("PrepareOp: implicit type: <nullstruct>\n" ));
-            opnd->type = nullstruct;
-            /* a - probably unnecessary - hack */
-            //opnd->type->type = old->sym;
+        /* v2.11: nullstruct not used here. Set type to NULL and is_dot==TRUE */
+        //} else if ( !ModuleInfo.oldstructs ) {
+        } else if ( !ModuleInfo.oldstructs && old->sym && old->sym->state == SYM_UNDEFINED ) {
+            DebugMsg1(("PrepareOp: forward ref to %s, type will be NULL\n", old->sym->name ));
+            opnd->type = NULL;
+            opnd->is_dot = TRUE;
         }
         break;
     case T_UNARY_OPERATOR:
@@ -3177,7 +3185,8 @@ static ret_code evaluate( struct expr *opnd1, int *i, struct asm_tok tokenarray[
             else if( !is_operator( tokenarray[curr_operator].token ) || tokenarray[curr_operator].token == T_UNARY_OPERATOR ) {
                 DebugMsg(("%u evaluate: unexpected token at idx=%u, token=%X >%s<\n", evallvl, curr_operator, tokenarray[curr_operator].token, tokenarray[curr_operator].tokpos ));
                 rc = ERROR;
-                if ( !opnd2.is_opattr )
+                //if ( !opnd2.is_opattr )  /* v2.11: opnd2 was accessed before initialization */
+                if ( !opnd1->is_opattr )
                     OperErr( curr_operator, tokenarray );
                 break;
             }
@@ -3264,13 +3273,13 @@ static ret_code evaluate( struct expr *opnd1, int *i, struct asm_tok tokenarray[
 
 #ifdef DEBUG_OUT
     if ( opnd1->hvalue != -1 && opnd1->hvalue != 0 ) {
-        DebugMsg1(("%u evaluate exit, rc=%d, kind=%u value=%" I64d_SPEC "(0x%" I64X_SPEC") memtype=%Xh string=%s indirect=%u type=>%s<\n",
+        DebugMsg1(("%u evaluate exit, rc=%d, kind=%d value=%" I64_SPEC "d(0x%" I64_SPEC "X) memtype=%Xh string=%s indirect=%u type=>%s<\n",
                    evallvl--, rc, opnd1->kind, opnd1->llvalue, opnd1->llvalue, opnd1->mem_type,
                    opnd1->quoted_string ? opnd1->quoted_string->string_ptr : "NULL",
                    opnd1->indirect,
                    opnd1->type ? opnd1->type->name : "NULL" ));
     } else {
-        DebugMsg1(("%u evaluate exit, rc=%d, kind=%u value=%ld(0x%" FX32 ") memtype=%Xh string=%s ind=%u exp=%u ofssiz=%d instr=%s type=>%s<\n",
+        DebugMsg1(("%u evaluate exit, rc=%d, kind=%d value=%" I32_SPEC "d(0x%" I32_SPEC "X) memtype=%Xh string=%s ind=%u exp=%u ofssiz=%d instr=%s type=>%s<\n",
                    evallvl--, rc, opnd1->kind, opnd1->value, opnd1->value, opnd1->mem_type,
                    opnd1->quoted_string ? opnd1->quoted_string->string_ptr : "NULL",
                    opnd1->indirect, opnd1->explicit, opnd1->Ofssize,
@@ -3364,6 +3373,16 @@ ret_code EvalOperand( int *start_tok, struct asm_tok tokenarray[], int end_tok, 
     /* v2.10: global flag 'error_msg' replaced by 'fnEmitErr()' */
     fnEmitErr = ( ( flags & EXPF_NOERRMSG ) ? noEmitErr : EmitErr );
     return ( evaluate( result, start_tok, tokenarray, i, flags ) );
+}
+
+ret_code EmitConstError( const struct expr *opnd )
+/************************************************/
+{
+    if ( opnd->hlvalue != 0 )
+        EmitErr( CONSTANT_VALUE_TOO_LARGE_EX, opnd->hlvalue, opnd->value64 );
+    else
+        EmitErr( CONSTANT_VALUE_TOO_LARGE, opnd->value64 );
+    return( ERROR );
 }
 
 /* global init (called once for each module) */

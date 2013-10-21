@@ -1,30 +1,36 @@
 
-# this makefile in OW WMake style creates JWASM.EXE (Win32) and optionally
-# JWASMD.EXE (DOS).
+# this makefile in OW WMake style creates JWasm.EXE (Win32) and optionally
+# JWasmD.EXE (DOS).
 # tools used:
-# - Open Watcom v1.8/v1.9
-# - HXDEV (only needed if DOS=1 is set below to create JWASMD.EXE)
+# - Open Watcom v1.9
+# - jwlink ( optionally OW Wlink may be used, see below )
+# - HXDev  ( needed only if a DOS version is to be created )
 #
-# to create a debug version, run "WMake debug=1".
-# to create a version with DJGPP support, run "WMake djgpp=1".
-
-WIN=1
-DOS=1
-
-# Open Watcom root directory
-
-WATCOM = \Watcom
-
-# if DOS=1, HXDIR must contain the HX root directory
-
-HXDIR = \HX
+# "WMake"         - creates the Win32 version.
+# "WMake debug=1" - creates the Win32 debug version.
+# "WMake dos=1"   - creates both Win32 and DOS version (JWasmD.exe)
+# "WMake djgpp=1" - creates a Win32 version with DJGPP support.
+# "WMake wlink=1" - create a Win32 version that is linked with OW Wlink.
 
 name = JWasm
+
+WIN=1
+
+# Open Watcom root directory
+!ifndef WATCOM
+WATCOM = \Watcom
+!endif
+# if a DOS version is to be created, HXDIR must contain the HX root directory
+!ifndef HXDIR
+HXDIR = \HX
+!endif
 
 !ifndef DEBUG
 DEBUG=0
 !endif
-
+!ifndef DOS
+DOS=0
+!endif
 !ifndef DJGPP
 DJGPP=0
 !endif
@@ -44,16 +50,16 @@ OUTD=Release
 !endif
 !endif
 
-# calling convention for compiler: s=Stack, r=register
-# r will create a slightly smaller binary
-CCV=r
-
 inc_dirs  = -IH -I$(WATCOM)\H
+c_flags = -q -bc -bt=nt -3r -fpi87
 
-!ifdef JWLINK
-LINK = jwlink.exe
-!else
+# -zc flag makes wcc386 place constant data in code segment.
+# used with wlink because it won't accept readonly attribute for segments
+!ifdef WLINK
 LINK = $(WATCOM)\binnt\wlink.exe
+c_flags += -zc
+!else
+LINK = jwlink.exe
 !endif
 
 #cflags stuff
@@ -79,37 +85,21 @@ extra_c_flags += -DDJGPP_SUPPORT=1
 # without it, WD(W) will crash immediately.
 LOPTD = debug c op cvp, symfile lib user32.lib
 !else
-LOPTD = 
+LOPTD =
 !endif
 
-CC=$(WATCOM)\binnt\wcc386 -q -3$(CCV) -zc -bc -bt=nt $(inc_dirs) $(extra_c_flags) -fo$@
+CC=$(WATCOM)\binnt\wcc386 $(c_flags) $(inc_dirs) $(extra_c_flags) -fo$@
+LIB=$(WATCOM)\binnt\wlib
 
 .c{$(OUTD)}.obj:
 	$(CC) $<
 
-proj_obj = $(OUTD)/main.obj     $(OUTD)/assemble.obj $(OUTD)/assume.obj  &
-           $(OUTD)/directiv.obj $(OUTD)/posndir.obj  $(OUTD)/segment.obj &
-           $(OUTD)/expreval.obj $(OUTD)/memalloc.obj $(OUTD)/errmsg.obj  &
-           $(OUTD)/macro.obj    $(OUTD)/string.obj   $(OUTD)/condasm.obj &
-           $(OUTD)/types.obj    $(OUTD)/fpfixup.obj  $(OUTD)/invoke.obj  &
-           $(OUTD)/equate.obj   $(OUTD)/mangle.obj   $(OUTD)/loop.obj    &
-           $(OUTD)/parser.obj   $(OUTD)/tokenize.obj $(OUTD)/input.obj   &
-           $(OUTD)/expans.obj   $(OUTD)/symbols.obj  $(OUTD)/label.obj   &
-           $(OUTD)/fixup.obj    $(OUTD)/codegen.obj  $(OUTD)/data.obj    &
-           $(OUTD)/reswords.obj $(OUTD)/branch.obj   $(OUTD)/queue.obj   &
-           $(OUTD)/hll.obj      $(OUTD)/proc.obj     $(OUTD)/option.obj  &
-           $(OUTD)/omf.obj      $(OUTD)/omfint.obj   $(OUTD)/omffixup.obj&
-           $(OUTD)/coff.obj     $(OUTD)/elf.obj      $(OUTD)/bin.obj     &
-           $(OUTD)/listing.obj  $(OUTD)/cmdline.obj &
-           $(OUTD)/context.obj  $(OUTD)/extern.obj   $(OUTD)/simsegm.obj &
+proj_obj = &
+!include owmod.inc
+
 !if $(TRMEM)
-           $(OUTD)/trmem.obj    &
+proj_obj += $(OUTD)/trmem.obj
 !endif
-           $(OUTD)/fastpass.obj $(OUTD)/backptch.obj $(OUTD)/tbyte.obj   &
-           $(OUTD)/apiemu.obj   $(OUTD)/dbgcv.obj    $(OUTD)/end.obj     &
-           $(OUTD)/cpumodel.obj $(OUTD)/safeseh.obj  $(OUTD)/linnum.obj  &
-           $(OUTD)/msgtext.obj  
-######
 
 !if $(WIN)
 TARGET1=$(OUTD)/$(name).exe
@@ -123,15 +113,24 @@ ALL: $(OUTD) $(TARGET1) $(TARGET2)
 $(OUTD):
 	@if not exist $(OUTD) mkdir $(OUTD)
 
-$(OUTD)/$(name).exe: $(proj_obj)
+$(OUTD)/$(name).exe: $(OUTD)/main.obj $(proj_obj)
 	$(LINK) @<<
 $(LOPTD)
 format windows pe runtime console
-file { $(proj_obj) } name $@
-Libpath $(WATCOM)\lib386 
-Libpath $(WATCOM)\lib386\nt
-Library kernel32
-op quiet, stack=0x20000, heapsize=0x100000, norelocs, map=$^* com stack=0x1000
+file { $(OUTD)/main.obj $(proj_obj) } name $@
+Libpath $(WATCOM)\lib386\nt;$(WATCOM)\lib386
+Library kernel32.lib
+op quiet, stack=0x40000, heapsize=0x100000, map=$^*, norelocs
+com stack=0x1000
+disable 171
+!ifndef NOGBL
+sort global
+!endif
+op statics
+!ifndef WLINK
+segment CONST readonly
+segment CONST2 readonly
+!endif
 <<
 !if $(DEBUG)
 	@if not exist TEST mkdir TEST
@@ -139,22 +138,33 @@ op quiet, stack=0x20000, heapsize=0x100000, norelocs, map=$^* com stack=0x1000
 	copy $(OUTD)\$(name).sym TEST\*.* >NUL
 !endif
 
-$(OUTD)/$(name)d.exe: $(proj_obj)
+$(OUTD)/$(name)d.exe: $(OUTD)/main.obj $(proj_obj)
 	$(LINK) @<<
 $(LOPTD)
+!ifndef WLINK
+format windows pe hx runtime console
+!else
 format windows pe runtime console
-file { $(proj_obj) } name $@
-Libpath $(WATCOM)\lib386 
-Libpath $(WATCOM)\lib386\nt
-Libpath $(HXDIR)\lib
-Library imphlp.lib, dkrnl32s.lib 
-Libfile cstrtwhx.obj 
-op quiet, map=$^*, stub=$(HXDIR)\Bin\loadpex.bin, stack=0x40000, heapsize=0x100000
+!endif
+file { $(OUTD)/main.obj $(proj_obj) } name $@
+Libpath $(WATCOM)\lib386\nt;$(WATCOM)\lib386
+Libfile cstrtwhx.obj
+libpath $(HXDIR)\lib
+Library imphlp.lib, dkrnl32s.lib, HXEmu387.lib
+reference EMUInit
+op quiet, stack=0x40000, heapsize=0x40000, map=$^*, stub=$(HXDIR)\Bin\loadpex.bin
+sort global op statics
+!ifndef WLINK
+segment CONST readonly
+segment CONST2 readonly
+!endif
 <<
+!ifdef WLINK
 #	$(HXDIR)\Bin\pestub.exe -x -z -n $@
 	pestub.exe -x -z -n $@
+!endif
 
-$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/usage.h H/globals.h
+$(OUTD)/msgtext.obj: msgtext.c H/msgdef.h H/globals.h
 	$(CC) msgtext.c
 
 $(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h H/opndcls.h H/instravx.h
@@ -162,7 +172,9 @@ $(OUTD)/reswords.obj: reswords.c H/instruct.h H/special.h H/directve.h H/opndcls
 
 ######
 
-clean:
-	@erase $(OUTD)\*.exe
-	@erase $(OUTD)\*.obj
-	@erase $(OUTD)\*.map
+clean: .SYMBOLIC
+	@if exist $(OUTD)\$(name).exe erase $(OUTD)\$(name).exe
+	@if exist $(OUTD)\$(name)d.exe erase $(OUTD)\$(name)d.exe
+	@if exist $(OUTD)\$(name).map erase $(OUTD)\$(name).map
+	@if exist $(OUTD)\$(name)d.map erase $(OUTD)\$(name)d.map
+	@if exist $(OUTD)\*.obj erase $(OUTD)\*.obj

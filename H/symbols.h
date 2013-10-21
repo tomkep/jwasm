@@ -104,7 +104,6 @@ enum memtype {
  */
 struct macro_instance;
 
-typedef ret_code (* macro_func)( struct macro_instance *, char *, struct asm_tok * );
 typedef void (* internal_func)( struct asym *, void * );
 
 struct debug_info {
@@ -117,18 +116,19 @@ struct debug_info {
     uint next_file;      /* index next file */
 };
 
-
 struct asym {
-    struct asym     *next;
+    /* v2.11: name changed from 'next' to 'nextitem' */
+    struct asym     *nextitem;     /* next symbol in hash line */
     char            *name;         /* symbol name */
     union {
-        int_32         offset;     /* used by SYM_INTERNAL (labels), SYM_TYPE */
+        int_32         offset;     /* used by SYM_INTERNAL (labels), SYM_TYPE, v2.11: SYM_SEG */
         int_32         value;      /* used by SYM_INTERNAL (equates) */
         uint_32        uvalue;     /* v2.01: equates (they are 33-bit!) */
         char           *string_ptr;/* used by SYM_TMACRO */
         struct asym    *substitute;/* v2.04b: used by SYM_ALIAS */
-        macro_func     func_ptr;   /* used by SYM_MACRO if predefined==1 */
-        int_32         max_offset; /* used by SYM_SEG */
+        /* func_ptr: used by SYM_MACRO if predefined==1 */
+        ret_code (* func_ptr)( struct macro_instance *, char *, struct asm_tok * );
+        //int_32         max_offset; /* used by SYM_SEG; v2.11 field moved */
         int_32         class_lname_idx;/* used by SYM_CLASS_LNAME */
     };
     struct asym     *segment;      /* used by SYM_INTERNAL, SYM_EXTERNAL */
@@ -144,14 +144,14 @@ struct asym {
 #endif
                     isequate:1,   /* symbol has been defined with EQU */
                     predefined:1, /* symbol is predefined */
-                    variable:1,   /* symbol is variable ('=' directive) */
-                    public:1;     /* symbol has been added to the publics queue */
+                    variable:1,   /* symbol is variable (defined by '=' directive) */
+                    ispublic:1;   /* symbol has been added to the publics queue */
     unsigned char   list:1,       /* symbol is to be listed */
                     isarray:1,    /* symbol is an array (total_length is valid) */
                     isdata:1,     /* field first_size is valid */
-                    isproc:1,     /* symbol is PROC or PROTO */
+                    isproc:1,     /* symbol is PROC or PROTO; has proc_info extension */
 #if FASTPASS
-                    issaved:1,    /* assembly time variables only: symbol has been saved */
+                    issaved:1,    /* assembly-time variables only: symbol has been saved */
 #endif
 //#if FASTMEM==0 /* v2.09: obsolete */
 //                    isstatic:1,   /* symbol stored in static memory */
@@ -187,6 +187,9 @@ struct asym {
 #if MACROLABEL
                             label:1,    /* macro is "label-aware" */
 #endif
+#if VARARGML
+                            mac_multiline:1, /* v2.11: vararg arguments may be on multiple lines */
+#endif
                             purged:1;   /* macro has been PURGEd */
         };
     };
@@ -212,6 +215,8 @@ struct asym {
 #if DLLIMPORT
         struct dll_desc *dll;         /* SYM_EXTERNAL (isproc=1) */
 #endif
+        /* for SYM_SEG; v2.11: moved here to make segment's offset field contain "local start offset" (=0) */
+        int_32          max_offset;
     };
     union {
         /* SYM_INTERNAL, SYM_STRUCT_FIELD,
@@ -295,8 +300,10 @@ struct seg_info {
         struct asym     *label_list;    /* linked list of labels in this seg */
         FlushSegFunc    flushfunc;      /* to flush the segment buffer */
     };
-    struct fixup        *FixupListHead; /* fixup queue head */
-    struct fixup        *FixupListTail; /* fixup queue tail */
+    struct {
+        struct fixup    *head;          /* fixup queue head */
+        struct fixup    *tail;          /* fixup queue tail */
+    } FixupList;
     union {
         void            *LinnumQueue;   /* for COFF line numbers */
         uint_32         fileoffset;     /* used by BIN + ELF */
@@ -343,30 +350,36 @@ struct proc_info {
     struct dsym         *paralist;      /* list of parameters */
     struct dsym         *locallist;     /* PROC: list of local variables */
     struct dsym         *labellist;     /* PROC: list of local labels */
-    int                 parasize;       /* total no. of bytes used by parameters */
-    int                 localsize;      /* PROC: total no. of bytes used by local variables */
+    uint                parasize;       /* total no. of bytes used by parameters */
+    uint                localsize;      /* PROC: total no. of bytes used by local variables */
     char                *prologuearg;   /* PROC: prologuearg attribute */
 #if AMD64_SUPPORT
     struct asym         *exc_handler;   /* PROC: exc handler set by FRAME */
     int                 ReservedStack;  /* PROC: win64: additional reserved stack */
 #endif
-    uint_32             list_pos;       /* PROC: prologue list pos */
+    uint_32             prolog_list_pos;/* PROC: prologue list pos */
     union {
         unsigned char   flags;
         struct {
-            unsigned char  is_vararg:1; /* if last param is VARARG */
-            unsigned char  pe_type:1;   /* epilog code, 1=use LEAVE */
-            unsigned char  export:1;    /* EXPORT attribute set */
-            unsigned char  init_done:1; /* has ParseProc() been called? */
-            unsigned char  forceframe:1;/* FORCEFRAME prologuearg? */
-            unsigned char  loadds:1;    /* LOADDS prologuearg? */
-            unsigned char  stackparam:1;/* for FASTCALL: 1=a stack param exists */
+            unsigned char  has_vararg:1;/* last param is VARARG */
+            unsigned char  pe_type:1;   /* PROC: prolog-epilog type, 1=use LEAVE */
+            unsigned char  isexport:1;  /* PROC: EXPORT attribute set */
+            //unsigned char  init_done:1; /* has ParseProc() been called? v2.11: obsolete */
+            unsigned char  forceframe:1;/* PROC: FORCEFRAME prologuearg? */
+            unsigned char  loadds:1;    /* PROC: LOADDS prologuearg? */
+            unsigned char  stackparam:1;/* PROC: 1=stack params exists ( not just register params ) */
 #if AMD64_SUPPORT
-            unsigned char  isframe:1;   /* FRAME set? */
+            unsigned char  isframe:1;   /* PROC: FRAME attribute set? */
+#endif
+#if STACKBASESUPP
+            unsigned char  fpo:1;
 #endif
         };
     };
-    uint_8              size_prolog;    /* v2.10: prologue size */
+    uint_8              size_prolog;    /* PROC: v2.10: prologue size */
+#if STACKBASESUPP
+    uint_16             basereg;        /* PROC: v2.11: stack base register */
+#endif
 };
 
 /* macro parameter */
@@ -468,11 +481,11 @@ struct dsym {
      */
     struct dsym *next;
     union {
-        /* for SYM_UNDEFINED, SYM_SEG, SYM_GRP, SYM_EXTERNAL, SYM_INTERNAL(procs)
-         * linked list of this type of symbol, to allow fast removes.
-         * Actually, the only symbols which have a "chance" to be
-         * removed are SYM_UNDEFINED and SYM_EXTERNAL (weak=TRUE ) during
-         * pass one.
+        /* for SYM_UNDEFINED, SYM_EXTERNAL, SYM_ALIAS and SYM_GRP:
+         * predecessor of current symbol with the same state, to allow fast removes.
+         * Actually, the only symbols which may change the state and thus
+         * have a chance to be removed are SYM_UNDEFINED and SYM_EXTERNAL ( weak=TRUE )
+         * during pass one.
          */
         struct dsym *prev;
         /* used by PROC symbols (SYM_INTERNAL) for linked list, TAB_PROC */
@@ -481,8 +494,10 @@ struct dsym {
         struct dsym *nextlocal;
         /* used by PROC params (SYM_STACK) for linked list */
         struct dsym *nextparam;
-        /* used by SYM_EXTERNAL (weak=FALSE) if altname is set */
-        struct dsym *nextext;
+        /* used by SYM_EXTERNAL (weak=FALSE) if altname is set.
+         * v2.11: removed; member is in use for SYM_EXTERNAL.
+         */
+        //struct dsym *nextext;
     };
 };
 
@@ -494,7 +509,7 @@ extern  struct asym     *SymLCreate( const char * );
 extern  struct asym     *SymAddGlobal( struct asym * );
 extern  struct asym     *SymAddLocal( struct asym *, const char * );
 extern  struct asym     *SymLookup( const char * );
-extern  struct asym     *SymLookupLabel( const char *, int bDefine );
+extern  struct asym     *SymLookupLocal( const char * );
 
 extern  struct asym     *SymFind( const char *name );
 #define SymSearch(x) SymFind(x)
@@ -507,8 +522,8 @@ extern  void            SymGetAll( struct asym ** );
 extern  struct asym     *SymEnum( struct asym *, int * );
 extern  uint_32         SymGetCount( void );
 
-#ifdef __WATCOMC__
-typedef int (__watcall * StrCmpFunc)(const void *, const void *, unsigned );
+#if defined(__WATCOMC__)
+typedef int (__watcall * StrCmpFunc)(const void *, const void *, size_t );
 #else
 typedef int (* StrCmpFunc)(const void *, const void *, size_t );
 #endif

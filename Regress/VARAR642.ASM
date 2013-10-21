@@ -14,7 +14,10 @@
 
 szFmt1 db "number: %u", 10, 0
 szFmt2 db "numbers: %u %u", 10, 0
-	align 8
+	nop
+	nop
+	nop
+	nop
 
 printf proc szFmt:ptr byte, args:VARARG
 	ret

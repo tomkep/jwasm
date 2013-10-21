@@ -16,7 +16,7 @@
 #include "segment.h"
 #include "assume.h"
 #include "equate.h"
-#include "input.h"
+#include "lqueue.h"
 #include "tokenize.h"
 #include "expreval.h"
 #include "fastpass.h"
@@ -24,7 +24,9 @@
 #include "proc.h"
 #include "macro.h"
 #include "fixup.h"
-
+#ifdef DEBUG_OUT
+#include "reswords.h"
+#endif
 #include "myassert.h"
 #if PE_SUPPORT
 #include "bin.h"
@@ -155,10 +157,11 @@ static void SetModel( void )
 #else
         SetDefaultOfssize( USE32 );
 #endif
+        /* v2.11: define symbol FLAT - after default offset size has been set! */
+        DefineFlatGroup();
     } else
         ModuleInfo.offsettype = OT_GROUP;
 
-    NewLineQueue();
     ModelSimSegmInit( ModuleInfo.model ); /* create segments in first pass */
     ModelAssumeInit();
 
@@ -223,6 +226,12 @@ static void SetModel( void )
     if ( ModuleInfo.sub_format == SFORMAT_PE )
         pe_create_PE_header();
 #endif
+
+#ifdef DEBUG_OUT
+    if ( Options.dump_reswords )
+        DumpResWords();
+#endif
+
 }
 
 /* handle .model directive
@@ -265,8 +274,7 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
 
     i++;
     if ( tokenarray[i].token == T_FINAL ) {
-        EmitError( EXPECTED_MEMORY_MODEL );
-        return( ERROR );
+        return( EmitError( EXPECTED_MEMORY_MODEL ) );
     }
     /* get the model argument */
     index = FindToken( tokenarray[i].string_ptr, ModelToken, sizeof( ModelToken )/sizeof( ModelToken[0] ) );
@@ -278,8 +286,7 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
         model = index + 1; /* model is one-base ( 0 is MODEL_NONE ) */
         i++;
     } else {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
     }
 
     /* get the optional arguments: language, stack distance, os */
@@ -297,8 +304,7 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
                 switch ( initv ) {
                 case INIT_STACK:
                     if ( model == MODEL_FLAT ) {
-                        EmitError( INVALID_MODEL_PARAM_FOR_FLAT );
-                        return( ERROR );
+                        return( EmitError( INVALID_MODEL_PARAM_FOR_FLAT ) );
                     }
                     distance = ModelAttrValue[index].value;
                     break;
@@ -318,14 +324,12 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
     }
     /* everything parsed successfully? */
     if ( tokenarray[i].token != T_FINAL ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
     }
 
     if ( model == MODEL_FLAT ) {
         if ( ( ModuleInfo.curr_cpu & P_CPU_MASK) < P_386 ) {
-            EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
-            return( ERROR );
+            return( EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE ) );
         }
 #if AMD64_SUPPORT
         if ( ( ModuleInfo.curr_cpu & P_CPU_MASK ) >= P_64 ) /* cpu 64-bit? */
@@ -334,7 +338,8 @@ ret_code ModelDirective( int i, struct asm_tok tokenarray[] )
             case OFORMAT_ELF:  ModuleInfo.fmtopt = &elf64_fmtopt;  break;
             };
 #endif
-        DefineFlatGroup();
+        /* v2.11: define FLAT symbol is to early here, because defOfssize isn't set yet */
+        //DefineFlatGroup();
     }
 
     ModuleInfo.model = model;
@@ -467,8 +472,7 @@ ret_code CpuDirective( int i, struct asm_tok tokenarray[] )
         if ( EvalOperand( &i, Token_Count, &opndx, 0 ) == ERROR )
             return( ERROR );
         if ( opndx.kind != EXPR_CONST || opndx.value < 1 || opndx.value > 4 ) {
-            EmitConstError( &opndx );
-            return( ERROR );
+            return( EmitConstError( &opndx ) );
         }
         newcpy &= ~P_SSEALL; 
         switch ( opndx.value ) {
@@ -482,8 +486,7 @@ ret_code CpuDirective( int i, struct asm_tok tokenarray[] )
     i++;
 
     if ( tokenarray[i].token != T_FINAL ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
     }
 
     return( SetCPU( newcpu ) );

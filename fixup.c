@@ -33,11 +33,15 @@
 #include "parser.h"
 #include "fixup.h"
 #include "segment.h"
+#include "omfspec.h"
+#include "myassert.h"
 
 #define GNURELOCS 1
 
-extern int_8           Frame_Type;     /* Frame of current fixup */
-extern uint_16         Frame_Datum;    /* Frame datum of current fixup */
+extern struct asym *SegOverride;
+
+int_8   Frame_Type;   /* curr fixup frame type: SEG|GRP|EXT|ABS|NONE; see omfspec.h */
+uint_16 Frame_Datum;  /* curr fixup frame value */
 
 struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_options option )
 /*********************************************************************************************/
@@ -62,8 +66,8 @@ struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_o
 
     fixup = LclAlloc( sizeof( struct fixup ) );
 #ifdef TRMEM
-    printf("CreateFixup, pass=%u: %X sym=%s\n", Parse_Pass, fixup, sym ? sym->name : "NULL" );
     fixup->marker = 'XF';
+    DebugMsg1(("CreateFixup, pass=%u: fix=%p sym=%s\n", Parse_Pass+1, fixup, sym ? sym->name : "NULL" ));
 #endif
 
     /* add the fixup to the symbol's linked list (used for backpatch)
@@ -86,8 +90,8 @@ struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_o
         if ( Options.nobackpatch == FALSE )
 #endif
         if ( CurrSeg ) {
-            fixup->nextrlc = CurrSeg->e.seginfo->FixupListHead;
-            CurrSeg->e.seginfo->FixupListHead = fixup;
+            fixup->nextrlc = CurrSeg->e.seginfo->FixupList.head;
+            CurrSeg->e.seginfo->FixupList.head = fixup;
         }
     }
     fixup->offset = 0;
@@ -104,7 +108,7 @@ struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_o
     fixup->def_seg = CurrSeg;           /* may be NULL (END directive) */
     fixup->sym = sym;
 
-    DebugMsg1(("CreateFixup(sym=%s type=%u, opt=%u) cnt=%" FX32 ", loc=%" FX32 "h\n",
+    DebugMsg1(("CreateFixup(sym=%s type=%u, opt=%u) cnt=%" I32_SPEC "X, loc=%" I32_SPEC "Xh\n",
         sym ? sym->name : "NULL", type, option, ++cnt, fixup->location ));
     return( fixup );
 }
@@ -120,10 +124,10 @@ void FreeFixup( struct fixup *fixup )
     if ( Parse_Pass == PASS_1 ) {
         dir = fixup->def_seg;
         if ( dir ) {
-            if ( fixup == dir->e.seginfo->FixupListHead ) {
-                dir->e.seginfo->FixupListHead = fixup->nextrlc;
+            if ( fixup == dir->e.seginfo->FixupList.head ) {
+                dir->e.seginfo->FixupList.head = fixup->nextrlc;
             } else {
-                for ( fixup2 = dir->e.seginfo->FixupListHead; fixup2; fixup2 = fixup2->nextrlc ) {
+                for ( fixup2 = dir->e.seginfo->FixupList.head; fixup2; fixup2 = fixup2->nextrlc ) {
                     if ( fixup2->nextrlc == fixup ) {
                         fixup2->nextrlc = fixup->nextrlc;
                         break;
@@ -133,6 +137,53 @@ void FreeFixup( struct fixup *fixup )
         }
     }
     LclFree( fixup );
+}
+
+/*
+ * Set global variables Frame_Type and Frame_Datum.
+ * segment override with a symbol (i.e. DGROUP )
+ * it has been checked in the expression evaluator that the
+ * symbol has type SYM_SEG/SYM_GRP.
+ */
+
+void SetFixupFrame( const struct asym *sym, char ign_grp )
+/********************************************************/
+{
+    struct dsym *grp;
+
+    if( sym ) {
+        switch ( sym->state ) {
+        case SYM_INTERNAL:
+        case SYM_EXTERNAL:
+            if( sym->segment != NULL ) {
+                if( ign_grp == FALSE && ( grp = (struct dsym *)GetGroup( sym ) ) ) {
+                    Frame_Type = FRAME_GRP;
+                    Frame_Datum = grp->e.grpinfo->grp_idx;
+                } else {
+                    Frame_Type = FRAME_SEG;
+                    Frame_Datum = GetSegIdx( sym->segment );
+                }
+            }
+            break;
+        case SYM_SEG:
+            Frame_Type = FRAME_SEG;
+            Frame_Datum = GetSegIdx( sym->segment );
+            break;
+        case SYM_GRP:
+            Frame_Type = FRAME_GRP;
+            Frame_Datum = ((struct dsym *)sym)->e.grpinfo->grp_idx;
+            break;
+#ifdef DEBUG_OUT
+        case SYM_UNDEFINED:
+        case SYM_STACK:
+            break;
+        default:
+            DebugMsg(("SetFixupFrame(%s): unexpected state=%u\n", sym->name, sym->state ));
+            /**/myassert( 0 );
+            break;
+#endif
+        }
+    }
 }
 
 /*
@@ -154,10 +205,10 @@ void store_fixup( struct fixup *fixup, int_32 *pdata )
 
 #ifdef DEBUG_OUT
     if ( fixup->sym )
-        DebugMsg1(("store_fixup: type=%u, loc=%s.%" FX32 ", target=%s(%" FX32 "+% "FX32 ")\n",
+        DebugMsg1(("store_fixup: type=%u, loc=%s.%" I32_SPEC "X, target=%s(%" I32_SPEC "X+% " I32_SPEC "X)\n",
                 fixup->type, CurrSeg->sym.name, fixup->location, fixup->sym->name, fixup->sym->offset, fixup->offset ));
     else
-        DebugMsg1(("store_fixup: type=%u, loc=%s.%" FX32 ", target=%" FX32 "\n",
+        DebugMsg1(("store_fixup: type=%u, loc=%s.%" I32_SPEC "X, target=%" I32_SPEC "X\n",
                 fixup->type, CurrSeg->sym.name, fixup->location, fixup->offset));
 #endif
 
@@ -240,12 +291,11 @@ void store_fixup( struct fixup *fixup, int_32 *pdata )
         }
 #endif
     }
-    if( CurrSeg->e.seginfo->FixupListHead == NULL ) {
-        CurrSeg->e.seginfo->FixupListTail = CurrSeg->e.seginfo->FixupListHead = fixup;
+    if( CurrSeg->e.seginfo->FixupList.head == NULL ) {
+        CurrSeg->e.seginfo->FixupList.tail = CurrSeg->e.seginfo->FixupList.head = fixup;
     } else {
-        CurrSeg->e.seginfo->FixupListTail->nextrlc = fixup;
-        CurrSeg->e.seginfo->FixupListTail = fixup;
+        CurrSeg->e.seginfo->FixupList.tail->nextrlc = fixup;
+        CurrSeg->e.seginfo->FixupList.tail = fixup;
     }
     return;
 }
-

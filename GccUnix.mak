@@ -26,26 +26,7 @@ CC = gcc
 .SUFFIXES:
 .SUFFIXES: .c .o
 
-proj_obj = $(OUTD)/main.o     $(OUTD)/assemble.o $(OUTD)/assume.o  \
-           $(OUTD)/directiv.o $(OUTD)/posndir.o  $(OUTD)/segment.o \
-           $(OUTD)/expreval.o $(OUTD)/memalloc.o $(OUTD)/errmsg.o  \
-           $(OUTD)/macro.o    $(OUTD)/string.o   $(OUTD)/condasm.o \
-           $(OUTD)/types.o    $(OUTD)/fpfixup.o  $(OUTD)/invoke.o  \
-           $(OUTD)/equate.o   $(OUTD)/mangle.o   $(OUTD)/loop.o    \
-           $(OUTD)/parser.o   $(OUTD)/tokenize.o $(OUTD)/input.o   \
-           $(OUTD)/expans.o   $(OUTD)/symbols.o  $(OUTD)/label.o   \
-           $(OUTD)/fixup.o    $(OUTD)/codegen.o  $(OUTD)/data.o    \
-           $(OUTD)/reswords.o $(OUTD)/branch.o   $(OUTD)/queue.o   \
-           $(OUTD)/hll.o      $(OUTD)/proc.o     $(OUTD)/option.o  \
-           $(OUTD)/omf.o      $(OUTD)/omfint.o   $(OUTD)/omffixup.o\
-           $(OUTD)/coff.o     $(OUTD)/elf.o      $(OUTD)/bin.o     \
-           $(OUTD)/listing.o  $(OUTD)/linnum.o  \
-           $(OUTD)/context.o  $(OUTD)/extern.o   $(OUTD)/simsegm.o \
-           $(OUTD)/apiemu.o   $(OUTD)/dbgcv.o    $(OUTD)/end.o     \
-           $(OUTD)/backptch.o $(OUTD)/msgtext.o  $(OUTD)/tbyte.o   \
-           $(OUTD)/cpumodel.o $(OUTD)/safeseh.o  $(OUTD)/cmdline.o \
-           $(OUTD)/fastpass.o 
-######
+include gccmod.inc
 
 #.c.o:
 #	$(CC) -c $(inc_dirs) $(c_flags) -o $(OUTD)/$*.o $<
@@ -57,17 +38,17 @@ all:  $(OUTD) $(OUTD)/$(TARGET1)
 $(OUTD):
 	mkdir $(OUTD)
 
-$(OUTD)/$(TARGET1) : $(proj_obj)
+$(OUTD)/$(TARGET1) : $(OUTD)/main.o $(proj_obj)
 ifeq ($(DEBUG),0)
-	$(CC) $(proj_obj) -s -o $@ -Wl,-Map,$(OUTD)/$(TARGET1).map
+	$(CC) $(OUTD)/main.o $(proj_obj) -s -o $@ -Wl,-Map,$(OUTD)/$(TARGET1).map
 else
-	$(CC) $(proj_obj) -o $@ -Wl,-Map,$(OUTD)/$(TARGET1).map
+	$(CC) $(OUTD)/main.o $(proj_obj) -o $@ -Wl,-Map,$(OUTD)/$(TARGET1).map
 endif
 
-$(OUTD)/msgtext.o: msgtext.c H/msgdef.h H/usage.h
+$(OUTD)/msgtext.o: msgtext.c H/msgdef.h
 	$(CC) -c $(inc_dirs) $(c_flags) -o $*.o msgtext.c
 
-$(OUTD)/reswords.o: reswords.c H/instruct.h H/special.h H/directve.h
+$(OUTD)/reswords.o: reswords.c H/instruct.h H/special.h H/directve.h H/opndcls.h H/instravx.h
 	$(CC) -c $(inc_dirs) $(c_flags) -o $*.o reswords.c
 
 ######

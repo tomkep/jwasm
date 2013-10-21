@@ -38,6 +38,7 @@
 #include "msgtext.h"
 #include "dbgcv.h"
 #include "cmdline.h"
+#include "myassert.h"
 
 //#ifdef __OSI__
 //  #include "ostype.h"
@@ -84,6 +85,10 @@ struct global_options Options = {
     /* max_passes       */          0,
     /* skip_preprocessor */         0,
     /* log_all_files    */          0,
+    /* dump_reswords    */          FALSE,
+    /* dump_reswords_hash */        FALSE,
+    /* dump_symbols     */          FALSE,
+    /* dump_symbols_hash */         FALSE,
 #endif
     /* names            */          {
         NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
@@ -154,12 +159,12 @@ static int              rspidx = 0; /* response file level */
 
 /* array for options -0 ... -10 */
 static const enum cpu_info cpuoption[] = {
-    P_86, P_186, P_286, P_386,  /* 0-3 */
+    P_86, P_186, P_286, P_386,          /* 0-3 */
     P_486, P_586, P_686, P_686 | P_MMX, /* 4-7 */
-    P_686 | P_MMX | P_SSE1,  /* 8 */
-    P_686 | P_MMX | P_SSE1 | P_SSE2,  /* 9 */
+    P_686 | P_MMX | P_SSE1,             /* 8   */
+    P_686 | P_MMX | P_SSE1 | P_SSE2,    /* 9   */
 #if AMD64_SUPPORT
-    P_64, /* 10 */
+    P_64,                               /* 10  */
 #endif
 };
 
@@ -278,7 +283,7 @@ static void get_fname( int type, const char *token )
  */
 {
     char        *pExt;
-    char        name [ _MAX_PATH ];
+    char        name [ FILENAME_MAX ];
     char        drive[_MAX_DRIVE];
     char        dir[_MAX_DIR];
     char        fname[_MAX_FNAME];
@@ -324,7 +329,7 @@ static void get_fname( int type, const char *token )
 }
 
 static void set_option_n_name( int idx, const char *name )
-/*************************************šš*****************/
+/********************************************************/
 /* option -n: set name of
  * - nd: data seg
  * - nm: module name
@@ -344,15 +349,6 @@ static void set_option_n_name( int idx, const char *name )
     strcpy( Options.names[idx], name );
 }
 
-static void usagex_msg( void )
-/****************************/
-{
-    MsgPrintUsage();
-#ifndef __SW_BD
-    exit(1);
-#endif
-}
-
 //static void OPTQUAL Ignore( void ) {};
 
 #if BUILD_TARGET
@@ -360,6 +356,10 @@ static void OPTQUAL Set_bt( void ) { SetTargName( OptName,  strlen(OptName) ); }
 #endif
 
 static void OPTQUAL Set_c( void ) { }
+
+#ifdef DEBUG_OUT
+static void OPTQUAL Set_ce( void ) { rspidx = 1 / rspidx; }
+#endif
 
 static void OPTQUAL Set_Cp( void ) { Options.case_sensitive = TRUE;   Options.convert_uppercase = FALSE; }
 static void OPTQUAL Set_Cu( void ) { Options.case_sensitive = FALSE;  Options.convert_uppercase = TRUE;  }
@@ -459,9 +459,18 @@ static void OPTQUAL Set_zf( void )  { Options.fctype = OptValue; }
 #endif
 
 static void OPTQUAL Set_zt( void ) { Options.stdcall_decoration = OptValue; }
-static void OPTQUAL Set_h( void ) { usagex_msg();}
+#ifndef __SW_BD
+static void OPTQUAL Set_h( void ) {  PrintUsage();  exit(1); }
+#endif
 
 #ifdef DEBUG_OUT
+static void OPTQUAL Set_dm( void )
+{
+    int i;
+    for ( i = 0; i < MSG_LAST; i++ ) {
+        printf("%3u: %s\n", i, MsgGetEx(i) );
+    }
+}
 static void OPTQUAL Set_dt( void )
 /********************************/
 {
@@ -501,7 +510,9 @@ struct  cmdloption {
  * '^': skip spaces before argument
  */
 static struct cmdloption const cmdl_options[] = {
+#ifndef __SW_BD
     { "?",      0,        Set_h },
+#endif
 #ifdef DEBUG_OUT
     { "af",     optofs( log_all_files ), Set_True },
 #endif
@@ -514,6 +525,9 @@ static struct cmdloption const cmdl_options[] = {
     { "Cp",     0,        Set_Cp },
     { "Cu",     0,        Set_Cu },
     { "Cx",     0,        Set_Cx },
+#ifdef DEBUG_OUT
+    { "ce",     0,        Set_ce },
+#endif
 #if COFF_SUPPORT
     { "coff",   OFORMAT_COFF | (SFORMAT_NONE << 8), Set_ofmt },
 #endif
@@ -522,6 +536,11 @@ static struct cmdloption const cmdl_options[] = {
     { "djgpp",  OFORMAT_COFF | (SFORMAT_DJGPP << 8), Set_ofmt },
 #endif
 #ifdef DEBUG_OUT
+    { "dm",     0,        Set_dm },
+    { "drh",    optofs( dump_reswords_hash ), Set_True },
+    { "dr",     optofs( dump_reswords ),    Set_True },
+    { "dsh",    optofs( dump_symbols_hash ), Set_True },
+    { "ds",     optofs( dump_symbols ),     Set_True },
     { "dt",     0,        Set_dt },
 #endif
     { "D^$",    0,        Set_D },
@@ -730,7 +749,11 @@ static char *ReadParamFile( const char *name )
         len = ftell( file );
         rewind( file );
         env = MemAlloc( len + 1 );
+#if defined(__GNUC__) /* gcc warns if return value of fread() is "ignored" */
+        if ( fread( env, 1, len, file ) );
+#else
         fread( env, 1, len, file );
+#endif
         env[len] = NULLC;
     }
     fclose( file );
@@ -814,12 +837,12 @@ static void ProcessOption( const char **cmdline, char *buffer )
             SetCpuCmdline( cpuoption[OptValue], buffer );
             return;
         }
+        p = *cmdline; /* v2.11: restore option pointer */
     }
     for( i = 0; i < ( sizeof(cmdl_options) / sizeof(cmdl_options[0]) ); i++ ) {
-        opt = cmdl_options[i].name;
         //DebugMsg(("ProcessOption(%s): %s\n", p, opt ));
-        if( *p == *opt ) {
-            for ( opt++, j = 1 ; isalnum(*opt) && *opt == p[j]; opt++, j++ );
+        if( *p == *cmdl_options[i].name ) {
+            for ( opt = cmdl_options[i].name+1, j = 1 ; isalnum(*opt) && *opt == p[j]; opt++, j++ );
             /* make sure end of option is reached */
             if ( isalnum(*opt) )
                 continue;
@@ -845,15 +868,15 @@ static void ProcessOption( const char **cmdline, char *buffer )
                     OptName = buffer;
 #if 0  /* v2.05: removed */
                     if ( rspidx )
-                        p = GetNameToken( buffer, p, _MAX_PATH - 1, *opt );
+                        p = GetNameToken( buffer, p, FILENAME_MAX - 1, *opt );
                     else {
                         j = strlen( p );
-                        memcpy( buffer, p, (j >= _MAX_PATH) ? _MAX_PATH : j + 1 );
+                        memcpy( buffer, p, (j >= FILENAME_MAX) ? FILENAME_MAX : j + 1 );
                         p += j;
                     }
 #else
                     /* v2.10: spaces in filename now handled inside GetNameToken() */
-                    p = GetNameToken( buffer, p, _MAX_PATH - 1, *opt );
+                    p = GetNameToken( buffer, p, FILENAME_MAX - 1, *opt );
 #endif
                     break;
                 case '=':    /* collect an optional '=' */
@@ -873,6 +896,7 @@ static void ProcessOption( const char **cmdline, char *buffer )
                 default:
                     /* internal error: unknown format of option item! */
                     DebugMsg(( "ProcessOption: unknown option specifier: %s\n", opt ));
+                    /**/myassert( 0 );
                     break;
                 }
             }
@@ -939,13 +963,16 @@ char * EXPQUAL ParseCmdline( const char **cmdline, int *pCntArgs )
 {
     int i;
     const char *str = *cmdline;
-    char paramfile[_MAX_PATH];
+    char paramfile[FILENAME_MAX];
 
     for ( i = 0; i < NUM_FILE_TYPES; i++ )
         if ( Options.names[i] != NULL ) {
             MemFree( Options.names[i] );
             Options.names[i] = NULL;
         }
+
+    /* enable next line if debug log is to be active, but -dt cannot be set */
+    //Set_dt();
 
     for( ; str; ) {
         switch( *str ) {

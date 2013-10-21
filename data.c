@@ -32,14 +32,12 @@
 ****************************************************************************/
 
 #include <ctype.h>
-#include <float.h>
 
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
 #include "expreval.h"
 #include "input.h"
-#include "tbyte.h"
 #include "fixup.h"
 #include "listing.h"
 #include "segment.h"
@@ -48,15 +46,12 @@
 #include "tokenize.h"
 #include "macro.h"
 #include "omf.h"
+#include "atofloat.h"
 #include "myassert.h"
 
 //#ifndef min
 //#define min(x,y) (((x) < (y)) ? (x) : (y))
 //#endif
-
-#if !defined(__GNUC__) && !defined(__POCC__)
-#define tolower(c) ((c >= 'A' && c <= 'Z') ? c | 0x20 : c )
-#endif
 
 extern ret_code segm_override( const struct expr *, struct code_info * );
 extern struct asym *SegOverride;
@@ -89,7 +84,7 @@ static ret_code InitializeArray( const struct sfield *f, int *pi, struct asm_tok
     oldofs = GetCurrOffset();
     no_of_bytes = SizeFromMemtype( f->sym.mem_type, USE_EMPTY, f->sym.type );
 
-    DebugMsg1(("InitializeArray(%s) enter, items=%" FU32 " size=%" FU32 " mem_type=%xh type=%s currofs=%" FX32 " [%s]\n",
+    DebugMsg1(("InitializeArray(%s) enter, items=%" I32_SPEC "u size=%" I32_SPEC "u mem_type=%xh type=%s currofs=%" I32_SPEC "X [%s]\n",
                f->sym.name, f->sym.total_length, no_of_bytes, f->sym.mem_type,
                f->sym.type ? f->sym.type->name : "NULL", oldofs, tokenarray[i].tokpos ));
 
@@ -119,8 +114,7 @@ static ret_code InitializeArray( const struct sfield *f, int *pi, struct asm_tok
 
         if ( bArray == FALSE ) {
             DebugMsg1(("InitializeArray(%s): error, array init requires DUP, string or literal\n", f->sym.name ));
-            EmitErr( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM, tokenarray[i].tokpos );
-            return( ERROR );
+            return( EmitErr( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM, tokenarray[i].tokpos ) );
         }
 
         lvl = tokenarray[j].tokpos - tokenarray[i].tokpos;
@@ -161,7 +155,7 @@ static ret_code InitializeArray( const struct sfield *f, int *pi, struct asm_tok
         rc = ERROR;
     } else if ( no_of_bytes < f->sym.total_size ) {
         char filler = NULLC;
-        DebugMsg1(("InitializeArray: remaining bytes=%lu\n", f->sym.total_size - no_of_bytes ));
+        DebugMsg1(("InitializeArray: remaining bytes=%" I32_SPEC "u\n", f->sym.total_size - no_of_bytes ));
         if ( CurrSeg && CurrSeg->e.seginfo->segtype == SEGTYPE_BSS )
             SetCurrOffset( CurrSeg, f->sym.total_size - no_of_bytes, TRUE, TRUE );
         else {
@@ -210,7 +204,7 @@ static ret_code InitStructuredVar( int index, struct asm_tok tokenarray[], const
     struct expr     opndx;
     //char            line[MAX_LINE_LEN];
 
-    DebugMsg1(("InitStructuredVar(%s) enter, total_size=%" FU32 ", init=>%s<, embedded=%s, alignm=%u\n",
+    DebugMsg1(("InitStructuredVar(%s) enter, total_size=%" I32_SPEC "u, init=>%s<, embedded=%s, alignm=%u\n",
               symtype->sym.name, symtype->sym.total_size, tokenarray[index].string_ptr, embedded ? embedded->name : "NULL", symtype->e.structinfo->alignment ));
 
     /**/myassert( symtype->sym.state == SYM_TYPE && symtype->sym.typekind != TYPE_TYPEDEF );
@@ -219,8 +213,7 @@ static ret_code InitStructuredVar( int index, struct asm_tok tokenarray[], const
         /* v2.08: no special handling of {}-literals anymore */
         if ( tokenarray[index].string_delim != '<' &&
             tokenarray[index].string_delim != '{' ) {
-            EmitError( MISSING_ANGLE_BRACKET_OR_BRACE_IN_LITERAL );
-            return( ERROR );
+            return( EmitError( MISSING_ANGLE_BRACKET_OR_BRACE_IN_LITERAL ) );
         }
         i = Token_Count + 1;
         //strcpy( line, tokenarray[index].string_ptr );
@@ -235,8 +228,7 @@ static ret_code InitStructuredVar( int index, struct asm_tok tokenarray[], const
                  tokenarray[index].token == T_FINAL)) {
         i = Token_Count;
     } else {
-        EmitErr( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM, embedded ? embedded->name : "" );
-        return( ERROR );
+        return( EmitErr( INITIALIZER_MUST_BE_A_STRING_OR_SINGLE_ITEM, embedded ? embedded->name : "" ) );
     }
     if ( symtype->sym.typekind == TYPE_RECORD ) {
         dwRecInit = 0;
@@ -246,7 +238,7 @@ static ret_code InitStructuredVar( int index, struct asm_tok tokenarray[], const
     /* scan the STRUCT/UNION/RECORD's members */
     for( f = symtype->e.structinfo->head; f != NULL; f = f->next ) {
 
-        DebugMsg1(("InitStructuredVar(%s) field=%s ofs=%" FU32 " total_size=%" FU32 " total_len=%" FU32 " value=>%s< >%s<\n",
+        DebugMsg1(("InitStructuredVar(%s) field=%s ofs=%" I32_SPEC "u total_size=%" I32_SPEC "u total_len=%" I32_SPEC "u value=>%s< >%s<\n",
                   symtype->sym.name,
                   f->sym.name,
                   f->sym.offset,
@@ -354,7 +346,7 @@ static ret_code InitStructuredVar( int index, struct asm_tok tokenarray[], const
                 nextofs = f->next->sym.offset;
 
             if ( f->sym.offset + f->sym.total_size < nextofs ) {
-                DebugMsg1(("InitStructuredVar: padding, field=%s ofs=%" FX32 " total=%" FX32 " nextofs=%" FX32 "\n",
+                DebugMsg1(("InitStructuredVar: padding, field=%s ofs=%" I32_SPEC "X total=%" I32_SPEC "X nextofs=%" I32_SPEC "X\n",
                           f->sym.name, f->sym.offset, f->sym.total_size, nextofs ));
                 SetCurrOffset( CurrSeg, nextofs - (f->sym.offset + f->sym.total_size), TRUE, TRUE );
             }
@@ -400,7 +392,7 @@ static ret_code InitStructuredVar( int index, struct asm_tok tokenarray[], const
     /* restore token status */
     Token_Count = old_tokencount;
     StringBufferEnd = old_stringbufferend;
-    DebugMsg1(("InitStructuredVar(%s) exit, current ofs=%" FX32 "\n", symtype->sym.name, GetCurrOffset() ));
+    DebugMsg1(("InitStructuredVar(%s) exit, current ofs=%" I32_SPEC "X\n", symtype->sym.name, GetCurrOffset() ));
     return( NOT_ERROR );
 }
 
@@ -425,78 +417,6 @@ static char *little_endian( const char *src, unsigned len )
     return( StringBufferEnd );
 }
 
-/* convert hex numbers with "real number designator" to binary.
- * the tokenizer stores just the string.
- */
-
-static void hex2float( void *out, const char *inp, int size )
-/***********************************************************/
-{
-    int val;
-    int i;
-    int j;
-    char *p = out;
-    const char *char_ptr = inp;
-
-    memset( (char *)out, 0, size );
-    for ( i = 0;
-         *char_ptr != NULLC && *char_ptr != 'r';
-          char_ptr++, i++ ) {
-        if( *char_ptr <= '9' )
-            val = *char_ptr - '0';
-        else
-            val = tolower( *char_ptr ) - 'a' + 10;
-        for ( j = 0, p = out; j < size; j++ ) {
-            val += *p * 16;
-            *(p++) = val;
-            val >>= 8;
-        }
-    }
-}
-
-void atofloat( void *out, const char *inp, unsigned size, bool negative, uint_8 ftype )
-/*************************************************************************************/
-{
-    //const char *inp;
-    double  double_value;
-    float   float_value;
-
-    /* v2.04: accept and handle 'real number designator' */
-    if ( ftype ) {
-        hex2float( out, inp, size );
-    } else {
-        switch ( size ) {
-        case 4:
-            double_value = strtod( inp, NULL );
-            /* v2.06: check added */
-            if ( double_value > FLT_MAX )
-                EmitErr( MAGNITUDE_TOO_LARGE_FOR_SPECIFIED_SIZE );
-            if( negative )
-                double_value *= -1;
-            float_value = double_value;
-            *(float *)out = float_value;
-            break;
-        case 8:
-            double_value = strtod( inp, NULL );
-            if( negative )
-                double_value *= -1;
-            *(double *)out = double_value;
-            break;
-        case 10:
-            strtotb( inp, (struct TB_LD *)out, negative );
-            break;
-        default:
-            /* sizes != 4,8 or 10 aren't accepted.
-             * Masm ignores silently, JWasm also unless -W4 is set.
-             */
-            if ( Parse_Pass == PASS_1 )
-                EmitWarn( 4, FP_INITIALIZER_IGNORED );
-            memset( (char *)out, 0, size );
-        }
-    }
-    return;
-}
-
 static void output_float( const struct expr *opnd, unsigned size )
 /****************************************************************/
 {
@@ -507,24 +427,19 @@ static void output_float( const struct expr *opnd, unsigned size )
     char buffer[32];
 
     if ( opnd->mem_type != MT_EMPTY ) {
+        int i;
         memset( buffer, 0, sizeof( buffer ) );
-        atofloat( buffer, opnd->float_tok->string_ptr, SizeFromMemtype( opnd->mem_type, USE_EMPTY, NULL ), opnd->negative, opnd->float_tok->floattype );
+        i = SizeFromMemtype( opnd->mem_type, USE_EMPTY, NULL );
+        if ( i > size )
+            EmitErr( INITIALIZER_OUT_OF_RANGE );
+        else {
+            atofloat( buffer, opnd->float_tok->string_ptr, i , opnd->negative, opnd->float_tok->floattype );
+        }
     } else {
         atofloat( buffer, opnd->float_tok->string_ptr, size, opnd->negative, opnd->float_tok->floattype );
     }
     OutputDataBytes( buffer, size );
     return;
-}
-
-/* update a symbols's total_length (operator LENGTHOF) and
- * total_size (operator SIZEOF). Called in Pass 1 only.
- */
-
-static void update_sizes( struct asym *sym, uint_32 size )
-/********************************************************/
-{
-    sym->total_length++;
-    sym->total_size += size;
 }
 
 /*
@@ -557,6 +472,7 @@ static ret_code data_item( int *start_pos, struct asm_tok tokenarray[], struct a
 {
     int                 i;
     int                 string_len;
+    uint_32             total = 0;
     bool                initwarn = FALSE;
     //unsigned int        count;
     uint_8              *pchar;
@@ -565,21 +481,21 @@ static ret_code data_item( int *start_pos, struct asm_tok tokenarray[], struct a
     struct fixup        *fixup;
     struct expr         opndx;
 
-    DebugMsg1(("data_item( idx=%u [%s], label=%s, no_of_bytes=%" FU32 ", type=%s, dup=%" FX32 "h, inside_struct=%u, is_float=%u ) enter\n",
+    DebugMsg1(("data_item( idx=%u [%s], label=%s, no_of_bytes=%" I32_SPEC "u, type=%s, dup=%" I32_SPEC "Xh, inside_struct=%u, is_float=%u ) enter\n",
                *start_pos, tokenarray[*start_pos].tokpos, sym ? sym->name : "NULL",
                no_of_bytes, type_sym ? type_sym->name : "NULL",
                dup, inside_struct, is_float ));
 
     for ( ; dup; dup-- ) {
     i = *start_pos;
-next_item:
+next_item:  /* <--- continue scan if a comma has been detected */
     /* since v1.94, the expression evaluator won't handle strings
      * enclosed in <> or {}. That is, in previous versions syntax
      * "mov eax,<1>" was accepted, now it's rejected.
      */
     if ( tokenarray[i].token == T_STRING && ( tokenarray[i].string_delim == '<'  || tokenarray[i].string_delim == '{' ) ) {
         if( type_sym ) {
-            DebugMsg1(("data_item(%s): literal/brace found: >%s<, inside_struct=%u, no_of_bytes=%" FU32 ", curr_ofs=%" FX32 "\n",
+            DebugMsg1(("data_item(%s): literal/brace found: >%s<, inside_struct=%u, no_of_bytes=%" I32_SPEC "u, curr_ofs=%" I32_SPEC "X\n",
                        type_sym->name, tokenarray[i].string_ptr, inside_struct, no_of_bytes, GetCurrOffset()));
 
             /* it's either a real data item - then inside_struct is FALSE -
@@ -606,8 +522,7 @@ next_item:
                     EmitWarn( 2, UNEXPECTED_LITERAL_FOUND_IN_EXPRESSION, tokenarray[i].tokpos );
             }
 
-            if( sym && Parse_Pass == PASS_1 )
-                update_sizes( sym, no_of_bytes );
+            total++;
             i++;
             goto item_done;
 #if 0 /* v2.08: just let EvalOperand() emit 'Unexpected literal...' error */
@@ -638,7 +553,7 @@ next_item:
         /* v2.03: db 'AB' dup (0) is valid syntax! */
         //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
         if ( opndx.kind != EXPR_CONST ) {
-            DebugMsg(("data_item, error, opndx.kind=%u, opndx.string=%X\n", opndx.kind, opndx.quoted_string));
+            DebugMsg(("data_item, error, unexpected kind=%u of DUP's first operand\n", opndx.kind ));
             /* v2.09: emit a better error msg if a forward ref was used */
             if ( opndx.sym && opndx.sym->state == SYM_UNDEFINED )
                 EmitErr( SYMBOL_NOT_DEFINED, opndx.sym->name );
@@ -648,14 +563,12 @@ next_item:
         }
         /* max dup is 0x7fffffff */
         if ( opndx.value < 0 ) {
-            EmitError( COUNT_MUST_BE_POSITIVE_OR_ZERO );
-            return( ERROR );
+            return( EmitError( COUNT_MUST_BE_POSITIVE_OR_ZERO ) );
         }
         i++;
         if( tokenarray[i].token != T_OP_BRACKET ) {
             DebugMsg(("data_item error, missing '('\n"));
-            EmitErr( EXPECTED, "(" );
-            return( ERROR );
+            return( EmitErr( EXPECTED, "(" ) );
         }
         i++;
 
@@ -673,19 +586,21 @@ next_item:
                     break;
             }
         } else {
-            DebugMsg1(("data_item(%s): op DUP, count=%" FX32 "h, calling data_item()\n", sym ? sym->name : "NULL", opndx.uvalue ));
+            DebugMsg1(("data_item(%s): op DUP, count=%" I32_SPEC "Xh, calling data_item()\n", sym ? sym->name : "NULL", opndx.uvalue ));
             if ( data_item( &i, tokenarray, sym, no_of_bytes, type_sym, opndx.uvalue, inside_struct, is_float, first, end ) == ERROR ) {
-                DebugMsg(("data_item(%s): op DUP, count=%" FX32 "h, returned with error\n", sym ? sym->name : "NULL", opndx.uvalue ));
+                DebugMsg(("data_item(%s): op DUP, count=%" I32_SPEC "Xh, returned with error\n", sym ? sym->name : "NULL", opndx.uvalue ));
                 return( ERROR );
             }
         }
         if( tokenarray[i].token != T_CL_BRACKET ) {
             DebugMsg(("data_item: error 'missing ')', exit\n"));
-            EmitErr( EXPECTED, ")" );
-            return( ERROR );
+            return( EmitErr( EXPECTED, ")" ) );
         }
         /* v2.09: SIZE and LENGTH actually don't return values for "first initializer, but
-         * the "first dimension" values */
+         * the "first dimension" values
+         * v2.11: fixme: if the first dimension is 0 ( opndx.value == 0),
+         * Masm ignores the expression - may be a Masm bug!
+         */
         if ( sym && first && Parse_Pass == PASS_1 ) {
             sym->first_size = opndx.value * no_of_bytes;
             sym->first_length = opndx.value;
@@ -706,8 +621,7 @@ next_item:
         while ( tmp->type ) tmp = tmp->type;
         if ( tmp->typekind != TYPE_TYPEDEF ) {
             DebugMsg1(("data_item: error, type=%s needs literal, >%s<\n", type_sym->name, tokenarray[i].tokpos ));
-            EmitErr( STRUCTURE_IMPROPERLY_INITIALIZED, type_sym->name );
-            return( ERROR );
+            return( EmitErr( STRUCTURE_IMPROPERLY_INITIALIZED, type_sym->name ) );
         }
     }
 
@@ -718,14 +632,10 @@ next_item:
         /* tiny optimization for uninitialized arrays */
         if ( tokenarray[i+1].token != T_COMMA && i == *start_pos ) {
             opndx.uvalue *= dup;
-            if( sym && Parse_Pass == PASS_1 ) {
-                sym->total_length += dup;
-                sym->total_size += opndx.uvalue;
-            }
+            total += dup;
             dup = 1; /* force loop exit */
         } else {
-            if( sym && Parse_Pass == PASS_1 )
-                update_sizes( sym, opndx.uvalue );
+            total++;
         }
         if( !inside_struct ) {
             SetCurrOffset( CurrSeg, opndx.uvalue, TRUE, TRUE );
@@ -760,14 +670,11 @@ next_item:
                    opndx.float_tok->string_ptr, inside_struct, no_of_bytes, GetCurrOffset()));
         if (!inside_struct)
             output_float( &opndx, no_of_bytes );
-        if( sym && Parse_Pass == PASS_1 ) {
-            update_sizes( sym, no_of_bytes );
-        }
+        total++;
         break;
     case EXPR_CONST:
         if ( is_float ) {
-            EmitError( MUST_USE_FLOAT_INITIALIZER );
-            return( ERROR );
+            return( EmitError( MUST_USE_FLOAT_INITIALIZER ) );
         }
 
         /* a string returned by the evaluator (enclosed in quotes!)? */
@@ -781,40 +688,35 @@ next_item:
             /* v2.07: check for empty string for ALL types */
             if ( string_len == 0 ) {
                 if ( inside_struct ) {
-                    /* no error for struct field */
-                    /* v2.07: don't modify string_len! Instead
+                    /* when the struct is declared, it's no error -
+                     * but won't be accepted when the struct is instanced.
+                     * v2.07: don't modify string_len! Instead
                      * mark field as array!
                      */
                     //string_len = 1;
                     sym->isarray = TRUE;
                 } else {
-                    EmitError( EMPTY_STRING ); /* MASM doesn't like "" */
-                    return( ERROR );
+                    return( EmitError( EMPTY_STRING ) ); /* MASM doesn't like "" */
                 }
             }
             /* a string is only regarded as an array if item size is 1 */
             /* else it is regarded as ONE item */
             if( no_of_bytes != 1 ) {
                 if( string_len > no_of_bytes ) {
-                    EmitError( INITIALIZER_OUT_OF_RANGE );
-                    return( ERROR );
+                    return( EmitError( INITIALIZER_OUT_OF_RANGE ) );
                 }
             }
 
             if( sym && Parse_Pass == PASS_1 && string_len > 0 ) {
-                update_sizes( sym, no_of_bytes );
+                total++;
                 if ( no_of_bytes == 1 && string_len > 1 ) {
-                    //int j;
-                    //for ( j = string_len-1; j; j-- )
-                    //    update_sizes( sym, FALSE, 1 );
+                    total += ( string_len - 1 );
+                    sym->isarray = TRUE; /* v2.07: added */
                     if ( first ) {
                         sym->first_length = 1;
                         sym->first_size = 1;
+                        first = FALSE; /* avoid to touch first_xxx fields below */
                     }
-                    first = FALSE; /* avoid to touch first_xxx fields below */
-                    sym->total_length += ( string_len - 1 );
-                    sym->total_size += ( string_len - 1 );
-                    sym->isarray = TRUE; /* v2.07: added */
                 }
             }
 
@@ -829,7 +731,7 @@ next_item:
             }
         } else {
             /* it's NOT a string */
-            DebugMsg1(("data_item.CONST: const found, value=%" FX32 "h, no_of_bytes=%u, curr_ofs=%" FX32 "\n", opndx.value, no_of_bytes, GetCurrOffset()));
+            DebugMsg1(("data_item.CONST: const found, value=%" I32_SPEC "Xh, no_of_bytes=%u, curr_ofs=%" I32_SPEC "X\n", opndx.value, no_of_bytes, GetCurrOffset()));
             if( !inside_struct ) {
                 /* the evaluator cannot handle types with size > 16.
                  * so if a (simple) type is larger ( YMMWORD? ),
@@ -856,26 +758,25 @@ next_item:
                         tmp = ( opndx.chararray[7] < 0x80 ? 0 : 0xFF );
                         memset( opndx.chararray, tmp, no_of_bytes );
                         if ( opndx.llvalue != 0 && opndx.llvalue != -1 ) {
-                            DebugMsg(("data_item.CONST: error, unhandled data is %" I64X_SPEC "_%016" I64X_SPEC "\n", opndx.hlvalue, opndx.llvalue));
-                            EmitErr( INITIALIZER_MAGNITUDE_TOO_LARGE, opndx.sym ? opndx.sym->name : "" );
-                            return( ERROR );
+                            DebugMsg(("data_item.CONST: error, unhandled data is %" I64_SPEC "X_%016" I64_SPEC "X\n", opndx.hlvalue, opndx.llvalue));
+                            return( EmitErr( INITIALIZER_MAGNITUDE_TOO_LARGE, opndx.sym ? opndx.sym->name : "" ) );
                         }
                     } else if ( no_of_bytes == 10 ) {
                         //if ( opndx.hlvalue > 0xffff ) {
                         if ( opndx.hlvalue > 0xffff && opndx.hlvalue < -0xffff ) {
-                            EmitErr( INITIALIZER_MAGNITUDE_TOO_LARGE, opndx.sym ? opndx.sym->name : "" );
-                            return( ERROR );
+                            return( EmitErr( INITIALIZER_MAGNITUDE_TOO_LARGE, opndx.sym ? opndx.sym->name : "" ) );
                         }
                     }
                 }
             }
-            if( sym && Parse_Pass == PASS_1 ) {
-                update_sizes( sym, no_of_bytes );
-            }
+            total++;
         }
         break;
     case EXPR_ADDR:
-        /* since a fixup will be created, 8 bytes is max */
+        /* since a fixup will be created, 8 bytes is max.
+         * there's no way to define an initialized tbyte "far64" address,
+         * because there's no fixup available for the selector part.
+         */
         if ( no_of_bytes > sizeof(uint_64) ) {
             EmitErr( INVALID_DATA_INITIALIZER, sym ? sym->name : "" );
             break;
@@ -894,9 +795,8 @@ next_item:
                  * the line below might be better.
                  */
                 //if ( opndx.hvalue != 0 && ( opndx.hvalue != -1 || opndx.value == 0 ) ) {
-                DebugMsg(("data_item.ADDR: displacement doesn't fit in 32 bits: %" I64X_SPEC "\n", opndx.value64 ));
-                EmitConstError( &opndx );
-                return( ERROR );
+                DebugMsg(("data_item.ADDR: displacement doesn't fit in 32 bits: %" I64_SPEC "X\n", opndx.value64 ));
+                return( EmitConstError( &opndx ) );
             }
 
         if ( is_float ) {
@@ -905,9 +805,7 @@ next_item:
             break;
         }
 
-        if( sym && Parse_Pass == PASS_1 ) {
-            update_sizes( sym, no_of_bytes );
-        }
+        total++;
         /* for STRUCT fields, don't emit anything! */
         if ( inside_struct ) {
             break;
@@ -1135,16 +1033,15 @@ next_item:
 
         /* v2.07: fixup type check moved here */
         if ( ( 1 << fixup_type ) & ModuleInfo.fmtopt->invalid_fixup_type ) {
-            EmitErr( UNSUPPORTED_FIXUP_TYPE,
+            return( EmitErr( UNSUPPORTED_FIXUP_TYPE,
                     ModuleInfo.fmtopt->formatname,
-                    opndx.sym ? opndx.sym->name : szNull );
-            return( ERROR );
+                    opndx.sym ? opndx.sym->name : szNull ) );
         }
         fixup = NULL;
         if ( write_to_file ) {
             /* there might be a segment override:
              * a segment, a group or a segment register.
-             * Init var SegOverride, it's used inside find_frame()
+             * Init var SegOverride, it's used inside set_frame()
              */
             SegOverride = NULL;
             segm_override( &opndx, NULL );
@@ -1153,9 +1050,9 @@ next_item:
             /* opndx.sym may be NULL, then SegOverride is set. */
             if ( ModuleInfo.offsettype == OT_SEGMENT &&
                 ( opndx.instr == T_OFFSET || opndx.instr == T_SEG ))
-                find_frame2( opndx.sym );
+                set_frame2( opndx.sym );
             else
-                find_frame( opndx.sym );
+                set_frame( opndx.sym );
             /* uses Frame and Frame_Datum  */
             fixup = CreateFixup( opndx.sym, fixup_type, OPTJ_NONE );
             //store_fixup( fixup, &opndx.value ); /* may fail, but ignore error! */
@@ -1167,13 +1064,12 @@ next_item:
         break;
     default: /* unknown opndx.kind, shouldn't happen */
         DebugMsg(("data_item: error, opndx.kind=%u\n", opndx.kind ));
-        EmitError( SYNTAX_ERROR );
-        return( ERROR );
+        return( EmitError( SYNTAX_ERROR ) );
     } /* end switch (opndx.kind) */
 item_done:
     if( sym && first && Parse_Pass == PASS_1 ) {
-        sym->first_length = sym->total_length;
-        sym->first_size = sym->total_size;
+        sym->first_length = total;
+        sym->first_size = total * no_of_bytes;
     }
     if( i < end && tokenarray[i].token == T_COMMA ) {
         i++;
@@ -1187,6 +1083,11 @@ item_done:
     }
 
     } /* end for */
+
+    if( sym && Parse_Pass == PASS_1 ) {
+        sym->total_length += total;
+        sym->total_size += total * no_of_bytes;
+    }
 
     *start_pos = i;
     DebugMsg1(("data_item: exit, no error, i=%d\n", i));
@@ -1213,16 +1114,19 @@ static ret_code checktypes( const struct asym *sym, enum memtype mem_type, const
         }
         if ( mem_type2 != mem_type ) {
             DebugMsg(("checktypes: memtype conflict: %u - %u\n", mem_type2, mem_type ));
-            EmitErr( SYMBOL_TYPE_CONFLICT, sym->name );
-            return( ERROR );
+            return( EmitErr( SYMBOL_TYPE_CONFLICT, sym->name ) );
         }
     }
     return( NOT_ERROR );
 }
 /*
- * parse data initialization assembly line:
- * [label] simple|arbitrary type initializer,...
- * i: pos of directive (DB,DW,...) or of type (predef or userdef)
+ * parse data definition line. Syntax:
+ * [label] directive|simple type|arbitrary type initializer [,...]
+ * - directive: DB, DW, ...
+ * - simple type: BYTE, WORD, ...
+ * - arbitrary type: struct, union, typedef or record name
+ * arguments:
+ * i: index of directive or type
  * type_sym: userdef type or NULL
  */
 
@@ -1242,13 +1146,11 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
 
     /* v2.05: the previous test in parser.c wasn't fool-proved */
     if ( i > 1 && ModuleInfo.m510 == FALSE ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
     }
     if( tokenarray[i+1].token == T_FINAL ) {
         DebugMsg(("data_dir: missing initializer\n"));
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
     }
 
     /* set values for mem_type and no_of_bytes */
@@ -1259,10 +1161,12 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
         mem_type = MT_TYPE;
         if ( type_sym->typekind != TYPE_TYPEDEF &&
              ( type_sym->total_size == 0 || ((struct dsym *)type_sym)->e.structinfo->OrgInside == TRUE ) ) {
-            EmitError( STRUCT_CANNOT_BE_INSTANCED );
-            return( ERROR );
+            return( EmitError( STRUCT_CANNOT_BE_INSTANCED ) );
         }
 
+        /* v2.09: expand literals inside <> or {}.
+         * Previously this was done inside InitStructuredVar()
+         */
 #if FASTPASS
         if ( Parse_Pass == PASS_1 || UseSavedState == FALSE )
 #endif
@@ -1273,12 +1177,11 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
             DebugMsg(("data_dir: size of arbitrary type is 0!\n"));
             /* a void type is not valid */
             if ( type_sym->typekind == TYPE_TYPEDEF ) {
-                EmitErr( INVALID_TYPE_FOR_DATA_DECLARATION, type_sym->name );
-                return( ERROR );
+                return( EmitErr( INVALID_TYPE_FOR_DATA_DECLARATION, type_sym->name ) );
             }
         }
     } else {
-        /* it's either a type or a data directive. For types, the index
+        /* it's either a predefined type or a data directive. For types, the index
          into the simpletype table is in <bytval>, for data directives
          the index is found in <sflags>.
          * v2.06: SimpleType is obsolete. Use token index directly!
@@ -1291,15 +1194,13 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
                    ( tokenarray[i].dirtype == DRT_DATADIR )) {
             idx = GetSflagsSp( tokenarray[i].tokval );
         } else {
-            EmitErr( INVALID_TYPE_FOR_DATA_DECLARATION, tokenarray[i].string_ptr );
-            return( ERROR );
+            return( EmitErr( INVALID_TYPE_FOR_DATA_DECLARATION, tokenarray[i].string_ptr ) );
         }
         mem_type = GetMemtypeSp( idx );
         /* types NEAR[16|32], FAR[16|32] and PROC are invalid here */
         //if ( ( SimpleType[idx].mem_type & MT_SPECIAL_MASK ) == MT_ADDRESS ) {
         if ( ( mem_type & MT_SPECIAL_MASK ) == MT_ADDRESS ) {
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-            return( ERROR );
+            return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
         }
         no_of_bytes = (mem_type & MT_SIZE_MASK) + 1;
         if ( mem_type & MT_FLOAT )
@@ -1339,8 +1240,7 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
     } else {
 
         if( CurrSeg == NULL ) {
-            EmitError( MUST_BE_IN_SEGMENT_BLOCK );
-            return( ERROR );
+            return( EmitError( MUST_BE_IN_SEGMENT_BLOCK ) );
         }
 
         FStoreLine(0);
@@ -1357,14 +1257,15 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
             /* get/create the label. */
             DebugMsg1(("data_dir: calling SymLookup(%s)\n", name ));
             sym = SymLookup( name );
-            if( sym == NULL ) {
-                DebugMsg(("data_dir exit, error: invalid label name\n"));
-                return( ERROR );
-            }
+            /* v2.11: cannot fail */
+            //if( sym == NULL ) {
+            //    DebugMsg(("data_dir exit, error: invalid label name\n"));
+            //    return( ERROR );
+            //}
 
             if( Parse_Pass == PASS_1 ) {
 
-                if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) { /* EXTERNDEF? */
+                if ( sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->isproc == FALSE ) { /* EXTERNDEF? */
 
                     //if ( checktypes( sym, mem_type, type_sym ) == ERROR )
                     //    return( ERROR );
@@ -1380,7 +1281,14 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
 
                     sym_remove_table( &SymTables[TAB_UNDEF], (struct dsym *)sym );
                     sym->state = SYM_INTERNAL;
-
+#if 1
+                    /* v2.11: Set the symbol's langtype. It may have been set
+                     * by a PUBLIC directive, so take care not to overwrite it.
+                     * Problem: Masm doesn't do this - might be a bug.
+                     */
+                    if ( sym->langtype == LANG_NONE )
+                        sym->langtype = ModuleInfo.langtype;
+#endif
                 } else if ( sym->state == SYM_INTERNAL) {
 
                     /* accept a symbol "redefinition" if addresses and types
@@ -1388,8 +1296,7 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
                      */
                     if ( sym->segment != (struct asym *)CurrSeg ||
                         sym->offset != GetCurrOffset() ) {
-                        EmitErr( SYMBOL_ALREADY_DEFINED, name );
-                        return( ERROR );
+                        return( EmitErr( SYMBOL_ALREADY_DEFINED, name ) );
                     }
                     /* check for symbol type conflict */
                     if ( checktypes( sym, mem_type, type_sym ) == ERROR )
@@ -1401,8 +1308,7 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
 
                 } else {
                     DebugMsg(("data_dir(%s): error, symbol redefinition, state=%X\n", sym->name, sym->state ));
-                    EmitErr( SYMBOL_REDEFINITION, sym->name );
-                    return( ERROR );
+                    return( EmitErr( SYMBOL_REDEFINITION, sym->name ) );
                 }
                 /* add the label to the linked list attached to curr segment */
                 /* this allows to reduce the number of passes (see Fixup.c) */
@@ -1449,8 +1355,7 @@ ret_code data_dir( int i, struct asm_tok tokenarray[], struct asym *type_sym )
     }
 
     if ( tokenarray[i].token != T_FINAL ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
     }
 
     /* v2.06: update struct size after ALL items have been processed */

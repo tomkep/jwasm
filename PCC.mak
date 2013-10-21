@@ -2,8 +2,10 @@
 # This makefile (NMake) creates the JWasm Win32 binary with PCC.
 
 name = jwasm
-PCCROOT  = \pcc
 
+!ifndef PCCROOT
+PCCROOT  = \pcc
+!endif
 !ifndef DEBUG
 DEBUG=0
 !endif

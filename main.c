@@ -31,11 +31,17 @@
 #endif
 
 #if WILDCARDS
-#ifdef __UNIX__
- #include <unistd.h>
-#else
- #include <io.h>
+
+ #ifdef __UNIX__
+  #include <unistd.h>
+ #else
+  #include <io.h>
+ #endif
 #endif
+
+#ifdef TRMEM
+void tm_Init( void );
+void tm_Fini( void );
 #endif
 
 static void genfailure( int signo )
@@ -59,11 +65,14 @@ int main( int argc, char **argv )
     int     numFiles = 0;
     int     rc = 0;
 #if WILDCARDS
-    long    fh; /* _findfirst/next/close() handle, must be long! */
+    /* v2.11: _findfirst/next/close() handle, should be of type intptr_t.
+     * since this type isn't necessarily defined, type long is used as substitute.
+     */
+    long    fh;
     struct  _finddata_t finfo;
     char    drv[_MAX_DRIVE];
     char    dir[_MAX_DIR];
-    char    fname[_MAX_PATH];
+    char    fname[FILENAME_MAX];
 #endif
 
 #if 0 //def DEBUG_OUT    /* DebugMsg() cannot be used that early */
@@ -71,6 +80,10 @@ int main( int argc, char **argv )
     for ( i = 1; i < argc; i++ ) {
         printf("argv[%u]=>%s<\n", i, argv[i] );
     }
+#endif
+
+#ifdef TRMEM
+    tm_Init();
 #endif
 
     pEnv = getenv( "JWASM" );
@@ -88,11 +101,8 @@ int main( int argc, char **argv )
     signal(SIGTERM, genfailure);
 #endif
 
-    MsgInit();
-
-    while ( 1 ) {
-        if ( ParseCmdline( (const char **)argv, &numArgs ) == NULL )
-            break;  /* exit if no source file name supplied */
+    /* ParseCmdLine() returns NULL if no source file name has been found (anymore) */
+    while ( ParseCmdline( (const char **)argv, &numArgs ) ) {
         numFiles++;
         write_logo();
 #if WILDCARDS
@@ -116,10 +126,14 @@ int main( int argc, char **argv )
     CmdlineFini();
     if ( numArgs == 0 ) {
         write_logo();
-        printf( MsgGetEx( MSG_USAGE ) );
+        printf( "%s", MsgGetEx( MSG_USAGE ) );
     } else if ( numFiles == 0 )
         EmitError( NO_FILENAME_SPECIFIED );
 
-    MsgFini();
+#ifdef TRMEM
+    tm_Fini();
+#endif
+
+    DebugMsg(("main: exit, return code=%u\n", 1 - rc ));
     return( 1 - rc ); /* zero if no errors */
 }

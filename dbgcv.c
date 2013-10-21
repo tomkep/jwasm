@@ -47,6 +47,7 @@ struct dbgcv {
         struct cv_symrec_bprel32  *ps_br32;/* S_BPREL32  */
         struct cv_symrec_ldata32  *ps_d32; /* S_xDATA32  */
         struct cv_symrec_lproc32  *ps_p32; /* S_xPROC32  */
+        struct cv_symrec_regrel32 *ps_rr32;/* S_REGREL32 */
         struct cv_symrec_label32  *ps_l32; /* S_LABEL32  */
     };
     struct dsym *symbols;
@@ -89,7 +90,7 @@ static cv_typeref GetTyperef( struct asym *sym, uint_8 Ofssize )
 {
     union cv_typeref_u value = { CV_PDS_SPECIAL_NO_TYPE, 0, CV_PDT_SPECIAL, CV_PDM_DIRECT, 0 };
 
-    if ( ( sym->mem_type & MT_SPECIAL ) == 0 && sym->mem_type != MT_FWORD ) {
+    if ( ( sym->mem_type & MT_SPECIAL ) == 0 ) {
         int size = SizeFromMemtype( sym->mem_type, Ofssize, sym->type );
         if ( sym->mem_type & MT_FLOAT ) {
             value.s.type = CV_PDT_REAL;
@@ -98,7 +99,7 @@ static cv_typeref GetTyperef( struct asym *sym, uint_8 Ofssize )
             case 8:  value.s.size = CV_PDS_REAL_64BIT; break;
             case 10: value.s.size = CV_PDS_REAL_80BIT; break;
             }
-        } else {
+        } else if ( size <= 8 ) {
             if ( sym->mem_type & MT_SIGNED )
                 value.s.type = CV_PDT_SIGNED_INTEGRAL;
             else
@@ -108,8 +109,20 @@ static cv_typeref GetTyperef( struct asym *sym, uint_8 Ofssize )
             case 2:  value.s.size = CV_PDS_INTEGRAL_2BYTE; break;
             case 4:  value.s.size = CV_PDS_INTEGRAL_4BYTE; break;
             case 8:  value.s.size = CV_PDS_INTEGRAL_8BYTE; break;
-            //case 16: value.s.size = CV_PDS_INTEGRAL_16BYTE; break;
+            case 6: /* v2.11: added ( FWORD ) */
+                value.s.type = CV_PDT_SPECIAL;
+                value.s.size = CV_PDS_SPECIAL_VOID;
+                value.s.mode = CV_PDM_FAR32PTR;
+                break;
             }
+        } else { /* v2.11: branch added */
+            /* problem: there's no integral size > 8 bytes.
+             * Masm v8+ sets 79h (=?) for 16-byte and 3h (=void) for 32-byte.
+             * jwasm sets uint64, which allows to view at least
+             * the lower 8 bytes.
+             */
+            value.s.type = CV_PDT_REAL_INT_VALUE;
+            value.s.size = CV_PDS_REAL_INT_UINT64;
         }
     } else {
         switch ( sym->mem_type ) {
@@ -391,14 +404,27 @@ static void cv_memberproc( struct dsym *type, struct asym *mbr, struct dbgcv *cv
 static void cv_enum_fields( struct dsym *sym, cv_enum_func enumfunc, struct dbgcv *cv, struct cv_counters *cc )
 /*************************************************************************************************************/
 {
+    unsigned i;
     struct sfield  *curr;
-    for ( curr = sym->e.structinfo->head; curr; curr = curr->next ) {
-        if ( curr->sym.name_size ) /* has member a name? */
+    for ( curr = sym->e.structinfo->head, i = 0; curr; curr = curr->next ) {
+        if ( curr->sym.name_size ) { /* has member a name? */
             enumfunc( sym, &curr->sym, cv, cc );
-        else if ( curr->sym.type ) { /* is member a type (struct, union, record)? */
+        } else if ( curr->sym.type ) { /* is member a type (struct, union, record)? */
             cc->ofs += curr->sym.offset;
             cv_enum_fields( (struct dsym *)curr->sym.type, enumfunc, cv, cc );
             cc->ofs -= curr->sym.offset;
+        } else if ( sym->sym.typekind == TYPE_UNION ) {
+            /* v2.11: include anonymous union members.
+             * to make the MS debugger work with those members, they must have a name -
+             * a temporary name is generated below which starts with "@@".
+             */
+            char *pold = curr->sym.name;
+            char tmpname[8];
+            curr->sym.name_size = sprintf( tmpname, "@@%u", ++i );
+            curr->sym.name = tmpname;
+            enumfunc( sym, &curr->sym, cv, cc );
+            curr->sym.name = pold;
+            curr->sym.name_size = 0;
         }
     }
     return;
@@ -603,6 +629,30 @@ static uint_16 cv_get_register( struct asym *sym )
     return( rc );
 }
 
+#if AMD64_SUPPORT
+
+/*
+ *  convert register number
+ *        0  1  2  3  4  5  6  7
+ * -----------------------------
+ * from: ax cx dx bx sp bp si di
+ *   to: ax bx cx dx si di bp sp
+ */
+static const uint_8 reg64[] = { 0, 2, 3, 1, 7, 6, 4, 5 };
+
+static short cv_get_x64_regno( short regno )
+/******************************************/
+{
+    if ( regno >= T_RAX && regno <= T_RDI )
+        return( reg64[ regno - T_RAX ] + CV_REG_AMD64_START64 );
+    if ( regno >= T_R8 && regno <= T_R15 )
+        return( regno - T_R8 + CV_REG_AMD64_START64 + 8 );
+    /* it's a 32-bit register r8d-r15d */
+    return( regno - T_R8D + CV_REG_AMD64_START32 );
+
+}
+#endif
+
 /* write a symbol
  *    cv: debug state
  *   sym: symbol to write
@@ -692,7 +742,7 @@ static void cv_write_symbol( struct dbgcv *cv, struct asym *sym )
         DebugMsg(( "cv_write_symbol(%X): PROC=%s\n", GetPos(cv->symbols, cv->ps), sym->name ));
         if ( Ofssize == USE16 ) {
             cv->ps_p16->sr.size = sizeof( struct cv_symrec_lproc16 ) - sizeof(uint_16) + 1 + sym->name_size;
-            cv->ps_p16->sr.type = (sym->public ? S_GPROC16 : S_LPROC16);
+            cv->ps_p16->sr.type = (sym->ispublic ? S_GPROC16 : S_LPROC16);
             cv->ps_p16->pParent = 0;  /* filled by CVPACK */
             cv->ps_p16->pEnd = 0;     /* filled by CVPACK */
             cv->ps_p16->pNext = 0;    /* filled by CVPACK */
@@ -707,7 +757,7 @@ static void cv_write_symbol( struct dbgcv *cv, struct asym *sym )
             ofs = offsetof( struct cv_symrec_lproc16, offset );
         } else {
             cv->ps_p32->sr.size = sizeof( struct cv_symrec_lproc32 ) - sizeof(uint_16) + 1 + sym->name_size;
-            cv->ps_p32->sr.type = (sym->public ? S_GPROC32 : S_LPROC32 );
+            cv->ps_p32->sr.type = (sym->ispublic ? S_GPROC32 : S_LPROC32 );
             cv->ps_p32->pParent = 0; /* filled by CVPACK */
             cv->ps_p32->pEnd = 0;    /* filled by CVPACK */
             cv->ps_p32->pNext = 0;   /* filled by CVPACK */
@@ -717,7 +767,11 @@ static void cv_write_symbol( struct dbgcv *cv, struct asym *sym )
             cv->ps_p32->offset = 0;
             cv->ps_p32->segment = 0;
             cv->ps_p32->proctype = cv->currtype; /* typeref LF_PROCEDURE */
+#if STACKBASESUPP
+            cv->ps_p32->flags = ( ( sym->mem_type == MT_FAR ? CV_PROCF_FAR : 0 ) | ( proc->e.procinfo->fpo ? CV_PROCF_FPO : 0 ) );
+#else
             cv->ps_p32->flags = ( sym->mem_type == MT_FAR ? CV_PROCF_FAR : 0 );
+#endif
             rlctype = FIX_PTR32;
             ofs = offsetof( struct cv_symrec_lproc32, offset );
         }
@@ -773,7 +827,7 @@ static void cv_write_symbol( struct dbgcv *cv, struct asym *sym )
 
         if ( Ofssize == USE16 ) {
             cv->ps_d16->sr.size = sizeof( struct cv_symrec_ldata16 ) - sizeof(uint_16) + 1 + sym->name_size;
-            cv->ps_d16->sr.type = (sym->public ? S_GDATA16 : S_LDATA16 );
+            cv->ps_d16->sr.type = (sym->ispublic ? S_GDATA16 : S_LDATA16 );
             cv->ps_d16->offset = 0;
             cv->ps_d16->segment = 0;
             cv->ps_d16->type = typeref;
@@ -785,10 +839,10 @@ static void cv_write_symbol( struct dbgcv *cv, struct asym *sym )
 #if CVOSUPP
             if ( ( ModuleInfo.cv_opt & CVO_STATICTLS ) && ((struct dsym *)sym->segment)->e.seginfo->clsym &&
                 strcmp( ((struct dsym *)sym->segment)->e.seginfo->clsym->name, "TLS" ) == 0 )
-                cv->ps_d32->sr.type = (sym->public ? S_GTHREAD32 : S_LTHREAD32 );
+                cv->ps_d32->sr.type = (sym->ispublic ? S_GTHREAD32 : S_LTHREAD32 );
             else
 #endif
-            cv->ps_d32->sr.type = (sym->public ? S_GDATA32 : S_LDATA32 );
+            cv->ps_d32->sr.type = (sym->ispublic ? S_GDATA32 : S_LDATA32 );
             cv->ps_d32->offset = 0;
             cv->ps_d32->segment = 0;
             cv->ps_d32->type = typeref;
@@ -851,14 +905,47 @@ static void cv_write_symbol( struct dbgcv *cv, struct asym *sym )
                     DebugMsg(( "cv_write_symbol(%X): proc=%s, S_BPREL16, var=%s [memt=%X typeref=%X]\n",
                               GetPos(cv->symbols,cv->ps), proc->sym.name, lcl->sym.name, lcl->sym.mem_type, cv->ps_br16->type ));
                 } else {
-                    len = sizeof( struct cv_symrec_bprel32 );
-                    cv->ps = checkflush( cv->symbols, cv->ps, 1 + lcl->sym.name_size + len );
-                    cv->ps_br32->sr.size = sizeof( struct cv_symrec_bprel32 ) - sizeof(uint_16) + 1 + lcl->sym.name_size;
-                    cv->ps_br32->sr.type = S_BPREL32;
-                    cv->ps_br32->offset = lcl->sym.offset;
-                    cv->ps_br32->type = lcl->sym.ext_idx1;
-                    DebugMsg(( "cv_write_symbol(%X): proc=%s, S_BPREL32, var=%s [memt=%X typeref=%X]\n",
-                              GetPos(cv->symbols,cv->ps), proc->sym.name, lcl->sym.name, lcl->sym.mem_type, cv->ps_br32->type ));
+#if STACKBASESUPP || AMD64_SUPPORT
+                    /* v2.11: use S_REGREL if 64-bit or frame reg != [E|BP */
+                    if (
+#if AMD64_SUPPORT
+                        Ofssize == USE64
+#if STACKBASESUPP
+                        || ( GetRegNo( proc->e.procinfo->basereg ) != 5 )
+#endif
+#else
+                        GetRegNo( proc->e.procinfo->basereg ) != 5
+#endif
+                       ) {
+
+                        len = sizeof( struct cv_symrec_regrel32 );
+                        cv->ps = checkflush( cv->symbols, cv->ps, 1 + lcl->sym.name_size + len );
+                        cv->ps_rr32->sr.size = sizeof( struct cv_symrec_regrel32 ) - sizeof(uint_16) + 1 + lcl->sym.name_size;
+                        cv->ps_rr32->sr.type = S_REGREL32;
+                        cv->ps_rr32->offset = lcl->sym.offset ;
+                        cv->ps_rr32->type = lcl->sym.ext_idx1;
+#if AMD64_SUPPORT
+                        /* x64 register numbers are different */
+                        if ( SpecialTable[ proc->e.procinfo->basereg ].cpu == P_64 )
+                            cv->ps_rr32->reg = cv_get_x64_regno( proc->e.procinfo->basereg );
+                        else
+#endif
+                            cv->ps_rr32->reg = GetRegNo( proc->e.procinfo->basereg ) + CV_REG_START32;
+                        DebugMsg(( "cv_write_symbol(%X): proc=%s, S_REGREL32, var=%s [memt=%X typeref=%X]\n",
+                                  GetPos(cv->symbols,cv->ps), proc->sym.name, lcl->sym.name, lcl->sym.mem_type, cv->ps_rr32->type ));
+                    } else {
+#endif
+                        len = sizeof( struct cv_symrec_bprel32 );
+                        cv->ps = checkflush( cv->symbols, cv->ps, 1 + lcl->sym.name_size + len );
+                        cv->ps_br32->sr.size = sizeof( struct cv_symrec_bprel32 ) - sizeof(uint_16) + 1 + lcl->sym.name_size;
+                        cv->ps_br32->sr.type = S_BPREL32;
+                        cv->ps_br32->offset = lcl->sym.offset;
+                        cv->ps_br32->type = lcl->sym.ext_idx1;
+                        DebugMsg(( "cv_write_symbol(%X): proc=%s, S_BPREL32, var=%s [memt=%X typeref=%X]\n",
+                                  GetPos(cv->symbols,cv->ps), proc->sym.name, lcl->sym.name, lcl->sym.mem_type, cv->ps_br32->type ));
+#if STACKBASESUPP || AMD64_SUPPORT
+                    }
+#endif
                 }
                 lcl->sym.ext_idx1 = 0; /* to be safe, clear the temp. used field */
                 cv->ps += len;
@@ -892,7 +979,7 @@ void cv_write_debug_tables( struct dsym *symbols, struct dsym *types )
 
     DebugMsg(( "cv_write_debug_tables enter\n"));
 
-    myassert( types && symbols && types->sym.state == SYM_SEG &&  symbols->sym.state == SYM_SEG );
+    /**/myassert( types && symbols && types->sym.state == SYM_SEG &&  symbols->sym.state == SYM_SEG );
 
     cv.ps = symbols->e.seginfo->CodeBuffer;
     cv.symbols = symbols;
@@ -933,7 +1020,12 @@ void cv_write_debug_tables( struct dsym *symbols, struct dsym *types )
     len = strlen( szCVCompiler );
     cv.ps_cp->sr.size = sizeof( struct cv_symrec_compile ) - sizeof(uint_16) + 1 + len;
     cv.ps_cp->sr.type = S_COMPILE;
-    cv.ps_cp->machine = (ModuleInfo.curr_cpu & P_CPU_MASK) >> 4;
+#if AMD64_SUPPORT
+    /* v2.11: use a valid 64-bit value */
+    cv.ps_cp->machine = ( ModuleInfo.defOfssize == USE64 ? CV_MACH_AMD64 : ( ModuleInfo.curr_cpu & P_CPU_MASK ) >> 4 );
+#else
+    cv.ps_cp->machine = ( ModuleInfo.curr_cpu & P_CPU_MASK ) >> 4;
+#endif
     /* 0 isnt possible, 1 is 8086 and 80186 */
     if ( cv.ps_cp->machine == 0 )
         cv.ps_cp->machine = CV_MACH_8086;

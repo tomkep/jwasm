@@ -105,10 +105,16 @@
 #endif
 #ifdef DEBUG_OUT
 "Debug options:\0\0"
-"-af\0"             "Display all files used in assembly process on stdout\0"
-"-dt\0"             "Display debug trace on stdout\0"
+"-af\0"             "Display all files used in assembly process\0"
+"-ce\0"             "Cause an exception\0"
+"-dm\0"             "Display all messages\0"
+"-dr\0"             "Display reserved words\0"
+"-drh\0"            "Display reserved words hash table\0"
+"-ds\0"             "Display global symbols\0"
+"-dsh\0"            "Display global symbols hash table\0"
+"-dt\0"             "Display debug trace\0"
 #if FASTPASS
-"-ls\0"             "Display preprocessed line storage on stdout\0"
+"-ls\0"             "Display preprocessed line storage\0"
 #endif
 "-nbp\0"            "Disable backpatching\0"
 #if FASTPASS

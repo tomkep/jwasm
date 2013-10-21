@@ -52,7 +52,7 @@ extern void             DefineFlatGroup( void );
 extern ret_code         SegmentModuleExit( void );
 extern void             DeleteGroup( struct dsym * );
 //extern char             *GetLname( int );
-extern void             FreeLnameQueue( void );
+//extern void             FreeLnameQueue( void );
 
 /* simplified segment functions */
 

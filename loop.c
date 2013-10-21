@@ -56,7 +56,7 @@ ret_code LoopDirective( int i, struct asm_tok tokenarray[] )
         /* the expression is "critical", that is, no forward
          * referenced symbols may be used here!
          */
-        if ( EvalOperand( &i, tokenarray, Token_Count, &opnd, EXPF_NOLCREATE ) == ERROR ) {
+        if ( EvalOperand( &i, tokenarray, Token_Count, &opnd, EXPF_NOUNDEF ) == ERROR ) {
             opnd.value = 0;
             i = Token_Count;
         } else if ( opnd.kind != EXPR_CONST ) { /* syntax <REPEAT|WHILE 'A'> is valid! */
@@ -77,24 +77,21 @@ ret_code LoopDirective( int i, struct asm_tok tokenarray[] )
          * v2.02: And it can begin with a '.'!
          */
         if( tokenarray[i].token == T_FINAL ) {
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[i-1].tokpos );
-            return( ERROR );
+            return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i-1].tokpos ) );
         }
         /* v2.02: allow parameter name to begin with a '.' */
         //c = *tokenarray[i].string_ptr;
         //if( ( is_valid_id_char(c) == FALSE ) || ( isdigit(c) == TRUE ) ) {
         if( is_valid_id_first_char( *tokenarray[i].string_ptr ) == FALSE ) {
             DebugMsg(( "LoopDirective(FOR/FORC): token %s is not a valid parameter name\n", tokenarray[i].string_ptr ));
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-            return( ERROR );
+            return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
         }
         arg_loc = i;
         i++;
 
         if( directive == T_FORC || directive == T_IRPC ) {
             if( tokenarray[i].token != T_COMMA ) {
-                EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
-                return( ERROR );
+                return( EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos ) );
             }
             i++;
             /* FORC/IRPC accepts anything as "argument list", even nothing! */
@@ -134,19 +131,16 @@ ret_code LoopDirective( int i, struct asm_tok tokenarray[] )
             while ( tokenarray[i].token != T_FINAL && tokenarray[i].token != T_COMMA )
                 i++;
             if( tokenarray[i].token != T_COMMA ) {
-                EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
-                return( ERROR );
+                return( EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos ) );
             }
             i++;
             /* FOR/IRP accepts a literal enclosed in <> only */
             if( tokenarray[i].token != T_STRING || tokenarray[i].string_delim != '<' ) {
-                EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-                return( ERROR );
+                return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
             }
             /* v2.03: also ensure that the literal is the last item */
             if( tokenarray[i+1].token != T_FINAL ) {
-                EmitErr( SYNTAX_ERROR_EX, tokenarray[i+1].tokpos );
-                return( ERROR );
+                return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i+1].tokpos ) );
             }
             /* v2.08: use myalloca() instead of a fixed-length buffer.
              * the loop directives are often nested, they call RunMacro()
@@ -215,7 +209,7 @@ ret_code LoopDirective( int i, struct asm_tok tokenarray[] )
             RunMacro( macro, 0, tokenarray, NULL, MF_NOSAVE, &is_exitm );
             if ( is_exitm )
                 break;
-            DebugMsg1(("LoopDirective REPT: iteration=%" FU32 "\n", ++count ));
+            DebugMsg1(("LoopDirective REPT: iteration=%" I32_SPEC "u\n", ++count ));
         }
         break;
     case T_WHILE:
@@ -261,7 +255,7 @@ ret_code LoopDirective( int i, struct asm_tok tokenarray[] )
             RunMacro( macro, 0, tokenarray, NULL, MF_NOSAVE, &is_exitm );
             if ( is_exitm )
                 break;
-            DebugMsg1(("LoopDirective FORC: call RunMacro(), cnt=%" FU32 ", param=>%s<\n", count++, buffer ));
+            DebugMsg1(("LoopDirective FORC: call RunMacro(), cnt=%" I32_SPEC "u, param=>%s<\n", count++, buffer ));
         }
         break;
     default: /* T_FOR, T_IRP */
@@ -292,7 +286,7 @@ ret_code LoopDirective( int i, struct asm_tok tokenarray[] )
          * parse the full argument and trigger macro expansion if necessary.
          * No need anymore to count commas here. */
         for( ; i < Token_Count; i++, macro->sym.value++ ) {
-            DebugMsg1(("LoopDirective FOR: cnt=%" FU32 ", calling RunMacro( param=>%s< )\n", count++, tokenarray[i].tokpos ));
+            DebugMsg1(("LoopDirective FOR: cnt=%" I32_SPEC "u, calling RunMacro( param=>%s< )\n", count++, tokenarray[i].tokpos ));
             i = RunMacro( macro, i, tokenarray, NULL, MF_IGNARGS, &is_exitm );
             if ( i < 0 || is_exitm )
                 break;

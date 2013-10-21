@@ -127,6 +127,7 @@ struct fixup {
 };
 
 extern struct fixup  *CreateFixup( struct asym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
+extern void          SetFixupFrame( const struct asym *sym, char );
 extern void          FreeFixup( struct fixup * );
 extern void          store_fixup( struct fixup *, int_32 * );
 

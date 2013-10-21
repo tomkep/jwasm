@@ -115,23 +115,6 @@ void fill_placeholders( char *dst, const char *src, uint argc, uint localstart, 
     return;
 }
 
-/* Read the current (macro) queue until it's done. */
-
-void SkipCurrentQueue( struct asm_tok tokenarray[] )
-/**************************************************/
-{
-    char buffer[MAX_LINE_LEN];
-
-    /* The queue isn't just thrown away, because any
-     * coditional assembly directives found in the source
-     * must be executed.
-     */
-    while ( GetTextLine( buffer ) ) {
-        Tokenize( buffer, 0, tokenarray, TOK_DEFAULT );
-    }
-
-}
-
 static char * replace_parm( const char *line, char *start, int len, struct mname_list *mnames )
 /*********************************************************************************************/
 {
@@ -234,10 +217,9 @@ static int store_placeholders( char *line, struct mname_list *mnames )
         } else {
             switch (*p) {
             case '!':
-                if ( quote == NULLC && *(p+1) != NULLC )
-                /* v2.0: code below might be better - or evil. */
-                //if ( quote == NULLC &&
-                //    ( *(p+1) == '<' || *(p+1) == '>' || *(p+1) == '"' || *(p+1) == '\'' || *(p+1) == '!') )
+                /* v2.11: skip next char only if it is a "special" one; see expans40.asm */
+                //if ( quote == NULLC && *(p+1) != NULLC )
+                if ( quote == NULLC && strchr( "<>\"'", *(p+1) ) )
                     p++;
                 break;
             case '<':
@@ -395,6 +377,17 @@ ret_code StoreMacro( struct dsym *macro, int i, struct asm_tok tokenarray[], boo
                     macro->sym.label = TRUE;
                     i++;
 #endif
+#if VARARGML
+                } else if( _stricmp( tokenarray[i].string_ptr, "VARARGML" ) == 0 ) {
+                    /* more parameters can follow, multi lines possible */
+                    macro->sym.mac_vararg = TRUE;
+                    macro->sym.mac_multiline = TRUE;
+                    if ( tokenarray[i+1].token != T_FINAL ) {
+                        EmitError( VARARG_PARAMETER_MUST_BE_LAST );
+                        break;
+                    }
+                    i++;
+#endif
                 } else {
                     EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
                     break;
@@ -421,9 +414,11 @@ ret_code StoreMacro( struct dsym *macro, int i, struct asm_tok tokenarray[], boo
 
         src = GetTextLine( buffer );
         if( src == NULL ) {
-            EmitError( UNMATCHED_MACRO_NESTING );
-            ModuleInfo.EndDirFound = TRUE; /* avoid error "END not found" */
-            return( ERROR );
+            /* v2.11: fatal error if source ends without an ENDM found */
+            //EmitError( UNMATCHED_MACRO_NESTING );
+            //ModuleInfo.EndDirFound = TRUE; /* avoid error "END not found" */
+            //return( ERROR );
+            Fatal( UNMATCHED_MACRO_NESTING );
         }
 
         /* add the macro line to the listing file */
@@ -435,6 +430,7 @@ ret_code StoreMacro( struct dsym *macro, int i, struct asm_tok tokenarray[], boo
         }
         ls.input = src;
         ls.start = src;
+        ls.index = 0;
     continue_scan:
         while ( isspace(*ls.input) ) ls.input++;
 
@@ -454,7 +450,7 @@ ret_code StoreMacro( struct dsym *macro, int i, struct asm_tok tokenarray[], boo
 
         /* get first token */
         ls.output = StringBufferEnd;
-        ls.last_token = T_FINAL;
+        //ls.last_token = T_FINAL;
         ls.flags = TOK_DEFAULT;
         ls.flags2 = 0;
         tok[0].token = T_FINAL;
@@ -689,8 +685,7 @@ ret_code MacroDir( int i, struct asm_tok tokenarray[] )
         macro = CreateMacro( name );
     } else if( macro->sym.state != SYM_MACRO ) {
         if ( macro->sym.state != SYM_UNDEFINED ) {
-            EmitErr( SYMBOL_REDEFINITION, name );
-            return( ERROR );
+            return( EmitErr( SYMBOL_REDEFINITION, name ) );
         }
         /* the macro was used before it's defined. That's
          * a severe error. Nevertheless define the macro now,
@@ -744,17 +739,14 @@ ret_code PurgeDirective( int i, struct asm_tok tokenarray[] )
     i++; /* skip directive */
     do {
         if ( tokenarray[i].token != T_ID ) {
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-            return( ERROR );
+            return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
         }
         sym = SymSearch( tokenarray[i].string_ptr );
         if ( sym == NULL ) {
-            EmitErr( SYMBOL_NOT_DEFINED, tokenarray[i].string_ptr );
-            return( ERROR );
+            return( EmitErr( SYMBOL_NOT_DEFINED, tokenarray[i].string_ptr ) );
         }
         if ( sym->state != SYM_MACRO ) {
-            EmitErr( EXPECTED, "macro name" );
-            return( ERROR );
+            return( EmitErr( EXPECTED, "macro name" ) );
         }
 #if TRUEPURGE
         sym->defined = FALSE;
@@ -773,8 +765,7 @@ ret_code PurgeDirective( int i, struct asm_tok tokenarray[] )
         i++;
         if ( i < Token_Count ) {
             if ( tokenarray[i].token != T_COMMA || tokenarray[i+1].token == T_FINAL ) {
-                EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-                return( ERROR );
+                return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
             }
             i++;
         }

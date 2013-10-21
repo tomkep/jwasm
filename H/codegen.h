@@ -35,7 +35,7 @@
 #define BIT_345         0x38
 #define BIT_67          0xC0
 #define NOT_BIT_012     0xF8
-#define NOT_BIT_345     0xC7
+#define NOT_BIT_345     0xC7 /* mask to filter Mod- and R/M-bits for ModRM-byte */
 #define NOT_BIT_67      0x3F
 
 #define MOD_00          0x00
@@ -125,7 +125,7 @@ enum vex_info {
     VX_NND   = 0x02,    /* VEX.NDS/NDD not supported */
     VX_DST   = 0x04,    /* VEX.NDD (if op3 is an immediate) */
     VX_IMM   = 0x08,    /* no VEX.NDS if op3 is an immediate */
-    VX_NMEM  = 0x10,    /* no VEX.NDS if op1 is a mem ref */
+    VX_NMEM  = 0x10,    /* no VEX.NDS if op1 is a mem ref (vmovs[d|s], vmov[h|l]p[d|s] ) */
     VX_HALF  = 0x20,    /* op2 is half-sized */
 };
 #endif

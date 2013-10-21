@@ -161,13 +161,13 @@ struct IMAGE_BASE_RELOCATION {
     uint_32 SizeOfBlock;
 };
 
-#define IMAGE_REL_BASED_ABSOLUTE   0
-#define IMAGE_REL_BASED_HIGH       1
-#define IMAGE_REL_BASED_LOW        2
-#define IMAGE_REL_BASED_HIGHLOW    3
-#define IMAGE_REL_BASED_HIGHADJ    4
-#define IMAGE_REL_BASED_IA64_IMM64 9
-#define IMAGE_REL_BASED_DIR64      10
+#define IMAGE_REL_BASED_ABSOLUTE   0 /* relocation is skipped */
+#define IMAGE_REL_BASED_HIGH       1 /* high 16-bits of a 32-bit target */
+#define IMAGE_REL_BASED_LOW        2 /* low 16-bits of a 32-bit target */
+#define IMAGE_REL_BASED_HIGHLOW    3 /* 32-bit target */
+#define IMAGE_REL_BASED_HIGHADJ    4 /* 32-bit target; first high 16-bits, then low 16-bits in next slot */
+//#define IMAGE_REL_BASED_IA64_IMM64 9 /* ??? */
+#define IMAGE_REL_BASED_DIR64      10 /* 64-bit target */
 
 /* PE resource directory structure */
 

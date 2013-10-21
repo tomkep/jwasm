@@ -7,8 +7,8 @@
      have an extra type for unicode strings (tchar), in 
      conjunction with a cmdline option to switch ansi/unicode.
 
-  2. option FPO (frame pointer omission)? Probably not worth
-     the efforts.
+  2. [ done, was: option FPO (frame pointer omission); has
+     become option STACKBASE. ]
 
   3. unnamed RECORD within a STRUCT. Record field names
      will be local then and must be unique within the STRUCT. This

@@ -138,7 +138,7 @@ static struct asym *CreateProto( int i, struct asm_tok tokenarray[], const char 
      */
     if( sym == NULL ||
        sym->state == SYM_UNDEFINED ||
-       (sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->isproc == FALSE )) {
+       ( sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->isproc == FALSE )) {
         if ( NULL == ( sym = CreateProc( sym, name, SYM_EXTERNAL ) ) )
             return( NULL ); /* name was probably invalid */
     } else if ( sym->isproc == FALSE ) {
@@ -161,10 +161,11 @@ static struct asym *CreateProto( int i, struct asm_tok tokenarray[], const char 
             return( sym );
         }
     }
-    sym->isproc = TRUE;
+    /* sym->isproc is set inside ParseProc() */
+    //sym->isproc = TRUE;
 
     if ( Parse_Pass == PASS_1 ) {
-        if ( ParseProc( i, tokenarray, dir, FALSE, langtype ) == ERROR )
+        if ( ParseProc( dir, i, tokenarray, FALSE, langtype ) == ERROR )
             return( NULL );
 #if DLLIMPORT
         sym->dll = ModuleInfo.CurrDll;
@@ -205,15 +206,13 @@ ret_code ExterndefDirective( int i, struct asm_tok tokenarray[] )
 
         /* get the symbol name */
         if( tokenarray[i].token != T_ID ) {
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-            return( ERROR );
+            return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
         }
         token = tokenarray[i++].string_ptr;
 
         /* go past the colon */
         if( tokenarray[i].token != T_COLON ) {
-            EmitError( COLON_EXPECTED );
-            return( ERROR );
+            return( EmitError( COLON_EXPECTED ) );
         }
         i++;
         sym = SymSearch( token );
@@ -352,8 +351,8 @@ ret_code ExterndefDirective( int i, struct asm_tok tokenarray[] )
             QAddItem( &ModuleInfo.g.GlobalQueue, sym );
         }
 #else
-        if ( sym->state == SYM_INTERNAL && sym->public == FALSE ) {
-            sym->public = TRUE;
+        if ( sym->state == SYM_INTERNAL && sym->ispublic == FALSE ) {
+            sym->ispublic = TRUE;
             AddPublicData( sym );
         }
 #endif
@@ -363,8 +362,7 @@ ret_code ExterndefDirective( int i, struct asm_tok tokenarray[] )
                 if ( (i + 1) < Token_Count )
                     i++;
             } else {
-                EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
-                return( ERROR );
+                return( EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos ) );
             }
 
     } while ( i < Token_Count );
@@ -388,8 +386,7 @@ ret_code ProtoDirective( int i, struct asm_tok tokenarray[] )
         return( NOT_ERROR );
     }
     if( i != 1 ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
     }
 
     return( CreateProto( 2, tokenarray, tokenarray[0].string_ptr, ModuleInfo.langtype ) ? NOT_ERROR : ERROR );
@@ -434,8 +431,7 @@ static ret_code HandleAltname( char *altname, struct asym *sym )
 
         /* altname symbol changed? */
         if ( sym->altname && sym->altname != symalt ) {
-            EmitErr( SYMBOL_REDEFINITION, sym->name );
-            return( ERROR );
+            return( EmitErr( SYMBOL_REDEFINITION, sym->name ) );
         }
 
         if ( Parse_Pass > PASS_1 ) {
@@ -445,7 +441,7 @@ static ret_code HandleAltname( char *altname, struct asym *sym )
                 EmitErr( SYMBOL_TYPE_CONFLICT, altname );
             } else {
 #if COFF_SUPPORT || ELF_SUPPORT
-                if ( symalt->state == SYM_INTERNAL && symalt->public == FALSE )
+                if ( symalt->state == SYM_INTERNAL && symalt->ispublic == FALSE )
                     if ( Options.output_format == OFORMAT_COFF
 #if ELF_SUPPORT
                         || Options.output_format == OFORMAT_ELF
@@ -464,20 +460,23 @@ static ret_code HandleAltname( char *altname, struct asym *sym )
                 if ( symalt->state != SYM_INTERNAL &&
                     symalt->state != SYM_EXTERNAL &&
                     symalt->state != SYM_UNDEFINED ) {
-                    EmitErr( SYMBOL_TYPE_CONFLICT, altname );
-                    return( ERROR );
+                    return( EmitErr( SYMBOL_TYPE_CONFLICT, altname ) );
                 }
             } else {
                 symalt = SymCreate( altname );
                 sym_add_table( &SymTables[TAB_UNDEF], (struct dsym *)symalt );
             }
-            /* make sure the alt symbol becomes strong if it is an external */
-            symalt->used = TRUE;
+            /* make sure the alt symbol becomes strong if it is an external.
+             * v2.11: not for OMF ( maybe neither for COFF/ELF? ).
+             */
+            if ( Options.output_format != OFORMAT_OMF )
+                symalt->used = TRUE;
             /* symbol inserted in the "weak external" queue?
              * currently needed for OMF only.
              */
             if ( sym->altname == NULL ) {
                 sym->altname = symalt;
+#if 0 /* v2.11: member nextext wasn't really free to use */
                 ((struct dsym *)sym)->nextext = NULL;
                 if ( ModuleInfo.g.AltQueue.head == NULL )
                     ModuleInfo.g.AltQueue.head = ModuleInfo.g.AltQueue.tail = (struct dsym *)sym;
@@ -485,6 +484,7 @@ static ret_code HandleAltname( char *altname, struct asym *sym )
                     ((struct dsym *)ModuleInfo.g.AltQueue.tail)->nextext = (struct dsym *)sym;
                     ModuleInfo.g.AltQueue.tail = (struct dsym *)sym;
                 }
+#endif
             }
         }
     }
@@ -520,8 +520,7 @@ ret_code ExternDirective( int i, struct asm_tok tokenarray[] )
 
         /* get the symbol name */
         if( tokenarray[i].token != T_ID ) {
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-            return( ERROR );
+            return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
         }
         token = tokenarray[i++].string_ptr;
 
@@ -529,22 +528,19 @@ ret_code ExternDirective( int i, struct asm_tok tokenarray[] )
         if( tokenarray[i].token == T_OP_BRACKET ) {
             i++;
             if ( tokenarray[i].token != T_ID ) {
-                EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-                return( ERROR );
+                return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
             }
             altname = tokenarray[i].string_ptr;
             i++;
             if( tokenarray[i].token != T_CL_BRACKET ) {
-                EmitErr( EXPECTED, ")" );
-                return( ERROR );
+                return( EmitErr( EXPECTED, ")" ) );
             }
             i++;
         }
 
         /* go past the colon */
         if( tokenarray[i].token != T_COLON ) {
-            EmitError( COLON_EXPECTED );
-            return( ERROR );
+            return( EmitError( COLON_EXPECTED ) );
         }
         i++;
         sym = SymSearch( token );
@@ -572,8 +568,7 @@ ret_code ExternDirective( int i, struct asm_tok tokenarray[] )
                 return( HandleAltname( altname, sym ) );
             } else {
                 /* unlike EXTERNDEF, EXTERN doesn't allow a PROC for the same name */
-                EmitErr( SYMBOL_REDEFINITION, sym->name );
-                return( ERROR );
+                return( EmitErr( SYMBOL_REDEFINITION, sym->name ) );
             }
         } else if ( tokenarray[i].token != T_FINAL && tokenarray[i].token != T_COMMA ) {
             if ( GetQualifiedType( &i, tokenarray, &ti ) == ERROR )
@@ -613,8 +608,7 @@ ret_code ExternDirective( int i, struct asm_tok tokenarray[] )
 #endif
             if ( sym->state != SYM_EXTERNAL ) {
                 DebugMsg(("ExternDirective: symbol %s redefinition, state=%u\n", token, sym->state ));
-                EmitErr( SYMBOL_REDEFINITION, token );
-                return( ERROR );
+                return( EmitErr( SYMBOL_REDEFINITION, token ) );
             }
             /* v2.05: added to accept type prototypes */
             if ( ti.is_ptr == 0 && ti.symtype && ti.symtype->isproc ) {
@@ -635,8 +629,7 @@ ret_code ExternDirective( int i, struct asm_tok tokenarray[] )
                           sym->ptr_memtype, ti.ptr_memtype,
                           sym->langtype, langtype
                          ));
-                EmitErr( SYMBOL_TYPE_CONFLICT, token );
-                return( ERROR );
+                return( EmitErr( SYMBOL_TYPE_CONFLICT, token ) );
             }
         }
 
@@ -666,8 +659,7 @@ ret_code ExternDirective( int i, struct asm_tok tokenarray[] )
             if ( tokenarray[i].token == T_COMMA &&  ( (i + 1) < Token_Count ) ) {
                 i++;
             } else {
-                EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-                return( ERROR );
+                return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
             }
     }  while ( i < Token_Count );
 
@@ -755,16 +747,14 @@ ret_code CommDirective( int i, struct asm_tok tokenarray[] )
 
         /* v2.08: ensure token is a valid id */
         if( tokenarray[i].token != T_ID ) {
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-            return( ERROR );
+            return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
         }
         /* get the symbol name */
         token = tokenarray[i++].string_ptr;
 
         /* go past the colon */
         if( tokenarray[i].token != T_COLON ) {
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-            return( ERROR );
+            return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
         }
         i++;
         /* the evaluator cannot handle a ':' so scan for one first */
@@ -773,12 +763,17 @@ ret_code CommDirective( int i, struct asm_tok tokenarray[] )
                 break;
         /* v2.10: expression evaluator isn't to accept forward references */
         //if ( EvalOperand( &i, tokenarray, tmp, &opndx, 0 ) == ERROR )
-        if ( EvalOperand( &i, tokenarray, tmp, &opndx, EXPF_NOLCREATE ) == ERROR )
+        if ( EvalOperand( &i, tokenarray, tmp, &opndx, EXPF_NOUNDEF ) == ERROR )
             return( ERROR );
         /* v2.03: a string constant is accepted by Masm */
         //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
         if ( opndx.kind != EXPR_CONST ) {
             EmitError( CONSTANT_EXPECTED );
+            opndx.value = 1;
+        }
+        /* v2.11: don't accept NEAR or FAR */
+        if ( ( opndx.mem_type & MT_SPECIAL_MASK) == MT_ADDRESS ) {
+            EmitErr( INVALID_TYPE_FOR_DATA_DECLARATION, token );
             opndx.value = 1;
         }
         if ( opndx.value == 0 ) {
@@ -793,7 +788,7 @@ ret_code CommDirective( int i, struct asm_tok tokenarray[] )
             /* get optional count argument */
             /* v2.10: expression evaluator isn't to accept forward references */
             //if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
-            if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOLCREATE ) == ERROR )
+            if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOUNDEF ) == ERROR )
                 return( ERROR );
             /* v2.03: a string constant is acceptable! */
             //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
@@ -814,21 +809,18 @@ ret_code CommDirective( int i, struct asm_tok tokenarray[] )
             if ( sym == NULL )
                 return( ERROR );
         } else if ( sym->state != SYM_EXTERNAL || sym->iscomm != TRUE ) {
-            EmitErr( SYMBOL_REDEFINITION, sym->name );
-            return( ERROR );
+            return( EmitErr( SYMBOL_REDEFINITION, sym->name ) );
         } else {
             tmp = sym->total_size / sym->total_length;
             if( count != sym->total_length || size != tmp ) {
-                EmitErr( NON_BENIGN_XXX_REDEFINITION, szCOMM, sym->name );
-                return( ERROR );
+                return( EmitErr( NON_BENIGN_XXX_REDEFINITION, szCOMM, sym->name ) );
             }
         }
         sym->isdefined = TRUE;
         SetMangler( sym, langtype, mangle_type );
 
         if ( tokenarray[i].token != T_FINAL && tokenarray[i].token != T_COMMA ) {
-            EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos );
-            return( ERROR );
+            return( EmitErr( EXPECTING_COMMA, tokenarray[i].tokpos ) );
         }
     }
     return( NOT_ERROR );
@@ -841,17 +833,16 @@ void AddPublicData( struct asym *sym )
     QAddItem( &ModuleInfo.g.PubQueue, sym );
 }
 
-/* get (next) PUBLIC item */
+#if 0 /* v2.11: obsolete - the queue is read directly when needed */
 
-struct asym *GetPublicData( void * *vp )
-/**************************************/
+/* get (next) PUBLIC symbol */
+
+struct asym *GetPublicSymbols( void * *vp )
+/*****************************************/
 {
     struct qnode * *curr = (struct qnode * *)vp;
 
-    if ( ModuleInfo.g.PubQueue.head == NULL )
-        return( NULL );
-
-    if (*curr == NULL)
+    if ( *curr == NULL )
         *curr = ModuleInfo.g.PubQueue.head;
     else
         *curr = (*curr)->next;
@@ -861,28 +852,19 @@ struct asym *GetPublicData( void * *vp )
         if ( sym->state == SYM_INTERNAL )
             return ( sym );
         /* v2.09: also return undefined symbols. this may be
-         * the case for assembly time variables. A full second
-         * pass will be done.
+         * the case for assembly time variables. This will trigger a full second
+         * pass, and the PUBLIC directive will emit an error then.
          */
         if ( sym->state == SYM_UNDEFINED ) {
-            DebugMsg(("GetPublicData: sym=%s has state SYM_UNDEFINED\n", sym->name ));
+            DebugMsg(("GetPublicSymbols: sym=%s has state SYM_UNDEFINED\n", sym->name ));
             return ( sym );
         }
-        DebugMsg(("GetPublicData: sym=%s skipped, state=%u\n", sym->name, sym->state ));
-#if 0 //FASTPASS  /* v2.04: this is now done in PassOneCheck() */
-        /* skip anything not EXTERNAL, also COMMs and EXTERNs */
-        if ( sym->state != SYM_EXTERNAL || sym->weak == FALSE ) {
-            /* v1.95: make a full second pass and
-             * emit the error msg later, on PUBLIC directive
-             * v2.04: this check works for OMF format only!
-             */
-            //EmitErr( CANNOT_DEFINE_AS_PUBLIC_OR_EXTERNAL, sym->name );
-            SkipSavedState();
-        }
-#endif
+        DebugMsg(("GetPublicSymbols: sym=%s skipped, state=%u\n", sym->name, sym->state ));
     }
     return( NULL );
 }
+
+#endif
 
 void FreePubQueue( void )
 /***********************/
@@ -924,8 +906,7 @@ ret_code PublicDirective( int i, struct asm_tok tokenarray[] )
         GetLangType( &i, tokenarray, &langtype );
 
         if ( tokenarray[i].token != T_ID ) {
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-            return( ERROR );
+            return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
         }
         /* get the symbol name */
         token = tokenarray[i++].string_ptr;
@@ -978,8 +959,8 @@ ret_code PublicDirective( int i, struct asm_tok tokenarray[] )
                 //return( ERROR );
             }
             if( Parse_Pass == PASS_1 && skipitem == FALSE ) {
-                if ( sym->public == FALSE ) {
-                    sym->public = TRUE;
+                if ( sym->ispublic == FALSE ) {
+                    sym->ispublic = TRUE;
                     AddPublicData( sym ); /* put it into the public table */
                 }
                 SetMangler( sym, langtype, mangle_type );
@@ -991,8 +972,7 @@ ret_code PublicDirective( int i, struct asm_tok tokenarray[] )
                 if ( (i + 1) < Token_Count )
                     i++;
             } else {
-                EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-                return( ERROR );
+                return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
             }
 
     } while ( i < Token_Count );

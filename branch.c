@@ -34,6 +34,8 @@
 *                 (see OPTION LJMP | NOLJMP).
 ****************************************************************************/
 
+#include <limits.h>
+
 #include "globals.h"
 #include "parser.h"
 #include "fixup.h"
@@ -43,12 +45,14 @@
 #include "input.h"
 #include "assume.h"
 #include "codegen.h"
+#include "myassert.h"
 
-#define NEEDLABEL 1
+#define NEEDLABEL 1 /* 1=better Masm compatibility */
 
 #define IS_CONDJMP( inst )  ( ( inst >= T_JA ) && ( inst <= T_JZ ) )
 
-#define SET_OPSIZ( s, x ) ( s->prefix.opsiz = (( x ) ^ ( s->Ofssize )) ? TRUE : FALSE )
+/* opsize byte (0x66) to be generated? */
+#define OPSIZE( s, x ) ( (  s != x ) ? TRUE : FALSE )
 
 /* v2.03: OutputCodeByte no longer needed */
 #define OutputCodeByte( x ) OutputByte( x )
@@ -141,10 +145,9 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
     /* v2.05: just 1 operand possible */
     if ( CurrOpnd != OPND1 ) {
         //EmitError( SYNTAX_ERROR ); /* v2.10: error msg changed */
-        EmitError( INVALID_INSTRUCTION_OPERANDS );
-        return( ERROR );
+        return( EmitError( INVALID_INSTRUCTION_OPERANDS ) );
     }
-    if ( opndx->explicit )
+    if ( opndx->explicit && opndx->instr != T_SHORT )
         CodeInfo->mem_type = opndx->mem_type;
     /*
      * Masm checks overrides for branch instructions with immediate operand!
@@ -153,37 +156,35 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
      */
     if ( opndx->override != NULL ) {
         segm_override( opndx, NULL );
-        DebugMsg(("process_branch(%" FX32 "): segment override %s\n", GetCurrOffset(), SegOverride ? SegOverride->name : "NULL" ));
+        DebugMsg(("process_branch(%" I32_SPEC "X): segment override %s\n", GetCurrOffset(), SegOverride ? SegOverride->name : "NULL" ));
         if ( SegOverride && opndx->sym && opndx->sym->segment ) {
             if ( SegOverride != opndx->sym->segment &&  SegOverride != ((struct dsym *)opndx->sym->segment)->e.seginfo->group ) {
-                EmitErr( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS, opndx->sym ? opndx->sym->name : "" );
-                return( ERROR );
+                return( EmitErr( CANNOT_ACCESS_LABEL_THROUGH_SEGMENT_REGISTERS, opndx->sym ? opndx->sym->name : "" ) );
             }
             /* v2.05: switch to far jmp/call */
             if ( SegOverride != &CurrSeg->sym && SegOverride != CurrSeg->e.seginfo->group ) {
-                DebugMsg(("process_branch(%" FX32 "): segment override %s caused FAR jmp/call\n", GetCurrOffset(), SegOverride->name ));
+                DebugMsg(("process_branch(%" I32_SPEC "X): segment override %s caused FAR jmp/call\n", GetCurrOffset(), SegOverride->name ));
                 //CodeInfo->isfar = TRUE;
                 CodeInfo->mem_type = MT_FAR;
             }
         }
     }
 
-    CodeInfo->opnd[OPND1].data = opndx->value;
+    CodeInfo->opnd[OPND1].data32l = opndx->value;
     /* v2.06: make sure, that next bytes are cleared (for OP_I48)! */
-    CodeInfo->opnd[OPND1].datahigh = 0;
+    CodeInfo->opnd[OPND1].data32h = 0;
     sym = opndx->sym;
     if( sym == NULL ) { /* no symbolic label specified? */
-        DebugMsg(("process_branch(%" FX32 "): sym=NULL, op.memtype=%Xh\n", GetCurrOffset(), opndx->mem_type ));
+        DebugMsg(("process_branch(%" I32_SPEC "X): sym=NULL, op.memtype=%Xh\n", GetCurrOffset(), opndx->mem_type ));
 
         /* Masm rejects: "jump dest must specify a label */
 #if NEEDLABEL
-        EmitError( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL );
-        return( ERROR );
+        return( EmitError( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL ) );
 #else
         if( IS_JMPCALL( CodeInfo->token ) )
             CodeInfo->isfar = TRUE; /* ??? most likely nonsense! */
 
-        if( CodeInfo->opnd[OPND1].data > USHRT_MAX )
+        if( CodeInfo->opnd[OPND1].data32l > USHRT_MAX )
             CodeInfo->opnd[OPND1].type = OP_I32;
         else
             CodeInfo->opnd_type[OPND1] = OP_I16;
@@ -191,19 +192,19 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
         return( NOT_ERROR );
 #endif
     }
-    DebugMsg1(("process_branch(%" FX32 ", %s): explicit=%u op.memtype=%X CI.memtype=%X sym.state=%u/mem_type=%Xh/ofs=%" FX32 "/seg=%s\n",
-              GetCurrOffset(), sym->name, opndx->explicit, opndx->mem_type, CodeInfo->mem_type,
+    DebugMsg1(("process_branch(%" I32_SPEC "X, %s): opnd.explicit=%u/memtype=%X/Ofssize=%u CI.memtype=%X sym.state=%u/mem_type=%Xh/ofs=%" I32_SPEC "X/seg=%s\n",
+              GetCurrOffset(), sym->name, opndx->explicit, opndx->mem_type, opndx->Ofssize, CodeInfo->mem_type,
               sym->state, sym->mem_type, sym->offset, sym->segment ? sym->segment->name : "NULL" ));
 
     state = sym->state;
     addr = GetCurrOffset(); /* for SYM_UNDEFINED, will force distance to SHORT */
 
     /* v2.02: if symbol is GLOBAL and it isn't clear yet were
-     * it's located, then assume it is "undefined"!
+     * it's located, then assume it is a forward reference (=SYM_UNDEFINED)!
      * This applies to PROTOs and EXTERNDEFs in Pass 1.
      */
     if ( ( state == SYM_EXTERNAL ) && sym->weak ) {
-        DebugMsg(("process_branch(%s): EXTERNDEF assumed UNDEFINED (ofs=%" FX32 "!)\n", sym->name, sym->offset ));
+        DebugMsg1(("process_branch(%s): EXTERNDEF assumed forward reference (=SYM_UNDEFINED)\n", sym->name ));
         state = SYM_UNDEFINED;
     }
 
@@ -240,17 +241,15 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 //else if ( opndx->mem_type == MT_NEAR ) {
                 else if ( opndx->mem_type == MT_NEAR && SegOverride == NULL ) {
                     DebugMsg(("process_branch: error, opndx.mem_type is MT_NEAR\n" ));
-                    EmitError( CANNOT_HAVE_IMPLICIT_FAR_JUMP_OR_CALL_TO_NEAR_LABEL );
-                    return( ERROR );
+                    return( EmitError( CANNOT_HAVE_IMPLICIT_FAR_JUMP_OR_CALL_TO_NEAR_LABEL ) );
                 }
             }
             /* jumps to another segment are just like to another file */
             state = SYM_EXTERNAL;
         }
     } else if ( state != SYM_UNDEFINED ) {
-        DebugMsg(("process_branch: error, sym=%s, state=%u, memtype=%u\n", sym->name, sym->state, sym->mem_type));
-        EmitErr( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL );
-        return( ERROR );
+        DebugMsg(("process_branch(%s): error, unexpected symbol state=%u\n", sym->name, sym->state ));
+        return( EmitErr( JUMP_DESTINATION_MUST_SPECIFY_A_LABEL ) );
     }
 
     if ( state != SYM_EXTERNAL ) {
@@ -281,7 +280,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
             //addr = sym->offset; /* v2.02: this has been done above */
             DebugMsg(("process_branch: step1: addr=%Xh\n", addr ));
             addr -= ( GetCurrOffset() + 2 );  /* calculate the displacement */
-            addr += CodeInfo->opnd[OPND1].data;
+            addr += CodeInfo->opnd[OPND1].data32l;
             /*  JCXZ, LOOPW, LOOPEW, LOOPZW, LOOPNEW, LOOPNZW,
                JECXZ, LOOPD, LOOPED, LOOPZD, LOOPNED, LOOPNZD? */
             if (( CodeInfo->Ofssize && InstrTable[opidx].byte1_info == F_16A ) ||
@@ -300,27 +299,24 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 if ( opndx->instr == T_SHORT || ( IS_XCX_BRANCH( CodeInfo->token ) ) ) {
                     /* v2.06: added */
                     if( CodeInfo->token == T_CALL ) {
-                        EmitError( CANNOT_USE_SHORT_WITH_CALL );
-                        return( ERROR );
+                        return( EmitError( CANNOT_USE_SHORT_WITH_CALL ) );
                     }
                     /* v1.96: since JWasm's backpatch strategy is to move from
                      * "smallest" to "largest" distance, an "out of range"
                      * error can be detected at any time.
                      */
-                    DebugMsg(("process_branch: 1, jump out of range, mem_type=%Xh addr=%Xh\n", CodeInfo->mem_type, addr ));
+                    DebugMsg(("process_branch: jump out of range, mem_type=%Xh addr=%Xh\n", CodeInfo->mem_type, addr ));
                     /* v2.06: removed */
                     /* v2.03: added */
                     //if ( addr >= SCHAR_MIN && addr <= SCHAR_MAX ) {
-                    //    EmitError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED );
-                    //    return( ERROR );
+                    //    return( EmitError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED ) );
                     //}
                     if ( addr < 0 ) {
                         addr -= SCHAR_MIN;
                         addr = 0 - addr;
                     } else
                         addr -= SCHAR_MAX;
-                    EmitErr( JUMP_OUT_OF_RANGE, addr );
-                    return( ERROR );
+                    return( EmitErr( CodeInfo->mem_type == MT_EMPTY ? JUMP_OUT_OF_RANGE : ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED, addr ) );
                 }
                 /* near destination */
                 /* is there a type coercion? */
@@ -332,10 +328,10 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                         CodeInfo->opnd[OPND1].type = OP_I32;
                         addr -= 3; /* 32 bit displacement */
                     }
-                    SET_OPSIZ( CodeInfo, opndx->Ofssize == USE32 );
+                    CodeInfo->prefix.opsiz = OPSIZE( CodeInfo->Ofssize, opndx->Ofssize );
                     if ( CodeInfo->prefix.opsiz )
                         addr--;
-                } else if( CodeInfo->Ofssize ) {
+                } else if( CodeInfo->Ofssize > USE16 ) {
                     CodeInfo->opnd[OPND1].type = OP_I32;
                     addr -= 3; /* 32 bit displacement */
                 } else {
@@ -349,8 +345,8 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
             }
 
             /* store the displacement */
-            CodeInfo->opnd[OPND1].data = addr;
-            DebugMsg1(("process_branch: displacement=%" FX32 " opnd_type=%" FX32 "\n", addr, CodeInfo->opnd[OPND1].type ));
+            CodeInfo->opnd[OPND1].data32l = addr;
+            DebugMsg1(("process_branch: displacement=%" I32_SPEC "X opnd_type=%" I32_SPEC "X\n", addr, CodeInfo->opnd[OPND1].type ));
 
             /* automatic (conditional) jump expansion.
              * for 386 and above this is not needed, since there exists
@@ -362,13 +358,13 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                     if( CodeInfo->mem_type == MT_EMPTY && ModuleInfo.ljmp == TRUE ) {
                         jumpExtend( CodeInfo, FALSE );
                         addr -= 1;
-                        CodeInfo->opnd[OPND1].data = addr;
+                        CodeInfo->opnd[OPND1].data32l = addr;
                         //return( SCRAP_INSTRUCTION );
                     //} else if( !PhaseError ) {
                     } else {
-                        DebugMsg(("%u process_branch: 2, jump out of range, mem_type=%X, curr_ofs=%X, addr=%d\n", Parse_Pass + 1, CodeInfo->mem_type, GetCurrOffset(), addr ));
-                        EmitErr( JUMP_OUT_OF_RANGE, addr );
-                        return( ERROR );
+                        DebugMsg(("%u process_branch: CPU < 386 and Jcc distance != SHORT, mem_type=%X, curr_ofs=%X, addr=%d\n", Parse_Pass + 1, CodeInfo->mem_type, GetCurrOffset(), addr ));
+                        /* v2.11: don't emit "out of range" if OP_I16 was forced by type coercion ( jmp near ptr xxx ) */
+                        return( EmitErr( CodeInfo->mem_type == MT_EMPTY ? JUMP_OUT_OF_RANGE : JUMP_DISTANCE_NOT_POSSIBLE, addr ) );
                     }
                 }
             }
@@ -427,7 +423,8 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 CodeInfo->mem_type = mem_type;
             break;
         default:
-            DebugMsg(("process_branch: strange mem_type %Xh\n", mem_type ));
+            DebugMsg(("process_branch: unexpected mem_type %Xh\n", mem_type ));
+            /**/myassert( 0 );
             CodeInfo->mem_type = mem_type;
         }
     }
@@ -440,8 +437,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
         switch( CodeInfo->mem_type ) {
         case MT_NEAR:
             if( opndx->explicit || opndx->instr == T_SHORT ) {
-                EmitError( CANNOT_USE_SHORT_OR_NEAR );
-                return( ERROR );
+                return( EmitError( CANNOT_USE_SHORT_OR_NEAR ) );
             }
             /* fall through */
         case MT_FAR:
@@ -449,12 +445,12 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
             /* v1.95: explicit flag to be removed! */
             //if ( opndx->explicit && opndx->Ofssize != USE_EMPTY )
             if ( opndx->Ofssize != USE_EMPTY )
-                SET_OPSIZ( CodeInfo, opndx->Ofssize == USE32 );
+                CodeInfo->prefix.opsiz = OPSIZE( CodeInfo->Ofssize, opndx->Ofssize );
             else
-                SET_OPSIZ( CodeInfo, GetSymOfssize( sym ));
+                CodeInfo->prefix.opsiz = OPSIZE( CodeInfo->Ofssize, GetSymOfssize( sym ) );
 
-            /* set global vars Frame + Frame_Datum */
-            find_frame( sym );
+            /* set fixup frame variables Frame + Frame_Datum */
+            set_frame( sym );
             if( IS_OPER_32( CodeInfo ) ) {
                 fixup_type = FIX_PTR32;
                 CodeInfo->opnd[OPND1].type = OP_I48;
@@ -463,11 +459,12 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 CodeInfo->opnd[OPND1].type = OP_I32;
             }
             break;
-        default:
-            /* cant happen */
-            DebugMsg(("process_branch: JMP/CALL far, strange mem_type=%X\n", CodeInfo->mem_type ));
-            EmitError( INVALID_OPERAND_SIZE );
-            return( ERROR );
+#ifdef DEBUG_OUT
+        default: /* cannot happen */
+            DebugMsg(("process_branch: JMP/CALL far, unexpected mem_type=%X\n", CodeInfo->mem_type ));
+            /**/myassert( 0 );
+            //return( EmitError( INVALID_OPERAND_SIZE ) );
+#endif
         }
         CodeInfo->opnd[OPND1].InsFixup = CreateFixup( sym, fixup_type, fixup_option );
         return( NOT_ERROR );
@@ -476,12 +473,11 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
     switch( CodeInfo->token ) {
     case T_CALL:
         if( opndx->instr == T_SHORT ) {
-            EmitError( CANNOT_USE_SHORT_WITH_CALL );
-            return( ERROR );
+            return( EmitError( CANNOT_USE_SHORT_WITH_CALL ) );
         }
         if( CodeInfo->mem_type == MT_EMPTY ) {
             fixup_option = OPTJ_CALL;
-            if( CodeInfo->Ofssize ) {
+            if( CodeInfo->Ofssize > USE16 ) {
                 fixup_type = FIX_RELOFF32;
                 CodeInfo->opnd[OPND1].type = OP_I32;
             } else {
@@ -504,18 +500,33 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
             break;
         case MT_NEAR:
             fixup_option = OPTJ_EXPLICIT;
-            if( CodeInfo->Ofssize ) {
+#if 1 /* v2.11: added, see call5.aso */
+            if( opndx->Ofssize != USE_EMPTY ) {
+                if ( opndx->Ofssize == USE16 ) {
+                    fixup_type = FIX_RELOFF16;
+                    CodeInfo->opnd[OPND1].type = OP_I16;
+                } else {
+                    fixup_type = FIX_RELOFF32;
+                    CodeInfo->opnd[OPND1].type = OP_I32;
+                }
+                CodeInfo->prefix.opsiz = OPSIZE( CodeInfo->Ofssize, opndx->Ofssize );
+            } else
+#endif
+            if( CodeInfo->Ofssize > USE16 ) {
                 fixup_type = FIX_RELOFF32;
                 CodeInfo->opnd[OPND1].type = OP_I32;
             } else {
                 fixup_type = FIX_RELOFF16;
                 CodeInfo->opnd[OPND1].type = OP_I16;
             }
-            find_frame( sym );/* added v1.95 (after change in fixup.c */
+            set_frame( sym );/* added v1.95 (after change in fixup.c */
             break;
+#ifdef DEBUG_OUT
         default:
-            EmitError( INVALID_OPERAND_SIZE );
-            return( ERROR );
+            DebugMsg(("process_branch: JMP/CALL, unexpected mem_type=%X\n", CodeInfo->mem_type ));
+            /**/myassert( 0 );
+            //return( EmitError( INVALID_OPERAND_SIZE ) );
+#endif
         }
         /* deactivated because there's no override involved here */
         // check_assume( sym, EMPTY );
@@ -524,8 +535,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
         /* JxCXZ and LOOPxx always require SHORT label */
         if ( IS_XCX_BRANCH( CodeInfo->token ) ) {
             if( CodeInfo->mem_type != MT_EMPTY && opndx->instr != T_SHORT ) {
-                EmitError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED );
-                return( ERROR );
+                return( EmitError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED ) );
             }
             CodeInfo->opnd[OPND1].type = OP_I8;
             fixup_option = OPTJ_EXPLICIT;
@@ -548,9 +558,9 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 /* v1.95: explicit flag to be removed! */
                 //if ( opndx->explicit && opndx->Ofssize != USE_EMPTY ) {
                 if ( opndx->Ofssize != USE_EMPTY ) {
-                    SET_OPSIZ( CodeInfo, opndx->Ofssize >= USE32 );
+                    CodeInfo->prefix.opsiz = OPSIZE( CodeInfo->Ofssize, opndx->Ofssize );
                     CodeInfo->opnd[OPND1].type = (opndx->Ofssize >= USE32) ? OP_I32 : OP_I16;
-                } else if( CodeInfo->Ofssize ) {
+                } else if( CodeInfo->Ofssize > USE16 ) {
                     fixup_type = FIX_RELOFF32;
                     CodeInfo->opnd[OPND1].type = OP_I32;
                 } else {
@@ -563,9 +573,9 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                     /* v1.95: explicit flag to be removed! */
                     //if ( opndx->explicit && opndx->Ofssize != USE_EMPTY )
                     if ( opndx->Ofssize != USE_EMPTY )
-                        SET_OPSIZ( CodeInfo, opndx->Ofssize >= USE32 );
+                        CodeInfo->prefix.opsiz = OPSIZE( CodeInfo->Ofssize, opndx->Ofssize );
                     else
-                        SET_OPSIZ( CodeInfo, GetSymOfssize( sym ));
+                        CodeInfo->prefix.opsiz = OPSIZE( CodeInfo->Ofssize, GetSymOfssize( sym ));
                     /* destination is FAR (externdef <dest>:far */
                     DebugMsg(("process_branch: JMP/CALL, FAR memtype, jump extension\n" ));
                     jumpExtend( CodeInfo, TRUE );
@@ -581,8 +591,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 }
                 /* fall through */
             default: /* is another memtype possible at all? */
-                EmitError( ONLY_SHORT_AND_NEAR_JUMP_DISTANCE_IS_ALLOWED );
-                return( ERROR );
+                return( EmitError( ONLY_SHORT_AND_NEAR_JUMP_DISTANCE_IS_ALLOWED ) );
             }
         } else {
             /* the only mode in 8086, 80186, 80286 is
@@ -614,8 +623,7 @@ ret_code process_branch( struct code_info *CodeInfo, unsigned CurrOpnd, const st
                 }
                 /* fall through */
             default:
-                EmitError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED );
-                return( ERROR );
+                return( EmitError( ONLY_SHORT_JUMP_DISTANCE_IS_ALLOWED ) );
             }
         }
     } /* end switch (CodeInfo->token) */

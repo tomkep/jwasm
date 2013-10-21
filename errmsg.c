@@ -43,14 +43,31 @@
 #include "segment.h"
 
 extern void             print_source_nesting_structure( void );
-extern char             banner_printed;
 extern jmp_buf          jmpenv;
 
 //static bool             Errfile_Written;
 //static void             PrtMsg( int severity, int msgnum, va_list args1, va_list args2 );
 //void                    PutMsg( FILE *fp, int severity, int msgnum, va_list args );
+char banner_printed = FALSE;
+
+static const char usage[] = {
+#include "usage.h"
+};
+
 
 #ifdef DEBUG_OUT
+
+/* there are intransparent IDEs that don't want to tell you the real, current command line arguments
+ * and often those tools also swallow anything that is written to stdout or stderr.
+ * To make jwasm write a trace log to a file, enable the next line!
+ * Additionally, you'll probably have to enable line Set_dt() in cmdline.c, function ParseCmdline().
+ */
+//#define DBGLOGFILE "jwasm.log"
+
+#ifdef DBGLOGFILE
+FILE *fdbglog = NULL;
+#endif
+
 void DoDebugMsg( const char *format, ... )
 /****************************************/
 {
@@ -61,10 +78,20 @@ void DoDebugMsg( const char *format, ... )
         return;
 
     va_start( args, format );
+#ifdef DBGLOGFILE
+    if ( fdbglog == NULL )
+        fdbglog = fopen( DBGLOGFILE, "w" );
+    vfprintf( fdbglog, format, args );
+#else
     vprintf( format, args );
+#endif
     va_end( args );
 #if 0
+#ifdef DBGLOGFILE
+    fflush( fdbglog );
+#else
     fflush( stdout );
+#endif
 #endif
 }
 void DoDebugMsg1( const char *format, ... )
@@ -77,23 +104,65 @@ void DoDebugMsg1( const char *format, ... )
 
     if( ModuleInfo.cref == FALSE ) return;
 
-    printf( "%lu%s. ", GetLineNumber(), GetTopLine( buffer ) );
-
+#ifdef DBGLOGFILE
+    if ( fdbglog == NULL )
+        fdbglog = fopen( DBGLOGFILE, "w" );
+#endif
+    //if ( CurrFName[ASM] )
+    if ( ModuleInfo.g.src_stack ) {
+#ifdef DBGLOGFILE
+        fprintf( fdbglog, "%" I32_SPEC "u%s. ", GetLineNumber(), GetTopLine( buffer ) );
+#else
+        printf( "%" I32_SPEC "u%s. ", GetLineNumber(), GetTopLine( buffer ) );
+#endif
+    }
     va_start( args, format );
+#ifdef DBGLOGFILE
+    vfprintf( fdbglog, format, args );
+#else
     vprintf( format, args );
+#endif
     va_end( args );
+
 #if 0
+#ifdef DBGLOGFILE
+    fflush( fdbglog );
+#else
     fflush( stdout );
+#endif
 #endif
 }
 #endif
 
-void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
-/*************************************************************/
+int write_logo( void )
+/********************/
+{
+    if( banner_printed == FALSE ) {
+        banner_printed = TRUE;
+        printf( "%s, %s\n", MsgGetEx( MSG_JWASM ), MsgGetEx( MSG_JWASM2 ) );
+        return( 4 ); /* return number of lines printed */
+    }
+    return( 0 );
+}
+
+void PrintUsage( void )
+/*********************/
+{
+    const char *p;
+    write_logo();
+    for ( p = usage; *p != '\n'; ) {
+        const char *p2 = p + strlen( p ) + 1;
+        printf("%-20s %s\n", p, p2 );
+        p = p2 + strlen( p2 ) + 1;
+    }
+}
+
+static void PutMsg( FILE *fp, int severity, int msgnum, va_list args )
+/********************************************************************/
 {
     int             i,j;
-    char            *type;
-    char            *pMsg;
+    const char      *type;
+    const char      *pMsg;
     char            buffer[MAX_LINE_LEN+128];
 
     if( fp != NULL ) {
@@ -133,8 +202,7 @@ static void PrtMsg( int severity, int msgnum, va_list args1, va_list args2 )
 /**************************************************************************/
 {
 #ifndef __SW_BD
-    if( !banner_printed )
-        write_logo();
+    write_logo();
 #endif
     /* open .err file if not already open and a name is given */
     if( CurrFile[ERR] == NULL && CurrFName[ERR] != NULL ) {
@@ -196,10 +264,10 @@ int EmitErr( int msgnum, ... )
     return( ERROR );
 }
 
-void EmitError( int msgnum )
-/**************************/
+int EmitError( int msgnum )
+/*************************/
 {
-    EmitErr( msgnum );
+    return( EmitErr( msgnum ) );
 }
 
 void EmitWarn( int level, int msgnum, ... )
@@ -237,14 +305,19 @@ char *ErrnoStr( void )
  * don't use functions which need to alloc memory here!
  * v2.08: do not exit(), just a longjmp() into AssembleModule().
  */
-void Fatal( unsigned msg, ... )
-/*****************************/
+void Fatal( int msgnum, ... )
+/***************************/
 {
-    va_list     args;
+    va_list     args1, args2;
 
-    va_start( args, msg );
-    PutMsg( errout, 1, msg, args );
-    va_end( args );
+    /* v2.11: call PrtMsg() instead of PutMsg().
+     * Makes the fatal error appear in the .ERR and .LST files
+     */
+    va_start( args1, msgnum );
+    va_start( args2, msgnum );
+    PrtMsg( 1, msgnum, args1, args2 );
+    va_end( args1 );
+    va_end( args2 );
 
     ModuleInfo.g.error_count++;
     //write_to_file = FALSE;
@@ -281,6 +354,7 @@ int InternalError( const char *file, unsigned line )
 /**************************************************/
 /* it's used by myassert() function in debug version */
 {
+#if 1
     char buffer[MAX_LINE_LEN];
     DebugMsg(("InternalError enter\n"));
     ModuleInfo.g.error_count++;
@@ -289,7 +363,10 @@ int InternalError( const char *file, unsigned line )
     fprintf( errout, MsgGetEx( INTERNAL_ERROR ), file, line );
     close_files();
     exit( EXIT_FAILURE );
-    return(0);
+#else
+    Fatal( INTERNAL_ERROR, file, line );
+#endif
+    return( 0 );
 }
 #endif
 

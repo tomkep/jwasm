@@ -55,7 +55,7 @@ res( LABEL,     LabelDirective )
 res( ALIAS,     AliasDirective )
 res( ECHO,      EchoDirective )
 res( EQU,       EquDirective )
-res( EQUALSGN,  EquDirective ) /* '=' directive */
+res( EQUALSGN,  EqualSgnDirective ) /* '=' directive */
 #if INCBINSUPP
 res( INCBIN,    IncBinDirective )
 #endif

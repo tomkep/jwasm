@@ -1,26 +1,6 @@
 /****************************************************************************
 *
-*                            Open Watcom Project
-*
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
-*
-*  ========================================================================
-*
-*    This file contains Original Code and/or Modifications of Original
-*    Code as defined in and that are subject to the Sybase Open Watcom
-*    Public License version 1.0 (the 'License'). You may not use this file
-*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
-*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
-*    provided with the Original Code and Modifications, and is also
-*    available at www.sybase.com/developer/opensource.
-*
-*    The Original Code and all software distributed under the License are
-*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
-*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
-*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
-*    NON-INFRINGEMENT. Please see the License for the specific language
-*    governing rights and limitations under the License.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
@@ -34,8 +14,6 @@
 #include "msgtext.h"
 
 #define USERESOURCES 0 /* 1=use Win string resources, won't work for Linux! */
-
-char banner_printed = FALSE;
 
 #if USERESOURCES
 
@@ -80,10 +58,6 @@ static const char * const msgtexts[] = {
 
 #endif
 
-static const char usage[] = {
-#include "usage.h"
-};
-
 /* the compiler string stored in CodeView symbolic debugging info */
 #ifdef DEBUG_OUT
 const char szCVCompiler[] = { "Microsoft (R) Macro Assembler Version 6.15.8803" };
@@ -92,24 +66,8 @@ const char szCVCompiler[] = { "Microsoft (R) Macro Assembler Version 6.15.8803" 
 const char szCVCompiler[] = { "JWasm v" _JWASM_VERSION_STR_ };
 #endif
 
-void MsgInit( void )
-/******************/
-{
-}
-
-void MsgFini( void )
-/******************/
-{
-#if 0 /* set to 1 to display all error texts and numbers */
-    int i;
-    for ( i = 0; i < MSG_LAST; i++ ) {
-        printf("%3u: %s\n", i, msgtexts[i] );
-    }
-#endif
-}
-
-char *MsgGet( int msgid, char *buffer )
-/*************************************/
+static const char *MsgGet( int msgid, char *buffer )
+/**************************************************/
 {
 #if USERESOURCES
     HRSRC hRsrc;
@@ -148,40 +106,9 @@ char *MsgGet( int msgid, char *buffer )
     return( buffer );
 }
 
-char *MsgGetEx( int msgid )
-/*************************/
+const char *MsgGetEx( int msgid )
+/*******************************/
 {
     return( MsgGet( msgid, NULL ) );
-}
-
-void MsgPrintUsage( void )
-/************************/
-{
-    const char *p;
-    write_logo();
-    for ( p = usage; *p != '\n'; ) {
-        const char *p2 = p + strlen( p ) + 1;
-        printf("%-20s %s\n", p, p2 );
-        p = p2 + strlen( p2 ) + 1;
-    }
-}
-
-char *MsgGetJWasmName( char *buffer )
-/***********************************/
-{
-    sprintf( buffer, MsgGetEx( MSG_JWASM ), _JWASM_VERSION_, __DATE__ );
-    return( buffer );
-}
-
-int write_logo( void )
-/********************/
-{
-    char buffer[128];
-    if( banner_printed == FALSE ) {
-        banner_printed = TRUE;
-        printf( MsgGetEx( MSG_BANNER ), MsgGetJWasmName( buffer ) );
-        return( 4 ); /* return number of lines printed */
-    }
-    return( 0 );
 }
 

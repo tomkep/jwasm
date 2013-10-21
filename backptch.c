@@ -52,8 +52,8 @@
 static void DoPatch( struct asym *sym, struct fixup *fixup )
 /**********************************************************/
 {
-    long                disp;
-    long                max_disp;
+    int_32              disp;
+    int_32              max_disp;
     unsigned            size;
     struct dsym         *seg;
 #if LABELOPT
@@ -65,7 +65,7 @@ static void DoPatch( struct asym *sym, struct fixup *fixup )
      * they must be removed after patching or skiped ( next processed as normal fixup )
      */
 
-    DebugMsg(("DoPatch(%u, %s): fixup sym=%s type=%u ofs=%" FX32 "h loc=%" FX32 "h opt=%u def_seg=%s\n",
+    DebugMsg(("DoPatch(%u, %s): fixup sym=%s type=%u ofs=%" I32_SPEC "Xh loc=%" I32_SPEC "Xh opt=%u def_seg=%s\n",
               Parse_Pass + 1, sym->name,
               fixup->sym ? fixup->sym->name : "NULL",
               fixup->type,
@@ -161,7 +161,7 @@ static void DoPatch( struct asym *sym, struct fixup *fixup )
                      * the optimization!
                      */
                     if ( Parse_Pass == PASS_1 ) {
-                        for ( fixup2 = seg->e.seginfo->FixupListHead; fixup2; fixup2 = fixup2->nextrlc ) {
+                        for ( fixup2 = seg->e.seginfo->FixupList.head; fixup2; fixup2 = fixup2->nextrlc ) {
                             if ( fixup2->orgoccured ) {
                                 DebugMsg(("DoPatch: ORG/ALIGN detected, optimization canceled\n" ));
                                 return;
@@ -186,23 +186,23 @@ static void DoPatch( struct asym *sym, struct fixup *fixup )
                         if ( sym2->offset <= fixup->location )
                             break;
                         sym2->offset += size;
-                        DebugMsg(("DoPatch(loc=%" FX32 "): sym %s, offset changed %" FX32 " -> %" FX32 "\n", fixup->location, sym2->name, sym2->offset - size, sym2->offset));
+                        DebugMsg(("DoPatch(loc=%" I32_SPEC "X): sym %s, offset changed %" I32_SPEC "X -> %" I32_SPEC "X\n", fixup->location, sym2->name, sym2->offset - size, sym2->offset));
                     }
                     /* v2.03: also adjust fixup locations located between the
                      * label reference and the label. This should reduce the
                      * number of passes to 2 for not too complex sources.
                      */
                     if ( Parse_Pass == PASS_1 ) /* v2.04: added, just to be safe */
-                    for ( fixup2 = seg->e.seginfo->FixupListHead; fixup2; fixup2 = fixup2->nextrlc ) {
+                    for ( fixup2 = seg->e.seginfo->FixupList.head; fixup2; fixup2 = fixup2->nextrlc ) {
                         if ( fixup2->sym == sym )
                             continue;
                         if ( fixup2->location <= fixup->location )
                             break;
                         fixup2->location += size;
-                        DebugMsg(("for sym=%s fixup loc %" FX32 " changed to %" FX32 "\n", fixup2->sym->name, fixup2->location - size, fixup2->location ));
+                        DebugMsg(("for sym=%s fixup loc %" I32_SPEC "X changed to %" I32_SPEC "X\n", fixup2->sym->name, fixup2->location - size, fixup2->location ));
                     }
 #else
-                    DebugMsg(("DoPatch: sym %s, offset changed %" FX32 " -> %" FX32 "\n", sym->name, sym->offset, sym->offset + size));
+                    DebugMsg(("DoPatch: sym %s, offset changed %" I32_SPEC "X -> %" I32_SPEC "X\n", sym->name, sym->offset, sym->offset + size));
                     sym->offset += size;
 #endif
                     /*  it doesn't matter what's actually "written" */
@@ -220,7 +220,7 @@ static void DoPatch( struct asym *sym, struct fixup *fixup )
         }
 #ifdef DEBUG_OUT
         else
-            DebugMsg(("DoPatch, loc=%" FX32 ": displacement still short: %Xh\n", fixup->location, disp ));
+            DebugMsg(("DoPatch, loc=%" I32_SPEC "X: displacement still short: %Xh\n", fixup->location, disp ));
 #endif
         /* v2.04: fixme: is it ok to remove the fixup?
          * it might still be needed in a later backpatch.
@@ -249,16 +249,21 @@ ret_code BackPatch( struct asym *sym )
 {
     struct fixup     *fixup;
     struct fixup     *next;
-
 #ifdef DEBUG_OUT
     uint_32 oldofs = sym->offset;
 #endif
-    DebugMsg1(("BackPatch(%s): location=%s:%X, bp_fixup=%X\n", sym->name, sym->segment ? sym->segment->name : "!NULL!", sym->offset, sym->bp_fixup ));
+
+    DebugMsg1(("BackPatch(%s): location=%s:%X, bp_fixup=%p\n", sym->name, sym->segment ? sym->segment->name : "!NULL!", sym->offset, sym->bp_fixup ));
 
     for( fixup = sym->bp_fixup; fixup; fixup = next ) {
         next = fixup->nextbp;
         DoPatch( sym, fixup );
     }
+    /* fixme: to clear field bp_fixup may cause memory leaks, since not all fixups are freed here.
+     * usually no problem, because FASTMEM is true ( that is, LclFree() is a NOP ).
+     * the problem is that these fixups are in 2 queues, one starts in sym.bp_fixup,
+     * the other start in CurrSeg.FixupList.
+     */
     sym->bp_fixup = NULL;
 #ifdef DEBUG_OUT
     if ( oldofs != sym->offset )

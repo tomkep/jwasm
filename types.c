@@ -184,8 +184,7 @@ ret_code StructDirective( int i, struct asm_tok tokenarray[] )
     if (( CurrStruct == NULL && i != 1 ) ||
         ( CurrStruct != NULL && i != 0 ) ) {
         DebugMsg(("StructDirective(%s): error: either currstruct or i must be 0\n", tokenarray[i].string_ptr ));
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
     }
 
     alignment = ( 1 << ModuleInfo.fieldalign );
@@ -215,8 +214,11 @@ ret_code StructDirective( int i, struct asm_tok tokenarray[] )
     if ( CurrStruct == NULL && tokenarray[i].token != T_FINAL ) {
         int power;
         struct expr opndx;
-        /* get the optional alignment parameter */
+        /* get the optional alignment parameter.
+         * forward references aren't accepted, but EXPF_NOUNDEF isn't used here!
+         */
         if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) != ERROR ) {
+            /* an empty expression is accepted */
             if ( opndx.kind == EXPR_EMPTY ) {
                 ;
             } else if ( opndx.kind != EXPR_CONST ) {
@@ -249,8 +251,7 @@ ret_code StructDirective( int i, struct asm_tok tokenarray[] )
     }
     if ( tokenarray[i].token != T_FINAL ) {
         DebugMsg(("StructDirective(%s): error: unexpected token %u >%s<\n", tokenarray[i].token, tokenarray[i].tokpos ));
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
     }
 
     /* does struct have a name? */
@@ -331,13 +332,11 @@ ret_code StructDirective( int i, struct asm_tok tokenarray[] )
         case TYPE_NONE:  /* TYPE_NONE is forward reference */
             break;
         default:
-            EmitErr( SYMBOL_REDEFINITION, sym->name );
-            return( ERROR );
+            return( EmitErr( SYMBOL_REDEFINITION, sym->name ) );
         }
 
     } else {
-        EmitErr( SYMBOL_REDEFINITION, sym->name );
-        return( ERROR );
+        return( EmitErr( SYMBOL_REDEFINITION, sym->name ) );
     }
 
     sym->offset = 0;
@@ -377,7 +376,7 @@ ret_code EndstructDirective( int i, struct asm_tok tokenarray[] )
 
     dir = CurrStruct; /* cannot be NULL */
 
-    DebugMsg1(("EndstructDirective(%s), ofs=%" FU32 ", struct size=%" FU32 ", max_mbr=%" FU32 ", alignment=%u\n",
+    DebugMsg1(("EndstructDirective(%s), ofs=%" I32_SPEC "u, struct size=%" I32_SPEC "u, max_mbr=%" I32_SPEC "u, alignment=%u\n",
               dir->sym.name,
               dir->sym.offset,
               dir->sym.total_size,
@@ -405,19 +404,14 @@ ret_code EndstructDirective( int i, struct asm_tok tokenarray[] )
     } else {
         /* v2.04: error msg improved */
         //EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        if ( i == 1)
-            EmitErr( UNMATCHED_BLOCK_NESTING, tokenarray[0].string_ptr );
-        else
-            EmitErr( UNMATCHED_BLOCK_NESTING, "" );
-        return( ERROR );
+        return( EmitErr( UNMATCHED_BLOCK_NESTING, i == 1 ? tokenarray[0].string_ptr : "" ) );
     }
 
     if ( i == 1 ) { /* an global struct ends with <name ENDS> */
         if ( SymCmpFunc( tokenarray[0].string_ptr, dir->sym.name, dir->sym.name_size ) != 0 ) {
             /* names don't match */
             DebugMsg(("EndstructDirective: names don't match, i=%u, name=%s - %s\n", i, tokenarray[0].string_ptr, dir->sym.name));
-            EmitErr( UNMATCHED_BLOCK_NESTING, tokenarray[0].string_ptr );
-            return( ERROR );
+            return( EmitErr( UNMATCHED_BLOCK_NESTING, tokenarray[0].string_ptr ) );
         }
     }
 
@@ -446,7 +440,7 @@ ret_code EndstructDirective( int i, struct asm_tok tokenarray[] )
         if ( size > dir->e.structinfo->alignment )
             size = dir->e.structinfo->alignment;
         dir->sym.total_size = (dir->sym.total_size + size - 1) & (-size);
-        DebugMsg1(("EndstructDirective:, struct size after final alignment=%" FU32 "\n", dir->sym.total_size));
+        DebugMsg1(("EndstructDirective:, struct size after final alignment=%" I32_SPEC "u\n", dir->sym.total_size));
     }
 #endif
     dir->e.structinfo->isOpen = FALSE;
@@ -507,8 +501,7 @@ ret_code EndstructDirective( int i, struct asm_tok tokenarray[] )
     }
     //dir->sym.max_mbr_size = 0;
     if ( tokenarray[i].token != T_FINAL ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
     }
     return( NOT_ERROR );
 }
@@ -526,8 +519,7 @@ static ret_code CheckAnonymousStruct( struct dsym *type )
         if ( *f->sym.name ) {
             sym = SearchNameInStruct((struct asym *)CurrStruct, f->sym.name, &disp, 0 );
             if ( sym ) {
-                EmitErr( SYMBOL_REDEFINITION, sym->name );
-                return( ERROR );
+                return( EmitErr( SYMBOL_REDEFINITION, sym->name ) );
             }
         } else if ( f->sym.type ) {
             struct dsym *stype = (struct dsym *)f->sym.type;
@@ -565,7 +557,7 @@ struct asym *CreateStructField( int loc, struct asm_tok tokenarray[], const char
     si = CurrStruct->e.structinfo;
     offset = CurrStruct->sym.offset;
 
-    DebugMsg1(("CreateStructField(%s): name=%s, curr ofs=%" FU32 ", vartype=%s, size=%" FU32 "\n",
+    DebugMsg1(("CreateStructField(%s): name=%s, curr ofs=%" I32_SPEC "u, vartype=%s, size=%" I32_SPEC "u\n",
                CurrStruct->sym.name, name ? name : "<anonymous>", offset,
                vartype ? vartype->name : "NULL", size ));
 
@@ -721,7 +713,8 @@ struct asym *CreateStructField( int loc, struct asm_tok tokenarray[], const char
     if ( ModuleInfo.oldstructs == TRUE && *name != NULLC ) {
         DebugMsg(("CreateStructField(%s): Masm51 compat on, lookup %s in global symbol table\n", CurrStruct->sym.name, name ));
         gsym  = SymLookup( name );
-        if ( gsym ) {
+        /* v2.11: cannot fail */
+        //if ( gsym ) {
             if ( gsym->state == SYM_UNDEFINED )
                 gsym->state = SYM_STRUCT_FIELD;
             if ( gsym->state == SYM_STRUCT_FIELD ) {
@@ -736,7 +729,7 @@ struct asym *CreateStructField( int loc, struct asm_tok tokenarray[], const char
                     gsym->offset += dir->sym.offset;
                 gsym->isdefined = TRUE;
             }
-        }
+        //}
     }
 
     return( &f->sym );
@@ -789,8 +782,7 @@ ret_code SetStructCurrentOffset( int_32 offset )
 /**********************************************/
 {
     if ( CurrStruct->sym.typekind == TYPE_UNION ) {
-        EmitError( ORG_NOT_ALLOWED_IN_UNIONS );
-        return( ERROR );
+        return( EmitError( ORG_NOT_ALLOWED_IN_UNIONS ) );
     }
     CurrStruct->sym.offset = offset;
     /* if an ORG is inside the struct, it cannot be instanced anymore */
@@ -871,8 +863,7 @@ ret_code GetQualifiedType( int *pi, struct asm_tok tokenarray[], struct qualifie
             if ( pti->symtype == NULL || pti->symtype->state == SYM_UNDEFINED )
                 pti->symtype = CreateTypeSymbol( pti->symtype, tokenarray[i].string_ptr, TRUE );
             else if ( pti->symtype->state != SYM_TYPE ) {
-                EmitErr( INVALID_QUALIFIED_TYPE, tokenarray[i].string_ptr );
-                return( ERROR );
+                return( EmitErr( INVALID_QUALIFIED_TYPE, tokenarray[i].string_ptr ) );
             } else {
                 sym = pti->symtype;
                 /* if it's a typedef, simplify the info */
@@ -978,8 +969,7 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
     DebugMsg1(("TypedefDirective(%d) enter\n", i));
 
     if( i != 1 ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
     }
     name = tokenarray[0].string_ptr;
 
@@ -1001,8 +991,7 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
         if ( ( sym->state != SYM_TYPE ) ||
             ( sym->typekind != TYPE_TYPEDEF &&
              sym->typekind != TYPE_NONE ) ) {
-            EmitErr( SYMBOL_REDEFINITION, sym->name );
-            return( ERROR );
+            return( EmitErr( SYMBOL_REDEFINITION, sym->name ) );
         }
     }
 
@@ -1013,32 +1002,32 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
 
     /* PROTO is special */
     if ( tokenarray[i].token == T_DIRECTIVE && tokenarray[i].tokval == T_PROTO ) {
-        struct dsym *dir2;  /* create a PROTOtype item without name */
+        struct dsym *proto;  /* create a PROTOtype item without name */
         /* v2.04: added check if prototype is set already */
         if ( sym->target_type == NULL && sym->mem_type == MT_EMPTY ) {
-            dir2 = (struct dsym *)CreateProc( NULL, "", SYM_TYPE );
-            DebugMsg1(("TypedefDirective PROTO, created new unnamed prototype %p\n", dir2 ));
+            proto = (struct dsym *)CreateProc( NULL, "", SYM_TYPE );
+            DebugMsg1(("TypedefDirective PROTO, created new unnamed prototype %p\n", proto ));
         } else if ( sym->mem_type == MT_PROC ) {
-            dir2 = (struct dsym *)sym->target_type;
+            proto = (struct dsym *)sym->target_type;
         } else {
-            EmitErr( SYMBOL_TYPE_CONFLICT, sym->name );
-            return( ERROR );
+            return( EmitErr( SYMBOL_TYPE_CONFLICT, sym->name ) );
         }
         i++;
-        DebugMsg1(("TypedefDirective PROTO, call ParseProc(sym=%p i=%d, 0)\n", dir2, i));
-        if( ParseProc( i, tokenarray, dir2, FALSE, ModuleInfo.langtype ) == ERROR )
+        DebugMsg1(("TypedefDirective PROTO, call ParseProc(sym=%p i=%d, 0)\n", proto, i));
+        if( ParseProc( proto, i, tokenarray, FALSE, ModuleInfo.langtype ) == ERROR )
             return ( ERROR );
         DebugMsg1(("TypedefDirective PROTO, ParseProc() returned status ok\n"));
         sym->mem_type = MT_PROC;
-        dir2->sym.isproc = TRUE; /* v2.05: added */
-        sym->Ofssize = dir2->sym.seg_ofssize;
+        /* v2.11: member isproc was set inside ParseProc() */
+        //proto->sym.isproc = TRUE; /* v2.05: added */
+        sym->Ofssize = proto->sym.seg_ofssize;
         /* v2.03: set value of field total_size (previously was 0) */
-        sym->total_size = (2 << sym->Ofssize);
-        if( dir2->sym.mem_type != MT_NEAR ) {
+        sym->total_size = ( 2 << sym->Ofssize );
+        if( proto->sym.mem_type != MT_NEAR ) {
             sym->isfar = TRUE; /* v2.04: added */
             sym->total_size += 2;
         }
-        sym->target_type = (struct asym *)dir2;
+        sym->target_type = (struct asym *)proto;
         DebugMsg1(("TypedefDirective(%s) ok, mem_type=%Xh, ofssize=%u\n", sym->name, sym->mem_type, sym->Ofssize ));
         return( NOT_ERROR );
     }
@@ -1084,8 +1073,7 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
                       sym->is_ptr, ti.is_ptr,
                       sym->Ofssize, ti.Ofssize,
                       sym->ptr_memtype, ti.ptr_memtype ));
-            EmitErr( SYMBOL_TYPE_CONFLICT, name );
-            return( ERROR );
+            return( EmitErr( SYMBOL_TYPE_CONFLICT, name ) );
         }
     }
 
@@ -1099,15 +1087,14 @@ ret_code TypedefDirective( int i, struct asm_tok tokenarray[] )
     else
         sym->target_type = ti.symtype;
     sym->ptr_memtype = ti.ptr_memtype;
-    DebugMsg1(("TypedefDirective(%s) ok, mem_type=MT_TYPE, size=%" FU32 ", type=%p type.memtype=%X\n",
+    DebugMsg1(("TypedefDirective(%s) ok, mem_type=MT_TYPE, size=%" I32_SPEC "u, type=%p type.memtype=%X\n",
                sym->name, sym->total_size, sym->type, ti.symtype ? ti.symtype->mem_type : 0 ));
 
     DebugMsg1(("TypedefDirective(%s) ok, mem_type=%Xh, size=%u, indirection=%u target=%p\n", sym->name, sym->mem_type, ti.size, ti.is_ptr, ti.symtype ));
 
     if ( tokenarray[i].token != T_FINAL ) {
         DebugMsg(("TypedefDirective: unexpected token %u, idx=%u\n", tokenarray[i].token, i));
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
     }
 
     return( NOT_ERROR );
@@ -1139,8 +1126,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
 
     DebugMsg1(("RecordDirective(%d) enter\n", i));
     if ( i != 1 ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
     }
 
     name = tokenarray[0].string_ptr;
@@ -1160,8 +1146,7 @@ ret_code RecordDirective( int i, struct asm_tok tokenarray[] )
             redef_err = 0;
         }
     } else {
-        EmitErr( SYMBOL_REDEFINITION, name );
-        return( ERROR );
+        return( EmitErr( SYMBOL_REDEFINITION, name ) );
     }
     sym->isdefined = TRUE;
 
@@ -1329,11 +1314,16 @@ void DeleteType( struct dsym *dir )
     struct sfield      *curr;
     struct sfield      *next;
 
-    DebugMsg(("DeleteType(%s) enter\n", dir->sym.name ));
+    DebugMsg(("DeleteType(%s) enter, typekind=%u, memtype=%Xh\n", dir->sym.name, dir->sym.typekind, dir->sym.mem_type ));
 #if FASTMEM==0
     /* release prototype in target_type if typedef is PROTO */
-    if ( dir->sym.mem_type == MT_PROC )
+    if ( dir->sym.mem_type == MT_PROC ) {
+        /* v2.11: change the prototype type to an external, because SymFree()
+         * doesn't expect a prototype in a type.
+         */
+        dir->sym.target_type->state = SYM_EXTERNAL;
         SymFree( dir->sym.target_type );
+    }
 #endif
 #if TYPEOPT
     if ( dir->sym.typekind == TYPE_TYPEDEF )

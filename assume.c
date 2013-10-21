@@ -37,7 +37,7 @@
 #include "assume.h"
 #include "types.h"
 #include "label.h"
-#include "input.h"
+#include "lqueue.h"
 #include "expreval.h"
 #include "fastpass.h"
 #include "tokenize.h"
@@ -202,7 +202,6 @@ void AssumeInit( int pass ) /* pass may be -1 here! */
 
 /* generate assume lines after .MODEL directive
  * model is in ModuleInfo.model, it can't be MODEL_NONE.
- * NewLineQueue() has already been called
  */
 void ModelAssumeInit( void )
 /**************************/
@@ -320,26 +319,22 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
             }
         }
         if ( info == NULL ) {
-            EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr );
-            return( ERROR );
+            return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].string_ptr ) );
         }
 
         if( ( ModuleInfo.curr_cpu & P_CPU_MASK ) < GetCpuSp( reg ) ) {
-            EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE );
-            return( ERROR );
+            return( EmitError( INSTRUCTION_OR_REGISTER_NOT_ACCEPTED_IN_CURRENT_CPU_MODE ) );
         }
 
         i++; /* go past register */
 
         if( tokenarray[i].token != T_COLON ) {
-            EmitError( COLON_EXPECTED );
-            return( ERROR );
+            return( EmitError( COLON_EXPECTED ) );
         }
         i++;
 
         if( tokenarray[i].token == T_FINAL ) {
-            EmitError( SYNTAX_ERROR );
-            return( ERROR );
+            return( EmitError( SYNTAX_ERROR ) );
         }
 
         /* check for ERROR and NOTHING */
@@ -377,8 +372,7 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
             size = OperandSize( flags, NULL );
             if ( ( ti.is_ptr == 0 && size != ti.size ) ||
                 ( ti.is_ptr > 0 && size < CurrWordSize ) ) {
-                EmitError( TYPE_IS_WRONG_SIZE_FOR_REGISTER );
-                return( ERROR );
+                return( EmitError( TYPE_IS_WRONG_SIZE_FOR_REGISTER ) );
             }
             info->error &= ~(( reg >= T_AH && reg <= T_BH ) ? RH_ERROR : ( flags & OP_R ));
             if ( stdsym[j] == NULL ) {
@@ -408,8 +402,7 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
             switch ( opnd.kind ) {
             case EXPR_ADDR:
                 if ( opnd.sym == NULL || opnd.indirect == TRUE || opnd.value ) {
-                    EmitError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
-                    return( ERROR );
+                    return( EmitError( SEGMENT_GROUP_OR_SEGREG_EXPECTED ) );
                 } else if ( opnd.sym->state == SYM_UNDEFINED ) {
                     /* ensure that directive is rerun in pass 2
                      * so an error msg can be emitted.
@@ -421,8 +414,7 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
                 } else if ( opnd.instr == T_SEG ) {
                     info->symbol = opnd.sym->segment;
                 } else {
-                    EmitError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
-                    return( ERROR );
+                    return( EmitError( SEGMENT_GROUP_OR_SEGREG_EXPECTED ) );
                 }
                 info->is_flat = ( info->symbol == &ModuleInfo.flat_grp->sym );
                 break;
@@ -433,8 +425,7 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
                     break;
                 }
             default:
-                EmitError( SEGMENT_GROUP_OR_SEGREG_EXPECTED );
-                return( ERROR );
+                return( EmitError( SEGMENT_GROUP_OR_SEGREG_EXPECTED ) );
             }
             info->error = FALSE;
         }
@@ -444,8 +435,7 @@ ret_code AssumeDirective( int i, struct asm_tok tokenarray[] )
             break;
     }
     if ( i < Token_Count ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[i].tokpos ) );
     }
     return( NOT_ERROR );
 }

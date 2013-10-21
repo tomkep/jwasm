@@ -41,8 +41,10 @@ extern struct line_item *LineStoreCurr;
 
 struct mod_state {
     bool init;           /* is this struct initialized? */
-    struct equ_item *EquHead; /* the list of modified assembly time variables */
-    struct equ_item *EquTail;
+    struct {
+        struct equ_item *head; /* the list of modified assembly time variables */
+        struct equ_item *tail;
+    } Equ;
     uint_8 modinfo[ sizeof( struct module_info ) - sizeof( struct module_vars ) ];
 };
 
@@ -55,7 +57,7 @@ struct mod_state {
  * - directive ASSUME if operand is a forward reference
  */
 
-extern struct mod_state modstate;
+//extern struct mod_state modstate;
 extern bool StoreState; /* is 1 if states are to be stored in pass one */
 
 /* UseSavedState: is TRUE if preprocessed lines are to be read in pass 2,3,...
@@ -72,13 +74,13 @@ void FastpassInit( void );
 void SegmentSaveState( void );
 void AssumeSaveState( void );
 void ContextSaveState( void );
-void StoreLine( char *, uint_32, int );
+void StoreLine( const char *, int, uint_32 );
 void SkipSavedState( void );
 struct line_item *RestoreState( void );
 void SaveVariableState( struct asym *sym );
 void FreeLineStore( void );
 
-#define FStoreLine( flags ) if ( Parse_Pass == PASS_1 ) StoreLine( CurrSource, list_pos, flags ); else
+#define FStoreLine( flags ) if ( Parse_Pass == PASS_1 ) StoreLine( CurrSource, flags, 0 ); else
 
 #else
 

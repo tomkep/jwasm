@@ -28,6 +28,8 @@
 *
 ****************************************************************************/
 
+#include <limits.h>
+
 #include "globals.h"
 #include "memalloc.h"
 #include "parser.h"
@@ -90,7 +92,7 @@ static void output_opc( struct code_info *CodeInfo )
      * Output debug info - line numbers
      */
     if( Options.line_numbers )
-        AddLinnumDataRef( GetLineNumber() );
+        AddLinnumDataRef( get_curr_srcfile(), GetLineNumber() );
 
     /* if it's a FPU instr, reset opsiz */
     //if( ins->cpu & P_FPU_MASK ) {
@@ -375,10 +377,11 @@ static void output_opc( struct code_info *CodeInfo )
         CodeInfo->iswide = 0;
         /* no break */
     default: /* opcode (with w d s bits), rm-byte */
-        /* don't output opcode for 3DNow! instructions */
+        /* don't emit opcode for 3DNow! instructions */
         if( ins->byte1_info != F_0F0F ) {
             OutputCodeByte( ins->opcode | CodeInfo->iswide | CodeInfo->opc_or );
         }
+        /* emit ModRM byte; bits 7-6 = Mod, bits 5-3 = Reg, bits 2-0 = R/M */
         tmp = ins->rm_byte | CodeInfo->rm_byte;
         OutputCodeByte( tmp );
 
@@ -390,6 +393,7 @@ static void output_opc( struct code_info *CodeInfo )
         case 0x04: /* mod = 00, r/m = 100, s-i-b is present */
         case 0x44: /* mod = 01, r/m = 100, s-i-b is present */
         case 0x84: /* mod = 10, r/m = 100, s-i-b is present */
+            /* emit SIB byte; bits 7-6 = Scale, bits 5-3 = Index, bits 2-0 = Base */
             OutputCodeByte( CodeInfo->sib );
         }
     }
@@ -417,9 +421,9 @@ static void output_data( const struct code_info *CodeInfo, enum operand_type det
     }
 #ifdef DEBUG_OUT
     if ( CodeInfo->opnd[index].InsFixup )
-        DebugMsg1(("output_data(idx=%u, op=%" FX32 " [data=%" FX32 " fixup=%p typ=%u] ) enter [rm=%X]\n", index, determinant, CodeInfo->opnd[index].data, CodeInfo->opnd[index].InsFixup, CodeInfo->opnd[index].InsFixup->type ,CodeInfo->rm_byte ));
+        DebugMsg1(("output_data(idx=%u, op=%" I32_SPEC "X [data=%" I32_SPEC "X fixup=%p typ=%u] ) enter [rm=%X]\n", index, determinant, CodeInfo->opnd[index].data32l, CodeInfo->opnd[index].InsFixup, CodeInfo->opnd[index].InsFixup->type ,CodeInfo->rm_byte ));
     else
-        DebugMsg1(("output_data(idx=%u, op=%" FX32 " [data=%" FX32 " fixup=NULL] ) enter [rm=%X]\n", index, determinant, CodeInfo->opnd[index].data, CodeInfo->rm_byte ));
+        DebugMsg1(("output_data(idx=%u, op=%" I32_SPEC "X [data=%" I32_SPEC "X fixup=NULL] ) enter [rm=%X]\n", index, determinant, CodeInfo->opnd[index].data32l, CodeInfo->rm_byte ));
 #endif
 
     /* determine size */
@@ -449,6 +453,12 @@ static void output_data( const struct code_info *CodeInfo, enum operand_type det
                      size = 2; /* = size of displacement */
                 }
             } else {
+#if AMD64_SUPPORT
+                /* v2.11: special case, 64-bit direct memory addressing, opcodes 0xA0 - 0xA3 */
+                if( CodeInfo->Ofssize == USE64 && ( CodeInfo->pinstr->opcode & 0xFC ) == 0xA0 && CodeInfo->pinstr->byte1_info == 0 )
+                    size = 8;
+                else
+#endif
                 switch( CodeInfo->rm_byte & BIT_012 ) {
                 case RM_SIB: /* 0x04 (equals register # for ESP) */
                     if( ( CodeInfo->sib & BIT_012 ) != RM_D32 ) {
@@ -457,6 +467,11 @@ static void output_data( const struct code_info *CodeInfo, enum operand_type det
                     /* no break */
                 case RM_D32: /* 0x05 (equals register # for EBP) */
                     size = 4; /* = size of displacement */
+#if AMD64_SUPPORT
+                    /* v2.11: overflow check for 64-bit added */
+                    if ( CodeInfo->Ofssize == USE64 && CodeInfo->opnd[index].data64 >= 0x80000000 && CodeInfo->opnd[index].data64 < 0xffffffff80000000 )
+                        EmitErr( INVALID_INSTRUCTION_OPERANDS );
+#endif
                 }
             }
             break;
@@ -471,9 +486,9 @@ static void output_data( const struct code_info *CodeInfo, enum operand_type det
     }
 #ifdef DEBUG_OUT
     if ( size > 4 )
-        DebugMsg1(( "output_data: size=%u cont=%" I64X_SPEC "\n", size, (uint_64)CodeInfo->opnd[index].data ));
+        DebugMsg1(( "output_data: size=%u cont=%" I64_SPEC "X\n", size, CodeInfo->opnd[index].data64 ));
     else if ( size )
-        DebugMsg1(( "output_data: size=%u cont=%" FX32 "\n", size, CodeInfo->opnd[index].data ));
+        DebugMsg1(( "output_data: size=%u cont=%" I32_SPEC "X\n", size, CodeInfo->opnd[index].data32l ));
     else
         DebugMsg1(( "output_data: size=0\n" ));
 #endif
@@ -489,12 +504,12 @@ static void output_data( const struct code_info *CodeInfo, enum operand_type det
                 }
             if ( write_to_file ) {
                 CodeInfo->opnd[index].InsFixup->location = GetCurrOffset();
-                OutputBytes( (unsigned char *)&CodeInfo->opnd[index].data,
+                OutputBytes( (unsigned char *)&CodeInfo->opnd[index].data32l,
                             size, CodeInfo->opnd[index].InsFixup );
                 return;
             }
         }
-        OutputBytes( (unsigned char *)&CodeInfo->opnd[index].data, size, NULL );
+        OutputBytes( (unsigned char *)&CodeInfo->opnd[index].data32l, size, NULL );
     }
     return;
 }
@@ -516,9 +531,9 @@ static ret_code check_3rd_operand( struct code_info *CodeInfo )
         break;
     case OP3_I8_U: /* IMUL, SHxD, a few MMX/SSE */
         /* for IMUL, the operand is signed! */
-        if ( ( CodeInfo->opnd[OPND3].type & OP_I ) && CodeInfo->opnd[OPND3].data >= -128 ) {
-            if ( ( CodeInfo->token == T_IMUL && CodeInfo->opnd[OPND3].data < 128 ) ||
-                ( CodeInfo->token != T_IMUL && CodeInfo->opnd[OPND3].data < 256 ) ) {
+        if ( ( CodeInfo->opnd[OPND3].type & OP_I ) && CodeInfo->opnd[OPND3].data32l >= -128 ) {
+            if ( ( CodeInfo->token == T_IMUL && CodeInfo->opnd[OPND3].data32l < 128 ) ||
+                ( CodeInfo->token != T_IMUL && CodeInfo->opnd[OPND3].data32l < 256 ) ) {
                 CodeInfo->opnd[OPND3].type = OP_I8;
                 return( NOT_ERROR );
             }
@@ -537,7 +552,7 @@ static ret_code check_3rd_operand( struct code_info *CodeInfo )
         } else
 #endif
         if ( CodeInfo->opnd[OPND3].type == OP_XMM &&
-            CodeInfo->opnd[OPND3].data == 0 )
+            CodeInfo->opnd[OPND3].data32l == 0 )
             return( NOT_ERROR );
         break;
     }
@@ -548,7 +563,7 @@ static void output_3rd_operand( struct code_info *CodeInfo )
 /**********************************************************/
 {
     if( opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type_3rd == OP3_I8_U ) {
-        DebugMsg1(("output_3rd_operand, expected I8, op3=%" FX32 "\n", CodeInfo->opnd[OPND3].type ));
+        DebugMsg1(("output_3rd_operand, expected I8, op3=%" I32_SPEC "X\n", CodeInfo->opnd[OPND3].type ));
         /* v2.06: the type has been checked already! */
         //if( CodeInfo->opnd_type[OPND3] & OP_I ) {
         output_data( CodeInfo, OP_I8, OPND3 );
@@ -559,7 +574,7 @@ static void output_3rd_operand( struct code_info *CodeInfo )
     } else if( opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type_3rd == OP3_I ) {
         output_data( CodeInfo, CodeInfo->opnd[OPND3].type, OPND3 );
     } else if( opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type_3rd == OP3_HID ) {
-        DebugMsg1(("output_3rd_operand, expected OP3_HID, op3=%" FX32 "\n", CodeInfo->opnd[OPND3].type ));
+        DebugMsg1(("output_3rd_operand, expected OP3_HID, op3=%" I32_SPEC "X\n", CodeInfo->opnd[OPND3].type ));
         /* v2.06: to avoid having to add 3*8 operand categories there's a
          * hard-wired peculiarity for the "hidden" 3rd operand: it's calculated
          * directly from the instruction token. in instruct.h, CMPEQPD must
@@ -567,14 +582,14 @@ static void output_3rd_operand( struct code_info *CodeInfo )
          * changed.
          */
         //CodeInfo->data[OPND3] = opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type_3rd & ~OP3_HID;
-        CodeInfo->opnd[OPND3].data = ( CodeInfo->token - T_CMPEQPD ) % 8;
+        CodeInfo->opnd[OPND3].data32l = ( CodeInfo->token - T_CMPEQPD ) % 8;
         CodeInfo->opnd[OPND3].InsFixup = NULL;
         output_data( CodeInfo, OP_I8, OPND3 );
     }
 #if AVXSUPP
     else if( CodeInfo->token >= VEX_START &&
             opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type_3rd == OP3_XMM0 ) {
-        CodeInfo->opnd[OPND3].data = ( CodeInfo->opnd[OPND3].data << 4 );
+        CodeInfo->opnd[OPND3].data32l = ( CodeInfo->opnd[OPND3].data32l << 4 );
         output_data( CodeInfo, OP_I8, OPND3 );
     }
 #endif
@@ -594,7 +609,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, enum operand_type opn
     enum operand_type    opnd2 = CodeInfo->opnd[OPND2].type;
     enum operand_type    tbl_op2;
 
-    DebugMsg1(("match_phase_3 enter, opnd1=%" FX32 ", searching op2=%" FX32 "\n", opnd1, opnd2 ));
+    DebugMsg1(("match_phase_3 enter, opnd1=%" I32_SPEC "X, searching op2=%" I32_SPEC "X\n", opnd1, opnd2 ));
 
 #if AVXSUPP
     if ( CodeInfo->token >= VEX_START && ( vex_flags[ CodeInfo->token - VEX_START ] & VX_L ) ) {
@@ -623,7 +638,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, enum operand_type opn
 #endif
     do  {
         tbl_op2 = opnd_clstab[CodeInfo->pinstr->opclsidx].opnd_type[OPND2];
-        DebugMsg1(("match_phase_3: instr table op2=%" FX32 "\n", tbl_op2 ));
+        DebugMsg1(("match_phase_3: instr table op2=%" I32_SPEC "X\n", tbl_op2 ));
         switch( tbl_op2 ) {
         case OP_I: /* arith, MOV, IMUL, TEST */
             if( opnd2 & tbl_op2 ) {
@@ -700,7 +715,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, enum operand_type opn
                     break;
                 /* v2.03: lower bound wasn't checked */
                 /* range of unsigned 8-bit is -128 - +255 */
-                if( CodeInfo->opnd[OPND2].data <= UCHAR_MAX && CodeInfo->opnd[OPND2].data >= SCHAR_MIN ) {
+                if( CodeInfo->opnd[OPND2].data32l <= UCHAR_MAX && CodeInfo->opnd[OPND2].data32l >= SCHAR_MIN ) {
                     /* v2.06: if there's an external, adjust the fixup if it is > 8-bit */
                     if ( CodeInfo->opnd[OPND2].InsFixup != NULL ) {
                         if ( CodeInfo->opnd[OPND2].InsFixup->type == FIX_OFF16 ||
@@ -729,13 +744,15 @@ static ret_code match_phase_3( struct code_info *CodeInfo, enum operand_type opn
                 CodeInfo->token == T_XOR ) )
                 break;
 
-            if ( CodeInfo->opnd[OPND2].InsFixup != NULL ) /* external? then skip */
+            /* v2.11: skip externals - but don't skip undefines; forward8.asm */
+            //if ( CodeInfo->opnd[OPND2].InsFixup != NULL ) /* external? then skip */
+            if ( CodeInfo->opnd[OPND2].InsFixup != NULL && CodeInfo->opnd[OPND2].InsFixup->sym->state != SYM_UNDEFINED ) /* external? then skip */
                 break;
 
             if ( CodeInfo->const_size_fixed == FALSE )
-                if ( ( opnd1 & ( OP_R16 | OP_M16 ) ) && (int_8)CodeInfo->opnd[OPND2].data == (int_16)CodeInfo->opnd[OPND2].data )
+                if ( ( opnd1 & ( OP_R16 | OP_M16 ) ) && (int_8)CodeInfo->opnd[OPND2].data32l == (int_16)CodeInfo->opnd[OPND2].data32l )
                     tbl_op2 |= OP_I16;
-                else if ( ( opnd1 & ( OP_RGT16 | OP_MGT16 ) ) && (int_8)CodeInfo->opnd[OPND2].data == (int_32)CodeInfo->opnd[OPND2].data )
+                else if ( ( opnd1 & ( OP_RGT16 | OP_MGT16 ) ) && (int_8)CodeInfo->opnd[OPND2].data32l == (int_32)CodeInfo->opnd[OPND2].data32l )
                     tbl_op2 |= OP_I32;
 
             if( opnd2 & tbl_op2 ) {
@@ -748,7 +765,7 @@ static ret_code match_phase_3( struct code_info *CodeInfo, enum operand_type opn
             break;
         case OP_I_1: /* shift ops */
             if( opnd2 & tbl_op2 ) {
-               if ( CodeInfo->opnd[OPND2].data == 1 ) {
+               if ( CodeInfo->opnd[OPND2].data32l == 1 ) {
                    DebugMsg1(("match_phase_3: matched OP_I_1\n"));
                    output_opc( CodeInfo );
                    output_data( CodeInfo, opnd1, OPND1 );
@@ -915,12 +932,12 @@ ret_code codegen( struct code_info *CodeInfo, uint_32 oldofs )
                 retcode = check_operand_2( CodeInfo, tbl_op1 );
                 break;
             case OP_I8_U: /* INT xx; OUT xx, AL */
-                if( CodeInfo->opnd[OPND1].data <= UCHAR_MAX && CodeInfo->opnd[OPND1].data >= SCHAR_MIN ) {
+                if( CodeInfo->opnd[OPND1].data32l <= UCHAR_MAX && CodeInfo->opnd[OPND1].data32l >= SCHAR_MIN ) {
                     retcode = check_operand_2( CodeInfo, OP_I8 );
                 }
                 break;
             case OP_I_3: /* INT 3 */
-                if ( CodeInfo->opnd[OPND1].data == 3 ) {
+                if ( CodeInfo->opnd[OPND1].data32l == 3 ) {
                     retcode = check_operand_2( CodeInfo, OP_NONE );
                 }
                 break;

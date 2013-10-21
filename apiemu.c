@@ -25,7 +25,7 @@
 *  ========================================================================
 *
 *  Description: API emulations:
-*               gcc:     _makepath(), _splitpath(), _fullpath(), strupr()
+*               gcc:     _makepath(), _splitpath(), strupr()
 *               OW:      CharUpperA()
 *               PellesC: _makepath()
 *
@@ -59,7 +59,7 @@ static void copypart( char *buf, const char *p, int len, int maxlen )
     if( buf != NULL ) {
         if( len > maxlen ) len = maxlen;
         memcpy( buf, p, len );
-        buf[len] = '\0';
+        buf[len] = NULLC;
     }
 }
 
@@ -80,40 +80,25 @@ void _splitpath( const char *path, char *drive, char *dir, char *fname, char *ex
     const char *dotp;
     const char *fnamep;
     const char *startp;
-    unsigned    ch;
 
     /* take apart specification like -> //0/hd/user/fred/filename.ext for QNX */
     /* take apart specification like -> c:\fred\filename.ext for DOS, OS/2 */
 
     /* process node/drive specification */
     startp = path;
-    if( path[0] == PC  &&  path[1] == PC ) {
+    if( path[0] == PC && path[1] == PC ) {
         path += 2;
-        for( ;; ) {
-            if( *path == '\0' ) break;
-            if( *path == PC ) break;
-            if( *path == '.' ) break;
-            path++;
-        }
+        while ( *path != NULLC && *path != PC && *path != '.' ) path++;
     }
-    copypart( drive, startp, path - startp, _MAX_NODE );
+    copypart( drive, startp, path - startp, _MAX_NODE - 1 );
 
     /* process /user/fred/filename.ext for QNX */
     /* process /fred/filename.ext for DOS, OS/2 */
-    dotp = NULL;
-    fnamep = path;
-    startp = path;
 
-    for(;;) {           /* 07-jul-91 DJG -- save *path in ch for speed */
-        if( *path == '\0' )  break;
-        ch = *path;
-        if( ch == '.' ) {
+    for( dotp = NULL, fnamep = path, startp = path; *path; path++ ) {
+        if( *path == '.' ) {
             dotp = path;
-            ++path;
-            continue;
-        }
-        path++;
-        if( ISPC(ch) ) {
+        } else if( ISPC( *path ) ) {
             fnamep = path;
             dotp = NULL;
         }
@@ -121,7 +106,7 @@ void _splitpath( const char *path, char *drive, char *dir, char *fname, char *ex
     copypart( dir, startp, fnamep - startp, _MAX_DIR - 1 );
     if( dotp == NULL ) dotp = path;
     copypart( fname, fnamep, dotp - fnamep, _MAX_FNAME - 1 );
-    copypart( ext,   dotp,   path - dotp,   _MAX_EXT - 1);
+    copypart( ext,   dotp,   path - dotp,   _MAX_EXT - 1 );
 }
 
 /* create full Unix style path name from the components */
@@ -129,56 +114,53 @@ void _splitpath( const char *path, char *drive, char *dir, char *fname, char *ex
 void _makepath( char *path, const char *node, const char *dir, const char *fname, const char *ext )
 /*************************************************************************************************/
 {
-    *path = '\0';
+    *path = NULLC;
 
-    if( node != NULL ) {
-        if( *node != '\0' ) {
-            strcpy( path, node );
-            path = strchr( path, '\0' );
+    if( node != NULL && *node != NULLC ) {
+        strcpy( path, node );
+        path += strlen( path );
 
-            /* if node did not end in '/' then put in a provisional one */
-            if( path[-1] == PC )
-                path--;
-            else
-                *path = PC;
-        }
+        /* if node did not end in '/' then put in a provisional one */
+        if( path[-1] == PC )
+            path--;
+        else
+            *path = PC;
     }
-    if( dir != NULL ) {
-        if( *dir != '\0' ) {
-            /*  if dir does not start with a '/' and we had a node then
-                    stick in a separator
-            */
-            if( ( ! ISPC(*dir) ) && ( ISPC(*path) ) ) path++;
+    if( dir != NULL && *dir != NULLC ) {
+        /*  if dir does not start with a '/' and we had a node then
+         * stick in a separator
+         */
+        if( ( ! ISPC(*dir) ) && ( ISPC(*path) ) ) path++;
 
-            strcpy( path, dir );
-            path = strchr( path, '\0' );
+        strcpy( path, dir );
+        path += strlen( path );
 
-            /* if dir did not end in '/' then put in a provisional one */
-            if( path[-1] == PC )
-                path--;
-            else
-                *path = PC;
-        }
+        /* if dir did not end in '/' then put in a provisional one */
+        if( path[-1] == PC )
+            path--;
+        else
+            *path = PC;
     }
 
     if( fname != NULL ) {
         if( ( !ISPC(*fname) ) && ( ISPC(*path) ) ) path++;
 
         strcpy( path, fname );
-        path = strchr( path, '\0' );
+        path += strlen( path );
 
     } else {
         if( ISPC(*path) ) path++;
     }
-    if( ext != NULL ) {
-        if( *ext != '\0' ) {
-            if( *ext != '.' )  *path++ = '.';
-            strcpy( path, ext );
-            path = strchr( path, '\0' );
-        }
+
+    if( ext != NULL && *ext != NULLC ) {
+        if( *ext != '.' )  *path++ = '.';
+        strcpy( path, ext );
+        path += strlen( path );
     }
-    *path = '\0';
+    *path = NULLC;
 }
+
+#if 0 /* v2.11: _fullpath() no longer used */
 
 #define _WILL_FIT( c )  if(( (c) + 1 ) > size ) {       \
                             __set_errno( ERANGE );      \
@@ -193,7 +175,7 @@ static char *_sys_fullpath( char *buff, const char *path, size_t size )
     const char  *p;
     char        *q;
     size_t      len;
-    char        curr_dir[_MAX_PATH];
+    char        curr_dir[FILENAME_MAX];
 
     p = path;
     q = buff;
@@ -263,7 +245,7 @@ char *_fullpath( char *buff, const char *path, size_t size )
     char *ptr = NULL;
 
     if( buff == NULL ) {
-        size = _MAX_PATH;
+        size = FILENAME_MAX;
         ptr = malloc( size );
         if( ptr == NULL ) __set_errno( ENOMEM );
         buff = ptr;
@@ -281,6 +263,8 @@ char *_fullpath( char *buff, const char *path, size_t size )
     }
     return( buff );
 }
+
+#endif
 
 #if 0
 int _memicmp( const void *in_s1, const void *in_s2, size_t len )
@@ -381,55 +365,43 @@ char * _stdcall CharUpperA( char *lpsz )
 void _makepath( char *path, const char *node, const char *dir, const char *fname, const char *ext )
 /*************************************************************************************************/
 {
-    *path = '\0';
+    *path = NULLC;
 
     if( node != NULL ) {
-        if( *node != '\0' ) {
-            strcpy( path, node );
-            path = strchr( path, '\0' );
-
-            /* if node did not end in '/' then put in a provisional one */
-            if( path[-1] == PC )
-                path--;
-            else
-                *path = PC;
-        }
+        strcpy( path, node );
+        path += strlen( path );
     }
-    if( dir != NULL ) {
-        if( *dir != '\0' ) {
-            /*  if dir does not start with a '/' and we had a node then
-                    stick in a separator
-            */
-            if( ( ! ISPC(*dir) ) && ( ISPC(*path) ) ) path++;
+    if( dir != NULL && *dir != NULLC ) {
+        /*  if dir does not start with a '/' and we had a node then
+         * stick in a separator
+         */
+        if( ( ! ISPC(*dir) ) && ( ISPC(*path) ) ) path++;
 
-            strcpy( path, dir );
-            path = strchr( path, '\0' );
+        strcpy( path, dir );
+        path += strlen( path );
 
-            /* if dir did not end in '/' then put in a provisional one */
-            if( path[-1] == PC )
-                path--;
-            else
-                *path = PC;
-        }
+        /* if dir did not end in '/' then put in a provisional one */
+        if( path[-1] == PC )
+            path--;
+        else
+            *path = PC;
     }
 
     if( fname != NULL ) {
         if( ( !ISPC(*fname) ) && ( ISPC(*path) ) ) path++;
 
         strcpy( path, fname );
-        path = strchr( path, '\0' );
+        path += strlen( path );
 
-    } else {
-        if( ISPC(*path) ) path++;
-    }
+    } else if( *path )
+        path++;
+
     if( ext != NULL ) {
-        if( *ext != '\0' ) {
-            if( *ext != '.' )  *path++ = '.';
-            strcpy( path, ext );
-            path = strchr( path, '\0' );
-        }
+        if( *ext != '.' )  *path++ = '.';
+        strcpy( path, ext );
+        path += strlen( path );
     }
-    *path = '\0';
+    *path = NULLC;
 }
 
 #endif

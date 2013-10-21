@@ -34,19 +34,20 @@
 
 struct line_status {
     char *input;
-    char *output;
-    unsigned int index;
-    char *start;
-    char last_token;
+    char *output;   /* free space in token string buffer */
+    char *start;    /* start of line */
+    unsigned int index; /* index token array */
+    //char last_token;
     char flags;     /* v2.08: added */
     char flags2;    /* v2.08: was global var g_flags */
     char flags3;    /* v2.08: added */
 };
 
 enum tokenize_flags {
-    TOK_DEFAULT = 0x00,  /* default mode - handle conditional assembly */
-    TOK_RESCAN  = 0x01,  /* rescan - ignore conditional assembly */
+    TOK_DEFAULT      = 0x00,  /* default mode - handle conditional assembly */
+    TOK_RESCAN       = 0x01,  /* retokenize after expansion - ignore conditional assembly */
     TOK_NOCURLBRACES = 0x02,  /* don't handle {}-literals */
+    TOK_LINE         = 0x04,  /* full line is retokenized */
 };
 
 enum tok_flags3 {
@@ -54,7 +55,7 @@ enum tok_flags3 {
     TF3_EXPANSION = 0x02,  /* expansion operator % at pos 0 */
 };
 
-extern ret_code GetToken( struct asm_tok *, struct line_status * );
-extern int      Tokenize( char * , unsigned int, struct asm_tok *, unsigned int );
+extern ret_code GetToken( struct asm_tok[], struct line_status * );
+extern int      Tokenize( char *, unsigned int, struct asm_tok[], unsigned int );
 
 #endif

@@ -113,6 +113,9 @@ OpCls( RGT16,    R8_M08,     NONE  )
 OpCls( RGT16,    RGT8_MS,    NONE  )
 OpCls( RGT16,    RSPEC,      NONE  )
 OpCls( RGT16,    XMM,        NONE  )
+#if AVXSUPP
+OpCls( RGT16,    YMM,        NONE  ) /* v2.11 */
+#endif
 OpCls( RGT16,    XMM_M32,    NONE  )
 OpCls( RGT16,    XMM_M64,    NONE  )
 #if VMXSUPP

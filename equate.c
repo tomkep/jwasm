@@ -21,6 +21,7 @@
 #include "listing.h"
 #include "input.h"
 #include "fixup.h"
+#include "myassert.h"
 
 extern void myatoi128( const char *, uint_64[], int, int );
 
@@ -106,7 +107,7 @@ static void SetValue( struct asym *sym, struct expr *opndx )
             if( Parse_Pass != PASS_1 && sym->offset != ( opndx->sym->offset + opndx->value ) ) {
 #ifdef DEBUG_OUT
                 if ( !ModuleInfo.PhaseError )
-                    DebugMsg1(("SetValue(%s): Phase error, enforced by alias equate %" FX32 " != %" FX32 "\n", sym->name, sym->offset, opndx->sym->offset + opndx->value ));
+                    DebugMsg1(("SetValue(%s): Phase error, enforced by alias equate %" I32_SPEC "X != %" I32_SPEC "X\n", sym->name, sym->offset, opndx->sym->offset + opndx->value ));
 #endif
                 ModuleInfo.PhaseError = TRUE;
             }
@@ -119,7 +120,7 @@ static void SetValue( struct asym *sym, struct expr *opndx )
 }
 
 /* the '=' directive defines an assembly time variable.
- * this can only be a number, with or without "type".
+ * this can only be a number (constant or relocatable).
  */
 
 static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
@@ -250,6 +251,25 @@ static struct asym *CreateAssemblyTimeVariable( struct asm_tok tokenarray[] )
     return( sym );
 }
 
+/* '=' directive.*/
+
+ret_code EqualSgnDirective( int i, struct asm_tok tokenarray[] )
+/**************************************************************/
+{
+    struct asym *sym;
+
+    if( tokenarray[0].token != T_ID ) {
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[0].string_ptr ) );
+    }
+    if ( sym = CreateAssemblyTimeVariable( tokenarray ) ) {
+        if ( ModuleInfo.list == TRUE ) {
+            LstWrite( LSTTYPE_EQUATE, 0, sym );
+        }
+        return( NOT_ERROR );
+    }
+    return( ERROR );
+}
+
 /* CreateVariable().
  * define an assembly time variable directly without using the token buffer.
  * this is used for some internally generated variables (SIZESTR, INSTR, @Cpu)
@@ -336,7 +356,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
 
     if( sym == NULL ||
        sym->state == SYM_UNDEFINED ||
-       ( sym->state == SYM_EXTERNAL && sym->weak == TRUE ) ) {
+       ( sym->state == SYM_EXTERNAL && sym->weak == TRUE && sym->isproc == FALSE ) ) {
         /* It's a "new" equate.
          * wait with definition until type of equate is clear
          */
@@ -346,7 +366,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
 
     } else if( sym->isequate == FALSE ) {
 
-        DebugMsg1(( "CreateConstant(%s) state=%u, mem_type=%Xh, value=%" FX32 ", symbol redefinition\n", name, sym->state, sym->mem_type, sym->value));
+        DebugMsg1(( "CreateConstant(%s) state=%u, mem_type=%Xh, value=%" I32_SPEC "X, symbol redefinition\n", name, sym->state, sym->mem_type, sym->value));
         EmitErr( SYMBOL_REDEFINITION, name );
         return( NULL );
 
@@ -375,7 +395,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
         if ( opnd.hlvalue == 0 && opnd.value64 >= minintvalues[ModuleInfo.Ofssize] &&
             opnd.value64 <= maxintvalues[ModuleInfo.Ofssize] ) {
             rc = NOT_ERROR;
-            DebugMsg1(( "CreateConstant(%s): simple numeric value=%" I64d_SPEC "\n", name, opnd.value64 ));
+            DebugMsg1(( "CreateConstant(%s): simple numeric value=%" I64_SPEC "d\n", name, opnd.value64 ));
             i++;
         } else
             return ( SetTextMacro( tokenarray, sym, name, p ) );
@@ -401,7 +421,7 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
                 }
             DebugMsg1(("CreateConstant(%s): after ExpandLineItems: >%s<\n", name, p ));
         }
-        rc = EvalOperand( &i, tokenarray, Token_Count, &opnd, EXPF_NOERRMSG | EXPF_NOLCREATE );
+        rc = EvalOperand( &i, tokenarray, Token_Count, &opnd, EXPF_NOERRMSG | EXPF_NOUNDEF );
 
         /* v2.08: if it's a quoted string, handle it like a plain number */
         /* v2.10: quoted_string field is != 0 if kind == EXPR_FLOAT,
@@ -468,14 +488,20 @@ struct asym *CreateConstant( struct asm_tok tokenarray[] )
         //}
         sym->variable = FALSE;
         SetValue( sym, &opnd );
-        DebugMsg1(("CreateConstant(%s): memtype=%Xh value=%" I64X_SPEC " isproc=%u variable=%u type=%s\n", name, sym->mem_type, sym->value, sym->value3264, sym->isproc, sym->variable, sym->type ? sym->type->name : "NULL" ));
+        DebugMsg1(("CreateConstant(%s): memtype=%Xh value=%" I64_SPEC "X isproc=%u variable=%u type=%s\n",
+            name, sym->mem_type, (uint_64)sym->value + ( (uint_64)sym->value3264 << 32), sym->isproc, sym->variable, sym->type ? sym->type->name : "NULL" ));
         return( sym );
     }
     DebugMsg1(("CreateConstant(%s): calling SetTextMacro() [MI.Ofssize=%u]\n", name, ModuleInfo.Ofssize ));
     return ( SetTextMacro( tokenarray, sym, name, argbuffer ) );
 }
 
-/* EQU and '=' directives */
+/* EQU directive.
+ * This function is called rarely, since EQU
+ * is a preprocessor directive handled directly inside PreprocessLine().
+ * However, if fastpass is on, the preprocessor step is skipped in
+ * pass 2 and later, and then this function may be called.
+ */
 
 ret_code EquDirective( int i, struct asm_tok tokenarray[] )
 /*********************************************************/
@@ -483,10 +509,11 @@ ret_code EquDirective( int i, struct asm_tok tokenarray[] )
     struct asym *sym;
 
     if( tokenarray[0].token != T_ID ) {
-        EmitErr( SYNTAX_ERROR_EX, tokenarray[0].string_ptr );
-        return( ERROR );
+        return( EmitErr( SYNTAX_ERROR_EX, tokenarray[0].string_ptr ) );
     }
-    if ( sym = ( ( tokenarray[i].dirtype == DRT_EQUALSGN ) ? CreateAssemblyTimeVariable( tokenarray ) : CreateConstant( tokenarray ) ) ) {
+    DebugMsg1(("EquDirective(%s): calling CreateConstant\n", tokenarray[0].string_ptr ));
+    if ( sym = CreateConstant( tokenarray ) ) {
+        /**/myassert( sym->state == SYM_INTERNAL ); /* must not be a text macro */
         if ( ModuleInfo.list == TRUE ) {
             LstWrite( LSTTYPE_EQUATE, 0, sym );
         }
@@ -494,4 +521,3 @@ ret_code EquDirective( int i, struct asm_tok tokenarray[] )
     }
     return( ERROR );
 }
-

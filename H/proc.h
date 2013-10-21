@@ -37,12 +37,20 @@ extern struct dsym     *CurrProc;      /* current procedure */
 extern struct asym     *sym_ReservedStack;  /* max stack space required by INVOKE */
 #endif
 
+/* v2.11: proc status flags */
+enum proc_status {
+    PRST_INSIDE_PROLOGUE   = 0x01,
+    PRST_INSIDE_EPILOGUE   = 0x02,
+    PRST_FPO               = 0x04,
+    PRST_PROLOGUE_NOT_DONE = 0x80,
+};
+
 /*---------------------------------------------------------------------------*/
 
 //extern void             pushitem( void *, void * );
 //extern void             *popitem( void * );
 
-extern ret_code         ParseProc( int, struct asm_tok[], struct dsym *, bool, enum lang_type );
+extern ret_code         ParseProc( struct dsym *, int, struct asm_tok[], bool, enum lang_type );
 extern struct asym      *CreateProc( struct asym *, const char *, enum sym_state );
 extern void             DeleteProc( struct dsym * );
 
