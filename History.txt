@@ -1,6 +1,12 @@
 
    Changelog
 
+   11/16/2013, v2.11a:
+
+   Bugfixes:
+   -  regression in v2.11, Unix version only: _splitpath() emulation code
+      didn't handle correctly dots in directory part of the filename.
+
    10/20/2013, v2.11:
 
    Bugfixes:

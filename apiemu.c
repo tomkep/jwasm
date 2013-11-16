@@ -69,11 +69,6 @@ static void copypart( char *buf, const char *p, int len, int maxlen )
 
 /* split full path name into its components */
 
-/* Under QNX we will map drive to node, dir to dir, and
- * filename to (filename and extension)
- *          or (filename) if no extension requested.
- */
-
 void _splitpath( const char *path, char *drive, char *dir, char *fname, char *ext )
 /*********************************************************************************/
 {
@@ -81,8 +76,7 @@ void _splitpath( const char *path, char *drive, char *dir, char *fname, char *ex
     const char *fnamep;
     const char *startp;
 
-    /* take apart specification like -> //0/hd/user/fred/filename.ext for QNX */
-    /* take apart specification like -> c:\fred\filename.ext for DOS, OS/2 */
+    DebugMsg(("splitpath('%s') enter\n", path ));
 
     /* process node/drive specification */
     startp = path;
@@ -92,21 +86,21 @@ void _splitpath( const char *path, char *drive, char *dir, char *fname, char *ex
     }
     copypart( drive, startp, path - startp, _MAX_NODE - 1 );
 
-    /* process /user/fred/filename.ext for QNX */
-    /* process /fred/filename.ext for DOS, OS/2 */
-
-    for( dotp = NULL, fnamep = path, startp = path; *path; path++ ) {
-        if( *path == '.' ) {
-            dotp = path;
-        } else if( ISPC( *path ) ) {
-            fnamep = path;
-            dotp = NULL;
-        }
+    for( startp = path, fnamep = path; *path; path++ ) {
+        if ( ISPC( *path ) )
+            fnamep = path+1;
     }
     copypart( dir, startp, fnamep - startp, _MAX_DIR - 1 );
+    path = fnamep;
+
+    for( dotp = NULL; *path; path++ ) {
+        if( *path == '.' )
+            dotp = path;
+    }
     if( dotp == NULL ) dotp = path;
     copypart( fname, fnamep, dotp - fnamep, _MAX_FNAME - 1 );
     copypart( ext,   dotp,   path - dotp,   _MAX_EXT - 1 );
+    DebugMsg(("splitpath: drive=%s dir=%s fname=%s ext=%s\n", drive ? drive : "NULL", dir ? dir : "NULL", fname ? fname : "NULL", ext ? ext : "NULL" ));
 }
 
 /* create full Unix style path name from the components */
@@ -116,6 +110,7 @@ void _makepath( char *path, const char *node, const char *dir, const char *fname
 {
     *path = NULLC;
 
+    DebugMsg(("makepath(%s, %s, %s, %s) enter\n", node ? node : "NULL", dir ? dir : "NULL", fname ? fname : "NULL", ext ? ext : "NULL" ));
     if( node != NULL && *node != NULLC ) {
         strcpy( path, node );
         path += strlen( path );
