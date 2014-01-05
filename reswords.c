@@ -412,8 +412,8 @@ static struct {
 static bool  b64bit = FALSE; /* resw tables in 64bit mode? */
 #endif
 
-static unsigned int get_hash( const char *s, unsigned char size )
-/***************************************************************/
+static unsigned get_hash( const char *s, unsigned char size )
+/***********************************************************/
 {
     uint_32 h;
     uint_32 g;
@@ -428,12 +428,12 @@ static unsigned int get_hash( const char *s, unsigned char size )
     return( h % HASH_TABITEMS );
 }
 
-uint FindResWord( const char *name, unsigned char size )
-/******************************************************/
+unsigned FindResWord( const char *name, unsigned char size )
+/**********************************************************/
 /* search reserved word in hash table */
 {
     struct ReservedWord *inst;
-    uint i;
+    unsigned i;
 #ifdef BASEPTR
     __segment seg = FP_SEG( resw_strings );
 #endif
@@ -519,8 +519,8 @@ struct rename_node {
  * - length: length of new name
  */
 
-void RenameKeyword( uint token, const char *newname, uint_8 length )
-/******************************************************************/
+void RenameKeyword( unsigned token, const char *newname, uint_8 length )
+/**********************************************************************/
 {
     struct rename_node *curr;
     struct rename_node *prev;
@@ -645,8 +645,8 @@ void Set64Bit( bool newmode )
 }
 #endif
 
-void DisableKeyword( uint token )
-/*******************************/
+void DisableKeyword( unsigned token )
+/***********************************/
 {
     if ( !( ResWordTable[token].flags & RWF_DISABLED ) ) {
         RemoveResWord( token );
@@ -667,7 +667,7 @@ void DisableKeyword( uint token )
 bool IsKeywordDisabled( const char *name, int len )
 /*************************************************/
 {
-    uint  token;
+    unsigned token;
     for ( token = Removed.Head; token != 0; token = ResWordTable[token].next )
         if( ResWordTable[token].name[ len ] == NULLC && _memicmp( name, ResWordTable[token].name, len ) == 0 )
             return( TRUE );
@@ -678,8 +678,8 @@ bool IsKeywordDisabled( const char *name, int len )
  * max size is 255.
  */
 
-char *GetResWName( uint resword, char *buff )
-/*******************************************/
+char *GetResWName( unsigned resword, char *buff )
+/***********************************************/
 {
 #ifdef __I86__
     static char intbuff[32];

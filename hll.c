@@ -126,11 +126,11 @@ static const char neg_cjmptype[]      = {   0,    1,    0,    0,    1,   1  };
  */
 
 #ifdef DEBUG_OUT
-static uint evallvl;
-static uint cntAlloc;  /* # of allocated hll_items */
-static uint cntReused; /* # of reused hll_items */
-static uint cntCond;   /* # of allocated 'condlines'-buffer in .WHILE-blocks */
-static uint cntCondBytes; /* total size of allocated 'condlines'-buffers */
+static unsigned evallvl;
+static unsigned cntAlloc;  /* # of allocated hll_items */
+static unsigned cntReused; /* # of reused hll_items */
+static unsigned cntCond;   /* # of allocated 'condlines'-buffer in .WHILE-blocks */
+static unsigned cntCondBytes; /* total size of allocated 'condlines'-buffers */
 #endif
 
 static uint_32 GetHllLabel( void )

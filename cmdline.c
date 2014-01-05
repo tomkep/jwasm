@@ -28,7 +28,7 @@
 *
 ****************************************************************************/
 
-#include <stdarg.h>
+//#include <stdarg.h>
 #include <stddef.h>
 #include <ctype.h>
 
@@ -39,6 +39,7 @@
 #include "dbgcv.h"
 #include "cmdline.h"
 #include "myassert.h"
+#include "input.h" /* GetFNamePart() */
 
 //#ifdef __OSI__
 //  #include "ostype.h"
@@ -147,7 +148,8 @@ struct global_options Options = {
 #endif
 };
 
-char                    *DefaultDir[NUM_FILE_TYPES] = { NULL, NULL, NULL, NULL };
+char *DefaultDir[NUM_FILE_TYPES] = { NULL, NULL, NULL, NULL };
+//static char *DefaultExt[NUM_FILE_TYPES] = { OBJ_EXT, LST_EXT, ERR_EXT };
 
 #define MAX_RSP_NESTING 15  /* nesting of response files */
 
@@ -280,23 +282,20 @@ static void get_fname( int type, const char *token )
 /*
  * called by -Fo, -Fw or -Fl (for .OBJ, .ERR or .LST filenames ).
  * also called by -Fd; in this case type is > NUM_FILE_TYPES!
+ * v2.12: _splitpath()/_makepath() removed.
  */
 {
-    char        *pExt;
+    const char  *pName;
     char        name [ FILENAME_MAX ];
-    char        drive[_MAX_DRIVE];
-    char        dir[_MAX_DIR];
-    char        fname[_MAX_FNAME];
-    char        ext[_MAX_EXT];
-    //char        msgbuf[MAXMSGSIZE];
 
     DebugMsg(("get_fname( type=%u, >%s< ) enter\n", type, token ));
-    _splitpath( token, drive, dir, fname, ext );
+    //_splitpath( token, drive, dir, fname, ext );
+    pName = GetFNamePart( token );
     /*
      * If name's ending with a '\' (or '/' in Unix), it's supposed
      * to be a directory name only.
      */
-    if( fname[0] == NULLC ) {
+    if( *pName == NULLC ) {
         DebugMsg(("get_fname(%u, >%s< ) name is empty or a directory\n", type, token ));
         /* v2.10: ensure type is < NUM_FILE_TYPES */
         if ( type < NUM_FILE_TYPES ) {
@@ -308,19 +307,24 @@ static void get_fname( int type, const char *token )
         return;
     }
     /* v2.10: ensure type is < NUM_FILE_TYPES */
-    if ( drive[0] == NULLC && dir[0] == NULLC && type < NUM_FILE_TYPES && DefaultDir[type] ) {
+    //if ( drive[0] == NULLC && dir[0] == NULLC && type < NUM_FILE_TYPES && DefaultDir[type] ) {
+    name[0] = NULLC;
+    if ( pName == token && type < NUM_FILE_TYPES && DefaultDir[type] ) {
         DebugMsg(("get_fname: default drive+dir used: %s\n" ));
-        _splitpath( DefaultDir[type], drive, dir, NULL, NULL );
+        //_splitpath( DefaultDir[type], drive, dir, NULL, NULL );
+        strcpy( name, DefaultDir[type] );
     }
-    pExt = ext;
-    if( ext[0] == NULLC ) {
-        switch( type ) {
-        case ERR:   pExt = ERR_EXT;  break;
-        case LST:   pExt = LST_EXT;  break;
-        case OBJ:   pExt = OBJ_EXT;  break;
+    strcat( name, token );
+#if 0 /* v2.12: extension will be set in SetFileNames() */
+    if( type && type < NUM_FILE_TYPES ) {
+        char *pExt = GetExtPart( name );
+        if ( *pExt == NULLC ) {
+            *pExt++ = '.';
+            strcpy( pExt, DefaultExt[type-1] );
         }
     }
-    _makepath( name, drive, dir, fname, pExt );
+#endif
+    //_makepath( name, drive, dir, fname, pExt );
     if( Options.names[type] != NULL ) {
         MemFree( Options.names[type] );
     }

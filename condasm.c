@@ -452,7 +452,7 @@ ret_code ErrorDirective( int i, struct asm_tok tokenarray[] )
 /***********************************************************/
 {
     struct expr opndx;
-    uint direct;
+    unsigned direct;
     const char *string1;
     const char *string2;
     int errmsg = EMPTY;

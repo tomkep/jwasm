@@ -1,6 +1,29 @@
 
    Changelog
 
+   __/__/2014, v2.12:
+
+   Bugfixes:
+   -  COMM directive: there was no check that numeric arguments 'size' or 
+      'count' did fit into 32-bits; see comm06.aso.
+   -  regression in v2.10-2.11: in 16-/32-bit, if a FASTCALL procedure was
+      first prototyped and then defined, the assembly process may have stopped
+      with error 'General Failure'; see proc9.asm.
+   -  regression in v2.10-2.11, COFF format: if full segment directives were
+      used and a bss segment didn't have the expected class name, jwasm may
+      have calculated wrong file positions of section data and relocations;
+      see coff1.asc.
+   -  operator OPATTR: bit 1 (=indirect memref) and language type flags of 
+      result may have been set even if operand was an invalid reference; see
+      opattr9.asm.
+   -  ELF format: object module may have been larger than necessary due to
+      bss section sizes that were not ignored for file offset calculations.
+   -  GPF might have occured if a TYPE for an undefined variable was 
+      specified in an expression; see expr5.aso. 
+
+   Other changes:
+   -  OPTION WIN64:4 added.
+
    11/16/2013, v2.11a:
 
    Bugfixes:

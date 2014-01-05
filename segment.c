@@ -85,8 +85,9 @@ static const struct typeinfo SegAttrValue[] = {
 #undef sitem
 };
 
-static uint             grpdefidx;      /* Number of group definitions   */
-static uint             LnamesIdx;      /* Number of LNAMES definitions  */
+static unsigned         grpdefidx;      /* Number of group definitions   */
+/* v2.12: obsolete, lnames are OMF only */
+//static unsigned         LnamesIdx;      /* Number of LNAMES definitions  */
 
 static struct dsym      *SegStack[MAX_SEG_NESTING]; /* stack of open segments */
 static int              stkindex;       /* current top of stack */
@@ -178,6 +179,9 @@ static void AddLnameItem( struct asym *sym )
 /******************************************/
 {
     QAddItem( &ModuleInfo.g.LnameQueue, sym );
+    //return( ++LnamesIdx );
+    return;
+
 }
 
 /* what's inserted into the LNAMES queue:
@@ -329,8 +333,7 @@ static struct dsym *CreateGroup( const char *name )
 
         grp->sym.list = TRUE;
         grp->e.grpinfo->grp_idx = ++grpdefidx;
-        grp->e.grpinfo->lname_idx = ++LnamesIdx;
-        AddLnameItem( &grp->sym );
+        /* grp->e.grpinfo->lname_idx = */ AddLnameItem( &grp->sym );
     } else if( grp->sym.state != SYM_GRP ) {
         EmitErr( SYMBOL_REDEFINITION, name );
         return( NULL );
@@ -454,12 +457,12 @@ ret_code GrpDir( int i, struct asm_tok tokenarray[] )
                 return( EmitErr( GROUP_SEGMENT_SIZE_CONFLICT, grp->sym.name, seg->sym.name ) );
             }
         } else {
-            /* v2.04: don't check the "defined" flag. It's for IFDEF only! */
+            /* v2.04: don't check the "defined" flag in passes > 1. It's for IFDEF only! */
             //if( seg == NULL || seg->sym.state != SYM_SEG || seg->sym.defined == FALSE ) {
             /* v2.07: check the "segment" field instead of "defined" flag! */
             //if( seg == NULL || seg->sym.state != SYM_SEG ) {
             if( seg == NULL || seg->sym.state != SYM_SEG || seg->sym.segment == NULL ) {
-                return( EmitErr( SEG_NOT_DEFINED, name ) );
+                return( EmitErr( SEGMENT_NOT_DEFINED, name ) );
             }
         }
 
@@ -578,8 +581,8 @@ void DefineFlatGroup( void )
     ModuleInfo.flat_grp->sym.isdefined = TRUE; /* v2.09 */
 }
 
-uint GetSegIdx( const struct asym *sym )
-/**************************************/
+unsigned GetSegIdx( const struct asym *sym )
+/******************************************/
 /* get idx to sym's segment */
 {
     if( sym )
@@ -770,9 +773,7 @@ static struct asym *CreateClassLname( const char *name )
          but they are in a queue */
         sym = SymAlloc( name );
         sym->state = SYM_CLASS_LNAME;
-        sym->class_lname_idx = ++LnamesIdx; /* index needed by OMF only */
-        /* put it into the lname table */
-        AddLnameItem( sym );
+        /* sym->class_lname_idx = */ AddLnameItem( sym ); /* index needed by OMF only */
     }
 
     return( sym );
@@ -821,10 +822,12 @@ struct asym *CreateIntSegment( const char *name, const char *classname, uint_8 a
     } else
         seg = CreateSegment( NULL, name, FALSE );
     if ( seg ) {
-        if( seg->e.seginfo->lname_idx == 0 ) {
+        /* v2.12: check 'isdefined' instead of 'lname_idx' */
+        //if( seg->e.seginfo->lname_idx == 0 ) {
+        if( seg->sym.isdefined == FALSE ) {
             seg->e.seginfo->seg_idx = ++ModuleInfo.g.num_segs;
-            seg->e.seginfo->lname_idx = ++LnamesIdx;
-            AddLnameItem( &seg->sym );
+            /* seg->e.seginfo->lname_idx = */ AddLnameItem( &seg->sym );
+            seg->sym.isdefined = TRUE; /* v2.12: added */
         }
         seg->e.seginfo->internal = TRUE; /* segment has private buffer */
         seg->sym.segment = &seg->sym;
@@ -871,7 +874,7 @@ static ret_code SetCurrSeg( int i, struct asm_tok tokenarray[] )
     sym = SymSearch( tokenarray[0].string_ptr );
     DebugMsg1(("SetCurrSeg(%s) sym=%p\n", tokenarray[0].string_ptr, sym));
     if ( sym == NULL || sym->state != SYM_SEG ) {
-        return( EmitErr( SEG_NOT_DEFINED, tokenarray[0].string_ptr ) );
+        return( EmitErr( SEGMENT_NOT_DEFINED, tokenarray[0].string_ptr ) );
     }
     /* v2.04: added */
     sym->isdefined = TRUE;
@@ -920,7 +923,7 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
     const struct typeinfo *type;          /* type of option */
     int                 temp;
     int                 temp2;
-    uint                initstate = 0;  /* flags for attribute initialization */
+    unsigned            initstate = 0;  /* flags for attribute initialization */
     //unsigned char       oldreadonly;    /* readonly value of a defined segment */
     //unsigned char       oldsegtype;
     unsigned char       oldOfssize;
@@ -952,7 +955,8 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         sym = (struct asym *)CreateSegment( (struct dsym *)sym, name, TRUE );
         sym->list = TRUE; /* always list segments */
         dir = (struct dsym *)sym;
-        dir->e.seginfo->seg_idx = ++ModuleInfo.g.num_segs;
+        /* v2.12: seg_idx member now set AFTER parsing is done */
+        //dir->e.seginfo->seg_idx = ++ModuleInfo.g.num_segs;
 #if 0 //COFF_SUPPORT || ELF_SUPPORT /* v2.09: removed, since not Masm-compatible */
         if ( Options.output_format == OFORMAT_COFF
 #if ELF_SUPPORT
@@ -981,13 +985,16 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
     } else if ( sym->state == SYM_SEG ) { /* segment already defined? */
         
         dir = (struct dsym *)sym;
-        if( dir->e.seginfo->lname_idx == 0 ) {
+        /* v2.12: check 'isdefined' instead of lname_idx */
+        //if( dir->e.seginfo->lname_idx == 0 ) {
+        if( sym->isdefined == FALSE ) {
             /* segment was forward referenced (in a GROUP directive), but not really set up */
             /* the segment list is to be sorted.
              * So unlink the segment and add it at the end.
              */
             UnlinkSeg( dir );
-            dir->e.seginfo->seg_idx = ++ModuleInfo.g.num_segs;
+            /* v2.12: seg_idx member now set AFTER parsing is done */
+            //dir->e.seginfo->seg_idx = ++ModuleInfo.g.num_segs;
             dir->next = NULL;
             if ( SymTables[TAB_SEG].head == NULL )
                 SymTables[TAB_SEG].head = SymTables[TAB_SEG].tail = dir;
@@ -1120,7 +1127,9 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
 #if COMDATSUPP
         case INIT_COMBINE_COMDAT:
             DebugMsg1(("SegmentDir(%s): COMDAT found\n", name ));
-            if ( Options.output_format != OFORMAT_COFF ) {
+            /* v2.12: COMDAT supported by OMF */
+            //if ( Options.output_format != OFORMAT_COFF ) {
+            if ( Options.output_format != OFORMAT_COFF && Options.output_format != OFORMAT_OMF ) {
                 EmitErr( NOT_SUPPORTED_WITH_CURR_FORMAT, tokenarray[i].string_ptr );
                 i = Token_Count; /* stop further parsing of this line */
                 break;
@@ -1317,10 +1326,17 @@ ret_code SegmentDir( int i, struct asm_tok tokenarray[] )
         sym->isdefined = TRUE;
         sym->segment = sym;
         sym->offset = 0; /* remains 0 ( =segment's local start offset ) */
-        if( dir->e.seginfo->lname_idx == 0 ) {
-            dir->e.seginfo->lname_idx = ++LnamesIdx;
-            AddLnameItem( sym );
+#if COMDATSUPP
+        /* no segment index for COMDAT segments in OMF! */
+        if ( dir->e.seginfo->comdat_selection && Options.output_format == OFORMAT_OMF )
+            ;
+        else {
+#endif
+            dir->e.seginfo->seg_idx = ++ModuleInfo.g.num_segs;
+            /* dir->e.seginfo->lname_idx = */ AddLnameItem( sym );
+#if COMDATSUPP
         }
+#endif
 
     }
     if ( newcharacteristics )
@@ -1461,7 +1477,7 @@ void SegmentInit( int pass )
 
     if ( pass == PASS_1 ) {
         grpdefidx   = 0;
-        LnamesIdx   = 1; /* the first Lname is a null-string */
+        //LnamesIdx   = 1; /* the first Lname is a null-string */
         //pCodeBuff = NULL;
         buffer_size = 0;
         //flat_grp    = NULL;

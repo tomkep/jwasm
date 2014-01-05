@@ -13,7 +13,7 @@ struct line_num_info {
         };
     };
     union {
-        uint srcfile;
+        unsigned srcfile;
         struct asym *sym; /* used if number is 0 ( COFF only ) */
     };
 };

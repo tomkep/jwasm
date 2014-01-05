@@ -199,7 +199,7 @@ ret_code GetLangType( int *i, struct asm_tok tokenarray[], enum lang_type *plang
 int SizeFromRegister( int registertoken )
 /***************************************/
 {
-    uint flags;
+    unsigned flags;
     flags = GetSflagsSp( registertoken ) & SFR_SIZMSK;
 
     if ( flags )
@@ -2775,7 +2775,7 @@ ret_code ParseLine( struct asm_tok tokenarray[] )
 {
     int                 i;
     int                 j;
-    uint                dirflags;
+    unsigned            dirflags;
     unsigned            CurrOpnd;
     ret_code            temp;
     struct asym         *sym;

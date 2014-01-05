@@ -11,11 +11,11 @@
  */
 
 /* directives field usage:
- * value  = DF_  flags    SpecialTable.value  uint
+ * value  = DF_  flags    SpecialTable.value  unsigned
  * bytval = DRT_ value    SpecialTable.bytval uint_8
  * flags  = RWF_ flags    ResWordTable.flags  uint_8
  * cpu    = cpu  flags    SpecialTable.cpu    uint_16
- * sflags = dep. on DRT_  SpecialTable.sflags uint
+ * sflags = dep. on DRT_  SpecialTable.sflags unsigned
  */
 
 /* cpu directives */

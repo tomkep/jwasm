@@ -1142,7 +1142,7 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
             //char is_r0 = FALSE;
             if ( opnd.kind == EXPR_REG ) {
                 int reg = opnd.base_reg->tokval;
-                uint optype = GetValueSp( reg );
+                unsigned optype = GetValueSp( reg );
 
                 /* v2.11 */
                 if ( curr->sym.is_vararg == TRUE && psize < pushsize )

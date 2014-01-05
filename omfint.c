@@ -44,15 +44,15 @@
 #pragma pack( push, 1 )
 /* fields cmd, reclen and buffer must be consecutive */
 struct outbuff {
-    uint        in_buf;   /* number of bytes in buffer  */
+    unsigned    in_buf;   /* number of bytes in buffer  */
     uint_8      cmd;      /* record cmd                 */
     uint_16     reclen;   /* record length              */
     uint_8      buffer[OBJ_BUFFER_SIZE];
 };
 #pragma pack( pop )
 
-static void safeWrite( FILE *file, const uint_8 *buf, uint len )
-/**************************************************************/
+static void safeWrite( FILE *file, const uint_8 *buf, unsigned len )
+/******************************************************************/
 {
     if( fwrite( buf, 1, len, file ) != len )
         WriteError();
@@ -153,8 +153,8 @@ static void PutDword( struct outbuff *out, uint_32 value )
 
 /* write a byte sequence to the current record */
 
-static void PutMem( struct outbuff *out, const uint_8 *buf, uint length )
-/***********************************************************************/
+static void PutMem( struct outbuff *out, const uint_8 *buf, unsigned length )
+/***************************************************************************/
 {
     /* ensure that there is enough free space in the buffer,
      * and also 1 byte left for the chksum!
@@ -356,9 +356,7 @@ static int FFQUAL writeModend( struct outbuff *out, const struct omf_rec *objr )
         //mtype |= 0x40 | is_log;
         mtype |= 0x41;
         PutByte( out, mtype );
-        //out->in_buf += OmfFixGenRef( &objr->d.modend.ref, is_log, out->buffer + out->in_buf,
-        out->in_buf += OmfFixGenLogRef( &objr->d.modend.ref, out->buffer + out->in_buf,
-            is32 ? FIX_GEN_MS386 : FIX_GEN_INTEL );
+        PutMem( out, objr->data, objr->length );
     } else
         PutByte( out, mtype );
 
@@ -428,7 +426,7 @@ static int FFQUAL writeComdat( struct outbuff *out, const struct omf_rec *objr )
     if( ( objr->d.comdat.attributes & COMDAT_ALLOC_MASK ) == COMDAT_EXPLICIT ) {
         PutBase( out, &objr->d.comdat.base );
     }
-    PutIndex( out, objr->d.comdat.public_name_idx );
+    PutIndex( out, objr->d.comdat.public_lname_idx );
     /* record is already in ms omf format */
     PutMem( out, objr->data, objr->length );
     WEndRec( out );
@@ -445,7 +443,7 @@ static int FFQUAL writeLinsym( struct outbuff *out, const struct omf_rec *objr )
 
     WBegRec( out, CMD_LINSYM + objr->is_32 );
     PutByte( out, objr->d.linsym.flags );
-    PutIndex( out, objr->d.linsym.public_name_idx );
+    PutIndex( out, objr->d.linsym.public_lname_idx );
     PutMem( out, objr->data, objr->length );
     WEndRec( out );
     return( 0 );
@@ -505,8 +503,8 @@ static const uint_8 func_index[] = {
     OFF_SEGDEF, OFF_MISC,   OFF_MISC32, 0,         /* 98 SEGDEF, GRPDEF, FIXUP,  ???    */
     OFF_LEDATA, OFF_LEDATA, 0,          0,         /* A0 LEDATA, LIDATA, LIBHED, LIBNAM */
     0,          0,          0,          0,         /* A8 LIBLOC, LIBDIC, ???,    ???    */
-    OFF_MISC,   OFF_MISC32, OFF_MISC,   OFF_PUBDEF,/* B0 COMDEF, BAKPAT, LEXTDEF,LPUBDEF */
-    OFF_MISC,   0,          OFF_MISC,   0,         /* B8 LCOMDEF,???,    CEXTDF, ???    */
+    OFF_MISC,   OFF_MISC32, OFF_MISC,   OFF_PUBDEF,/* B0 COMDEF, BAKPAT, LEXTDEF,LPUBDEF*/
+    OFF_MISC,   0,          OFF_MISC,   0,         /* B8 LCOMDEF,???,    CEXTDEF,???    */
 #if COMDATSUPP
     0,          OFF_COMDAT, OFF_LINSYM, OFF_MISC,  /* C0 ???,    COMDAT, LINSYM, ALIAS  */
 #else

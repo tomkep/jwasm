@@ -64,6 +64,17 @@ jmp_buf jmpenv;
 
 #define USELSLINE 1 /* must match switch in listing.c! */
 
+//#define ASM_EXT "asm"
+#ifdef __UNIX__
+#define OBJ_EXT "o"
+#else
+#define OBJ_EXT "obj"
+#endif
+#define LST_EXT "lst"
+#define ERR_EXT "err"
+#define BIN_EXT "BIN"
+#define EXE_EXT "EXE"
+
 extern int_32           LastCodeBufSize;
 extern char             *DefaultDir[NUM_FILE_TYPES];
 extern const char       *ModelToken[];
@@ -150,8 +161,8 @@ static const enum seg_type stt[] = {
  * _BSS  -> .bss
  */
 
-char *ConvertSectionName( struct asym *sym, enum seg_type *pst, char *coffname )
-/******************************************************************************/
+char *ConvertSectionName( const struct asym *sym, enum seg_type *pst, char *buffer )
+/**********************************************************************************/
 {
     int i;
 
@@ -175,9 +186,9 @@ char *ConvertSectionName( struct asym *sym, enum seg_type *pst, char *coffname )
                     return( (char *)cst[i].dst );
                 }
 
-                strcpy( coffname, cst[i].dst );
-                strcat( coffname, sym->name+cst[i].len );
-                return( coffname );
+                strcpy( buffer, cst[i].dst );
+                strcat( buffer, sym->name+cst[i].len );
+                return( buffer );
             }
         }
     }
@@ -261,7 +272,7 @@ void OutputBytes( const unsigned char *pbytes, int len, struct fixup *fixup )
             idx = CurrSeg->e.seginfo->current_loc - CurrSeg->e.seginfo->start_loc;
         }
         if ( fixup )
-            store_fixup( fixup, (int_32 *)pbytes );
+            store_fixup( fixup, CurrSeg, (int_32 *)pbytes );
         //DebugMsg(("OutputBytes: buff=%p, idx=%" I32_SPEC "X, byte=%X\n", CurrSeg->e.seginfo->CodeBuffer, idx, *pbytes ));
         memcpy( &CurrSeg->e.seginfo->CodeBuffer[idx], pbytes, len );
     }
@@ -1049,15 +1060,21 @@ static void get_os_include( void )
 static void get_module_name( void )
 /*********************************/
 {
-    char dummy[_MAX_EXT];
+    //char dummy[_MAX_EXT];
     char        *p;
 
     /* v2.08: prefer name given by -nm option */
     if ( Options.names[OPTN_MODULE_NAME] ) {
         strncpy( ModuleInfo.name, Options.names[OPTN_MODULE_NAME], sizeof( ModuleInfo.name ) );
         ModuleInfo.name[ sizeof( ModuleInfo.name ) - 1] = NULLC;
-    } else
-        _splitpath( CurrFName[ASM], NULL, NULL, ModuleInfo.name, dummy );
+    } else {
+        /* v2.12: _splitpath()/_makepath() removed */
+        const char *fn = GetFNamePart( CurrFName[ASM] );
+        char *ext = GetExtPart( fn );
+        memcpy( ModuleInfo.name, fn, ext - fn );
+        ModuleInfo.name[ ext - fn ] = NULLC;
+        //_splitpath( CurrFName[ASM], NULL, NULL, ModuleInfo.name, dummy );
+    }
 
     _strupr( ModuleInfo.name );
     /* the module name must be a valid identifier, because it's used
@@ -1218,10 +1235,10 @@ static char *GetExt( int type )
                 || Options.sub_format == SFORMAT_PE
 #endif
                )
-                return("EXE");
+                return( EXE_EXT );
             else
 #endif
-                return("BIN");
+                return( BIN_EXT );
 #endif
         return( OBJ_EXT );
     case LST:
@@ -1234,45 +1251,53 @@ static char *GetExt( int type )
 
 /* set filenames for .obj, .lst and .err
  * in:
- *  name: full assembly source name
+ *  name: assembly source name
  *  DefaultDir[]: default directory part for .obj, .lst and .err
  * in:
  *  CurrFName[] for .obj, .lst and .err ( may be NULL )
+ * v2.12: _splitpath()/_makepath() removed.
  */
 
 static void SetFilenames( const char *name )
 /******************************************/
 {
     int i;
-    char fnamesrc[_MAX_FNAME];
-    char drive[_MAX_DRIVE];
-    char dir[_MAX_DIR];
-    char fname[_MAX_FNAME];
-    char ext[_MAX_EXT];
+    const char *fn;
+    char *ext;
     char path[ FILENAME_MAX ];
 
     DebugMsg(("SetFilenames(\"%s\") enter\n", name ));
-    //memset( CurrFName, 0, sizeof( CurrFName ) );
+
+    /* set CurrFName[ASM] */
     CurrFName[ASM] = LclAlloc( strlen( name ) + 1 );
     strcpy( CurrFName[ASM], name );
-    _splitpath( name, NULL, NULL, fnamesrc, NULL );
+
+    /* set [OBJ], [ERR], [LST] */
+    fn = GetFNamePart( name );
     for ( i = ASM+1; i < NUM_FILE_TYPES; i++ ) {
         if( Options.names[i] == NULL ) {
-            drive[0] = NULLC;
-            dir[0] = NULLC;
+            path[0] = NULLC;
             if ( DefaultDir[i])
-                _splitpath( DefaultDir[i], drive, dir, NULL, NULL );
-            _makepath( path, drive, dir, fnamesrc, GetExt( i ) );
+                strcpy( path, DefaultDir[i] );
+            strcat( path, fn );
+            ext = GetExtPart( path );
+            *ext++  = '.';
+            strcpy( ext, GetExt( i ) );
+
         } else {
             /* filename has been set by cmdline option -Fo, -Fl or -Fr */
-            _splitpath( Options.names[i], drive, dir, fname, ext );
-            if( fname[0] == NULLC )
-                strcpy( fname, fnamesrc );
-            if( ext[0] == NULLC )
+            const char *fn2;
+            strcpy( path, Options.names[i] );
+            fn2 = GetFNamePart( path );
+            if( *fn2 == NULLC )
+                strcpy( (char *)fn2, fn );
+            ext = GetExtPart( fn2 );
+            if( *ext == NULLC ) {
+                *ext++  = '.';
                 strcpy( ext, GetExt( i ) );
-
-            _makepath( path, drive, dir, fname, ext );
+            }
         }
+        DebugMsg(("SetFilenames: i=%u >%s<\n", i, path ));
         CurrFName[i] = LclAlloc( strlen( path ) + 1 );
         strcpy( CurrFName[i], path );
     }

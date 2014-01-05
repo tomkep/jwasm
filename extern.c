@@ -456,7 +456,7 @@ static ret_code HandleAltname( char *altname, struct asym *sym )
         } else {
 
             if ( symalt ) {
-                DebugMsg(("HandleAltname: %s found\n", altname ));
+                DebugMsg(("HandleAltname: symbol '%s' found, state=%u\n", altname, symalt->state ));
                 if ( symalt->state != SYM_INTERNAL &&
                     symalt->state != SYM_EXTERNAL &&
                     symalt->state != SYM_UNDEFINED ) {
@@ -466,8 +466,8 @@ static ret_code HandleAltname( char *altname, struct asym *sym )
                 symalt = SymCreate( altname );
                 sym_add_table( &SymTables[TAB_UNDEF], (struct dsym *)symalt );
             }
-            /* make sure the alt symbol becomes strong if it is an external.
-             * v2.11: not for OMF ( maybe neither for COFF/ELF? ).
+            /* make sure the alt symbol becomes strong if it is an external
+             * v2.11: don't do this for OMF ( maybe neither for COFF/ELF? )
              */
             if ( Options.output_format != OFORMAT_OMF )
                 symalt->used = TRUE;
@@ -476,7 +476,8 @@ static ret_code HandleAltname( char *altname, struct asym *sym )
              */
             if ( sym->altname == NULL ) {
                 sym->altname = symalt;
-#if 0 /* v2.11: member nextext wasn't really free to use */
+#if 0 /* v2.11: removed. Member nextext wasn't free to use */
+                DebugMsg1(("HandleAltname: symbol '%s' added to AltQueue\n", sym->name ));
                 ((struct dsym *)sym)->nextext = NULL;
                 if ( ModuleInfo.g.AltQueue.head == NULL )
                     ModuleInfo.g.AltQueue.head = ModuleInfo.g.AltQueue.tail = (struct dsym *)sym;
@@ -668,8 +669,8 @@ ret_code ExternDirective( int i, struct asm_tok tokenarray[] )
 
 /* helper for COMM directive */
 
-static struct asym *MakeComm( char *name, struct asym *sym, int size, int count, bool isfar )
-/*******************************************************************************************/
+static struct asym *MakeComm( char *name, struct asym *sym, uint_32 size, uint_32 count, bool isfar )
+/***************************************************************************************************/
 {
     sym = CreateComm( sym, name );
     if( sym == NULL )
@@ -711,8 +712,8 @@ ret_code CommDirective( int i, struct asm_tok tokenarray[] )
     bool            isfar;
     //int             distance;
     int             tmp;
-    int             size;
-    int             count;
+    uint_32         size;  /* v2.12: changed from 'int' to 'uint_32' */
+    uint_32         count; /* v2.12: changed from 'int' to 'uint_32' */
     struct asym     *sym;
     struct expr     opndx;
     enum lang_type  langtype;
@@ -765,22 +766,21 @@ ret_code CommDirective( int i, struct asm_tok tokenarray[] )
         //if ( EvalOperand( &i, tokenarray, tmp, &opndx, 0 ) == ERROR )
         if ( EvalOperand( &i, tokenarray, tmp, &opndx, EXPF_NOUNDEF ) == ERROR )
             return( ERROR );
+
         /* v2.03: a string constant is accepted by Masm */
-        //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
-        if ( opndx.kind != EXPR_CONST ) {
-            EmitError( CONSTANT_EXPECTED );
-            opndx.value = 1;
-        }
         /* v2.11: don't accept NEAR or FAR */
-        if ( ( opndx.mem_type & MT_SPECIAL_MASK) == MT_ADDRESS ) {
+        /* v2.12: check for too large value added */
+        //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
+        if ( opndx.kind != EXPR_CONST )
+            EmitError( CONSTANT_EXPECTED );
+        else if ( ( opndx.mem_type & MT_SPECIAL_MASK) == MT_ADDRESS )
             EmitErr( INVALID_TYPE_FOR_DATA_DECLARATION, token );
-            opndx.value = 1;
-        }
-        if ( opndx.value == 0 ) {
+        else if ( opndx.hvalue != 0 && opndx.hvalue != -1 )
+            EmitConstError( &opndx );
+        else if ( opndx.uvalue == 0 )
             EmitError( POSITIVE_VALUE_EXPECTED );
-            opndx.value = 1;
-        }
-        size = opndx.value;
+
+        size = opndx.uvalue;
 
         count = 1;
         if( tokenarray[i].token == T_COLON ) {
@@ -790,17 +790,18 @@ ret_code CommDirective( int i, struct asm_tok tokenarray[] )
             //if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, 0 ) == ERROR )
             if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOUNDEF ) == ERROR )
                 return( ERROR );
+
             /* v2.03: a string constant is acceptable! */
+            /* v2.12: check for too large value added */
             //if ( opndx.kind != EXPR_CONST || opndx.string != NULL ) {
-            if ( opndx.kind != EXPR_CONST ) {
+            if ( opndx.kind != EXPR_CONST )
                 EmitError( CONSTANT_EXPECTED );
-                opndx.value = 1;
-            }
-            if ( opndx.value == 0 ) {
+            else if ( opndx.hvalue != 0 && opndx.hvalue != -1 )
+                EmitConstError( &opndx );
+            else if ( opndx.uvalue == 0 )
                 EmitError( POSITIVE_VALUE_EXPECTED );
-                opndx.value = 1;
-            }
-            count = opndx.value;
+
+            count = opndx.uvalue;
         }
 
         sym = SymSearch( token );

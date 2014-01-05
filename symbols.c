@@ -733,12 +733,10 @@ struct asym *SymEnum( struct asym *sym, int *pi )
 static void DumpSymbol( struct asym *sym )
 /****************************************/
 {
-    struct dsym *dir;
+    struct dsym *dir = (struct dsym *)sym;
     char        *type;
     uint_64     value = sym->uvalue;
     //const char  *langtype;
-
-    dir = (struct dsym *)sym;
 
     switch( sym->state ) {
     case SYM_UNDEFINED:
@@ -805,7 +803,7 @@ static void DumpSymbol( struct asym *sym )
         type = "Unknown";
         break;
     }
-    printf( "%-12s  %16" I64_SPEC "X  %8p %c %8p %s\n", type, value, dir->e, sym->ispublic ? 'X' : ' ', sym->name, sym->name );
+    printf( "%-12s  %16" I64_SPEC "X %02X %8p %c %8p %s\n", type, value, sym->mem_type, dir->e, sym->ispublic ? 'X' : ' ', sym->name, sym->name );
 }
 
 static void DumpSymbols( void )
@@ -823,8 +821,8 @@ static void DumpSymbols( void )
 
     DebugMsg(("DumpSymbols enter\n"));
     if ( Options.dump_symbols ) {
-        printf( "   # Addr     Type                     Value    Ext    P  pName   Name\n" );
-        printf( "-----------------------------------------------------------------------------\n" );
+        printf( "   # Addr     Type                     Value MT    Ext   P  pName   Name\n" );
+        printf( "--------------------------------------------------------------------------------\n" );
     }
     for( i = 0; i < GHASH_TABLE_SIZE; i++ ) {
         for( sym = gsym_table[i], curr = 0; sym; sym = sym->nextitem ) {

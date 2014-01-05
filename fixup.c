@@ -94,12 +94,11 @@ struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_o
             CurrSeg->e.seginfo->FixupList.head = fixup;
         }
     }
-    fixup->offset = 0;
-    /* initialize <location> value with current offset.
-     * Used for backpatching only. It's not the correct location,
-     * but sufficiently exact for this purpose.
+    /* initialize locofs member with current offset.
+     * It's unlikely to be the final location, but sufficiently exact for backpatching.
      */
-    fixup->location = GetCurrOffset();
+    fixup->locofs = GetCurrOffset();
+    fixup->offset = 0;
     fixup->type = type;
     fixup->option = option;
     fixup->flags = 0;
@@ -109,7 +108,7 @@ struct fixup *CreateFixup( struct asym *sym, enum fixup_types type, enum fixup_o
     fixup->sym = sym;
 
     DebugMsg1(("CreateFixup(sym=%s type=%u, opt=%u) cnt=%" I32_SPEC "X, loc=%" I32_SPEC "Xh\n",
-        sym ? sym->name : "NULL", type, option, ++cnt, fixup->location ));
+        sym ? sym->name : "NULL", type, option, ++cnt, fixup->locofs ));
     return( fixup );
 }
 
@@ -187,13 +186,13 @@ void SetFixupFrame( const struct asym *sym, char ign_grp )
 }
 
 /*
- * Store fixup information in current segment's fixup linked list.
+ * Store fixup information in segment's fixup linked list.
  * please note: forward references for backpatching are written in PASS 1 -
  * they no longer exist when store_fixup() is called.
  */
 
-void store_fixup( struct fixup *fixup, int_32 *pdata )
-/****************************************************/
+void store_fixup( struct fixup *fixup, struct dsym *seg, int_32 *pdata )
+/**********************************************************************/
 {
     //struct fixup     *fixup;
 
@@ -206,10 +205,10 @@ void store_fixup( struct fixup *fixup, int_32 *pdata )
 #ifdef DEBUG_OUT
     if ( fixup->sym )
         DebugMsg1(("store_fixup: type=%u, loc=%s.%" I32_SPEC "X, target=%s(%" I32_SPEC "X+% " I32_SPEC "X)\n",
-                fixup->type, CurrSeg->sym.name, fixup->location, fixup->sym->name, fixup->sym->offset, fixup->offset ));
+                fixup->type, seg->sym.name, fixup->locofs, fixup->sym->name, fixup->sym->offset, fixup->offset ));
     else
         DebugMsg1(("store_fixup: type=%u, loc=%s.%" I32_SPEC "X, target=%" I32_SPEC "X\n",
-                fixup->type, CurrSeg->sym.name, fixup->location, fixup->offset));
+                fixup->type, seg->sym.name, fixup->locofs, fixup->offset));
 #endif
 
     fixup->nextrlc = NULL;
@@ -268,7 +267,7 @@ void store_fixup( struct fixup *fixup, int_32 *pdata )
          */
         if ( fixup->sym && ModuleInfo.sub_format == SFORMAT_DJGPP ) {
             if ( fixup->type == FIX_RELOFF32 ) { /* probably also for 16-bit */
-                *pdata -= ( fixup->location + 4 );
+                *pdata -= ( fixup->locofs + 4 );
             } else if ( fixup->type == FIX_OFF32 ) {
                 *pdata += fixup->sym->offset;
                 fixup->offset += fixup->sym->offset; /* ok? */
@@ -291,11 +290,11 @@ void store_fixup( struct fixup *fixup, int_32 *pdata )
         }
 #endif
     }
-    if( CurrSeg->e.seginfo->FixupList.head == NULL ) {
-        CurrSeg->e.seginfo->FixupList.tail = CurrSeg->e.seginfo->FixupList.head = fixup;
+    if( seg->e.seginfo->FixupList.head == NULL ) {
+        seg->e.seginfo->FixupList.tail = seg->e.seginfo->FixupList.head = fixup;
     } else {
-        CurrSeg->e.seginfo->FixupList.tail->nextrlc = fixup;
-        CurrSeg->e.seginfo->FixupList.tail = fixup;
+        seg->e.seginfo->FixupList.tail->nextrlc = fixup;
+        seg->e.seginfo->FixupList.tail = fixup;
     }
     return;
 }

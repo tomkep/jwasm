@@ -62,9 +62,9 @@
 
 #if TRUNCATE
 #if defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__)
-#include "unistd.h"
+#include <unistd.h>
 #else
-#include "io.h"
+#include <io.h>
 #endif
 #endif
 
@@ -100,7 +100,7 @@ union DOS_DATETIME {
     time_t timet;
 };
 
-extern void cv_write_debug_tables( struct dsym *, struct dsym *);
+extern void cv_write_debug_tables( struct dsym *, struct dsym *, void * );
 extern void SortSegments( int );
 
 extern struct qdesc LinnumQueue;    /* queue of line_num_info items */
@@ -116,8 +116,12 @@ static uint_32    seg_pos;        /* file pos of SEGDEF record(s) */
 static uint_32    public_pos;     /* file pos of PUBDEF record(s) */
 static uint_32    end_of_header;  /* file pos of "end of header"  */
 
+/* v2.12: moved from inside omf_write_lnames() */
+static int startitem;
+static int startext;
+
 #if MULTIHDR
-static uint ln_srcfile;          /* last file for which line numbers have been written */
+static unsigned ln_srcfile;      /* last file for which line numbers have been written */
 #endif
 static uint_8 ln_is32;           /* last mode for which line numbers have been written */
 static uint_16 ln_size;          /* size of line number info */
@@ -215,8 +219,8 @@ static void PutEither( struct omf_rec *objr, uint_32 data )
  * order byte first ( with bit 7=1 ).
  */
 
-static void PutIndex( struct omf_rec *objr, uint idx )
-/****************************************************/
+static void PutIndex( struct omf_rec *objr, unsigned idx )
+/********************************************************/
 {
 /**/myassert( objr != NULL && objr->data != NULL && idx <= 0x7FFF );
     if( idx > 0x7f ) {
@@ -267,8 +271,8 @@ static void AllocData( struct omf_rec *objr, size_t len )
 
 /* return a group's index */
 
-uint omf_GetGrpIdx( struct asym *sym )
-/************************************/
+unsigned omf_GetGrpIdx( struct asym *sym )
+/****************************************/
 {
     return( sym ? ((struct dsym *)sym)->e.grpinfo->grp_idx : 0 );
 }
@@ -342,8 +346,8 @@ void omf_OutSelect( bool is_data )
 static void omf_write_linnum( uint_8 is32 )
 /*****************************************/
 {
-    uint                 ofssize = ( is32 ? sizeof( uint_32) : sizeof( uint_16 ) );
-    uint                 size;
+    unsigned             ofssize = ( is32 ? sizeof( uint_32) : sizeof( uint_16 ) );
+    unsigned             size;
     uint_8               *data;
     struct line_num_info *node;
     struct line_num_info *next;
@@ -372,13 +376,13 @@ static void omf_write_linnum( uint_8 is32 )
     return;
 }
 
-static void omf_write_fixups( struct dsym *seg, char is32 )
+static void omf_write_fixupp( struct dsym *seg, char is32 )
 /*********************************************************/
 {
     uint_8 *data;
-    uint size;
+    unsigned size;
     struct fixup *fix;
-    int type = ( is32 ? FIX_GEN_MS386 : FIX_GEN_INTEL );
+    enum fixup_types type = ( is32 ? FIX_GEN_MS386 : FIX_GEN_INTEL );
     struct omf_rec  obj;
 
     fix = seg->e.seginfo->FixupList.head;
@@ -400,13 +404,15 @@ static void omf_write_fixups( struct dsym *seg, char is32 )
             size = (char *)data - StringBufferEnd;
         }
         if ( size ) {
-            omf_InitRec( &obj, CMD_FIXUP );
+            omf_InitRec( &obj, CMD_FIXUPP );
             obj.is_32 = is32;
             AttachData( &obj, StringBufferEnd, size );
             omf_write_record( &obj );
         }
     }
 }
+
+static uint_8 get_omfalign( uint_8 alignment );
 
 /* write an LEDATA record, optionally write fixups */
 
@@ -421,12 +427,49 @@ static void omf_write_ledata( struct dsym *seg )
               seg->e.seginfo->CodeBuffer, seg->e.seginfo->start_loc, size ));
     if( size > 0 && write_to_file == TRUE ) {
         LastCodeBufSize = size;
-        omf_InitRec( &obj, CMD_LEDATA );
-        AttachData( &obj, seg->e.seginfo->CodeBuffer, size );
-        obj.d.ledata.idx = seg->e.seginfo->seg_idx;
-        obj.d.ledata.offset = seg->e.seginfo->start_loc;
-        if( obj.d.ledata.offset > 0xffffUL )
-            obj.is_32 = 1;
+#if COMDATSUPP
+        if ( seg->e.seginfo->comdat_selection ) {
+            /* if the COMDAT symbol has been referenced in a FIXUPP,
+             * a CEXTDEF has to be written.
+             */
+            if ( seg->sym.used ) {
+                omf_InitRec( &obj, CMD_CEXTDEF );
+                AttachData( &obj, StringBufferEnd, 2 * sizeof( uint_16 ) );
+                PutIndex( &obj, seg->e.seginfo->comdat_idx ); /* Index */
+                PutIndex( &obj, 0 ); /* Type */
+                TruncRec( &obj );
+                omf_write_record( &obj );
+                if ( seg->e.seginfo->seg_idx == 0 )
+                    seg->e.seginfo->seg_idx = startext++;
+            }
+
+            omf_InitRec( &obj, CMD_COMDAT );
+            AttachData( &obj, seg->e.seginfo->CodeBuffer, size );
+            if( seg->e.seginfo->start_loc > 0xffffUL )
+                obj.is_32 = 1;
+            obj.d.comdat.flags = 0;
+            /* low 4-bits is allocation type */
+            if ( seg->e.seginfo->segtype == SEGTYPE_CODE ) {
+                obj.d.comdat.attributes = ( ModuleInfo.model == MODEL_FLAT ? COMDAT_CODE32 : COMDAT_FAR_CODE );
+            } else {
+                obj.d.comdat.attributes = ( ModuleInfo.model == MODEL_FLAT ? COMDAT_DATA32 : COMDAT_FAR_DATA );
+            }
+            obj.d.comdat.align = get_omfalign( seg->e.seginfo->alignment );
+            obj.d.comdat.offset = seg->e.seginfo->start_loc;
+            obj.d.comdat.type_idx = 0;
+            obj.d.comdat.public_lname_idx = seg->e.seginfo->comdat_idx;
+            /* todo: error if comdat_idx is 0 */
+        } else {
+#endif
+            omf_InitRec( &obj, CMD_LEDATA );
+            AttachData( &obj, seg->e.seginfo->CodeBuffer, size );
+            obj.d.ledata.idx = seg->e.seginfo->seg_idx;
+            obj.d.ledata.offset = seg->e.seginfo->start_loc;
+            if( obj.d.ledata.offset > 0xffffUL )
+                obj.is_32 = 1;
+#if COMDATSUPP
+        }
+#endif
         omf_write_record( &obj );
 
         /* process Fixup, if any */
@@ -435,8 +478,8 @@ static void omf_write_ledata( struct dsym *seg )
             struct fixup *fix;
             struct fixup *next;
 #endif
-            omf_write_fixups( seg, 0 );
-            omf_write_fixups( seg, 1 );
+            omf_write_fixupp( seg, 0 );
+            omf_write_fixupp( seg, 1 );
 #if FASTMEM==0
             for( fix = seg->e.seginfo->FixupList.head; fix; ) {
                 next = fix->nextrlc;
@@ -735,8 +778,8 @@ static void omf_write_export( void )
 /* write OMF GRPDEF records
  */
 
-static void omf_write_grp( void )
-/*******************************/
+static void omf_write_grpdef( void )
+/**********************************/
 {
     struct dsym     *curr;
     struct dsym     *segminfo;
@@ -744,7 +787,7 @@ static void omf_write_grp( void )
     struct omf_rec  grp;
     //char            writeseg;
 
-    DebugMsg1(("omf_write_grp enter\n"));
+    DebugMsg1(("omf_write_grpdef enter\n"));
     //line_num = LineNumber;
 
     /* size of group records may exceed 1024! */
@@ -777,7 +820,28 @@ static void omf_write_grp( void )
         TruncRec( &grp );
         omf_write_record( &grp );
     }
-    DebugMsg1(("omf_write_grp exit\n"));
+    DebugMsg1(("omf_write_grpdef exit\n"));
+}
+
+static uint_8 get_omfalign( uint_8 alignment )
+/********************************************/
+{
+    switch ( alignment ) {
+    case  1:  return( SEGDEF_ALIGN_WORD );
+    case  2:  return( SEGDEF_ALIGN_DWORD );
+    case  4:  return( SEGDEF_ALIGN_PARA );
+    case  8:  return( SEGDEF_ALIGN_PAGE );
+#if PAGE4K /* PharLab peculiarity; this is invalid for MS OMF */
+    case 12:
+        if ( Parse_Pass == PASS_1 )
+            EmitWarn( 2, NO_4KPAGE_ALIGNED_SEGMENTS_IN_MS386 );
+        return( SEGDEF_ALIGN_4KPAGE );
+#endif
+    case MAX_SEGALIGNMENT: return( SEGDEF_ALIGN_ABS );
+    }
+    /* value 0 is byte alignment, anything elso is "unexpected" */
+    /**/myassert( alignment == 0 );
+    return( SEGDEF_ALIGN_BYTE );
 }
 
 /* write segment table.
@@ -786,16 +850,20 @@ static void omf_write_grp( void )
  * the segment list!
  */
 
-static void omf_write_seg( void )
-/*******************************/
+static void omf_write_segdef( void )
+/**********************************/
 {
     struct dsym    *curr;
     struct omf_rec obj;
 
-    DebugMsg1(("omf_write_seg enter\n"));
+    DebugMsg1(("omf_write_segdef enter\n"));
 
     for( curr = SymTables[TAB_SEG].head; curr; curr = curr->next ) {
 
+#if COMDATSUPP
+        if ( curr->e.seginfo->comdat_selection )
+            continue;
+#endif
         omf_InitRec( &obj, CMD_SEGDEF );
         if ( curr->e.seginfo->Ofssize > USE16 ) {
             obj.is_32 = ( ( curr->e.seginfo->force32 || ( curr->sym.max_offset >= 0x10000 ) ) ? 1 : 0 );
@@ -805,27 +873,7 @@ static void omf_write_seg( void )
 
         obj.d.segdef.idx             = curr->e.seginfo->seg_idx;
         obj.d.segdef.use_32          = ( curr->e.seginfo->Ofssize > USE16 ? 1 : 0 );
-        switch ( curr->e.seginfo->alignment ) {
-        case  1:  obj.d.segdef.align = SEGDEF_ALIGN_WORD;    break;
-        case  2:  obj.d.segdef.align = SEGDEF_ALIGN_DWORD;   break;
-        case  4:  obj.d.segdef.align = SEGDEF_ALIGN_PARA;    break;
-        case  8:  obj.d.segdef.align = SEGDEF_ALIGN_PAGE;    break;
-#if PAGE4K /* PharLab peculiarity; this is invalid for MS OMF */
-        case 12:
-            obj.d.segdef.align = SEGDEF_ALIGN_4KPAGE;
-            if ( Parse_Pass == PASS_1 )
-                EmitWarn( 2, NO_4KPAGE_ALIGNED_SEGMENTS_IN_MS386 );
-            break;
-#endif
-        case MAX_SEGALIGNMENT:
-            obj.d.segdef.align = SEGDEF_ALIGN_ABS;
-            break;
-        default:
-            /* value 0 is byte alignment, anything elso is "unexpected" */
-            /**/myassert( curr->e.seginfo->alignment == 0 );
-            obj.d.segdef.align = SEGDEF_ALIGN_BYTE;
-            break;
-        }
+        obj.d.segdef.align           = get_omfalign( curr->e.seginfo->alignment );
         obj.d.segdef.combine         = curr->e.seginfo->combine;
         obj.d.segdef.abs.frame       = curr->e.seginfo->abs_frame;
         obj.d.segdef.abs.offset      = curr->e.seginfo->abs_offset;
@@ -835,7 +883,7 @@ static void omf_write_seg( void )
         obj.d.segdef.ovl_lname_idx   = 1;
 
         omf_write_record( &obj );
-        DebugMsg1(("omf_write_seg(%s): len=%" I32_SPEC "X use32=%u align=%u comb=%u seg_lname=%u class_lname=%u ovl_lname=%u\n",
+        DebugMsg1(("omf_write_segdef(%s): len=%" I32_SPEC "X use32=%u align=%u comb=%u seg_lname=%u class_lname=%u ovl_lname=%u\n",
                   curr->sym.name,
                   obj.d.segdef.seg_length,
                   obj.d.segdef.use_32,
@@ -862,7 +910,7 @@ static void omf_write_seg( void )
             omf_write_record( &obj );
         }
     }
-    DebugMsg1(("omf_write_seg exit\n"));
+    DebugMsg1(("omf_write_segdef exit\n"));
 }
 
 /* the lnames are stored in a queue. read
@@ -875,7 +923,6 @@ static void omf_write_lnames( void )
 {
     int         size;
     int         items;
-    int         startitem;
     unsigned char *p;
     //void        *pv = NULL;
     struct qnode *curr;
@@ -921,6 +968,12 @@ static void omf_write_lnames( void )
         DebugMsg1(("omf_write_lnames: %u=%s\n", items, p ));
         p += sym->name_size; /* overwrite the null char */
         items++;
+        /* v2.12: lname_idx fields now set in OMF only */
+        switch ( sym->state ) {
+        case SYM_SEG: ((struct dsym *)sym)->e.seginfo->lname_idx = items; break;
+        case SYM_GRP: ((struct dsym *)sym)->e.grpinfo->lname_idx = items; break;
+        default:      sym->class_lname_idx = items;                       break;
+        }
     };
 
     DebugMsg1(("omf_write_lnames() exit, items=%u\n", items ));
@@ -934,8 +987,8 @@ struct readext {
 
 /* read items for EXTDEF records.
  * there are 2 sources:
- * - weak externals ( member altname in items of TAB_EXT, iscomm==FALSE )
- * - strong externals ( items of TAB_EXT, iscomm==FALSE )
+ * - the AltQueue of weak externals
+ * - the TAB_EXT queue of externals
  * v2.09: index (ext_idx1, ext_idx2 ) is now set inside this function.
  */
 
@@ -983,8 +1036,8 @@ static uint_16 omf_write_extdef( void )
     struct omf_rec obj;
     struct asym *sym;
     struct dsym *symext;
-    uint        rec_size;
-    uint        len;
+    unsigned    rec_size;
+    unsigned    len;
     struct readext r;
     char        data[MAX_EXT_LENGTH];
     unsigned char buffer[MAX_ID_LEN + MANGLE_BYTES + 1];
@@ -992,8 +1045,8 @@ static uint_16 omf_write_extdef( void )
     DebugMsg1(("omf_write_extdef enter\n"));
 
     r.p = SymTables[TAB_EXT].head;
-    r.method = 0;
     r.index = 1;
+    r.method = 0;
     obj.d.extdef.first_idx = 0;
 
     /* scan the EXTERN/EXTERNDEF items */
@@ -1034,8 +1087,6 @@ static uint_16 omf_write_extdef( void )
      * those items are defined via "EXTERN (altname)" syntax.
      * After the records have been written, the indices in
      * altname are no longer needed.
-     * v2.11: ModuleInfo.AltQueue has been removed. The
-     * normal TAB_EXT queue is to be scanned.
      */
 
     for ( symext = SymTables[TAB_EXT].head; symext; symext = symext->next ) {
@@ -1052,13 +1103,11 @@ static uint_16 omf_write_extdef( void )
     }
     /* v2.05: reset the indices - this must be done only after ALL WKEXT
      * records have been written!
-     * v2.11: ModuleInfo.AltQueue has been removed. The
-     * normal TAB_EXT queue is to be scanned.
      */
     for ( symext = SymTables[TAB_EXT].head; symext; symext = symext->next ) {
-        /* v2.09: don't touch the index if the alternate name is an external
-         * - else an invalid object file will be created!
-         */
+            /* v2.09: don't touch the index if the alternate name is an external
+             * - else an invalid object file will be created!
+             */
         if ( symext->sym.iscomm == FALSE && symext->sym.altname && symext->sym.altname->state != SYM_EXTERNAL )
             symext->sym.altname->ext_idx = 0;
     }
@@ -1095,11 +1144,11 @@ static int get_size_of_comdef_number( uint_32 value )
 
 /* for COMDEF: write item size (or number of items) */
 
-static uint put_comdef_number( uint_8 *buffer, uint_32 value )
-/************************************************************/
+static unsigned put_comdef_number( uint_8 *buffer, uint_32 value )
+/****************************************************************/
 {
-    uint i;
-    uint symsize;
+    unsigned i;
+    unsigned symsize;
 
     symsize = get_size_of_comdef_number( value );
     switch( symsize ) {
@@ -1125,17 +1174,17 @@ static uint put_comdef_number( uint_8 *buffer, uint_32 value )
  * the size then!
  */
 
-static void omf_write_comdef( uint_16 index )
-/*******************************************/
+static uint_16 omf_write_comdef( uint_16 index )
+/**********************************************/
 {
     struct omf_rec obj;
     struct dsym    *curr;
-    uint        num;
-    uint        recsize;
-    uint        numsize;
-    uint        symsize;
+    unsigned    num;
+    unsigned    recsize;
+    unsigned    numsize;
+    unsigned    symsize;
     uint_32     varsize;
-    uint        start = 0; /* record's start index (not used) */
+    unsigned    start = 0; /* record's start index (not used) */
     char        buffer[MAX_ID_LEN + MANGLE_BYTES + 1];
     char        data[MAX_EXT_LENGTH];
     char        number[16];
@@ -1206,7 +1255,7 @@ static void omf_write_comdef( uint_16 index )
         }
     }
     DebugMsg1(("omf_write_comdef exit\n"));
-    return;
+    return( index );
 }
 
 static time_t GetFileTimeStamp( const char *filename )
@@ -1315,7 +1364,7 @@ static void omf_write_alias( void )
  *   - offset ( 2/4 bytes )
  *   - type ( index field, here always 0 )
  */
-static ret_code omf_write_public( void )
+static ret_code omf_write_pubdef( void )
 /**************************************/
 {
     struct qnode        *q;
@@ -1333,15 +1382,36 @@ static ret_code omf_write_public( void )
     while ( q ) {
         struct asym     *curr_seg;
         uint_8          *data;
-        uint            size;
+        unsigned        size;
         uint_8          curr32;
         uint_8          is32;
 
         for ( size = 0, data = StringBufferEnd; q; q = q->next ) {
-            uint        recsize;
-            uint        len;
+            unsigned    recsize;
+            unsigned    len;
             struct asym *sym;
             sym = q->sym;
+#if COMDATSUPP
+            /* COMDAT symbol? Then write an LNAME record */
+            if ( sym->segment && ((struct dsym *)sym->segment)->e.seginfo->comdat_selection ) {
+                struct dsym *seg = (struct dsym *)sym->segment;
+                if ( seg->e.seginfo->comdat_idx == 0 ) {
+                    struct omf_rec obj;
+                    seg->e.seginfo->comdat_idx = ++startitem;
+                    seg->sym.used = sym->used;
+                    omf_InitRec( &obj, CMD_LNAMES );
+                    len = Mangle( sym, StringBufferEnd + 1 );
+                    *StringBufferEnd = len;
+                    if ( ModuleInfo.case_sensitive == FALSE )
+                        _strupr( StringBufferEnd + 1 );
+                    AttachData( &obj, StringBufferEnd, len + 1 );
+                    omf_write_record( &obj );
+                } else if ( Parse_Pass == PASS_1 ) {
+                    /* ??? */
+                }
+                continue;
+            }
+#endif
             /* for constants, Masm checks if the value will fit in a 16-bit field,
              * either signed ( -32768 ... 32767 ) or unsigned ( 0 ... 65635 ).
              * As a result, the following code:
@@ -1410,9 +1480,9 @@ static void omf_write_modend( struct fixup *fixup, uint_32 displ )
 /****************************************************************/
 {
     struct omf_rec  obj;
-    struct asym     *sym;
+    uint_8 buffer[FIX_GEN_MODEND_MAX];
 
-    DebugMsg(("omf_write_modend()\n"));
+    DebugMsg(("omf_write_modend( fixup=%p, displ=%" I32_SPEC "X)\n", fixup, displ ));
 
     omf_InitRec( &obj, CMD_MODEND );
 
@@ -1420,61 +1490,19 @@ static void omf_write_modend( struct fixup *fixup, uint_32 displ )
         obj.d.modend.main_module = FALSE;
         obj.d.modend.start_addrs = FALSE;
     } else {
-
         obj.d.modend.start_addrs = TRUE;
         obj.d.modend.main_module = TRUE;
         obj.is_32 = ( GetSymOfssize( fixup->sym ) > USE16 ? 1 : 0 ); /* USE16 or USE32 */
-
-        sym = fixup->sym;
-
-        /* fill the logref part for MODEND:
-        struct logref {
-          uint_8  frame       :3;
-          uint_8  target      :3;
-          uint_8  is_secondary:1;
-          uint_16 frame_datum;
-          uint_16 target_datum;
-          int_32  target_offset;
-        };
-        */
-        obj.d.modend.ref.is_secondary = FALSE;
-        obj.d.modend.ref.target_offset = fixup->sym->offset + displ;
-
-        /* symbol is always a code label (near or far), internal or external */
-        /* now set Target and Frame */
-
-        if( sym->state == SYM_EXTERNAL ) {
-            DebugMsg(("omf_write_modend(%X): EXTERNAL %s\n", fixup, sym->name));
-
-            obj.d.modend.ref.target = TARGET_EXT & TARGET_WITH_DISPL;
-            obj.d.modend.ref.target_datum = sym->ext_idx1;
-
-            if( fixup->frame_type == FRAME_GRP && fixup->frame_datum == 0 ) {
-                /* set the frame to the frame of the corresponding segment */
-                fixup->frame_datum = omf_GetGrpIdx( sym );
-            }
-        } else { /* SYM_INTERNAL */
-            DebugMsg(("omf_write_modend_fixup(%X): fixup->frame, datum=%u.%u sym->name=%s state=%X segm=%X\n",
-                      fixup, fixup->frame_type, fixup->frame_datum, sym->name, sym->state, sym->segment ));
-
-            obj.d.modend.ref.target = TARGET_SEG & TARGET_WITH_DISPL;
-            obj.d.modend.ref.target_datum = GetSegIdx( sym->segment );
-        }
-
-        if( fixup->frame_type != FRAME_NONE && fixup->frame_type != FRAME_SEG ) {
-            obj.d.modend.ref.frame = (uint_8)fixup->frame_type;
-        } else {
-            obj.d.modend.ref.frame = FRAME_TARG;
-        }
-        obj.d.modend.ref.frame_datum = fixup->frame_datum;
+        AttachData( &obj, buffer, 0 );
+        obj.length = OmfFixGenFixModend( fixup, buffer, displ, obj.is_32 ? FIX_GEN_MS386 : FIX_GEN_INTEL );
     }
     omf_write_record( &obj );
 }
 
 /* this callback function is called during codeview debug info generation */
 
-static uint_8 *omf_flushfunc( struct dsym *seg, uint_8 *curr, int size )
-/**********************************************************************/
+static uint_8 *omf_cv_flushfunc( struct dsym *seg, uint_8 *curr, unsigned size, void *pv )
+/****************************************************************************************/
 {
     uint_8 *buffer = seg->e.seginfo->CodeBuffer;
 
@@ -1506,7 +1534,7 @@ static void omf_write_header_dbgcv( void )
     for ( i = 0; i < DBGS_MAX; i++ ) {
         if ( SymDebSeg[i] = (struct dsym *)CreateIntSegment( SymDebParm[i].name, SymDebParm[i].cname, 0, USE32, TRUE ) ) {
             SymDebSeg[i]->e.seginfo->force32 = TRUE; /* without this a 32-bit segdef is emitted only if segsize > 64kB */
-            SymDebSeg[i]->e.seginfo->flushfunc = omf_flushfunc;
+            SymDebSeg[i]->e.seginfo->flushfunc = omf_cv_flushfunc;
         }
     }
     return;
@@ -1520,7 +1548,7 @@ static void omf_write_debug_tables( void )
     if ( SymDebSeg[DBGS_SYMBOLS] && SymDebSeg[DBGS_TYPES] ) {
         SymDebSeg[DBGS_SYMBOLS]->e.seginfo->CodeBuffer = CurrSource;
         SymDebSeg[DBGS_TYPES]->e.seginfo->CodeBuffer = CurrSource + 1024;
-        cv_write_debug_tables( SymDebSeg[DBGS_SYMBOLS], SymDebSeg[DBGS_TYPES] );
+        cv_write_debug_tables( SymDebSeg[DBGS_SYMBOLS], SymDebSeg[DBGS_TYPES], NULL );
     }
 }
 
@@ -1574,12 +1602,12 @@ static ret_code omf_write_module( struct module_info *modinfo )
      * the records have to be written again after the final assembly pass.
      */
     fseek( CurrFile[OBJ] , seg_pos, SEEK_SET );
-    omf_write_seg();
+    omf_write_segdef();
     /* write PUBDEF records. Since the final value of offsets isn't known after
      * the first pass, this has to be called again after the final pass.
      */
     fseek( CurrFile[OBJ], public_pos, SEEK_SET);
-    omf_write_public();
+    omf_write_pubdef();
     return( NOT_ERROR );
 }
 
@@ -1612,17 +1640,17 @@ static ret_code omf_write_header_initial( struct module_info *modinfo )
      * hence the start position of those records has to be saved.
      */
     seg_pos = ftell( CurrFile[OBJ] );
-    omf_write_seg();
-    omf_write_grp(); /* write GRPDEF records */
+    omf_write_segdef();
+    omf_write_grpdef(); /* write GRPDEF records */
     ext_idx = omf_write_extdef(); /* write EXTDEF records */
-    omf_write_comdef( ext_idx ); /* write COMDEF records */
+    startext = omf_write_comdef( ext_idx ); /* write COMDEF records */
     omf_write_alias(); /* write ALIAS records */
 
     /* write PUBDEF records. Since the final value of offsets isn't known after
      * the first pass, this has to be called again after the final pass.
      */
     public_pos = ftell( CurrFile[OBJ] );
-    omf_write_public();
+    omf_write_pubdef();
     omf_write_export(); /* write export COMENT records */
 
     /* (optionally) write end-of-pass-one COMENT record

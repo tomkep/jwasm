@@ -74,12 +74,12 @@ static char HexDigit( char x )
  * parameters and locals. A placeholder consists of escape char 0x0a,
  * followed by a one-byte index field.
  */
-void fill_placeholders( char *dst, const char *src, uint argc, uint localstart, char *argv[] )
-/********************************************************************************************/
+void fill_placeholders( char *dst, const char *src, unsigned argc, unsigned localstart, char *argv[] )
+/****************************************************************************************************/
 {
     uint_32 i;
     const char *p;
-    uint parmno;
+    unsigned parmno;
 
     /* scan the string, replace the placeholders #nn */
     for( p = src ;*p != NULLC; ) {
@@ -131,7 +131,7 @@ static char * replace_parm( const char *line, char *start, int len, struct mname
      * and locals for a macro to 255.
      */
     char       *rest;
-    uint       count;
+    unsigned   count;
 
 //  DebugMsg(("replace_parm(%s) enter, len=%u\n", start, len ));
 
@@ -294,7 +294,7 @@ ret_code StoreMacro( struct dsym *macro, int i, struct asm_tok tokenarray[], boo
 #ifdef DEBUG_OUT
     int lineno = 0;
 #endif
-    uint                nesting_depth = 0;
+    unsigned            nesting_depth = 0;
     bool                locals_done;
     struct line_status  ls;
     struct asm_tok      tok[2];

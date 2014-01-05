@@ -438,7 +438,8 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
             DebugMsg1(("%u get_operand: T_ID, is_dot=1, id=%s, opnd.type=%s\n", evallvl, tokenarray[i].string_ptr, opnd->type ? opnd->type->name : "NULL" ));
             opnd->value = 0;
             sym = ( opnd->type ? SearchNameInStruct( opnd->type, tmp, &opnd->uvalue, 0 ) : NULL );
-            DebugMsg1(("get_operand(%s): is_dot, sym=%s, offset=%" I32_SPEC "Xh\n", tmp, sym ? sym->name : "NULL", opnd->uvalue ));
+            DebugMsg1(("get_operand(%s): is_dot, sym=%s, offset=%" I32_SPEC "Xh\n",
+                       tmp, sym ? sym->name : "NULL", opnd->uvalue ));
             if ( sym == NULL ) {
                 sym = SymSearch( tmp );
                 if ( sym ) {
@@ -458,9 +459,11 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                          * did set field 'type'.
                          * v2.09: oldstructs condition added, see regression test dotop4.asm.
                          * v2.11: fixme? opnd->type may be NULL here?
+                         * v2.12: for opnd->type==NULL test case, see expr5.aso.
                          */
                         //if ( sym == opnd->type || opnd->type->isdefined == FALSE )
-                        if ( sym == opnd->type || opnd->type->isdefined == FALSE || ModuleInfo.oldstructs )
+                        //if ( sym == opnd->type || opnd->type->isdefined == FALSE || ModuleInfo.oldstructs )
+                        if ( sym == opnd->type || ( opnd->type && opnd->type->isdefined == FALSE ) || ModuleInfo.oldstructs )
                             ; //opnd->sym = sym;
                         else {
                             sym = NULL;
@@ -553,7 +556,7 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
                     // } else if ( opnd->type == NULL || opnd->type->typekind != TYPE_NONE ) { /* v2.11: if changed */
                     } else if ( opnd->type->typekind != TYPE_NONE ) {
                         /* no struct or struct is known and defined */
-                        DebugMsg(("get_operand(%s): symbol error (type=%s kind=%u)\n", tmp, opnd->type ? opnd->type->name : "NULL", opnd->type ? opnd->type->typekind : 0 ));
+                        DebugMsg(("get_operand(%s): symbol error (type=%s typekind=%u)\n", tmp, opnd->type ? opnd->type->name : "NULL", opnd->type ? opnd->type->typekind : 0 ));
                         if ( *opnd->type->name )
                             fnEmitErr( MEMBER_NOT_DEFINED, opnd->type->name, tmp );
                         else
@@ -608,7 +611,7 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
             opnd->mem_type = sym->mem_type;
             opnd->is_type = TRUE;
             opnd->type = sym;
-            DebugMsg1(("get_operand(%s): symbol.kind=%u (STRUCT/UNION/TYPEDEF/RECORD)\n", sym->name, sym->typekind ));
+            DebugMsg1(("get_operand(%s): symbol.typekind=%u (STRUCT/UNION/TYPEDEF/RECORD)\n", sym->name, sym->typekind ));
 
             /* v2.08: if() removed. This was an old hack. */
             //if ( tokenarray[i-1].token != T_DOT && tokenarray[i+1].token != T_DOT )
@@ -773,7 +776,7 @@ static ret_code get_operand( struct expr *opnd, int *idx, struct asm_tok tokenar
         return( ERROR );
     }
     (*idx)++;
-    DebugMsg1(("%u get_operand exit, ok, kind=%u value=%" I64_SPEC "X hvalue=%" I64_SPEC "X mem_type=%Xh abs=%u string=%s is_type=%u type=>%s< sym=%s mbr=%s\n",
+    DebugMsg1(("%u get_operand exit, ok, kind=%d value=%" I64_SPEC "X hvalue=%" I64_SPEC "X mem_type=%Xh abs=%u string=%s is_type=%u type=>%s< sym=%s mbr=%s\n",
                evallvl, opnd->kind, opnd->llvalue, opnd->hlvalue, opnd->mem_type, opnd->is_abs,
                opnd->quoted_string ? opnd->quoted_string->string_ptr : "NULL",
                opnd->is_type, opnd->type ? opnd->type->name : "NULL",
@@ -1119,7 +1122,7 @@ static ret_code sizlen_op( int oper, struct expr *opnd1, struct expr *opnd2, str
 static ret_code type_op( int oper, struct expr *opnd1, struct expr *opnd2, struct asym *sym, char *name )
 /*******************************************************************************************************/
 {
-    DebugMsg1(("type_op: opnd2 kind=%u memtype=%X sym=%s type=%s instr=%d istype=%u explicit=%u\n",
+    DebugMsg1(("type_op: opnd2 kind=%d memtype=%X sym=%s type=%s instr=%d istype=%u explicit=%u\n",
                opnd2->kind,
                opnd2->mem_type,
                sym ? sym->name : "NULL",
@@ -1301,7 +1304,7 @@ static ret_code opattr_op( int oper, struct expr *opnd1, struct expr *opnd2, str
 /*********************************************************************************************************/
 {
 
-    DebugMsg1(("opattr_op: arg kind=%u memtype=%X sym=%s\n",
+    DebugMsg1(("opattr_op: arg kind=%d memtype=%X sym=%s\n",
                opnd2->kind, opnd2->mem_type,
                opnd2->sym ? opnd2->sym->name : "NULL" ));
     opnd1->kind = EXPR_CONST;
@@ -1333,7 +1336,9 @@ static ret_code opattr_op( int oper, struct expr *opnd1, struct expr *opnd2, str
             opnd1->value |= OPATTR_DATALABEL;
     }
     /* kind==EXPR_ADDR is not reliably set for indirect register addressing! */
-    if ( opnd2->indirect )
+    /* v2.12: check if operand is valid */
+    //if ( opnd2->indirect )
+    if ( opnd2->kind != EXPR_ERROR && opnd2->indirect )
         opnd1->value |= OPATTR_DATALABEL;
 
 
@@ -1381,7 +1386,9 @@ static ret_code opattr_op( int oper, struct expr *opnd1, struct expr *opnd2, str
         opnd1->value |= OPATTR_EXTRNREF;
 
     if ( oper == T_OPATTR )
-        if ( opnd2->sym )
+        /* v2.12: no language if symbol isn't defined properly */
+        //if ( opnd2->sym )
+        if ( opnd2->sym && opnd2->kind != EXPR_ERROR )
             opnd1->value |= opnd2->sym->langtype << 8;
 
     DebugMsg1(("opattr_op returns %Xh\n", opnd1->value));
@@ -1677,7 +1684,7 @@ static ret_code (* const unaryop[])( int, struct expr *, struct expr *, struct a
 static ret_code plus_op( struct expr *opnd1, struct expr *opnd2 )
 /***************************************************************/
 {
-    DebugMsg1(("plus_op: kind=%d-%d memtype=%Xh-%Xh value=%d-%d sym=%s-%s mbr=%s-%s type=%s-%s\n",
+    DebugMsg1(("plus_op: kind=%d/%d memtype=%Xh-%Xh value=%d-%d sym=%s-%s mbr=%s-%s type=%s-%s\n",
                opnd1->kind, opnd2->kind,
                opnd1->mem_type, opnd2->mem_type, 
                opnd1->value, opnd2->value,
@@ -1962,7 +1969,7 @@ static ret_code dot_op( struct expr *opnd1, struct expr *opnd2 )
 {
     /* this code needs cleanup! some stuff is obsolete. */
 
-    DebugMsg1(("dot_op: op1-op2 kind=%u-%u sym=%s-%s type=%s-%s mbr=%s-%s\n",
+    DebugMsg1(("dot_op: op1-op2 kind=%d/%d sym=%s-%s type=%s-%s mbr=%s-%s\n",
                opnd1->kind, opnd2->kind,
                opnd1->sym  ? opnd1->sym->name  : "NULL",
                opnd2->sym  ? opnd2->sym->name  : "NULL",
@@ -2155,7 +2162,7 @@ static ret_code dot_op( struct expr *opnd1, struct expr *opnd2 )
             opnd1->mem_type = opnd2->mem_type;
         }
     } else {
-        DebugMsg(("dot_op: error, unknown kind combination, opnd1->kind=%u, opnd2->kind=%u\n", opnd1->kind, opnd2->kind ));
+        DebugMsg(("dot_op: error, unknown kind combination, opnd1->kind=%d, opnd2->kind=%d\n", opnd1->kind, opnd2->kind ));
         return( struct_field_error( opnd1 ) );
     }
     return( NOT_ERROR );
@@ -2176,7 +2183,7 @@ static ret_code colon_op( struct expr *opnd1, struct expr *opnd2 )
      *     inside square brackets, seg_reg : register is not accepted
      *     if Masm-syntax is on.
      */
-    DebugMsg1(("colon_op: t1-t2 kind=%u-%u type=%s-%s is_type=%u-%u\n",
+    DebugMsg1(("colon_op: t1-t2 kind=%d/%d type=%s-%s is_type=%u-%u\n",
                opnd1->kind, opnd2->kind,
                opnd1->type ? opnd1->type->name : "NULL",
                opnd2->type ? opnd2->type->name : "NULL",
@@ -2346,7 +2353,7 @@ static ret_code negative_op( struct expr *opnd1, struct expr *opnd2 )
         opnd1->float_tok = opnd2->float_tok;
         opnd1->negative = 1 - opnd2->negative;
     } else {
-        DebugMsg(("negative_op: unexpected opnd2.kind=%u\n", opnd2->kind ));
+        DebugMsg(("negative_op: unexpected opnd2.kind=%d\n", opnd2->kind ));
         return( fnEmitErr( CONSTANT_EXPECTED ) );
     }
     return( NOT_ERROR );
@@ -2636,7 +2643,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
          *        register * scaling factor ( 1, 2, 4 or 8 )
          *                   386 only
          */
-        DebugMsg1(("calculate(*): kind=%u-%u value=%" I64_SPEC "d-%" I64_SPEC "d mbr=%X-%X\n",
+        DebugMsg1(("calculate(*): kind=%d/%d value=%" I64_SPEC "d-%" I64_SPEC "d mbr=%X-%X\n",
                    opnd1->kind,    opnd2->kind,
                    opnd1->value64, opnd2->value64,
                    opnd1->mbr,     opnd2->mbr ));
@@ -2700,7 +2707,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
         opnd1->value64 /= opnd2->value64;
         break;
     case T_BINARY_OPERATOR:
-        DebugMsg1(("calculate(%s [T_BINARY_OPERATOR] ): t1-t2 kind %d-%d memtype %X-%X sym %s-%s type %s-%s\n",
+        DebugMsg1(("calculate(%s [T_BINARY_OPERATOR] ): t1-t2 kind %d/%d memtype %X-%X sym %s-%s type %s-%s\n",
                    oper->string_ptr,
                    opnd1->kind, opnd2->kind,
                    opnd1->mem_type, opnd2->mem_type,
@@ -2792,7 +2799,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
                         return( ERROR );
                     }
                 } else {
-                    DebugMsg(("calculate(%s) error 2, token2.kind=%u indirect=%u sym=%s\n",
+                    DebugMsg(("calculate(%s) error 2, token2.kind=%d indirect=%u sym=%s\n",
                               oper->string_ptr, opnd2->kind, opnd2->indirect,
                               opnd2->sym ? opnd2->sym->name : "NULL" ));
                     return( fnEmitErr( OPERAND_MUST_BE_RELOCATABLE ) );
@@ -2899,7 +2906,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
         }
         break; /* end case T_BINARY_OPERATOR */
     case T_UNARY_OPERATOR:
-        DebugMsg1(("calculate(%s [T_UNARY_OPERATOR]): opnd2 kind=%u sym=%s mbr=%s type=%s memtype=%X is_type=%u indirect=%u\n",
+        DebugMsg1(("calculate(%s [T_UNARY_OPERATOR]): opnd2 kind=%d sym=%s mbr=%s type=%s memtype=%X is_type=%u indirect=%u\n",
                    oper->string_ptr,
                    opnd2->kind,
                    opnd2->sym ? opnd2->sym->name : "NULL",
@@ -3052,7 +3059,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
 
 #ifdef DEBUG_OUT
     if ( opnd1->hlvalue ) {
-        DebugMsg1(("%u calculate(%s) exit, ok kind=%u value=0x%" I64_SPEC "X_%016" I64_SPEC "X memtype=0x%X indirect=%u type=>%s<\n",
+        DebugMsg1(("%u calculate(%s) exit, ok kind=%d value=0x%" I64_SPEC "X_%016" I64_SPEC "X memtype=0x%X indirect=%u type=>%s<\n",
                    evallvl,
                    oper->string_ptr,
                    opnd1->kind,
@@ -3060,7 +3067,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
                    opnd1->mem_type,
                    opnd1->indirect, opnd1->type ? opnd1->type->name : "NULL" ));
     } else if ( opnd1->hvalue ) {
-        DebugMsg1(("%u calculate(%s) exit, ok kind=%u value=%" I64_SPEC"d(0x%" I64_SPEC "X) memtype=0x%X indirect=%u type=>%s<\n",
+        DebugMsg1(("%u calculate(%s) exit, ok kind=%d value=%" I64_SPEC"d(0x%" I64_SPEC "X) memtype=0x%X indirect=%u type=>%s<\n",
                    evallvl,
                    oper->string_ptr,
                    opnd1->kind,
@@ -3068,7 +3075,7 @@ static ret_code calculate( struct expr *opnd1, struct expr *opnd2, const struct 
                    opnd1->mem_type,
                    opnd1->indirect, opnd1->type ? opnd1->type->name : "NULL" ));
     } else {
-        DebugMsg1(("%u calculate(%s) exit, ok kind=%u value=%d(0x%X) memtype=0x%X ind=%u exp=%u type=%s mbr=%s\n",
+        DebugMsg1(("%u calculate(%s) exit, ok kind=%d value=%d(0x%X) memtype=0x%X ind=%u exp=%u type=%s mbr=%s\n",
                    evallvl,
                    oper->string_ptr,
                    opnd1->kind,
@@ -3216,8 +3223,17 @@ static ret_code evaluate( struct expr *opnd1, int *i, struct asm_tok tokenarray[
 
             if( !IsCurrToken( exp_token ) ) {
                 DebugMsg(("%u evaluate: error, missing '%c', i=%u\n", evallvl, exp_token, *i ));
-                if ( rc != ERROR )
+                if ( rc != ERROR ) {
                     fnEmitErr( MISSING_RIGHT_PARENTHESIS_IN_EXPRESSION );
+                    /* v2.12: if curr token is a comma, the intention might be to call a macro function
+                     * - using an undefined ( or not yet defined ) macro. The problem is that the name
+                     * of this undefined macro isn't displayed in pass one, making it hard to see the
+                     * reason for the error msg. However, if a comma is found, then it's surely no valid
+                     * expression - in this case an "undefined symbol" err msg may be helpful.
+                     */
+                    if ( IsCurrToken( T_COMMA ) && opnd1->sym && opnd1->sym->state == SYM_UNDEFINED )
+                        fnEmitErr( SYMBOL_NOT_DEFINED, opnd1->sym->name );
+                }
                 rc = ERROR;
             } else {
                 (*i)++;

@@ -11,6 +11,7 @@ for %%f in (*.asz) do call :lnkomf %%f
 call :safeseh
 call :coff
 call :coffdbg
+call :elf
 rem ifdef calls jwasmr ( won't run in 64-bit Windows )
 call :ifdef
 call :omf
@@ -133,6 +134,14 @@ rem CV4 debug info and multiple code sections
 jwasm -q -coff -Zi CVCOFF1.ASC
 ..\tools\jfc -co CVCOFF1.OBJ CVCOFF1.EXP
 
+jwasm -q -coff PROC645.ASC
+if errorlevel 1 goto end
+..\tools\jfc -co PROC645.OBJ PROC645.EXP
+
+jwasm -q -coff COFF1.ASC
+if errorlevel 1 goto end
+..\tools\jfc -co COFF1.OBJ COFF1.EXP
+
 goto end
 
 :coffdbg
@@ -145,6 +154,13 @@ goto end
 ..\owdos16r\jwasmr -q -zlc -zld ISDEF.ASC
 if errorlevel 1 goto end
 ..\tools\jfc ISDEF.OBJ ISDEF.EXP
+goto end
+
+:elf
+
+jwasm -q -elf ELF1.ASC
+if errorlevel 1 goto end
+..\tools\jfc ELF1.OBJ ELF1.EXP
 goto end
 
 :omf

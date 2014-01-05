@@ -66,8 +66,8 @@ static void AddLinnumData( struct line_num_info *data )
  * - proc.ProcDir() - in COFF, line_num is 0 then
  */
 
-void AddLinnumDataRef( uint srcfile, uint_32 line_num )
-/*****************************************************/
+void AddLinnumDataRef( unsigned srcfile, uint_32 line_num )
+/*********************************************************/
 {
     struct line_num_info    *curr;
 

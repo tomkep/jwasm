@@ -717,7 +717,7 @@ static ret_code get_id( struct asm_tok *buf, struct line_status *p )
     char *src = p->input;
     char *dst = p->output;
     int  index;
-    uint size;
+    unsigned size;
 
 #if CONCATID || DOTNAMEX
 continue_scan:

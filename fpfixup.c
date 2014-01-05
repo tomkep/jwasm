@@ -113,9 +113,11 @@ void AddFloatingPointEmulationFixup( struct code_info *CodeInfo )
         if ( sym[i] ) {
             fixup = CreateFixup( sym[i], FIX_OFF16, OPTJ_NONE );
             fixup->frame_type = FRAME_TARG;
-            fixup->location += i;
+            /* assume locofs has been set inside CreateFixup() */
+            //fixup->locofs = CurrSeg->e.seginfo->current_loc + i;
+            fixup->locofs += i;
             data = 0;
-            store_fixup( fixup, &data );
+            store_fixup( fixup, CurrSeg, &data );
         }
     }
     return;

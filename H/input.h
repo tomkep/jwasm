@@ -37,7 +37,7 @@ struct macro_instance {
     uint_32 localstart;
     char * *parm_array;
     struct asym *macro;
-    uint parmcnt;
+    unsigned parmcnt;
 };
 
 /* for line numbers, the source files have to be stored
@@ -64,6 +64,9 @@ struct input_status {
 extern uint_32  GetLineNumber( void );
 //#define LineNumber GetLineNumber()
 
+extern const char *GetFNamePart( const char *fname );
+extern char     *GetExtPart( const char *fname );
+
 extern FILE     *SearchFile( const char *path, bool );
 extern char     *GetTextLine( char *buffer );
 extern void     PushMacro( struct macro_instance * );
@@ -79,11 +82,11 @@ extern struct asm_tok *PushInputStatus( struct input_status * );
 extern void     PopInputStatus( struct input_status * );
 extern int      GetCurrSrcPos( char * );
 extern void     ClearSrcStack( void );
-extern uint     get_curr_srcfile( void );
+extern unsigned get_curr_srcfile( void );
 #if FASTPASS
-extern void     set_curr_srcfile( uint, uint_32 );
+extern void     set_curr_srcfile( unsigned, uint_32 );
 #endif
-extern const struct fname_item *GetFName( uint );
+extern const struct fname_item *GetFName( unsigned );
 #ifdef DEBUG_OUT
 extern char     *GetTopLine( char * );
 extern char     *GetTopSrcName( void );
