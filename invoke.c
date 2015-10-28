@@ -921,7 +921,7 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                     goto push_address;
                 if ( opnd.Ofssize == USE_EMPTY )
                     opnd.Ofssize = ModuleInfo.Ofssize;
-                asize = SizeFromMemtype( opnd.mem_type, opnd.Ofssize, opnd.type );
+                asize = SizeFromMemtype( opnd.mem_type, opnd.Ofssize, opnd.sym );
             } else {
                 if ( opnd.sym != NULL )
                     asize = opnd.sym->type->total_size;
