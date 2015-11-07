@@ -1,3 +1,24 @@
+!ifndef DEBUG
+DEBUG = 0
+!endif
+
+!ifndef TRMEM
+TRMEM = 0
+!endif
+
+!ifndef CFLAGS
+!error CFLAGS not defined
+!endif
+
+!ifndef OUTD
+!error OUTD not defined
+!endif
+
+!ifndef %WATCOM
+!error WATCOM environment variable not defined!
+!endif
+
+OBJS = &
 $(OUTD)/apiemu.obj   &
 $(OUTD)/assemble.obj &
 $(OUTD)/assume.obj   &
@@ -54,3 +75,54 @@ $(OUTD)/symbols.obj  &
 $(OUTD)/tbyte.obj    &
 $(OUTD)/tokenize.obj &
 $(OUTD)/types.obj
+
+!ifndef LINK
+LINK = wlink
+!endif
+
+!ifndef CC
+CC = wcc386
+!endif
+
+!ifdef __LOADDLL__
+!  ifeq CC wcc
+!    loaddll wcc    wccd
+!  endif
+!  ifeq CC wcc386
+!    loaddll wcc386 wccd386
+!  endif
+!  ifeq LINK
+!    loaddll wlink  wlinkd
+!  endif
+!endif
+
+
+CFLAGS += -q -6 -zc -i=H
+
+!if $(DEBUG)
+CFLAGS += -od -d2 -DDEBUG_OUT
+OUTD   =  $+ OW$(OUTD)D $-
+!else
+CFLAGS += -oxs -DNDEBUG
+OUTD   =  $+ OW$(OUTD)R $-
+!endif
+
+!if $(TRMEM)
+CFLAGS += -DTRMEM -DFASTMEM=0
+OBJS   += $(OUTD)/trmem.obj
+!endif
+
+.BEFORE
+        set LINUX_INCLUDE=$(%WATCOM)/lh
+        set DOS_INCLUDE=$(%WATCOM)/h
+        set NT_INCLUDE=$(%WATCOM)/h
+        set OS2_INCLUDE=$(%WATCOM)/h;$(%WATCOM)/h/os2
+
+{}.c{$(OUTD)}.obj: .AUTODEPEND
+        $(CC) $(CFLAGS) -fo=$^@ $[@
+
+$(OUTD): .EXPLICIT
+        if not exist $^@ mkdir $^@
+
+clean: .SYMBOLIC .EXPLICIT
+        rm -rf $(OUTD)

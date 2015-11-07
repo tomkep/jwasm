@@ -1,5 +1,5 @@
-CFLAGS = -bt=os2
-OUTD   = OS2
+CFLAGS = -bt=nt -bc -fp6 -fpi87
+OUTD   = WinExe
 
 !include owmod.inc
 
@@ -10,8 +10,10 @@ $(OUTD)/jwasm.exe: $(OUTD)/main.obj $(OBJS)
 !if $(DEBUG)
 debug dwarf option symfile
 !endif
-system os2v2
+system nt
 file { $< }
 name $^@
-option map=$^*,verbose,stack=128k,quiet
+disable 1171
+option map=$^*,verbose,norelocs,stack=256k,heapsize=1m,quiet
+commit stack=4k
 <<

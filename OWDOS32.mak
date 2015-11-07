@@ -1,17 +1,17 @@
-CFLAGS = -bt=os2
-OUTD   = OS2
+CFLAGS = -bt=dos
+OUTD   = DOS32
 
 !include owmod.inc
 
 all: $(OUTD) $(OUTD)/jwasm.exe
 
 $(OUTD)/jwasm.exe: $(OUTD)/main.obj $(OBJS)
-        $(LINK) @<<
+	$(LINK) @<<
 !if $(DEBUG)
 debug dwarf option symfile
 !endif
-system os2v2
+system dos4g
 file { $< }
 name $^@
-option map=$^*,verbose,stack=128k,quiet
+option map=$^*,verbose,stub=wstubq.exe,stack=256k,heapsize=256k,quiet
 <<
