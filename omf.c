@@ -1559,7 +1559,7 @@ static ret_code omf_write_module( struct module_info *modinfo )
     size = ftell( CurrFile[OBJ] );
 #if defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__)
     fh = fileno( CurrFile[OBJ] );
-    if ( ftruncate( fh, size ) ); /* gcc warns if return value of ftruncate() is "ignored" */
+    ftruncate( fh, size );
 #elif defined(__BORLANDC__)
     fh = _fileno( CurrFile[OBJ] );
     chsize( fh, size );

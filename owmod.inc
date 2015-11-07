@@ -97,7 +97,7 @@ CC = wcc386
 !endif
 
 
-CFLAGS += -q -6 -zc -i=H
+CFLAGS += -q -6 -zc -i=H -wx -we
 
 !if $(DEBUG)
 CFLAGS += -od -d2 -DDEBUG_OUT

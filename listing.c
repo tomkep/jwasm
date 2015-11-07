@@ -800,7 +800,7 @@ static void log_proc( const struct asym *sym )
     const char *p;
     struct dsym *dir = (struct dsym *)sym;
     int i = sym->name_size;
-    char Ofssize = GetSymOfssize( sym );
+    int Ofssize = GetSymOfssize( sym );
     const char *pdots;
 
     pdots = (( i >= DOTSMAX ) ? "" : dots + i + 1 );
