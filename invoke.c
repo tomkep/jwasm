@@ -824,8 +824,15 @@ static int PushInvokeParam( int i, struct asm_tok tokenarray[], struct dsym *pro
                     if ( Ofssize != ModuleInfo.Ofssize || ( curr->sym.Ofssize == USE16 && CurrWordSize > 2 ) )
                         AddLineQueue( " db 66h" );
                     AddLineQueueX( " push %r", sreg );
-                } else
-                    AddLineQueueX( " push %s", buffer );
+                } else {
+                    if ( (ModuleInfo.curr_cpu & P_CPU_MASK ) < P_186 ) {
+                        AddLineQueueX( " mov %r, seg %s", T_AX, buffer );
+                        AddLineQueueX( " push %r", T_AX );
+                        *r0flags |= R0_USED;
+                    } else {
+                        AddLineQueueX( " push seg %s", buffer );
+                    }
+                }
             }
             /* push offset part of address */
             if ( (ModuleInfo.curr_cpu & P_CPU_MASK ) < P_186 ) {
