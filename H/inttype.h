@@ -32,7 +32,15 @@
 #ifndef _INTTYPE_H_INCLUDED_
 #define _INTTYPE_H_INCLUDED_
 
-typedef unsigned        uint;
+/* v2.12: 'uint' removed ( replaced by 'unsigned') */
+//typedef unsigned        uint;
+
+/* assumptions:
+ * - [unsigned] char  is 8-bit
+ * - [unsigned] short is 16-bit
+ * - [unsigned] int   is either 16- or 32-bit
+ * - [unsigned] long  is either 32- or 64-bit
+ */
 
 typedef unsigned char   uint_8;
 typedef signed char     int_8;

@@ -41,7 +41,7 @@ extern uint_32          GetCurrOffset( void );
 extern ret_code         SetCurrOffset( struct dsym *, uint_32, bool, bool );
 extern struct asym      *CreateIntSegment( const char *, const char *, uint_8, uint_8, bool );
 /* get symbol's segment index, from the symbol itself */
-extern uint             GetSegIdx( const struct asym * );
+extern unsigned         GetSegIdx( const struct asym * );
 extern void             SegmentInit( int );     /* init segments */
 extern void             SegmentFini( void );    /* exit segments */
 extern struct asym      *GetGroup( const struct asym * );

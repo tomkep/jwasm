@@ -6,7 +6,7 @@ In the meantime, a part of the source contain no lines of
 Wasm anymore - they are new or have been completely rewritten. The license
 for these files is Public Domain (P).
 
-apiemu.c           S
+apiemu.c           P
 assemble.c         P
 assume.c           S
 atofloat.c         P

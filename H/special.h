@@ -18,13 +18,13 @@
 
 /* field usage:
  * type   = RWT_ value    SpecialTable.type   uint_8
- * value  =      flags    SpecialTable.value  uint
+ * value  =      flags    SpecialTable.value  unsigned
  * bytval =      value    SpecialTable.bytval uint_8
  * flags  = RWF_ flags    ResWordTable.flags  uint_8
  * cpu    = cpu  flags    SpecialTable.cpu    uint_16
- * sflags =               SpecialTable.sflags uint
+ * sflags =               SpecialTable.sflags unsigned
  * for registers, the 'value' field contains OP_ flags.
- * Since this field has type uint, it may be 16-bits wide only.
+ * Since this field has type unsigned, it may be 16-bits wide only.
  * This is no problem, since all register-related flags are in the low word.
  */
 /* token str    type        value    bytval    flags  cpu     sflags */

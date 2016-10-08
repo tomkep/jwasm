@@ -112,8 +112,8 @@ struct debug_info {
     uint_32 ln_fileofs;  /* file offset to line numbers */
     uint_16 line_numbers;/* line numbers in function */
     uint_16 file;        /* proc's start file */
-    uint next_proc;      /* index next proc */
-    uint next_file;      /* index next file */
+    unsigned next_proc;  /* index next proc */
+    unsigned next_file;  /* index next file */
 };
 
 struct asym {
@@ -121,7 +121,7 @@ struct asym {
     struct asym     *nextitem;     /* next symbol in hash line */
     char            *name;         /* symbol name */
     union {
-        int_32         offset;     /* used by SYM_INTERNAL (labels), SYM_TYPE, v2.11: SYM_SEG */
+        int_32         offset;     /* used by SYM_INTERNAL (labels), SYM_TYPE, SYM_STACK, v2.11: SYM_SEG */
         int_32         value;      /* used by SYM_INTERNAL (equates) */
         uint_32        uvalue;     /* v2.01: equates (they are 33-bit!) */
         char           *string_ptr;/* used by SYM_TMACRO */
@@ -254,7 +254,7 @@ struct asym {
         /* SYM_INTERNAL, SYM_UNDEFINED, SYM_EXTERNAL: backpatching fixup */
         struct fixup *bp_fixup;
         /* for SYM_EXTERNAL */
-        uint         ext_idx;     /* table index ( for coff and elf ) */
+        unsigned     ext_idx;     /* table index ( for coff and elf ) */
         struct {
             /* omf indices are 16-bit only! */
             uint_16  ext_idx1;    /* omf: (external definition) index */
@@ -277,10 +277,10 @@ struct grp_info {
     struct seg_item     *seglist;       /* list of segments in the group */
     int                 grp_idx;        /* its group index (OMF) */
     int                 lname_idx;      /* LNAME index (OMF only) */
-    uint                numseg;         /* OMF: number of segments in the group */
+    unsigned            numseg;         /* OMF: number of segments in the group */
 };
 
-typedef uint_8 * (* FlushSegFunc)( struct dsym *, uint_8 *, int );
+typedef uint_8 * (* FlushSegFunc)( struct dsym *, uint_8 *, unsigned, void * );
 
 struct seg_info {
     struct asym         *group;         /* segment's group or NULL */
@@ -310,7 +310,7 @@ struct seg_info {
         uint_32         num_linnums;    /* used by COFF (after LinnumQueue has been read) */
     };
     uint_32             num_relocs;     /* used by COFF/ELF */
-    short               seg_idx;        /* segment # */
+    unsigned            seg_idx;        /* segment #; v2.12: changed from short to unsigned */
     enum seg_type       segtype;        /* segment's type (code, data, ...) */
     int                 lname_idx;      /* segment's name LNAME index (OMF only) */
     struct asym         *clsym;         /* segment's class name (stored in an asym item) */
@@ -318,6 +318,7 @@ struct seg_info {
         uint_16         abs_frame;      /* ABS seg, frame number (OMF,BIN) */
 #if COMDATSUPP
         uint_16         comdat_number;  /* associated COMDAT segno (COFF) */
+        uint_16         comdat_idx;     /* lname index of COMDAT symbol (OMF) */
 #endif
     };
     union {
@@ -337,7 +338,7 @@ struct seg_info {
     unsigned char       linnum_init:1;  /* v2.10: linnum data emitted for segment? */
     unsigned char       combine:3;      /* combine type, see omfspec.h */
 #if COMDATSUPP
-    unsigned char       comdat_selection:3; /* COFF only */
+    unsigned char       comdat_selection:3; /* if > 0, it's a COMDAT (COFF/OMF) */
 #endif
 };
 
@@ -350,8 +351,8 @@ struct proc_info {
     struct dsym         *paralist;      /* list of parameters */
     struct dsym         *locallist;     /* PROC: list of local variables */
     struct dsym         *labellist;     /* PROC: list of local labels */
-    uint                parasize;       /* total no. of bytes used by parameters */
-    uint                localsize;      /* PROC: total no. of bytes used by local variables */
+    unsigned            parasize;       /* total no. of bytes used by parameters */
+    unsigned            localsize;      /* PROC: total no. of bytes used by local variables */
     char                *prologuearg;   /* PROC: prologuearg attribute */
 #if AMD64_SUPPORT
     struct asym         *exc_handler;   /* PROC: exc handler set by FRAME */
@@ -411,7 +412,7 @@ struct macro_info {
 #ifdef DEBUG_OUT
     uint_32             count;      /* no of times the macro was invoked */
 #endif
-    uint                srcfile;    /* sourcefile index */
+    unsigned            srcfile;    /* sourcefile index */
 };
 
 /* STRUCT field */
@@ -494,9 +495,8 @@ struct dsym {
         struct dsym *nextlocal;
         /* used by PROC params (SYM_STACK) for linked list */
         struct dsym *nextparam;
-        /* used by SYM_EXTERNAL (weak=FALSE) if altname is set.
-         * v2.11: removed; member is in use for SYM_EXTERNAL.
-         */
+        /* used by SYM_EXTERNAL (weak=FALSE) if altname is set */
+        /* v2.11: removed; member is in use for SYM_EXTERNAL */
         //struct dsym *nextext;
     };
 };

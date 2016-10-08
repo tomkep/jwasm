@@ -99,7 +99,7 @@ struct fixup {
     uint_16              marker;
 #endif
     uint_32              offset;        /* symbol's offset */
-    uint_32              location;      /* location of fixup */
+    uint_32              locofs;        /* location of fixup */
     enum fixup_types     type;
     enum fixup_options   option;
     union {
@@ -122,14 +122,14 @@ struct fixup {
         };
         struct asym         *segment_var;   /* symbol's segment if assembly time var */
     };
-    struct dsym             *def_seg;       /* segment the fixup is in */
+    struct dsym             *def_seg;       /* segment the fixup is in - pass 1 only */
     struct asym             *sym;
 };
 
 extern struct fixup  *CreateFixup( struct asym *sym, enum fixup_types fixup_type, enum fixup_options fixup_option );
 extern void          SetFixupFrame( const struct asym *sym, char );
 extern void          FreeFixup( struct fixup * );
-extern void          store_fixup( struct fixup *, int_32 * );
+extern void          store_fixup( struct fixup *, struct dsym *, int_32 * );
 
 extern ret_code      BackPatch( struct asym *sym );
 

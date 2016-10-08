@@ -33,9 +33,9 @@ struct lq_line {
 #define line_queue  ModuleInfo.g.line_queue
 
 #ifdef DEBUG_OUT
-static uint lqlines_written; /* lq lines written by AddLineQueue() */
-static uint lqlines_read;    /* lq lines read by RunLineQueue() */
-uint GetLqLine( void ) { return( lqlines_read ); }
+static unsigned lqlines_written; /* lq lines written by AddLineQueue() */
+static unsigned lqlines_read;    /* lq lines read by RunLineQueue() */
+unsigned GetLqLine( void ) { return( lqlines_read ); }
 #endif
 
 /* free items of current line queue */

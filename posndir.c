@@ -127,8 +127,8 @@ ret_code OrgDirective( int i, struct asm_tok tokenarray[] )
     return( EmitError( ORG_NEEDS_A_CONSTANT_OR_LOCAL_OFFSET ) );
 }
 
-static void fill_in_objfile_space( uint size )
-/********************************************/
+static void fill_in_objfile_space( unsigned size )
+/************************************************/
 {
     int i;
     int nop_type;

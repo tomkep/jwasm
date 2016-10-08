@@ -57,12 +57,12 @@ struct ReservedWord {
 #endif
 };
 
-extern uint     FindResWord( const char *, unsigned char );
-extern char     *GetResWName( uint, char * );
+extern unsigned FindResWord( const char *, unsigned char );
+extern char     *GetResWName( unsigned, char * );
 extern bool     IsKeywordDisabled( const char *, int );
-extern void     DisableKeyword( uint );
+extern void     DisableKeyword( unsigned );
 #if RENAMEKEY
-extern void     RenameKeyword( uint, const char *, uint_8 );
+extern void     RenameKeyword( unsigned, const char *, uint_8 );
 #endif
 #if AMD64_SUPPORT
 extern void     Set64Bit( bool );

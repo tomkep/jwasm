@@ -136,7 +136,9 @@ static void SetSimSeg( enum sim_seg segm, const char *name )
              */
             if ( Parse_Pass == PASS_1 ) {
                 sym = SymSearch( name );
-                if ( sym && sym->state == SYM_SEG && ((struct dsym *)sym)->e.seginfo->lname_idx != 0 )
+                /* v2.12: check 'isdefined' member instead of 'lname_idx' */
+                //if ( sym && sym->state == SYM_SEG && ((struct dsym *)sym)->e.seginfo->lname_idx != 0 )
+                if ( sym && sym->state == SYM_SEG && sym->isdefined == TRUE )
                     ModuleInfo.simseg_defd |= ( 1 << segm );
             }
             if ( ModuleInfo.simseg_defd & ( 1 << segm ) )
@@ -147,9 +149,11 @@ static void SetSimSeg( enum sim_seg segm, const char *name )
         /* v2.04: testing for state SYM_SEG isn't enough. The segment
          * might have been "defined" by a GROUP directive. Additional
          * check for segment's lname index is needed.
+         * v2.12: check 'isdefined' member instead of 'lname_idx'
          */
         //if ( sym && sym->state == SYM_SEG )
-        if ( sym && sym->state == SYM_SEG && ((struct dsym *)sym)->e.seginfo->lname_idx != 0 )
+        //if ( sym && sym->state == SYM_SEG && ((struct dsym *)sym)->e.seginfo->lname_idx != 0 )
+        if ( sym && sym->state == SYM_SEG && sym->isdefined == TRUE )
             pFmt = "%s %r";
     }
     AddLineQueueX( pFmt, name, T_SEGMENT, pAlign, pUse, SegmCombine[segm], pClass );

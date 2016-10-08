@@ -54,20 +54,20 @@ typedef struct {
 } Elf32_Ehdr;
 
 typedef struct {
-    uint_8   e_ident[EI_NIDENT];     // signature & ID info
-    uint_16  e_type;                 // file type (i.e. obj file, exe file)
-    uint_16  e_machine;              // required architecture
-    uint_32  e_version;              // version of the file
-    uint_64  e_entry;                // program entry point
-    uint_64  e_phoff;                // program header offset
-    uint_64  e_shoff;                // section header offset
-    uint_32  e_flags;                // processor specific flags
-    uint_16  e_ehsize;               // elf header size
-    uint_16  e_phentsize;            // program header entry size
-    uint_16  e_phnum;                // number of program header entries
-    uint_16  e_shentsize;            // section header entry size
-    uint_16  e_shnum;                // number of section header entries
-    uint_16  e_shstrndx;             // section name string table index.
+    uint_8   e_ident[EI_NIDENT];     // +0 signature & ID info
+    uint_16  e_type;                 // +16 file type (i.e. obj file, exe file)
+    uint_16  e_machine;              // +18 required architecture
+    uint_32  e_version;              // +20 version of the file
+    uint_64  e_entry;                // +24 program entry point
+    uint_64  e_phoff;                // +32 program header offset
+    uint_64  e_shoff;                // +40 section header offset
+    uint_32  e_flags;                // +48 processor specific flags
+    uint_16  e_ehsize;               // +52 elf header size
+    uint_16  e_phentsize;            // +54 program header entry size
+    uint_16  e_phnum;                // +56 number of program header entries
+    uint_16  e_shentsize;            // +58 section header entry size
+    uint_16  e_shnum;                // +60 number of section header entries
+    uint_16  e_shstrndx;             // +62 section name string table index.
 } Elf64_Ehdr;
 
 // e_ident field indicies
@@ -163,29 +163,29 @@ typedef struct {
 // section header
 
 typedef struct {
-    uint_32  sh_name;        // name of the section
-    uint_32  sh_type;        // section type
-    uint_32  sh_flags;
-    uint_32  sh_addr;        // starting address of section in image
-    uint_32  sh_offset;      // start of section in file
-    uint_32  sh_size;        // size of section in file.
-    uint_32  sh_link;        // multipurpose field   (based on type)
-    uint_32  sh_info;        // another multipurpose field (based on type)
-    uint_32  sh_addralign;   // address alignment
-    uint_32  sh_entsize;     // entry size for sects with fixed sized entries
+    uint_32  sh_name;        // +0 name of the section
+    uint_32  sh_type;        // +4 section type
+    uint_32  sh_flags;       // +8
+    uint_32  sh_addr;        // +12 starting address of section in image
+    uint_32  sh_offset;      // +16 start of section in file
+    uint_32  sh_size;        // +20 size of section (in file if type != SHT_NOBITS)
+    uint_32  sh_link;        // +24 multipurpose field   (based on type)
+    uint_32  sh_info;        // +28 another multipurpose field (based on type)
+    uint_32  sh_addralign;   // +32 address alignment
+    uint_32  sh_entsize;     // +36 entry size for sects with fixed sized entries
 } Elf32_Shdr;
 
 typedef struct {
-    uint_32  sh_name;        // name of the section
-    uint_32  sh_type;        // section type
-    uint_64  sh_flags;
-    uint_64  sh_addr;        // starting address of section in image
-    uint_64  sh_offset;      // start of section in file
-    uint_64  sh_size;        // size of section in file.
-    uint_32  sh_link;        // multipurpose field   (based on type)
-    uint_32  sh_info;        // another multipurpose field (based on type)
-    uint_64  sh_addralign;   // address alignment
-    uint_64  sh_entsize;     // entry size for sects with fixed sized entries
+    uint_32  sh_name;        // +0 name of the section
+    uint_32  sh_type;        // +4 section type
+    uint_64  sh_flags;       // +8
+    uint_64  sh_addr;        // +16 starting address of section in image
+    uint_64  sh_offset;      // +24 start of section in file
+    uint_64  sh_size;        // +32 size of section (in file if type != SHT_NOBITS)
+    uint_32  sh_link;        // +40 multipurpose field   (based on type)
+    uint_32  sh_info;        // +44 another multipurpose field (based on type)
+    uint_64  sh_addralign;   // +48 address alignment
+    uint_64  sh_entsize;     // +56 entry size for sects with fixed sized entries
 } Elf64_Shdr;
 
 // section types

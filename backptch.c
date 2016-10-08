@@ -70,7 +70,7 @@ static void DoPatch( struct asym *sym, struct fixup *fixup )
               fixup->sym ? fixup->sym->name : "NULL",
               fixup->type,
               fixup->offset,
-              fixup->location,
+              fixup->locofs,
               fixup->option,
               fixup->def_seg ? fixup->def_seg->sym.name : "NULL" ));
     seg = GetSegm( sym );
@@ -126,11 +126,11 @@ static void DoPatch( struct asym *sym, struct fixup *fixup )
         size++;
         /* calculate the displacement */
         // disp = fixup->offset + GetCurrOffset() - fixup->location - size;
-        disp = fixup->offset + fixup->sym->offset - fixup->location - size - 1;
+        disp = fixup->offset + fixup->sym->offset - fixup->locofs - size - 1;
         max_disp = (1UL << ((size * 8)-1)) - 1;
         if( disp > max_disp || disp < (-max_disp-1) ) {
         patch:
-            DebugMsg(("DoPatch(%u): Phase error, disp=%X, fixup=%s(%X), loc=%X!\n", Parse_Pass + 1, disp, fixup->sym->name, fixup->sym->offset, fixup->location ));
+            DebugMsg(("DoPatch(%u): Phase error, disp=%X, fixup=%s(%X), loc=%X!\n", Parse_Pass + 1, disp, fixup->sym->name, fixup->sym->offset, fixup->locofs ));
             ModuleInfo.PhaseError = TRUE;
             /* ok, the standard case is: there's a forward jump which
              * was assumed to be SHORT, but it must be NEAR instead.
@@ -167,7 +167,7 @@ static void DoPatch( struct asym *sym, struct fixup *fixup )
                                 return;
                             }
                             /* do this check after the check for ORG! */
-                            if ( fixup2->location <= fixup->location )
+                            if ( fixup2->locofs <= fixup->locofs )
                                 break;
                         }
                     }
@@ -182,11 +182,11 @@ static void DoPatch( struct asym *sym, struct fixup *fixup )
                         /* v2.0: location is at least 1 byte too low, so
                          * use the "<=" operator instead of "<"!
                          */
-                        //if ( sym2->offset < fixup->location )
-                        if ( sym2->offset <= fixup->location )
+                        //if ( sym2->offset < fixup->locofs )
+                        if ( sym2->offset <= fixup->locofs )
                             break;
                         sym2->offset += size;
-                        DebugMsg(("DoPatch(loc=%" I32_SPEC "X): sym %s, offset changed %" I32_SPEC "X -> %" I32_SPEC "X\n", fixup->location, sym2->name, sym2->offset - size, sym2->offset));
+                        DebugMsg(("DoPatch(loc=%" I32_SPEC "X): sym %s, offset changed %" I32_SPEC "X -> %" I32_SPEC "X\n", fixup->locofs, sym2->name, sym2->offset - size, sym2->offset));
                     }
                     /* v2.03: also adjust fixup locations located between the
                      * label reference and the label. This should reduce the
@@ -196,10 +196,10 @@ static void DoPatch( struct asym *sym, struct fixup *fixup )
                     for ( fixup2 = seg->e.seginfo->FixupList.head; fixup2; fixup2 = fixup2->nextrlc ) {
                         if ( fixup2->sym == sym )
                             continue;
-                        if ( fixup2->location <= fixup->location )
+                        if ( fixup2->locofs <= fixup->locofs )
                             break;
-                        fixup2->location += size;
-                        DebugMsg(("for sym=%s fixup loc %" I32_SPEC "X changed to %" I32_SPEC "X\n", fixup2->sym->name, fixup2->location - size, fixup2->location ));
+                        fixup2->locofs += size;
+                        DebugMsg(("for sym=%s fixup loc %" I32_SPEC "X changed to %" I32_SPEC "X\n", fixup2->sym->name, fixup2->locofs - size, fixup2->locofs ));
                     }
 #else
                     DebugMsg(("DoPatch: sym %s, offset changed %" I32_SPEC "X -> %" I32_SPEC "X\n", sym->name, sym->offset, sym->offset + size));
@@ -220,7 +220,7 @@ static void DoPatch( struct asym *sym, struct fixup *fixup )
         }
 #ifdef DEBUG_OUT
         else
-            DebugMsg(("DoPatch, loc=%" I32_SPEC "X: displacement still short: %Xh\n", fixup->location, disp ));
+            DebugMsg(("DoPatch, loc=%" I32_SPEC "X: displacement still short: %Xh\n", fixup->locofs, disp ));
 #endif
         /* v2.04: fixme: is it ok to remove the fixup?
          * it might still be needed in a later backpatch.

@@ -219,7 +219,7 @@ OPTFUNC( SetNoKeyword )
 {
     int i = *pi;
     //struct ReservedWord *resw;
-    uint index;
+    unsigned index;
     char *p;
 
     if( Parse_Pass != PASS_1 ) {
@@ -472,7 +472,7 @@ OPTFUNC( SetFieldAlign )
 /**********************/
 {
     int i = *pi;
-    uint temp, temp2;
+    unsigned temp, temp2;
     struct expr opndx;
 
     if ( EvalOperand( &i, tokenarray, Token_Count, &opndx, EXPF_NOUNDEF ) == ERROR )
@@ -627,7 +627,7 @@ OPTFUNC( SetRenameKey )
 {
     int i = *pi;
     //struct ReservedWord *resw;
-    uint index;
+    unsigned index;
     char *oldname;
 
 #if 0 /* v2.11: allow temporary renaming of keywords */

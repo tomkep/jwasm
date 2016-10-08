@@ -1,289 +1,18 @@
 /****************************************************************************
 *
-*                            Open Watcom Project
-*
-*    Portions Copyright (c) 1983-2002 Sybase, Inc. All Rights Reserved.
-*
-*  ========================================================================
-*
-*    This file contains Original Code and/or Modifications of Original
-*    Code as defined in and that are subject to the Sybase Open Watcom
-*    Public License version 1.0 (the 'License'). You may not use this file
-*    except in compliance with the License. BY USING THIS FILE YOU AGREE TO
-*    ALL TERMS AND CONDITIONS OF THE LICENSE. A copy of the License is
-*    provided with the Original Code and Modifications, and is also
-*    available at www.sybase.com/developer/opensource.
-*
-*    The Original Code and all software distributed under the License are
-*    distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
-*    EXPRESS OR IMPLIED, AND SYBASE AND ALL CONTRIBUTORS HEREBY DISCLAIM
-*    ALL SUCH WARRANTIES, INCLUDING WITHOUT LIMITATION, ANY WARRANTIES OF
-*    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR
-*    NON-INFRINGEMENT. Please see the License for the specific language
-*    governing rights and limitations under the License.
+*  This code is Public Domain.
 *
 *  ========================================================================
 *
 *  Description: API emulations:
-*               gcc:     _makepath(), _splitpath(), strupr()
+*               gcc:     strupr()
 *               OW:      CharUpperA()
-*               PellesC: _makepath()
-*
-****************************************************************************/
-
-#if defined(__UNIX__) || defined(__CYGWIN__) || defined(__DJGPP__)
-
-#include <unistd.h>
-#include "globals.h"
-
-#define __set_errno( err ) errno = (err)
-
-/****************************************************************************
-*
-* Description:  Platform independent _splitpath() implementation.
 *
 ****************************************************************************/
 
 #if defined(__UNIX__)
-#define PC '/'
-#define ISPC(x) (x == PC)
-#else
-#define PC '\\'
-#define ALT_PC '/'
-#define ISPC(x) ((x == PC) || (x == ALT_PC))
-#endif
 
-static void copypart( char *buf, const char *p, int len, int maxlen )
-/*******************************************************************/
-{
-    if( buf != NULL ) {
-        if( len > maxlen ) len = maxlen;
-        memcpy( buf, p, len );
-        buf[len] = NULLC;
-    }
-}
-
-#if !defined(_MAX_NODE)
-#define _MAX_NODE   _MAX_DRIVE  /*  maximum length of node name w/ '\0' */
-#endif
-
-/* split full path name into its components */
-
-void _splitpath( const char *path, char *drive, char *dir, char *fname, char *ext )
-/*********************************************************************************/
-{
-    const char *dotp;
-    const char *fnamep;
-    const char *startp;
-
-    DebugMsg(("splitpath('%s') enter\n", path ));
-
-    /* process node/drive specification */
-    startp = path;
-    if( path[0] == PC && path[1] == PC ) {
-        path += 2;
-        while ( *path != NULLC && *path != PC && *path != '.' ) path++;
-    }
-    copypart( drive, startp, path - startp, _MAX_NODE - 1 );
-
-    for( startp = path, fnamep = path; *path; path++ ) {
-        if ( ISPC( *path ) )
-            fnamep = path+1;
-    }
-    copypart( dir, startp, fnamep - startp, _MAX_DIR - 1 );
-    path = fnamep;
-
-    for( dotp = NULL; *path; path++ ) {
-        if( *path == '.' )
-            dotp = path;
-    }
-    if( dotp == NULL ) dotp = path;
-    copypart( fname, fnamep, dotp - fnamep, _MAX_FNAME - 1 );
-    copypart( ext,   dotp,   path - dotp,   _MAX_EXT - 1 );
-    DebugMsg(("splitpath: drive=%s dir=%s fname=%s ext=%s\n", drive ? drive : "NULL", dir ? dir : "NULL", fname ? fname : "NULL", ext ? ext : "NULL" ));
-}
-
-/* create full Unix style path name from the components */
-
-void _makepath( char *path, const char *node, const char *dir, const char *fname, const char *ext )
-/*************************************************************************************************/
-{
-    *path = NULLC;
-
-    DebugMsg(("makepath(%s, %s, %s, %s) enter\n", node ? node : "NULL", dir ? dir : "NULL", fname ? fname : "NULL", ext ? ext : "NULL" ));
-    if( node != NULL && *node != NULLC ) {
-        strcpy( path, node );
-        path += strlen( path );
-
-        /* if node did not end in '/' then put in a provisional one */
-        if( path[-1] == PC )
-            path--;
-        else
-            *path = PC;
-    }
-    if( dir != NULL && *dir != NULLC ) {
-        /*  if dir does not start with a '/' and we had a node then
-         * stick in a separator
-         */
-        if( ( ! ISPC(*dir) ) && ( ISPC(*path) ) ) path++;
-
-        strcpy( path, dir );
-        path += strlen( path );
-
-        /* if dir did not end in '/' then put in a provisional one */
-        if( path[-1] == PC )
-            path--;
-        else
-            *path = PC;
-    }
-
-    if( fname != NULL ) {
-        if( ( !ISPC(*fname) ) && ( ISPC(*path) ) ) path++;
-
-        strcpy( path, fname );
-        path += strlen( path );
-
-    } else {
-        if( ISPC(*path) ) path++;
-    }
-
-    if( ext != NULL && *ext != NULLC ) {
-        if( *ext != '.' )  *path++ = '.';
-        strcpy( path, ext );
-        path += strlen( path );
-    }
-    *path = NULLC;
-}
-
-#if 0 /* v2.11: _fullpath() no longer used */
-
-#define _WILL_FIT( c )  if(( (c) + 1 ) > size ) {       \
-                            __set_errno( ERANGE );      \
-                            return( NULL );             \
-                        }                               \
-                        size -= (c);
-
-static char *_sys_fullpath( char *buff, const char *path, size_t size )
-/*********************************************************************/
-{
-
-    const char  *p;
-    char        *q;
-    size_t      len;
-    char        curr_dir[FILENAME_MAX];
-
-    p = path;
-    q = buff;
-    if( ! ISPC( p[0] ) ) {
-        if( getcwd( curr_dir, sizeof(curr_dir) ) == NULL ) {
-            __set_errno( ENOENT );
-            return( NULL );
-        }
-        len = strlen( curr_dir );
-        _WILL_FIT( len );
-        strcpy( q, curr_dir );
-        q += len;
-        if( q[-1] != '/' ) {
-            _WILL_FIT( 1 );
-            *(q++) = '/';
-        }
-        for(;;) {
-            if( p[0] == '\0' ) break;
-            if( p[0] != '.' ) {
-                _WILL_FIT( 1 );
-                *(q++) = *(p++);
-                continue;
-            }
-            ++p;
-            if( ISPC( p[0] ) ) {
-                /* ignore "./" in directory specs */
-                if( ! ISPC( q[-1] ) ) {
-                    *q++ = '/';
-                }
-                ++p;
-                continue;
-            }
-            if( p[0] == '\0' ) break;
-            if( p[0] == '.' && ISPC( p[1] ) ) {
-                /* go up a directory for a "../" */
-                p += 2;
-                if( ! ISPC( q[-1] ) ) {
-                    return( NULL );
-                }
-                q -= 2;
-                for(;;) {
-                    if( q < buff ) {
-                        return( NULL );
-                    }
-                    if( ISPC( *q ) ) break;
-                    --q;
-                }
-                ++q;
-                *q = '\0';
-                continue;
-            }
-            _WILL_FIT( 1 );
-            *(q++) = '.';
-        }
-        *q = '\0';
-    } else {
-        len = strlen( p );
-        _WILL_FIT( len );
-        strcpy( q, p );
-    }
-    return( buff );
-}
-
-char *_fullpath( char *buff, const char *path, size_t size )
-/**********************************************************/
-{
-    char *ptr = NULL;
-
-    if( buff == NULL ) {
-        size = FILENAME_MAX;
-        ptr = malloc( size );
-        if( ptr == NULL ) __set_errno( ENOMEM );
-        buff = ptr;
-    }
-    if( buff != NULL ) {
-        buff[0] = '\0';
-        if( path == NULL || path[0] == '\0' ) {
-            buff = getcwd( buff, size );
-        } else {
-            buff = _sys_fullpath( buff, path, size );
-        }
-        if( buff == NULL ) {
-            if( ptr != NULL ) free( ptr );
-        }
-    }
-    return( buff );
-}
-
-#endif
-
-#if 0
-int _memicmp( const void *in_s1, const void *in_s2, size_t len )
-/**************************************************************/
-{
-    const unsigned char *s1 = (const unsigned char *)in_s1;
-    const unsigned char *s2 = (const unsigned char *)in_s2;
-    unsigned char        c1;
-    unsigned char        c2;
-
-    for( ; len; --len )  {
-        c1 = *s1;
-        c2 = *s2;
-        if( c1 >= 'A'  &&  c1 <= 'Z' )  c1 += 'a' - 'A';
-        if( c2 >= 'A'  &&  c2 <= 'Z' )  c2 += 'a' - 'A';
-        if( c1 != c2 ) return( c1 - c2 );
-        ++s1;
-        ++s2;
-    }
-    return( 0 );    /* both operands are equal */
-}
-#endif
-
-#if defined(__UNIX__)
+/* v2.12: _splitpath()/_makepath() removed */
 
 char *strupr( char *str )
 /***********************/
@@ -302,16 +31,13 @@ char *strupr( char *str )
     }
     return( str );
 }
-#endif
 
 #endif
 
 /* emulations for Open Watcom */
 
 #if defined(__WATCOMC__) && !defined(__UNIX__)
-
 #ifdef __FLAT__
-
 #ifndef DEBUG_OUT /* OW v1.8 WDW has a problem with locally defined imports */
 
 union cu {
@@ -342,62 +68,5 @@ char * _stdcall CharUpperA( char *lpsz )
 }
 #endif
 #endif
-#endif
-
-/* emulations for Pelles C */
-
-#ifdef __POCC__
-
-#include "globals.h"
-
-/* There's an error in PellesC's v5 _makepath() implementation which makes
- * it unusable. The error was reported and might get fixed for v6.
- */
-#define PC '\\'
-#define ALT_PC '/'
-#define ISPC(x) ((x == PC) || (x == ALT_PC))
-
-void _makepath( char *path, const char *node, const char *dir, const char *fname, const char *ext )
-/*************************************************************************************************/
-{
-    *path = NULLC;
-
-    if( node != NULL ) {
-        strcpy( path, node );
-        path += strlen( path );
-    }
-    if( dir != NULL && *dir != NULLC ) {
-        /*  if dir does not start with a '/' and we had a node then
-         * stick in a separator
-         */
-        if( ( ! ISPC(*dir) ) && ( ISPC(*path) ) ) path++;
-
-        strcpy( path, dir );
-        path += strlen( path );
-
-        /* if dir did not end in '/' then put in a provisional one */
-        if( path[-1] == PC )
-            path--;
-        else
-            *path = PC;
-    }
-
-    if( fname != NULL ) {
-        if( ( !ISPC(*fname) ) && ( ISPC(*path) ) ) path++;
-
-        strcpy( path, fname );
-        path += strlen( path );
-
-    } else if( *path )
-        path++;
-
-    if( ext != NULL ) {
-        if( *ext != '.' )  *path++ = '.';
-        strcpy( path, ext );
-        path += strlen( path );
-    }
-    *path = NULLC;
-}
-
 #endif
 

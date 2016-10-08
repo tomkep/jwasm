@@ -6,9 +6,9 @@
 
 struct qditem {
     uint_8 *next;
-    uint_16 size;
+    unsigned size;
 };
 
-void     coff_init( struct module_info * );
+extern void coff_init( struct module_info * );
 
 #endif

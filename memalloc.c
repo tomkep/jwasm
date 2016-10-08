@@ -73,7 +73,7 @@ struct linked_list {
 };
 static struct linked_list *pBase; /* start list of 512 kB blocks; to be moved to ModuleInfo.g */
 static uint_8 *pCurr; /* points into current block; to be moved to ModuleInfo.g */
-static uint currfree; /* free memory left in current block; to be moved to ModuleInfo.g */
+static uint_32 currfree; /* free memory left in current block; to be moved to ModuleInfo.g */
 #ifdef DEBUG_OUT
 static int blocks;    /* number of blocks allocated so far; to be moved to ModuleInfo.g */
 #endif

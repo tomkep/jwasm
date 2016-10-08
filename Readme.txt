@@ -106,8 +106,11 @@ JWasm Readme
 
     6. How to Create the JWasm Binaries
 
-     JWasm is written in C. The following Makefiles are supplied
-    in the source package: 
+     JWasm is written in C. It's virtually C89, but 64-bit integers and
+    structures/unions as unnamed members of structures/unions must be 
+    supported by the compiler.
+
+    The following Makefiles are supplied in the source package: 
 
     name         tool chain used               creates binary for
     ---------------------------------------------------------------

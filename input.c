@@ -29,7 +29,7 @@
 ****************************************************************************/
 
 #include <ctype.h>
-#include <stdarg.h>
+//#include <stdarg.h> /* v2.12: removed - was necessary for _splitpath()/_makepath() */
 
 #include "globals.h"
 #include "memalloc.h"
@@ -113,6 +113,8 @@ char *token_stringbuf;  /* start token string buffer */
 #define INC_PATH_DELIM_STR  ":"
 #define DIR_SEPARATOR       '/'
 #define filecmp strcmp
+#define ISPC( x ) ( x == '/' )
+#define ISABS( x ) ( *x == '/' )
 
 #else
 
@@ -120,6 +122,8 @@ char *token_stringbuf;  /* start token string buffer */
 #define INC_PATH_DELIM_STR  ";"
 #define DIR_SEPARATOR       '\\'
 #define filecmp _stricmp
+#define ISPC( x ) ( x == '/' || x == '\\' || x == ':' )
+#define ISABS( x ) ( *x == '/' || *x == '\\' || ( *x &&  *(x+1) == ':' && ( *(x+2) == '/' || *(x+2) == '\\' ) ) )
 
 #endif
 
@@ -148,6 +152,34 @@ static char *GetFullPath( const char *name, char *buff, size_t max )
 }
 #endif
 
+/* v2.12: function added - _splitpath()/_makepath() removed */
+
+const char *GetFNamePart( const char *fname )
+/*******************************************/
+{
+    const char *rc;
+    for ( rc = fname; *fname; fname++ )
+        if ( ISPC( *fname ) )
+            rc = fname + 1;
+    return( rc );
+}
+
+/* fixme: if the dot is at pos 0 of filename, ignore it */
+
+char *GetExtPart( const char *fname )
+/***********************************/
+{
+    char *rc;
+    for( rc = NULL; *fname; fname++ ) {
+        if( *fname == '.' ) {
+            rc = (char *)fname;
+        } else if( ISPC( *fname ) ) {
+            rc = NULL;
+        }
+    }
+    return( rc ? rc : (char *)fname );
+}
+
 /* check if a file is in the array of known files.
  * if no, store the file at the array's end.
  * returns array index.
@@ -155,10 +187,10 @@ static char *GetFullPath( const char *name, char *buff, size_t max )
  * the array is stored in the standard C heap!
  * the filenames are stored in the "local" heap.
  */
-static uint AddFile( char const *fname )
-/**************************************/
+static unsigned AddFile( char const *fname )
+/******************************************/
 {
-    uint    index;
+    unsigned    index;
 
     DebugMsg1(("AddFile(%s) enter, curr index=%u\n", fname, ModuleInfo.g.cnt_fnames ));
     for( index = 0; index < ModuleInfo.g.cnt_fnames; index++ ) {
@@ -194,8 +226,8 @@ static uint AddFile( char const *fname )
     return( index );
 }
 
-const struct fname_item *GetFName( uint index )
-/*********************************************/
+const struct fname_item *GetFName( unsigned index )
+/*************************************************/
 {
     return( ModuleInfo.g.FNames+index );
 }
@@ -232,9 +264,10 @@ static void FreeFiles( void )
         //LclFree( ModuleInfo.g.FNames[i].fullname );
     }
 #endif
-
-    MemFree( ModuleInfo.g.FNames );
-    ModuleInfo.g.FNames = NULL;
+    if ( ModuleInfo.g.FNames ) {
+        MemFree( ModuleInfo.g.FNames );
+        ModuleInfo.g.FNames = NULL;
+    }
     return;
 }
 
@@ -289,7 +322,7 @@ uint_32 GetLineNumber( void )
 
 #ifdef DEBUG_OUT
 
-extern uint GetLqLine( void );
+extern unsigned GetLqLine( void );
 
 char *GetTopLine( char *buffer )
 /******************************/
@@ -359,8 +392,8 @@ static char *my_fgets( char *buffer, int max, FILE *fp )
 }
 
 #if FILESEQ
-void AddFileSeq( uint file )
-/**************************/
+void AddFileSeq( unsigned file )
+/******************************/
 {
     struct file_seq *node;
     node = LclAlloc( sizeof( struct file_seq ) );
@@ -420,8 +453,8 @@ bool MacroInUse( struct dsym *macro )
 }
 #endif
 
-uint get_curr_srcfile( void )
-/***************************/
+unsigned get_curr_srcfile( void )
+/*******************************/
 {
     struct src_item *curr;
     for ( curr = src_stack; curr ; curr = curr->next )
@@ -431,8 +464,8 @@ uint get_curr_srcfile( void )
 }
 
 #if FASTPASS
-void set_curr_srcfile( uint file, uint_32 line_num )
-/**************************************************/
+void set_curr_srcfile( unsigned file, uint_32 line_num )
+/******************************************************/
 {
     if ( file != 0xFFF ) /* 0xFFF is the special value for macro lines */
         src_stack->srcfile = file;
@@ -486,19 +519,10 @@ void print_source_nesting_structure( void )
             tab++;
         } else {
             //char fname[_MAX_FNAME+_MAX_EXT];
-#ifndef __I86__ /* this function may be called on low stack condition */
-            char fname[_MAX_FNAME];
-            char fext[_MAX_EXT];
-#endif
             if (*(curr->mi->macro->name) == NULLC ) {
                 PrintNote( NOTE_ITERATION_MACRO_CALLED_FROM, tab, "", "MacroLoop", curr->line_num, curr->mi->macro->value + 1 );
             } else {
-#ifdef __I86__
-                PrintNote( NOTE_MACRO_CALLED_FROM, tab, "", curr->mi->macro->name, curr->line_num, GetFName(((struct dsym *)curr->mi->macro)->e.macroinfo->srcfile)->fname, "" ) ;
-#else
-                _splitpath( GetFName(((struct dsym *)curr->mi->macro)->e.macroinfo->srcfile)->fname, NULL, NULL, fname, fext );
-                PrintNote( NOTE_MACRO_CALLED_FROM, tab, "", curr->mi->macro->name, curr->line_num, fname, fext );
-#endif
+                PrintNote( NOTE_MACRO_CALLED_FROM, tab, "", curr->mi->macro->name, curr->line_num, GetFNamePart( GetFName(((struct dsym *)curr->mi->macro)->e.macroinfo->srcfile)->fname ) ) ;
             }
             tab++;
         }
@@ -565,6 +589,7 @@ static FILE *open_file_in_include_path( const char *name, char fullpath[] )
 /* the worker behind the INCLUDE directive. Also used
  * by INCBIN and the -Fi cmdline option.
  * the main source file is added in InputInit().
+ * v2.12: _splitpath()/_makepath() removed
  */
 
 FILE *SearchFile( const char *path, bool queue )
@@ -572,37 +597,40 @@ FILE *SearchFile( const char *path, bool queue )
 {
     FILE        *file = NULL;
     struct src_item *fl;
+    const char  *fn;
+    bool        isabs;
     char        fullpath[FILENAME_MAX];
-    char        drive[_MAX_DRIVE];
-    char        dir[_MAX_DIR];
-    char        fname[_MAX_FNAME];
-    char        ext[_MAX_EXT];
-    char        drive2[_MAX_DRIVE];
-    char        dir2[_MAX_DIR];
 
     DebugMsg1(("SearchFile(%s) enter\n", path ));
 
-    _splitpath( path, drive, dir, fname, ext );
-    DebugMsg1(("SearchFile(): drive=%s, dir=%s, fname=%s, ext=%s\n", drive, dir, fname, ext ));
+    //_splitpath( path, drive, dir, fname, ext );
+    //DebugMsg1(("SearchFile(): drive=%s, dir=%s, fname=%s, ext=%s\n", drive, dir, fname, ext ));
+    fn = GetFNamePart( path );
 
     /* if no absolute path is given, then search in the directory
      * of the current source file first!
      * v2.11: various changes because field fullpath has been removed.
      */
 
-    if ( dir[0] != '\\' && dir[0] != '/' ) {
+    isabs = ISABS( path );
+    //if ( dir[0] != '\\' && dir[0] != '/' ) {
+    if ( !isabs ) {
         for ( fl = src_stack; fl ; fl = fl->next ) {
             if ( fl->type == SIT_FILE ) {
-                _splitpath( GetFName( fl->srcfile )->fname, drive2, dir2, NULL, NULL );
-                DebugMsg1(("SearchFile(): curr src=%s, split into drive=%s, dir=%s\n", GetFName( fl->srcfile)->fname, drive2, dir2 ));
-                if ( drive2[0] || dir2[0] ) {
+                const char  *fn2;
+                char        *src;
+                //_splitpath( GetFName( fl->srcfile )->fname, drive2, dir2, NULL, NULL );
+                //DebugMsg1(("SearchFile(): curr src=%s, split into drive=%s, dir=%s\n", GetFName( fl->srcfile)->fname, drive2, dir2 ));
+                src = GetFName( fl->srcfile )->fname;
+                fn2 = GetFNamePart( src );
+                if ( fn2 != src ) {
+                    int i = fn2 - src;
                     /* v2.10: if there's a directory part, add it to the directory part of the current file.
-                     * fixme: check that both parts won't exceed _MAX_DIR!
+                     * fixme: check that both parts won't exceed FILENAME_MAX!
+                     * fixme: 'path' is relative, but it may contain a drive letter!
                      */
-                    if ( dir[0] ) {
-                        strcat( dir2, dir );
-                    }
-                    _makepath( fullpath, drive2, dir2, fname, ext );
+                    memcpy( fullpath, src, i );
+                    strcpy( fullpath + i, path );
                     if ( file = fopen( fullpath, "rb" ) ) {
                         DebugMsg1(("SearchFile(): file found, fopen(%s)=%X\n", fullpath, file ));
                         path = fullpath;
@@ -624,7 +652,7 @@ FILE *SearchFile( const char *path, bool queue )
         /* if the file isn't found yet and include paths have been set,
          * and NO absolute path is given, then search include dirs
          */
-        if( file == NULL && ModuleInfo.g.IncludePath != NULL && dir[0] != '\\' && dir[0] != '/' ) {
+        if( file == NULL && ModuleInfo.g.IncludePath != NULL && !isabs ) {
             if ( file = open_file_in_include_path( path, fullpath ) ) {
                 DebugMsg1(("SearchFile(): open_file_in_include_path(%s)=%X [%s]\n", path, file, fullpath ));
                 path = fullpath;
@@ -862,9 +890,11 @@ void InputInit( void )
 /********************/
 {
     struct src_item *fl;
+#if 0
     char        path[FILENAME_MAX];
     char        drive[_MAX_DRIVE];
     char        dir[_MAX_DIR];
+#endif
 
     DebugMsg(( "InputInit() enter\n" ));
     //ModuleInfo.g.cnt_fnames = 0;
@@ -885,12 +915,15 @@ void InputInit( void )
     cntlines = 0;
 #endif
 
-    /* add path of main module to the include path */
-    _splitpath( CurrFName[ASM], drive, dir, NULL, NULL );
-    if ( drive[0] || dir[0] ) {
-        _makepath( path, drive, dir, NULL, NULL );
-        AddStringToIncludePath( path );
-    }
+    /* add path of main module to the include path.
+     * v2.12: unnecessary since v2.10, since the directory part of the
+     * current source is added if a file is to be included; see SearchFile().
+     */
+    //_splitpath( CurrFName[ASM], drive, dir, NULL, NULL );
+    //if ( drive[0] || dir[0] ) {
+    //    _makepath( path, drive, dir, NULL, NULL );
+    //    AddStringToIncludePath( path );
+    //}
 
     srclinebuffer = LclAlloc( SIZE_SRCLINES + SIZE_TOKENARRAY + SIZE_STRINGBUFFER );
     /* the comment buffer is at the end of the source line buffer */
@@ -936,7 +969,8 @@ void InputFini( void )
     int   i;
 
     /* for the main source file, lines usually isn't filled yet */
-    ModuleInfo.g.FNames[ModuleInfo.srcfile].lines = src_stack->line_num;
+    if ( ModuleInfo.g.FNames )
+        ModuleInfo.g.FNames[ModuleInfo.srcfile].lines = src_stack->line_num;
     for( i = 0; i < ModuleInfo.g.cnt_fnames; i++ ) {
         if ( Options.log_all_files ) {
             if ( ModuleInfo.g.FNames[i].included > 1 )

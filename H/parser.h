@@ -181,18 +181,18 @@ struct instr_item {
  * other reserved words in SpecialTable (special.h).
  */
 struct special_item {
-    uint         value;
-    uint         sflags;
+    unsigned     value;
+    unsigned     sflags;
 #ifdef __WATCOMC__
     enum cpu_info   cpu;     /* CPU type */
 #else
-    unsigned short  cpu;     /* CPU type */
+    uint_16         cpu;     /* CPU type */
 #endif
-    unsigned char   bytval;
+    uint_8          bytval;
 #ifdef __WATCOMC__
     enum special_type type;
 #else
-    unsigned char   type;
+    uint_8            type;
 #endif
 };
 

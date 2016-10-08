@@ -503,7 +503,7 @@ static void output_data( const struct code_info *CodeInfo, enum operand_type det
                     /* don't exit! */
                 }
             if ( write_to_file ) {
-                CodeInfo->opnd[index].InsFixup->location = GetCurrOffset();
+                CodeInfo->opnd[index].InsFixup->locofs = GetCurrOffset();
                 OutputBytes( (unsigned char *)&CodeInfo->opnd[index].data32l,
                             size, CodeInfo->opnd[index].InsFixup );
                 return;
@@ -839,7 +839,7 @@ static ret_code check_operand_2( struct code_info *CodeInfo, enum operand_type o
         output_data( CodeInfo, opnd1, OPND1 );
 #if AMD64_SUPPORT
         if ( CodeInfo->Ofssize == USE64 && CodeInfo->opnd[OPND1].InsFixup && CodeInfo->opnd[OPND1].InsFixup->type == FIX_RELOFF32 )
-            CodeInfo->opnd[OPND1].InsFixup->addbytes = GetCurrOffset() - CodeInfo->opnd[OPND1].InsFixup->location;
+            CodeInfo->opnd[OPND1].InsFixup->addbytes = GetCurrOffset() - CodeInfo->opnd[OPND1].InsFixup->locofs;
 #endif
         return( NOT_ERROR );
     }
@@ -850,9 +850,9 @@ static ret_code check_operand_2( struct code_info *CodeInfo, enum operand_type o
         /* for rip-relative fixups, the instruction end is needed */
         if ( CodeInfo->Ofssize == USE64 ) {
             if ( CodeInfo->opnd[OPND1].InsFixup && CodeInfo->opnd[OPND1].InsFixup->type == FIX_RELOFF32 )
-                CodeInfo->opnd[OPND1].InsFixup->addbytes = GetCurrOffset() - CodeInfo->opnd[OPND1].InsFixup->location;
+                CodeInfo->opnd[OPND1].InsFixup->addbytes = GetCurrOffset() - CodeInfo->opnd[OPND1].InsFixup->locofs;
             if ( CodeInfo->opnd[OPND2].InsFixup && CodeInfo->opnd[OPND2].InsFixup->type == FIX_RELOFF32 )
-                CodeInfo->opnd[OPND2].InsFixup->addbytes = GetCurrOffset() - CodeInfo->opnd[OPND2].InsFixup->location;
+                CodeInfo->opnd[OPND2].InsFixup->addbytes = GetCurrOffset() - CodeInfo->opnd[OPND2].InsFixup->locofs;
         }
 #endif
         return( NOT_ERROR );

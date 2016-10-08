@@ -49,8 +49,8 @@ static ret_code ExpandTMacro( char * const, struct asm_tok tokenarray[], int equ
 /* C ltoa() isn't fully compatible since hex digits are lower case.
  * for JWasm, it's ensured that 2 <= radix <= 16.
  */
-char *myltoa( uint_32 value, char *buffer, uint radix, bool sign, bool addzero )
-/******************************************************************************/
+char *myltoa( uint_32 value, char *buffer, unsigned radix, bool sign, bool addzero )
+/**********************************************************************************/
 {
     char   *p;
     char   *dst = buffer;

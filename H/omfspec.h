@@ -91,30 +91,35 @@ enum {
 
 /*
  *  INTEL Frame Specifiers
+ *  FRAME_ABS[WD] not supported according to TIS OMF docs.
+ *  FRAME_NONE should never appear in object modules, it's just
+ *  a void used by jwasm internally.
  */
-enum frame_types {
+enum frame_methods {
     FRAME_SEG           = 0,        /* segment index                    */
     FRAME_GRP           = 1,        /* group index                      */
     FRAME_EXT           = 2,        /* external index                   */
-    FRAME_ABS           = 3,        /* absolute frame number            */
-    FRAME_LOC           = 4,        /* frame containing location        */
+    //FRAME_ABS           = 3,        /* absolute frame number            */
+    FRAME_LOC           = 4,        /* segment index of last LEDATA     */
     FRAME_TARG          = 5,        /* frame same as target             */
     FRAME_NONE          = 6,        /* no frame                         */
 };
 
 /*
  *  INTEL Target Specifiers
+ *  TARGET_ABS[WD] is supported for THREAD sub-records only, according to TIS OMF docs;
+ *  Since JWasm won't write THREAD sub-records, those methods are invalid.
  */
-enum target_types {
+enum target_methods {
     TARGET_SEGWD        = 0,        /* segment index with displacement  */
     TARGET_GRPWD        = 1,        /* group index with displacement    */
     TARGET_EXTWD        = 2,        /* external index with displacement */
-    TARGET_ABSWD        = 3,        /* abs frame num with displacement  */
+    //TARGET_ABSWD        = 3,        /* abs frame num with displacement  */
 
     TARGET_SEG          = 4,        /* segment index, no displacement   */
     TARGET_GRP          = 5,        /* group index, no displacement     */
     TARGET_EXT          = 6,        /* external index, no displacement  */
-    TARGET_ABS          = 7,        /* abs frame num, no displacement   */
+    //TARGET_ABS          = 7,        /* abs frame num, no displacement   */
 
     TARGET_WITH_DISPL   = ~4,       /* frame with displacement          */
 };
@@ -176,7 +181,7 @@ enum cmd_omf {
     CMD_LNAMES          = 0x96,     /* list of names record             */
     CMD_SEGDEF          = 0x98,     /* segment definition record        */
     CMD_GRPDEF          = 0x9a,     /* group definition record          */
-    CMD_FIXUP           = 0x9c,     /* relocation record                */
+    CMD_FIXUPP          = 0x9c,     /* relocation record                */
     CMD_LEDATA          = 0xa0,     /* logical enumerated data          */
     CMD_LIDATA          = 0xa2,     /* logical iterated data            */
 //  CMD_LIBHED          = 0xa4,     /* library header                   */
@@ -193,7 +198,7 @@ enum cmd_omf {
     CMD_LCOMDEF         = 0xb8,     /* local communal names def record  */
     CMD_STATIC_COMDEF   = 0xb8,
 
-    CMD_CEXTDF          = 0xbc,     /* external reference to a COMDAT   */
+    CMD_CEXTDEF         = 0xbc,     /* external reference to a COMDAT   */
     CMD_COMDAT          = 0xc2,     /* initialized communal data record */
     CMD_LINSYM          = 0xc4,     /* symbol line numbers              */
     CMD_ALIAS           = 0xc6,     /* alias definition record          */

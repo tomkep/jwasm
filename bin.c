@@ -187,7 +187,7 @@ uint_32 hfwrite( uint_8 huge *pBuffer, int size, uint_32 count, FILE *file )
 /**************************************************************************/
 {
     uint_32 written;
-    uint tmpsize;
+    unsigned tmpsize;
 
     for ( written = 0; written < count; written += tmpsize ) {
         if ( count > 0xFE00 )
@@ -341,11 +341,11 @@ static int GetSegRelocs( uint_16 *pDst )
                 /* ignore fixups for absolute segments */
                 if ( fixup->sym && fixup->sym->segment && ((struct dsym *)fixup->sym->segment)->e.seginfo->segtype == SEGTYPE_ABS )
                     break;
-                DebugMsg(("GetSegRelocs: found seg-related fixup at %s.%" I32_SPEC "X\n", curr->sym.name, fixup->location ));
+                DebugMsg(("GetSegRelocs: found seg-related fixup at %s.%" I32_SPEC "X\n", curr->sym.name, fixup->locofs ));
                 count++;
                 if ( pDst ) {
                     /* v2.04: fixed */
-                    loc = fixup->location + ( curr->e.seginfo->start_offset & 0xf );
+                    loc = fixup->locofs + ( curr->e.seginfo->start_offset & 0xf );
                     valueseg = curr->e.seginfo->start_offset >> 4;
                     if ( curr->e.seginfo->group ) {
                         loc += curr->e.seginfo->group->offset & 0xf;
@@ -363,8 +363,8 @@ static int GetSegRelocs( uint_16 *pDst )
                     };
 
                     valueofs = loc;
-                    DebugMsg(("GetSegRelocs: location=%" I32_SPEC "X fileofs=%" I32_SPEC "X segofs=%" I32_SPEC "X grpofs=%" I32_SPEC "X, fixup value: %X %X\n",
-                              fixup->location, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset: 0, valueofs, valueseg ));
+                    DebugMsg(("GetSegRelocs: locofs=%" I32_SPEC "X fileofs=%" I32_SPEC "X segofs=%" I32_SPEC "X grpofs=%" I32_SPEC "X, fixup value: %X %X\n",
+                              fixup->locofs, curr->e.seginfo->fileoffset, curr->e.seginfo->start_offset, curr->e.seginfo->group ? curr->e.seginfo->group->offset: 0, valueofs, valueseg ));
                     *pDst++ = valueofs;
                     *pDst++ = valueseg;
                 }
@@ -453,7 +453,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
     DebugMsg(("DoFixup(%s) enter, segment start ofs=%" I32_SPEC "Xh\n", curr->sym.name, curr->e.seginfo->start_offset ));
     for ( fixup = curr->e.seginfo->FixupList.head; fixup; fixup = fixup->nextrlc ) {
         codeptr.db = curr->e.seginfo->CodeBuffer +
-            ( fixup->location - curr->e.seginfo->start_loc );
+            ( fixup->locofs - curr->e.seginfo->start_loc );
 
         //if ( fixup->sym && fixup->sym->segment ) { /* v2.08: changed */
         if ( fixup->sym && ( fixup->sym->segment || fixup->sym->variable ) ) {
@@ -463,7 +463,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
                 seg = (struct dsym *)fixup->segment_var;
                 offset = 0;
                 DebugMsg(("DoFixup(%s, %04" I32_SPEC "X, %s): variable, fixup->segment=%Xh fixup->offset=%" I32_SPEC "Xh, fixup->sym->offset=%" I32_SPEC "Xh\n",
-                          curr->sym.name, fixup->location, fixup->sym->name, seg, fixup->offset, fixup->sym->offset ));
+                          curr->sym.name, fixup->locofs, fixup->sym->name, seg, fixup->offset, fixup->sym->offset ));
             } else {
                 seg = (struct dsym *)fixup->sym->segment;
                 offset = fixup->sym->offset;
@@ -477,7 +477,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             case FIX_OFF32_IMGREL:
                 value = ( fixup->offset + offset + seg->e.seginfo->start_offset ) - cp->imagestart;
                 DebugMsg(("DoFixup(%s): IMGREL, loc=%" I32_SPEC "X value=%" I32_SPEC "X seg.start=%" I32_SPEC "X imagestart=%" I32_SPEC "X\n",
-                          curr->sym.name, fixup->location, value, seg->e.seginfo->start_offset, cp->imagestart ));
+                          curr->sym.name, fixup->locofs, value, seg->e.seginfo->start_offset, cp->imagestart ));
                 break;
             case FIX_OFF32_SECREL:
                 value = ( fixup->offset + offset ) - seg->e.seginfo->start_loc;
@@ -498,7 +498,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
                     }
                 }
                 DebugMsg(("DoFixup(%s): SECREL, loc=%" I32_SPEC "X, value=%" I32_SPEC "X\n",
-                        curr->sym.name, fixup->location, value ));
+                        curr->sym.name, fixup->locofs, value ));
                 break;
             case FIX_RELOFF8:
             case FIX_RELOFF16:
@@ -506,7 +506,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
                 /* v1.96: special handling for "relative" fixups */
                 value = seg->e.seginfo->start_offset + fixup->offset + offset;
                 DebugMsg(("DoFixup(%s): RELOFFx, loc=%" I32_SPEC "X, sym=%s, [start_offset=%" I32_SPEC "Xh, fixup->offset=%" I32_SPEC "Xh, fixup->sym->offset=%" I32_SPEC "Xh\n",
-                        curr->sym.name, fixup->location, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, offset ));
+                        curr->sym.name, fixup->locofs, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, offset ));
                 break;
             default:
                 /* v2.01: don't use group if fixup explicitely refers the segment! */
@@ -526,7 +526,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
                     value = (seg->e.seginfo->start_offset & 0xF) + fixup->offset + offset;
 
                 DebugMsg(("DoFixup(%s): loc=%04" I32_SPEC "X, sym=%s, target->start_offset=%" I32_SPEC "Xh, fixup->offset=%" I32_SPEC "Xh, fixup->sym->offset=%" I32_SPEC "Xh\n",
-                        curr->sym.name, fixup->location, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, offset ));
+                        curr->sym.name, fixup->locofs, fixup->sym->name, seg->e.seginfo->start_offset, fixup->offset, offset ));
                 break;
             }
 
@@ -535,54 +535,54 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             //seg = (struct dsym *)fixup->segment_var;
             seg = NULL;
             DebugMsg(("DoFixup(%s, %04" I32_SPEC "X, %s): target segment=0, fixup->offset=%" I32_SPEC "Xh, fixup->sym->offset=%" I32_SPEC "Xh\n",
-                      curr->sym.name, fixup->location, fixup->sym ? fixup->sym->name : "", fixup->offset ? offset : 0 ));
+                      curr->sym.name, fixup->locofs, fixup->sym ? fixup->sym->name : "", fixup->offset ? offset : 0 ));
             value = 0;
         }
 
         switch ( fixup->type ) {
         case FIX_RELOFF8:
-            //*codeptr.db += (value - fixup->location + 1) & 0xff;
+            //*codeptr.db += (value - fixup->locofs + 1) & 0xff;
             /* changed in v1.95 */
-            *codeptr.db += (value - (fixup->location + curr->e.seginfo->start_offset) - 1) & 0xff;
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_RELOFF8, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
+            *codeptr.db += (value - (fixup->locofs + curr->e.seginfo->start_offset) - 1) & 0xff;
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_RELOFF8, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->locofs, value, *codeptr.db ));
             break;
         case FIX_RELOFF16:
-            //*codeptr.dw += (value - fixup->location + 2) & 0xffff;
+            //*codeptr.dw += (value - fixup->locofs + 2) & 0xffff;
             /* changed in v1.95 */
-            *codeptr.dw += (value - (fixup->location + curr->e.seginfo->start_offset) - 2) & 0xffff;
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_RELOFF16, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dw ));
+            *codeptr.dw += (value - (fixup->locofs + curr->e.seginfo->start_offset) - 2) & 0xffff;
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_RELOFF16, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->locofs, value, *codeptr.dw ));
             break;
         case FIX_RELOFF32:
 #if AMD64_SUPPORT
             /* adjust the location for EIP-related offsets if USE64 */
             if ( curr->e.seginfo->Ofssize == USE64 ) {
-                fixup->location += fixup->addbytes - 4;
+                fixup->locofs += fixup->addbytes - 4;
             }
 #endif
-            //*codeptr.dd += (value - fixup->location + 4);
+            //*codeptr.dd += (value - fixup->locofs + 4);
             /* changed in v1.95 */
-            *codeptr.dd += (value - (fixup->location + curr->e.seginfo->start_offset) - 4);
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_RELOFF32, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
+            *codeptr.dd += (value - (fixup->locofs + curr->e.seginfo->start_offset) - 4);
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_RELOFF32, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->locofs, value, *codeptr.dd ));
             break;
         case FIX_OFF8:
             *codeptr.db = value & 0xff;
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF8, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF8, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->locofs, value, *codeptr.db ));
             break;
         case FIX_OFF16:
             *codeptr.dw = value & 0xffff;
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF16, value=%" I32_SPEC "Xh, target=%p *target=%Xh\n", curr->sym.name, fixup->location, value, codeptr, *codeptr.dw ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF16, value=%" I32_SPEC "Xh, target=%p *target=%Xh\n", curr->sym.name, fixup->locofs, value, codeptr, *codeptr.dw ));
             break;
         case FIX_OFF32:
             *codeptr.dd = value;
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF32, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF32, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->locofs, value, *codeptr.dd ));
             break;
         case FIX_OFF32_IMGREL:
             *codeptr.dd = value;
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF32_IMGREL, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF32_IMGREL, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->locofs, value, *codeptr.dd ));
             break;
         case FIX_OFF32_SECREL:
             *codeptr.dd = value;
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF32_SECREL, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.dd ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF32_SECREL, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->locofs, value, *codeptr.dd ));
             break;
 #if AMD64_SUPPORT
         case FIX_OFF64:
@@ -592,12 +592,12 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             else
 #endif
                 *codeptr.dq = value;
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF64, value=%" I32_SPEC "Xh, *target=%" I64_SPEC "Xh\n", curr->sym.name, fixup->location, value, *codeptr.dq ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_OFF64, value=%" I32_SPEC "Xh, *target=%" I64_SPEC "Xh\n", curr->sym.name, fixup->locofs, value, *codeptr.dq ));
             break;
 #endif
         case FIX_HIBYTE:
             *codeptr.db = (value >> 8) & 0xff;
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_HIBYTE, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->location, value, *codeptr.db ));
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_HIBYTE, value=%" I32_SPEC "Xh, *target=%Xh\n", curr->sym.name, fixup->locofs, value, *codeptr.db ));
             break;
         case FIX_SEG:
             /* absolute segments are ok */
@@ -609,7 +609,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             }
 #if MZ_SUPPORT
             if ( ModuleInfo.sub_format == SFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_SEG frame=%u, ", curr->sym.name, fixup->location, fixup->frame_type ));
+                DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_SEG frame=%u, ", curr->sym.name, fixup->locofs, fixup->frame_type ));
                 if ( fixup->sym->state == SYM_GRP ) {
                     seg = (struct dsym *)fixup->sym;
                     *codeptr.dw = seg->sym.offset >> 4;
@@ -644,7 +644,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
 #endif
 #if MZ_SUPPORT
             if ( ModuleInfo.sub_format == SFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_PTR16, seg->start=%Xh\n", curr->sym.name, fixup->location, seg->e.seginfo->start_offset ));
+                DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_PTR16, seg->start=%Xh\n", curr->sym.name, fixup->locofs, seg->e.seginfo->start_offset ));
                 *codeptr.dw = value & 0xffff;
                 codeptr.dw++;
                 //if ( seg->e.seginfo->group ) { /* v2.04: changed */
@@ -672,7 +672,7 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
 #endif
 #if MZ_SUPPORT
             if ( ModuleInfo.sub_format == SFORMAT_MZ ) {
-                DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_PTR32\n", curr->sym.name, fixup->location ));
+                DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): FIX_PTR32\n", curr->sym.name, fixup->locofs ));
                 *codeptr.dd = value;
                 codeptr.dd++;
                 //if (seg->e.seginfo->group ) { /* v2.04: changed */
@@ -689,8 +689,8 @@ static ret_code DoFixup( struct dsym *curr, struct calc_param *cp )
             }
 #endif
         default:
-            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): invalid fixup %u\n", curr->sym.name, fixup->location, fixup->type ));
-            EmitErr( INVALID_FIXUP_TYPE, ModuleInfo.fmtopt->formatname, fixup->type, curr->sym.name, fixup->location );
+            DebugMsg(("DoFixup(%s, %04" I32_SPEC "X): invalid fixup %u\n", curr->sym.name, fixup->locofs, fixup->type ));
+            EmitErr( INVALID_FIXUP_TYPE, ModuleInfo.fmtopt->formatname, fixup->type, curr->sym.name, fixup->locofs );
             //return( ERROR );
         }
     }
@@ -885,7 +885,7 @@ static void pe_create_section_table( void )
 
 struct expitem {
     char *name;
-    uint idx;
+    unsigned idx;
 };
 
 static int compare_exp( const void *p1, const void *p2 )
@@ -1144,7 +1144,7 @@ static void pe_set_base_relocs( struct dsym *reloc )
 #if AMD64_SUPPORT
             case FIX_OFF64:
 #endif
-                currloc = curr->e.seginfo->start_offset + ( fixup->location & 0xFFFFF000 );
+                currloc = curr->e.seginfo->start_offset + ( fixup->locofs & 0xFFFFF000 );
                 if ( currloc != currpage ) {
                     currpage = currloc;
                     cnt2++;
@@ -1188,7 +1188,7 @@ static void pe_set_base_relocs( struct dsym *reloc )
             default: ftype = 0;
             }
             if ( ftype ) {
-                currloc = curr->e.seginfo->start_offset + ( fixup->location & 0xFFFFF000 );
+                currloc = curr->e.seginfo->start_offset + ( fixup->locofs & 0xFFFFF000 );
                 if ( currloc != baserel->VirtualAddress ) {
                     if ( baserel->VirtualAddress != -1 ) {
                         /* address of relocation header must be DWORD aligned */
@@ -1202,7 +1202,7 @@ static void pe_set_base_relocs( struct dsym *reloc )
                     baserel->VirtualAddress = currloc;
                     baserel->SizeOfBlock = sizeof( struct IMAGE_BASE_RELOCATION );
                 }
-                *prel++ = ( fixup->location & 0xfff ) | ( ftype << 12 );
+                *prel++ = ( fixup->locofs & 0xfff ) | ( ftype << 12 );
                 baserel->SizeOfBlock += sizeof( uint_16 );
             }
         }
